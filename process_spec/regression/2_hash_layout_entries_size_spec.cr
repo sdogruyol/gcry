@@ -1,4 +1,6 @@
-# Regression test for Hash layout walk using entries_capacity vs entries_size.
+# Regression test for the former Hash layout walk using entries_capacity vs
+# entries_size. `Gcry::Layout` has since been removed; the same heap shape
+# now guards the conservative body scan.
 #
 # Fixed in v0.12.0: precise scan_hash_object iterated (1 << indices_size_pow2) / 2
 # slots. After realloc, slots past @size + @deleted_count are uninitialized;

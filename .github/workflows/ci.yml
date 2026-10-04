@@ -340,11 +340,6 @@ jobs:
           crystal build bench/property_test.cr -o bin/property_test
           ./bin/property_test --seed=1 --iterations=5000
 
-      - name: Layout property test (500 iterations)
-        run: |
-          crystal build bench/layout_property_test.cr -o bin/layout_property_test
-          ./bin/layout_property_test --seed=1 --iterations=500
-
       - name: MT property test (50 iterations, 2+4 workers)
         run: |
           crystal build bench/mt_property_test.cr -o bin/mt_property_test
@@ -739,24 +734,6 @@ jobs:
       - name: Idle collector stack as a root
         run: make idle-thread-roots
 
-      # And one level down: a precise layout is a claim about *every* pointer in
-      # the object, and `Layout.register` had a bucket it never named — an ivar it
-      # could not classify (module-typed, Proc, Tuple) got no offset and did not
-      # force the conservative fallback, so the word was never scanned. 19 such
-      # ivars in 186 stdlib types, `Fiber#proc` among them. Same shape as the two
-      # register gaps above: a root the caller assumed was covered.
-      - name: Unclassified ivar layout roots
-        run: |
-          make ivar-layout-roots
-
-      # The orphan-knob census found `GCRY_DISABLE_AUTO_LAYOUTS` in no spec,
-      # recipe or CI step. `ivar-layout-roots` already runs under AUTO_LAYOUTS=1
-      # and cannot see it: those arms also register their probes explicitly.
-      # Counters, not survival: AUTO_LAYOUTS must grow the table and register a
-      # type builtins do not name; the disable must put both back.
-      - name: Auto layouts disable
-        run: make auto-layouts
-
       # The orphan-knob census found `GCRY_DISABLE_SCRUB_FIBERS` in no spec,
       # recipe or CI step. `sound_profile` already asserts the flag (default
       # off, opt-in overrides SOUND) and cannot see it: disable agrees with
@@ -1042,8 +1019,8 @@ jobs:
         run: |
           RSS_WARMUP=20 RSS_LIMIT=15 RSS_RSS_LIMIT=30 make rss-leak
 
-      # The recipe's second arm runs the contract with layouts off and
-      # requires the layout-registration check to fail.
+      # Green-only: no knob switches off a subject of the remaining checks
+      # (Makefile comment above the target).
       - name: Compiler GC contract + crystal tools
         run: |
           make compiler-gc-contract
@@ -1800,8 +1777,6 @@ jobs:
           t timeout 300 make dead-stack-below-sp
           t timeout 300 make scheduler-roots
           t timeout 300 make idle-thread-roots
-          t timeout 300 make ivar-layout-roots
-          t timeout 300 make auto-layouts
           t timeout 300 make scrub-fibers
           t timeout 300 make ec-queue-audit
           t timeout 300 make thread-block-audit
@@ -2420,8 +2395,6 @@ jobs:
           make dead-stack-below-sp
           make scheduler-roots
           make idle-thread-roots
-          make ivar-layout-roots
-          make auto-layouts
           make scrub-fibers
           make ec-queue-audit
           # Darwin stops only the threads on Crystal's list too, so a thread

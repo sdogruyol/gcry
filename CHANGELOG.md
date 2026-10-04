@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block is scanned conservatively now. It keeps nothing more: blocks are
   zeroed to their size class, Crystal allocates pointer-free classes and
   buffers atomic, and `Hash` clears the entries it deletes or compacts away.
-  Layout registration still runs and no longer affects marking
+  Layout registration was then removed; see Removed
   (`bench/log/linux/2026-10-04-layout-union-collision/`).
 
 - **macOS and Windows: the collector no longer keeps objects alive through
@@ -46,6 +46,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JsonParseSerializable mark −2 to −13%. Knuckeotide's 30-45 ms of mark is
   +9%, its wall time unchanged
   (`bench/log/linux/2026-10-04-layout-union-collision/`).
+
+### Removed
+
+- **`Gcry::Layout` and its registration API.** Since the fix above the mark
+  reads no layout, so registration only cost boot time, a malloc'd table
+  block and a counter reset per collection. Gone with it: `Gcry::Layout`,
+  `Gcry.register_layout`, `register_hash`, `register_set`,
+  `register_layouts` and `Heap#layout_precise`; the env knobs
+  `GCRY_DISABLE_LAYOUT`, `GCRY_AUTO_LAYOUTS`, `GCRY_DISABLE_AUTO_LAYOUTS`,
+  `GCRY_SCAN_CAPS`, `GCRY_LAYOUT_DROP_UNCLASSIFIED` and `GCRY_LAYOUT_DUMP`;
+  the `Metrics` fields `layout_precise_scans`, `layout_conservative_scans`,
+  `layout_entries` and `layout_unsafe_skips`, the Prometheus series
+  `gcry_layout_entries`, `gcry_layout_unsafe_skips_total` and
+  `gcry_layout_precise_scans_total`, and the `json_stats` keys
+  `layout_precise`, `layout_precise_scans`, `layout_conservative_scans`,
+  `layout_hash_bodies`, `layout_entries` and `layout_unsafe_skips` (the scan
+  counters had read 0 since the fix); the gates `make
+  layout-property-test`, `make ivar-layout-roots`, `make auto-layouts`,
+  `compiler-gc-contract`'s layout check and its `GCRY_DISABLE_LAYOUT=1`
+  red arm. Callers of the registration API fail to compile: delete the
+  calls (`bench/log/linux/2026-10-04-layout-union-collision/`).
 
 ## [0.34.0] - 2026-10-04
 

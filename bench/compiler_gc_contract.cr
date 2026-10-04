@@ -117,11 +117,6 @@ Contract.check("instance header type_id matches crystal_instance_type_id") do
   raise "A/B type_ids collided" if tid_a == tid_b
 end
 
-Contract.check("Array type_id is registered for layout") do
-  tid = Array(String).crystal_instance_type_id
-  raise "no layout" if Gcry::Layout.entry_for(tid).nil?
-end
-
 Contract.check("GC.stats heap_size stays positive after malloc") do
   keep = Array(UInt8).new(64) { 1_u8 }
   GC.collect

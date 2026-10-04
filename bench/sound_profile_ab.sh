@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # What does gcry cost when it is not allowed to guess?
 #
-# Measures Kemal /json throughput + post-GC RSS for four configurations on one
+# Measures Kemal /json throughput + post-GC RSS for three configurations on one
 # host, in one run:
 #
 #   boehm       Crystal default (the denominator)
@@ -9,10 +9,9 @@
 #   sound       GCRY_SOUND=1 — root-completeness heuristics off
 #               (interiors + misaligned interiors followed, type_id gate off,
 #                STW stack/pthread lag 0, parked-fiber scrub off, blacklist off)
-#   sound+cons  GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 — also drops the
-#               object-body layout tables, i.e. fully conservative scanning
 #
-# The last two are the numbers that belong in a correctness claim. See
+# Object bodies are always scanned conservatively, so `sound` is the number
+# that belongs in a correctness claim. See
 # docs/SOUND-DEFAULTS.md.
 #
 # Same variance protocol as perf_smoke.sh: N runs per config, discard min and
@@ -190,8 +189,7 @@ print(json.dumps({
         'allow_interior_pointers', 'scan_unaligned_candidates',
         'scan_static_roots', 'type_id_gate', 'type_id_gate_stacks',
         'stw_multi_stack_lag', 'stw_multi_pthread_lag', 'scrub_fibers_enabled',
-        'blacklist_enabled', 'nursery_enabled', 'incremental_auto',
-        'layout_precise')},
+        'blacklist_enabled', 'nursery_enabled', 'incremental_auto')},
 }))
 "
 }
@@ -275,7 +273,6 @@ CONFIGS="${BENCH_CONFIGS:-$(cat <<'EOF'
 boehm
 tuned
 sound GCRY_SOUND=1
-sound-cons GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1
 EOF
 )}"
 
@@ -349,7 +346,6 @@ titles = {
     "boehm": "Boehm (baseline)",
     "tuned": "gcry tuned (defaults)",
     "sound": "gcry sound roots",
-    "sound-cons": "gcry sound + conservative bodies",
 }
 
 data = {}

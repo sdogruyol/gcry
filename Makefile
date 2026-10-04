@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss parallel-dormant darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss parallel-dormant darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -45,14 +45,6 @@ property-test: $(BIN)
 property-test-short: $(BIN)
 	$(CRYSTAL) build bench/property_test.cr -o $(BIN)/property_test
 	$(BIN)/property_test --seed=1 --iterations=5000
-
-layout-property-test: $(BIN)
-	$(CRYSTAL) build bench/layout_property_test.cr -o $(BIN)/layout_property_test
-	$(BIN)/layout_property_test --seed=$${LAYOUT_PROP_SEED:-1} --iterations=$${LAYOUT_PROP_ITERATIONS:-10000}
-
-layout-property-test-short: $(BIN)
-	$(CRYSTAL) build bench/layout_property_test.cr -o $(BIN)/layout_property_test
-	$(BIN)/layout_property_test --seed=1 --iterations=500
 
 mt-property-test: $(BIN)
 	$(CRYSTAL) build bench/mt_property_test.cr -o $(BIN)/mt_property_test
@@ -260,14 +252,14 @@ rss-leak: $(BIN)
 	! $(BIN)/rss_leak --warmup=$${RSS_WARMUP:-15} --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000} \
 		--limit=$${RSS_LIMIT:-10} --rss-limit=$${RSS_RSS_LIMIT:-25} --leaking
 
-# The GC API and the compiler's type_id / layout contract. The red arm:
-# `GCRY_DISABLE_LAYOUT=1` registers no layouts, so "Array type_id is
-# registered for layout" must fail and the run must exit non-zero — the one
-# check here whose subject the collector can switch off.
+# The GC API and the compiler's type_id header contract. Green-only: the
+# remaining checks assert the GC API, malloc/realloc/collect and the type_id
+# header, and no knob switches one of their subjects off. The layout-table
+# check, whose `GCRY_DISABLE_LAYOUT=1` arm was the red one, went with
+# `Gcry::Layout`.
 compiler-gc-contract: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/compiler_gc_contract.cr -o $(BIN)/compiler_gc_contract --error-trace
 	$(BIN)/compiler_gc_contract
-	! GCRY_DISABLE_LAYOUT=1 $(BIN)/compiler_gc_contract
 	$(CRYSTAL) tool hierarchy src/gcry.cr >/dev/null
 	$(CRYSTAL) tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
 
@@ -458,48 +450,6 @@ scheduler-roots: $(BIN)
 	# parked fibers still live 16/16 — the conservative body scan
 	# reaches them. The counter is the gate.
 	! GCRY_DISABLE_EC_PINS=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots
-
-# A precise layout is a claim that every pointer in the object is at one of the
-# offsets it lists. `Layout.register` had a third outcome it never named: an ivar
-# it could not classify — module-typed (`Log::Dispatcher`), `Proc`, `Tuple` — got
-# no offset *and* did not force the conservative fallback, so the type stayed
-# precise and the word was never scanned. 19 such ivars in 186 stdlib types.
-# The gate is the installed entry, which is static; the sweep arm is the
-# consequence (both shapes were swept before the fix, on both registration
-# routes). `--control` types the same ivar as the class and must survive, or the
-# other two arms prove nothing. Run under GCRY_AUTO_LAYOUTS=1 as well: that is
-# the shipping route into the same macro. ~1 s.
-ivar-layout-roots: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/ivar_layout_roots.cr -o $(BIN)/ivar_layout_roots --error-trace
-	$(BIN)/ivar_layout_roots
-	$(BIN)/ivar_layout_roots --proc
-	$(BIN)/ivar_layout_roots --control
-	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots
-	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --proc
-	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --control
-	# The red direction, which until 2026-09-20 existed only as a hand
-	# edit of layout.cr ("has_inner_pointers? dropped"). The knob keeps
-	# the precise is_ptr offsets and skips the conservative fallback, so
-	# a module-typed / Proc ivar is simply never scanned. --control still
-	# passes: that ivar is a Reference and its offset is emitted either
-	# way. The counter is the gate; a survival assertion can still pass
-	# if a stale stack word roots the leaf.
-	! GCRY_LAYOUT_DROP_UNCLASSIFIED=1 $(BIN)/ivar_layout_roots
-	! GCRY_LAYOUT_DROP_UNCLASSIFIED=1 $(BIN)/ivar_layout_roots --proc
-
-# Does `GCRY_DISABLE_AUTO_LAYOUTS` still disable the whole-program walk
-# `GCRY_AUTO_LAYOUTS` opted into? `ivar-layout-roots` already runs under the
-# opt-in and cannot see this knob: it also registers its probes explicitly, so
-# the disable leaves them registered either way, and a survival assertion would
-# not discriminate. Three child arms, counters not objects: builtins must not
-# name a type this file declares, AUTO_LAYOUTS must grow the table *and*
-# register that type, both knobs must put both counters back. Measured here:
-# 51 → 159 → 51, probe false/true/false. Dropping the disable reddens it
-# (159 and probe still registered). ~1 s.
-.PHONY: auto-layouts
-auto-layouts: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/auto_layouts.cr -o $(BIN)/auto_layouts --error-trace
-	$(BIN)/auto_layouts
 
 # The 2026-08-10 soak died in `quick_dequeue?` on a run-queue slot whose pointer
 

@@ -24,9 +24,9 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 
 | Area | Grade | Notes |
 |------|-------|-------|
-| **Unit test coverage** | A | Specs across heap, collect, layout, barrier, finalizer, TLAB, parallel_mark, scrub, metrics, blacklist, type_id_gate. |
+| **Unit test coverage** | A | Specs across heap, collect, barrier, finalizer, TLAB, parallel_mark, scrub, metrics, blacklist, type_id_gate. |
 | **Integration test** | A- | `process_spec/` under `-Dgc_none`. Nursery HTTP regression in `bench/nursery_headers.cr`. |
-| **Fuzz / property** | A- | Deterministic fuzz + replay; heap/layout/MT property tests in CI. |
+| **Fuzz / property** | A- | Deterministic fuzz + replay; heap/MT property tests in CI. |
 | **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (thr≥70% Boehm, RSS≤1.25×, pause_p50≤2.5ms), soak-smoke, EC4 soft-soak smoke, nightly fuzz/soak. |
 | **Regression tests** | A- | `spec/regression/` (4 UAF-born cases) + CONTRIBUTING / PR template. |
 | **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak; secondary crystal-metric GC subset (informational). |
@@ -98,7 +98,7 @@ Priority labels:
 |---|----------|--------|------|-------------|
 | 2.1 | Must | 2-3 weeks | **Heap graph fuzzer** — `bench/property_test.cr`. Generate random pointer graphs: cycles, chains, trees, DAGs, disjoint sets. Random alloc/free/write sequences. Run 100k iterations per CI run. Verify invariants after every collect: all reachable objects are alive, all unreachable objects are dead. Use seed-based RNG for determinism. | Property test suite |
 | 2.2 | Must | 1-2 weeks | **Heap invariant property test** — Random alloc/free/collect sequences (50k iterations). Verify invariants with and without `GCRY_DEBUG_INVARIANTS=1`: `live_objects` matches actual live count, freelist walk yields all blocks, `heap_size` ≥ sum of all chunk sizes, no double-free, no use-after-free. | Invariant properties |
-| 2.3 | Should | 1 week | **Layout property test** — Random type_id, offset, scan_cap combinations (10k). Verify: (a) precise scan follows only registered offsets, (b) scan conservative fallback keeps all reachable, (c) `scan_cap ≤ alloc_size`, (d) hash entry stride matches `sizeof(Hash::Entry)`, (e) leaf layout produces no false roots. | Layout properties |
+| 2.3 | Should | 1 week | ~~**Layout property test** — Random type_id, offset, scan_cap combinations (10k).~~ **Removed 2026-10-04 with `Gcry::Layout`.** The mark reads no type map, so every arm reduced to "a conservative block keeps its slots", which the heap property test, the specs and `process_spec/regression/11_union_buffer_collision_spec.cr` already cover (`bench/log/linux/2026-10-04-layout-union-collision/`). | — |
 | 2.4 | Should | 1 week | **MT property test** — Concurrent alloc via fiber workers (2-8), periodic collect, 500 iterations per worker count. Verify: (a) no object lost under concurrent alloc + periodic collect, (b) `live_objects` counter accuracy after TLAB flush, (c) parallel mark produces the same live set as serial mark. | MT properties |
 
 **Framework note:** Crystal lacks a mature QuickCheck library. Start with a simple custom generator (`Random` + `Iterator(T)`) inside `bench/property_test.cr` — no external dependency needed. Port to a formal framework later if one emerges.
@@ -106,19 +106,19 @@ Priority labels:
 **What could go wrong:**
 - **Custom property framework takes too long (2.1):** Writing a good random graph generator is harder than it looks. Mitigation: if not working after 2 weeks, simplify — start with random alloc/free sequences only, add pointer graphs later.
 - **Property tests are flaky (2.1-2.4):** Random tests may fail intermittently. Mitigation: all property tests must log the seed on failure. CI reruns with the same seed for deterministic debugging. Treat flakiness as a bug in the test, not the code.
-- **Layout property test design vs GC behavior (2.3):** The test must align with the GC's actual scanning semantics. Until 2026-10-04 it pinned the narrowings — precise offsets, leaf, `scan_cap` — that a mixed-union buffer colliding with a registered type id turned into a use-after-free (`bench/log/linux/2026-10-04-layout-union-collision/`). The mark reads no layouts now, so it checks the opposite: no registration, whatever it claims, loses an edge. Mitigation: each sub-test is self-contained (no shared state), verified against the GC source, and runs 10k iterations independently.
+- **Layout property test design vs GC behavior (2.3):** Moot since the removal of `Gcry::Layout` (2026-10-04). Until then it pinned the narrowings — precise offsets, leaf, `scan_cap` — that a mixed-union buffer colliding with a registered type id turned into a use-after-free (`bench/log/linux/2026-10-04-layout-union-collision/`).
 - **MT property test deadlocks (2.4):** Fiber + collect + STW can deadlock in unpredictable ways. Mitigation: library heap mode (`stop_the_world=false`) avoids STW entirely. Workers use `Fiber.yield` to cooperate with the collector. Watchdog timer (120s deadline) prevents infinite hangs. Tested with 2, 4, 8 workers.
 
 **Definition of Done:**
 - [x] `bench/property_test.cr` exists and runs in CI
-- [x] `bench/layout_property_test.cr` exists with 2 sub-tests: every slot survives under each synthetic plain layout (precise offsets, leaf, noscan, scan cap) and under none, and a noscan offset's target is traced
+- [x] ~~`bench/layout_property_test.cr` exists with 2 sub-tests~~ — removed 2026-10-04 with `Gcry::Layout` (2.3)
 - [x] Heap graph fuzzer completes 100k iterations on every CI run (short: 5k in CI, full optional)
 - [x] Every property test failure logs the seed for deterministic replay
 - [x] Random alloc/free/collect sequences verify: `live_objects` counter accuracy, `heap_size` == sum chunk `mapped_bytes`, freelist consistency, no false negatives
-- [x] Layout property test passes 10k iterations, each sub-test self-contained (no shared state)
+- [x] ~~Layout property test passes 10k iterations, each sub-test self-contained (no shared state)~~ — removed with it
 - [x] `bench/mt_property_test.cr` exists with concurrent workers (2, 4, 8), periodic collect, parallel/serial mark verification
 - [x] MT property tests run with 2, 4, 8 workers, no deadlocks, no lost objects
-- [x] At least one layout property test passes (2.3)
+- [x] ~~At least one layout property test passes (2.3)~~ — removed with it
 - [x] Property tests add less than 10 min to CI runtime (~8s for 100k)
 
 **Success signal:** Property tests run in CI, find at least one heap corruption or lost-object bug within 3 months.

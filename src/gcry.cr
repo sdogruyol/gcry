@@ -7,7 +7,6 @@
 require "./gcry/clock"
 require "./gcry/cpu"
 require "./gcry/heap"
-require "./gcry/layout"
 
 module Gcry
   VERSION = "0.34.0"

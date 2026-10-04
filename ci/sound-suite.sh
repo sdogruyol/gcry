@@ -47,6 +47,5 @@ for seed in 1 2 3; do
 done
 [ "$stw_ok" -eq 1 ] || { echo "sound suite: three upstream deadlocks in a row"; exit 1; }
 GCRY_SOUND=1 GCRY_STRESS=1 GCRY_STRESS_EVERY=32 ./bin/stress 100
-GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./bin/json_churn 800
-GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./bin/pattern_fuzz --seed=2 --phases=20 --objects-per-phase=1000
+GCRY_SOUND=1 ./bin/pattern_fuzz --seed=2 --phases=20 --objects-per-phase=1000
 echo "sound suite: ok"

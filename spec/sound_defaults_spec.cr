@@ -9,7 +9,6 @@ require "./spec_helper"
 private def sound_heap : Gcry::Heap
   heap = Gcry::Heap.new
   heap.gc_threshold = UInt64::MAX
-  heap.layout_precise = false
   heap.allow_interior_pointers = true
   heap.scan_unaligned_candidates = true
   # Library heaps default this off; sound roots require it (BSS/data would be

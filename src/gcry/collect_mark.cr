@@ -23,9 +23,9 @@ module Gcry
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
     # into its allocation). Never apply type_id_gate (raw buffers OK).
     #
-    # Inlined, with the heap-span test first: the precise scans (layout
-    # offsets, Hash entries) call this once per slot, and most slots hold no
-    # heap address. See the conservative loop in `scan_object`.
+    # Inlined, with the heap-span test first: the nursery and dirty-page
+    # rescans call this once per candidate word, and most words hold no heap
+    # address. See the conservative loop in `scan_object`.
     @[AlwaysInline]
     private def mark_candidate(pointer : Void*) : Nil
       addr = pointer.address
@@ -427,7 +427,7 @@ module Gcry
       # parallel cycle leaves the count short, and the cap stays at its floor.
       @mark_scanned_bytes &+= size unless @mark_parallel
 
-      # No type map narrows this scan. `Gcry::Layout` keyed one off the
+      # No type map narrows this scan. The removed `Gcry::Layout` keyed one off the
       # payload's first Int32, and a raw buffer of a mixed union starts with
       # exactly such an id: Crystal tags every element with its runtime type
       # id. `[JSON::Any.new(array), JSON::Any.new("x")]` is a 32-byte buffer
@@ -442,7 +442,7 @@ module Gcry
       #
       # Raw buffers (no Crystal type_id): object-base only — cuts interior false
       # hits from JSON/bytes. Typed References keep interiors so Array#shift and
-      # layout-miss types with mid-object pointers stay correct.
+      # types with mid-object pointers stay correct.
       #
       # This is a root-completeness heuristic on *heap edges*, not just on
       # ambient roots: an interior pointer stored inside a Slice / raw buffer is

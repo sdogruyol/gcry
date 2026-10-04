@@ -251,9 +251,8 @@ survivals.each do |survival|
     "rss_kb"          => rss_kb.to_s,
     "radix_fast"      => heap.radix_fast_hits.to_s,
     "radix_slow"      => heap.radix_slow_lookups.to_s,
-    # Last collection's scan census: how many objects were conservatively /
-    # precisely scanned and how many ambient candidates the type_id gate refused.
-    "scans_conservative" => heap.layout_conservative_scans.to_s,
+    # Ambient candidates the type_id gate refused in the last collection.
+    "type_id_rejects" => heap.type_id_root_rejects.to_s,
     # Occupancy census: allocated blocks by walking the occ bitmaps (plus one per
     # large chunk). Independent of the live_objects counter, which is a running
     # tally and can drift.
@@ -268,8 +267,6 @@ survivals.each do |survival|
       end
       n.to_s
     end,
-    "scans_precise"   => heap.layout_precise_scans.to_s,
-    "type_id_rejects" => heap.type_id_root_rejects.to_s,
   })
 
   # `Gcry.pause_stats` p50/p99 are deliberately NOT reported. They are

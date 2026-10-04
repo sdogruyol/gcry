@@ -41,9 +41,10 @@ GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 ./app   # sound, except scrub is back on
 
 ### The second axis: object-body scan precision
 
-Since 2026-10-04 there is nothing on this axis: the mark scans every
-non-atomic block conservatively, word by word, and reads no `Gcry::Layout`
-map.
+There is nothing on this axis: the mark scans every non-atomic block
+conservatively, word by word. `Gcry::Layout`, the type-keyed maps that once
+narrowed the scan, stopped feeding the mark on 2026-10-04 and was then removed
+with its registration API.
 
 The maps were keyed off the payload's first `Int32`, and a raw buffer of a
 mixed union begins with its first element's type id. Two shapes of
@@ -96,10 +97,9 @@ say *which* assumption is in play when it is not `sound`.
 
 ### What the label still does not cover
 
-**Body-scan precision** — nothing since 2026-10-04: bodies are scanned
-conservatively whatever `GCRY_DISABLE_LAYOUT` says, so `GCRY_SOUND=1` alone has
-no caveat on any axis. The "sound + conservative bodies" rows below were
-measured when layouts still narrowed scans.
+**Body-scan precision** — nothing: bodies are always scanned conservatively,
+so `GCRY_SOUND=1` alone has no caveat on any axis. The "sound + conservative
+bodies" rows below were measured when layouts still narrowed scans.
 
 ---
 
@@ -121,8 +121,7 @@ plus a derived label:
   "scrub_fibers_enabled": false,
   "blacklist_enabled": false,
   "nursery_enabled": false,
-  "incremental_auto": false,
-  "layout_precise": true
+  "incremental_auto": false
 }
 ```
 

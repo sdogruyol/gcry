@@ -85,7 +85,7 @@ Full surface vs Boehm: [docs/INTEGRATION.md](docs/INTEGRATION.md). Comparison ch
 │  Heap ── size classes, TLAB, large cache, chunk release │
 │  Roots ─ stacks, fibers, static maps, type_id gate      │
 │  Collect ─ STW · scan · mark · sweep (split modules)    │
-│  Layout / blacklist / scrub ─ less false retention      │
+│  Blacklist / scrub ─ less false retention               │
 │  Barrier ─ soft-dirty / mprotect (nursery & incremental)│
 │  Finalizer · Metrics · Observability · Platform         │
 └─────────────────────────────────────────────────────────┘
@@ -111,7 +111,7 @@ Full surface vs Boehm: [docs/INTEGRATION.md](docs/INTEGRATION.md). Comparison ch
 
 1. **STW** (process GC): signal-suspend other OS threads; library heaps can skip.
 2. Optional **stack scrub** (opt-in): wipe unused words below SP / parked fiber SP — Boehm-style hygiene, not stack maps.
-3. Push roots; **mark** (worklist outside the GC heap). Layout tables scan known offsets precisely where registered.
+3. Push roots; **mark** (worklist outside the GC heap). Every non-atomic block body is scanned conservatively; no type map narrows it.
 4. Optional **parallel mark** (experimental): STW-exempt pthreads steal grey objects — measure thr before enabling.
 5. **Sweep** unmarked → freelists; release empty chunks; run finalizers after the world resumes.
 
@@ -130,7 +130,7 @@ src/gcry.cr                 # VERSION, public entry
 src/gcry/
   heap.cr                   # arenas, size classes, alloc path
   block.cr · size_classes.cr · tlab.cr · mark_bitmap.cr
-  roots.cr · layout.cr · blacklist.cr · stack_scrub.cr · stack_maps.cr
+  roots.cr · blacklist.cr · stack_scrub.cr · stack_maps.cr
   collect.cr                # orchestration
   collect_stw.cr · collect_scan.cr · collect_mark.cr · collect_sweep.cr
   mark.cr · parallel_mark.cr · barrier.cr
@@ -180,7 +180,7 @@ sweep stays a **supported opt-in**. Default path: EC parallelism **1**,
 | Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64; **dying-fiber stack rooted** (v0.20) |
 | Thread birth window | ⚠️ `GCRY_STAGED_WAIT` **default-on** — the collector waits for a thread `pthread_create` has returned but Crystal has not published (crashes 6/60 → 0/60, census gaps 3/30 → 0/30, ~1.4% of collections wait at all); `thread_birth_root.cr` roots the `Thread` object across the same window. The second UAF that motivated both is **open** |
 | Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (v0.16 carry); fat-app tip ~**1–1.6×** |
-| Layout / type_id / blacklist | ✅ defaults + escapes |
+| type_id / blacklist | ✅ defaults + escapes |
 | Barriers (soft-dirty / mprotect) | ✅; nursery **opt-in** (default off); soft-dirty Linux-only |
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Crash instruments | ✅ **default-off**, and each rides the gate that caught the defect it was built for: `GCRY_SEGV_REPORT`, `GCRY_POISON_FREED` / `_TAG` / `_HOLDERS`, `GCRY_MARK_AUDIT`, `GCRY_ADDRESS_SPACE_AUDIT`, `GCRY_THREAD_BLOCK_AUDIT`, `GCRY_THREAD_CENSUS`, `GCRY_EC_QUEUE_AUDIT` |
@@ -233,7 +233,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | **Moving / compacting** | After precise roots |
 | **Attribute the residual per-rep spread** | It bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp on post-GC RSS, at 12 reps |
 
-Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object page
+Shard-only polish continues (Parallel thr/RSS, large-object page
 policy). Darwin fat-app RSS closed on the tip re-cut without stack maps, as Linux
 did in v0.18; what still wants them is the Kemal `/json` ceiling. Process-STW
 property tests are no longer frontier — they run in CI on both architectures,
@@ -244,7 +244,7 @@ with TLAB and with nursery.
 | Risk | Mitigation |
 |------|------------|
 | Collector allocates from GC heap | Immortal arenas; hot-path rules; stress specs |
-| Conservative false retention | Size classes, layout, type_id gate, SP clamp, fiber scrub; measure vs Boehm |
+| Conservative false retention | Size classes, type_id gate, SP clamp, fiber scrub; measure vs Boehm |
 | Fiber / MT root bugs | Explicit registry; STW; SP clamp; thread staging + census; dying-fiber and thread-birth roots; CI samples |
 | **A defect only CI can see** | Both recent use-after-frees were named by instruments rather than by reading the collector, and the open one has *never* reproduced locally. So the instruments ship: default-off, riding the gates that caught the defect, counting what they walked so a silence is readable, and each broken on purpose and observed red before its quiet is worth anything |
 | “Just make it precise” expectations | Precise is a separate epic — documented, not blocked |

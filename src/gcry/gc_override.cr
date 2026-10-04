@@ -166,7 +166,6 @@ module GC
     # Cost is +4.3% of root work, a few µs per collection (SOUND-DEFAULTS).
     # Escape for measurement: GCRY_ALIGNED_CANDIDATES=1.
     heap.scan_unaligned_candidates = true
-    heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -196,31 +195,6 @@ module GC
       # reason, not a measured fix.
       {% if flag?(:unix) %} Gcry::SegvReport.install_if_requested {% end %}
       heap.set_stackbottom(Fiber.current.@stack.bottom)
-    end
-
-    # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
-    # growth under gcry during GC.init SIGSEGVs — Fiber/runtime is not ready yet.
-    # GCRY_DISABLE_LAYOUT is applied here and again in apply_env_config.
-    if env_flag_one?("GCRY_DISABLE_LAYOUT")
-      heap.layout_precise = false
-      Gcry::Layout.enabled = false
-    else
-      Gcry::Layout.register_builtins
-      # Precise whole-program layouts (Reference.all_subclasses). Opt-in via
-      # GCRY_AUTO_LAYOUTS=1 — Linux Kemal /json ~7pp thr vs builtins-only
-      # (bench/log/thr-abis). register() falls back to scan_cap for unsafe ivars;
-      # alloc_size must match before precise/scan_cap (raw-buffer type_id collisions).
-      # Escape when opted in: GCRY_DISABLE_AUTO_LAYOUTS=1.
-      # Curated HTTP::Headers::Key Hash as process default was measured: Kemal
-      # /json thr soft vs builtins-only — keep registration app-side
-      # (bench/nursery_headers.cr) or via GCRY_AUTO_LAYOUTS.
-      if env_flag_one?("GCRY_AUTO_LAYOUTS") && !env_flag_one?("GCRY_DISABLE_AUTO_LAYOUTS")
-        Gcry.register_layouts
-      end
-      # Optional size-class slack caps for all Reference types (GCRY_SCAN_CAPS=1).
-      if env_flag_one?("GCRY_SCAN_CAPS")
-        Gcry::Layout.register_scan_caps
-      end
     end
 
     # Ordering marker for `GCRY_TRACE_LARGE=1`: everything above is gcry
@@ -343,9 +317,9 @@ module GC
   #                            GC.init). Already off for process GC; set here so
   #                            the profile does not rely on that default.
   #
-  # Object-body scan precision (Gcry::Layout, keyed on the payload's first
-  # Int32) is a *separate* axis and is deliberately not touched here — measure
-  # it with GCRY_DISABLE_LAYOUT=1 so the two costs stay attributable.
+  # Object bodies have no precision axis: the mark scans every non-atomic
+  # block conservatively (the removed `Gcry::Layout` keyed on the payload's
+  # first Int32 and collided with mixed-union buffers).
   #
   # Applied before the individual knobs below, so an explicit GCRY_* still
   # wins: `GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1` re-enables scrub.
@@ -698,14 +672,6 @@ module GC
     if env_flag_one?("GCRY_BLACKLIST")
       heap.blacklist_enabled = true
     end
-
-    if env_flag_one?("GCRY_DISABLE_LAYOUT")
-      heap.layout_precise = false
-      Gcry::Layout.enabled = false
-    end
-
-    # GCRY_DISABLE_AUTO_LAYOUTS is handled in GC.init (before apply_env_config).
-    # The env var is listed here for discoverability — GC.init already checked it.
 
     if env_flag_one?("GCRY_DISABLE_SP_CLAMP")
       Gcry::Platform.stw_sp_clamp_enabled = false
@@ -1338,10 +1304,6 @@ module GC
     heap.dying_greg_dump = true if env_flag_one?("GCRY_DYING_GREG_DUMP")
     heap.disable_greg_roots = true if env_flag_one?("GCRY_DISABLE_GREG_ROOTS")
     heap.disable_ec_pins = true if env_flag_one?("GCRY_DISABLE_EC_PINS")
-    # After `register_builtins` on purpose: Fiber#proc is one of the holes
-    # this restores, and dropping it at init would take the process down
-    # before `make ivar-layout-roots` could measure its own probes.
-    Gcry::Layout.drop_unclassified = true if env_flag_one?("GCRY_LAYOUT_DROP_UNCLASSIFIED")
     heap.full_suspended_stack = true if env_flag_one?("GCRY_FULL_SUSPENDED_STACK")
     if sl = env_u64("GCRY_SUSPENDED_SP_SLACK")
       heap.suspended_sp_slack = sl

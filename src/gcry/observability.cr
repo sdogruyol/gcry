@@ -133,8 +133,6 @@ module Gcry
         empty_chunk_retain:          heap.empty_chunk_retain,
         empty_chunk_warm_retain:     heap.empty_chunk_warm_retain,
         warm_released_collects:      heap.warm_released_collects,
-        layout_precise_scans:        heap.layout_precise_scans,
-        layout_hash_bodies:          heap.layout_hash_bodies,
         sweep_large_uninitialised:   heap.sweep_large_uninitialised,
         sweep_small_uninitialised:   heap.sweep_small_uninitialised,
         large_cached_twice:          heap.large_cached_twice,
@@ -162,7 +160,6 @@ module Gcry
         quarantined_releases:        heap.quarantined_releases,
         quarantine_held:             heap.quarantine_held,
         quarantine_forced_drains:    heap.quarantine_forced_drains,
-        layout_conservative_scans:   heap.layout_conservative_scans,
         # Root-completeness state (docs/SOUND-DEFAULTS.md). Reported as the
         # actual field values, not as "GCRY_SOUND was set" — a measurement
         # should prove the profile applied, not trust that it did.
@@ -180,7 +177,6 @@ module Gcry
         blacklist_enabled:                     heap.blacklist_enabled,
         nursery_enabled:                       heap.nursery_enabled,
         incremental_auto:                      heap.incremental_auto,
-        layout_precise:                        heap.layout_precise,
         precise_stack_roots:                   heap.precise_stack_roots,
         precise_stack_exclusive:               heap.precise_stack_exclusive,
         precise_stack_fibers_exclusive:        heap.precise_stack_fibers_exclusive,
@@ -224,8 +220,6 @@ module Gcry
         stack_maps_miss_log:                   StackMaps.miss_log?,
         stack_maps_near_delta:                 StackMaps.near_delta,
         stack_maps_top_miss_pcs:               StackMaps.top_miss_pcs,
-        layout_entries:                        Layout.size,
-        layout_unsafe_skips:                   Layout.unsafe_skips_count,
         type_id_root_rejects:                  heap.type_id_root_rejects,
         type_id_stack_rejects:                 heap.type_id_stack_rejects,
         type_id_static_rejects:                heap.type_id_static_rejects,

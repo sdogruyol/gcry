@@ -337,7 +337,8 @@ module Gcry
     # one word, and anything else that can hold a pointer gets every word of its
     # slot marked. Values (`Int32`, `Bool`, `Atomic(Int32)`, an enum) are skipped
     # because `has_inner_pointers?` says there is nothing in them — the same
-    # predicate `Layout.register` was fixed to ask on 2026-08-15.
+    # predicate the removed `Gcry::Layout` registration was fixed to ask on
+    # 2026-08-15.
     private macro pin_ec_ivars(obj, type)
       {% for ivar in type.resolve.instance_vars %}
         {% ty = ivar.type %}

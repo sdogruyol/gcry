@@ -33,10 +33,6 @@ module Gcry
     getter parallel_mark_workers : Int32
     getter parallel_mark_runs : UInt64
     getter parallel_mark_stolen : UInt64
-    getter layout_precise_scans : UInt64
-    getter layout_conservative_scans : UInt64
-    getter layout_entries : Int32
-    getter layout_unsafe_skips : UInt64
     getter sp_clamp_hits : UInt64
     getter sp_clamp_fallbacks : UInt64
     getter low_water_skips : UInt64
@@ -69,8 +65,6 @@ module Gcry
       @blacklist_hits : UInt64, @blacklist_skips : UInt64,
       @tlab_refills : UInt64, @tlab_steals : UInt64, @tlab_hits : UInt64,
       @parallel_mark_workers : Int32, @parallel_mark_runs : UInt64, @parallel_mark_stolen : UInt64,
-      @layout_precise_scans : UInt64, @layout_conservative_scans : UInt64,
-      @layout_entries : Int32, @layout_unsafe_skips : UInt64,
       @sp_clamp_hits : UInt64, @sp_clamp_fallbacks : UInt64,
       @low_water_skips : UInt64, @low_water_skipped_bytes : UInt64,
       @barrier_backend : String, @barrier_dirty_rescans : UInt64,
@@ -123,10 +117,6 @@ module Gcry
       heap.parallel_mark_workers,
       heap.parallel_mark_runs,
       heap.parallel_mark_stolen,
-      heap.layout_precise_scans,
-      heap.layout_conservative_scans,
-      Layout.size,
-      Layout.unsafe_skips_count,
       heap.sp_clamp_hits,
       heap.sp_clamp_fallbacks,
       heap.low_water_skips,
@@ -233,15 +223,6 @@ module Gcry
       io << "# HELP #{prefix}_parallel_mark_stolen_total Grey objects stolen by helpers\n"
       io << "# TYPE #{prefix}_parallel_mark_stolen_total counter\n"
       io << "#{prefix}_parallel_mark_stolen_total #{m.parallel_mark_stolen}\n"
-      io << "# HELP #{prefix}_layout_entries Layout table size\n"
-      io << "# TYPE #{prefix}_layout_entries gauge\n"
-      io << "#{prefix}_layout_entries #{m.layout_entries}\n"
-      io << "# HELP #{prefix}_layout_unsafe_skips_total Types skipped by @unsafe_layouts blacklist\n"
-      io << "# TYPE #{prefix}_layout_unsafe_skips_total counter\n"
-      io << "#{prefix}_layout_unsafe_skips_total #{m.layout_unsafe_skips}\n"
-      io << "# HELP #{prefix}_layout_precise_scans_total Objects scanned via layout tables\n"
-      io << "# TYPE #{prefix}_layout_precise_scans_total counter\n"
-      io << "#{prefix}_layout_precise_scans_total #{m.layout_precise_scans}\n"
       io << "# HELP #{prefix}_sp_clamp_hits_total Other-thread stacks clamped to SP\n"
       io << "# TYPE #{prefix}_sp_clamp_hits_total counter\n"
       io << "#{prefix}_sp_clamp_hits_total #{m.sp_clamp_hits}\n"

@@ -27,7 +27,6 @@ puts "  scrub_fibers_enabled      = #{heap.scrub_fibers_enabled}"
 puts "  blacklist_enabled         = #{heap.blacklist_enabled}"
 puts "  nursery_enabled           = #{heap.nursery_enabled}"
 puts "  incremental_auto          = #{heap.incremental_auto}"
-puts "  layout_precise            = #{heap.layout_precise} (separate axis)"
 
 # Exercise the collector in whichever mode we booted into — the profile must
 # not just be reported, it must survive a real collect.

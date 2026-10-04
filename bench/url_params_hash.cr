@@ -75,20 +75,11 @@
 # clear, so `0x0` under poison means nothing either way.
 # `bench/log/linux/2026-08-30-zeroed-hash-slot/FINDINGS.md`
 #
-# The app registers a *different* instantiation with gcry:
-#
-#     Gcry.register_hash(String, JSON::Any)
-#
-# `register_hash` marks that Hash's `@indices` and `@entries` noscan and walks
-# its entries with recorded offsets instead. `Hash(String, String)` is not
-# registered and keeps the conservative treatment. This asks whether registering
-# one instantiation can cost another its values.
-#
-#   registered   the app's `register_hash(String, JSON::Any)` is made
-#   plain        it is not
-#
-# Both arms must keep every value. A difference between them points at the
-# registration; a failure in both points at the Hash path generally.
+# The app also registered `Hash(String, JSON::Any)` with `Gcry::Layout`, and
+# an arm here asked whether that cost `Hash(String, String)` its values. The
+# layout tables are removed (`bench/log/linux/2026-10-04-layout-union-collision/`),
+# and with them that arm. What remains asks whether the conservative Hash path
+# keeps every value across collections.
 #
 #   crystal build -Dgc_none bench/url_params_hash.cr -o bin/url_params_hash
 #   bin/url_params_hash
@@ -127,12 +118,6 @@ class Verdict
 end
 
 if ARGV.includes?("--child")
-  if ENV["URL_PARAMS_REGISTER"]? == "1"
-    # Exactly what acikturkiye does at boot.
-    Gcry.register_hash(String, JSON::Any)
-    Gcry.register_layout(Array(JSON::Any))
-  end
-
   threads = [] of Thread
   WORKERS.times do |w|
     threads << Thread.new do
@@ -200,17 +185,14 @@ def run(exe : String, env, attempts : Int32) : {Int32, String?}
   {bad, first}
 end
 
-reg_bad, reg_note = run(exe, {"URL_PARAMS_REGISTER" => "1"}, attempts)
-puts "  registered (as the app does): #{reg_bad} of #{attempts}#{reg_note ? "\n     #{reg_note.strip}" : ""}"
-
 plain_bad, plain_note = run(exe, {} of String => String, attempts)
-puts "  plain:                        #{plain_bad} of #{attempts}#{plain_note ? "\n     #{plain_note.strip}" : ""}"
+puts "  plain: #{plain_bad} of #{attempts}#{plain_note ? "\n     #{plain_note.strip}" : ""}"
 puts ""
 
-if reg_bad == 0 && plain_bad == 0
-  puts "ok — every value survived in both arms"
+if plain_bad == 0
+  puts "ok — every value survived"
   exit 0
 else
-  STDERR.puts "FAIL: a Hash(String, String) lost values (registered #{reg_bad}, plain #{plain_bad} of #{attempts})"
+  STDERR.puts "FAIL: a Hash(String, String) lost values (#{plain_bad} of #{attempts})"
   exit 1
 end

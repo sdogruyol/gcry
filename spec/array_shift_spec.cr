@@ -7,7 +7,6 @@ it "Array(String) shift + collect keeps elements with base-only ambient roots" d
   begin
     heap.gc_threshold = UInt64::MAX
     heap.allow_interior_pointers = false
-    heap.layout_precise = false
     heap.type_id_gate = false
 
     keep = [] of String

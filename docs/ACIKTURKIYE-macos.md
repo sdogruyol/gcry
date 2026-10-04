@@ -144,7 +144,7 @@ that as "one regime in nine draws on this host at this commit", not as
 | Free-page RSS | `MADV_DONTNEED` is a no-op; process default uses `mach_vm_deallocate` + `allocate(FIXED)` |
 | Blacklist | Default **off** since 2026-09-29 (`GCRY_BLACKLIST=1`); it had been on since the P2.3 era |
 | Conservative scan | Untyped payloads (`type_id ≤ 0`) are **object-base only** |
-| Layout builtins | Curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` (not whole-program AUTO) |
+| Object bodies | Scanned conservatively; `Gcry::Layout` (curated builtins) was removed 2026-10-04 |
 | Large mmap | Host-page aligned; Darwin `large_cache_retain` starts at **1 MiB** (adaptive LRU) |
 | Free-page release | Walks ALL kept size-class chunks on Darwin (not just HOLED) for aggressive RSS recovery |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |

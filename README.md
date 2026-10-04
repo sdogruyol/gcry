@@ -91,11 +91,11 @@ Readable. Debuggable. Changeable. Yours.
 │   │ size-cls │  │   mark   │  │ release  │  │  stack   │     │
 │   └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
 │                                                              │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
-│   │ Metrics  │  │  Layout  │  │ Platform │                   │
-│   │Prometheus│  │ precise  │  │  Linux   │                   │
-│   │HDR pause │  │ type_id  │  │  Darwin  │                   │
-│   └──────────┘  └──────────┘  └──────────┘                   │
+│   ┌──────────┐  ┌──────────┐                                 │
+│   │ Metrics  │  │ Platform │                                 │
+│   │Prometheus│  │  Linux   │                                 │
+│   │HDR pause │  │  Darwin  │                                 │
+│   └──────────┘  └──────────┘                                 │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -355,7 +355,6 @@ Defaults tuned for process GC. Change after you measure:
 | `GCRY_THRESHOLD_FACTOR` | Warm-chunk budget and adaptive threshold, % of live (default 100). 50 → Kemal 0.95× peak RSS at unchanged throughput, but −12 pp on the fat app |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks (freelist-era knob: ~95% `/json` thr, ~3x RSS on the freelist) |
 | `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), floored at 8 MiB, capped at 64 MiB (`GCRY_THRESHOLD_MAX`) or a third of the bytes the mark scanned |
-| `GCRY_AUTO_LAYOUTS=1` | Whole-program layout registration; no effect on the mark since 2026-10-04 |
 | `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
 | `GCRY_PARALLEL_MARK=N` | Experimental parallel mark workers (default 1) |
 | `GCRY_STRESS=1` | Collect every N allocs (debug) |
