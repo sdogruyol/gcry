@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`Gcry::Layout` and its registration API.** The mark has read no layout
+  since 0.34.0, when a mixed union's buffer was shown to collide with
+  registered maps (`bench/log/linux/2026-10-04-layout-union-collision/`), so
+  registration only cost boot time, a malloc'd table and a counter reset per
+  collection. Gone with it: `Gcry::Layout`, `Gcry.register_layout`,
+  `register_hash`, `register_set`, `register_layouts` and
+  `Heap#layout_precise`; the env knobs `GCRY_DISABLE_LAYOUT`,
+  `GCRY_AUTO_LAYOUTS`, `GCRY_DISABLE_AUTO_LAYOUTS`, `GCRY_SCAN_CAPS`,
+  `GCRY_LAYOUT_DROP_UNCLASSIFIED` and `GCRY_LAYOUT_DUMP`; the `Metrics`
+  fields `layout_precise_scans`, `layout_conservative_scans`,
+  `layout_entries` and `layout_unsafe_skips`, the Prometheus series
+  `gcry_layout_entries`, `gcry_layout_unsafe_skips_total` and
+  `gcry_layout_precise_scans_total`, and the `json_stats` keys
+  `layout_precise`, `layout_precise_scans`, `layout_conservative_scans`,
+  `layout_hash_bodies`, `layout_entries` and `layout_unsafe_skips` (the scan
+  counters had read 0 since 0.34.0); the gates `make layout-property-test`,
+  `make ivar-layout-roots`, `make auto-layouts`, `compiler-gc-contract`'s
+  layout check with its `GCRY_DISABLE_LAYOUT=1` red arm, and
+  `process_spec/regression/12_private_type_registration_spec.cr`, which
+  tested registration itself. Callers of the registration API fail to
+  compile: delete the calls. −2 200 lines.
+
 ## [0.35.0] - 2026-10-12
 
 ### Fixed

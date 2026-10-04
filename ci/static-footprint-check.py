@@ -64,7 +64,8 @@ def main() -> int:
         for size, name in sizes[:8]:
             print(f"  {size:8d}  {name}")
         print()
-        print("Move large tables to malloc'ed storage, carved at boot (see Gcry::Layout.alloc_tables).")
+        print("Move large tables to malloc'ed storage and keep only a pointer in the class "
+              "variable (see Gcry::StwSlots::Table#reserve).")
         return 1
 
     largest = f"{sizes[0][1]} {sizes[0][0]} B" if sizes else "none"

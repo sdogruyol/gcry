@@ -3953,26 +3953,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
       instruction-level trims have stopped paying on this host
       (`bench/log/linux/2026-10-03-mark-prefilter/`).
-- [ ] **Decide what to do with `Gcry::Layout` registration (2026-10-04).**
-      The mark reads no layout since a mixed union's buffer was shown to
-      collide, by its first tag, with both a registered `Array` map and a
-      `Hash` map that passed its shape check — two default-settings
-      use-after-frees, and the class acikturkiye hit in August
-      (`bench/log/linux/2026-10-04-layout-union-collision/`). Registration
-      still runs: `Layout.register`, `register_hash`, `Gcry.register_layouts`
-      (public API), `register_builtins` at boot, `GCRY_AUTO_LAYOUTS`,
-      `GCRY_SCAN_CAPS`, `GCRY_LAYOUT_DROP_UNCLASSIFIED`, `GCRY_LAYOUT_DUMP`,
-      `make ivar-layout-roots`, `make auto-layouts`, the
-      `compiler-gc-contract` layout check and the `layout_*` counters. Either
-      remove it all (a public API removal), or find a key a raw buffer cannot
-      forge before any map narrows a scan again. The removal is ready on the
-      `layout-removal` branch (`033daf7`, −2 205 lines, rebased onto
-      `d15b0ea`, CI green on every platform, not merged). Its one earlier CI
-      failure, `fp-register-root`'s red arm on Darwin x86_64 keeping its
-      victim 12 of 13 runs, was not the branch: the collector left copies of
-      suspended threads' registers in dead frames of its own stack and then
-      scanned them, and that build's frame sizes put them in the window
-      (`bench/log/macos/2026-10-05-dead-register-copies/`, fixed on master).
+- [x] **Decide what to do with `Gcry::Layout` registration — removed in
+      0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
+      collided with registered maps
+      (`bench/log/linux/2026-10-04-layout-union-collision/`), so the whole
+      subsystem went: `Gcry::Layout`, `register_layout` / `register_hash` /
+      `register_set` / `register_layouts`, `register_builtins` at boot, the
+      six layout env knobs, the `layout_*` counters, `make
+      layout-property-test`, `make ivar-layout-roots`, `make auto-layouts` and
+      the `compiler-gc-contract` layout check, which was that gate's only red
+      arm (it is green-only now: no knob can fail its remaining checks).
 - [x] **`make nursery-headers` tests the old→young scan — fixed 2026-10-04.**
       It never had: a major does not promote, so the Hash and its `@entries`
       were still young when the key was planted, and the minor reached the

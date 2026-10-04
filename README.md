@@ -111,11 +111,11 @@ Readable. Debuggable. Changeable. Yours.
 │   │ size-cls │  │   mark   │  │ release  │  │  stack   │     │
 │   └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
 │                                                              │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
-│   │ Metrics  │  │  Layout  │  │ Platform │                   │
-│   │Prometheus│  │ precise  │  │  Linux   │                   │
-│   │HDR pause │  │ type_id  │  │  Darwin  │                   │
-│   └──────────┘  └──────────┘  └──────────┘                   │
+│   ┌──────────┐  ┌──────────┐                                 │
+│   │ Metrics  │  │ Platform │                                 │
+│   │Prometheus│  │  Linux   │                                 │
+│   │HDR pause │  │  Darwin  │                                 │
+│   └──────────┘  └──────────┘                                 │
 └──────────────────────────────────────────────────────────────┘
 ```
 

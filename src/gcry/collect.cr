@@ -333,36 +333,8 @@ module Gcry
     # type_id_root_rejections that were later revisited and would have passed —
     # useful for tuning the upper-bound heuristic (false negatives == UAF risk).
     # When non-zero in production, the gate is too strict and the upper bound
-    # (1_000_000) needs to grow or the layout-aware gate must take over.
+    # (1_000_000) needs to grow.
     getter type_id_root_false_negatives : UInt64 = 0_u64
-    # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
-    property layout_precise : Bool = true
-    # Objects the mark scanned precisely / conservatively. Incremented once
-    # per scanned object, by every mark worker — so they are **per worker**,
-    # one cache line each, and summed on read. As two shared `Heap` fields they
-    # were written by every worker on every object, which is false sharing on
-    # the hottest path in the collector: measured on a graph-heavy workload
-    # (`gc_phases --fanout=6 --shuffle`), dropping them took 2-worker parallel
-    # mark from +34% to +21% against one worker
-    # (`bench/log/linux/2026-09-23-parallel-mark-scaling/`). Slot 0 is the
-    # master and every thread outside a parallel mark; 1..16 the helpers.
-    LAYOUT_SCAN_SLOTS  = 17
-    LAYOUT_SCAN_STRIDE =  8                                   # UInt64s per slot: one 64-byte line
-    @layout_scan_counts = StaticArray(UInt64, 272).new(0_u64) # 2 x 17 x 8
-
-    def layout_precise_scans : UInt64
-      sum = 0_u64
-      LAYOUT_SCAN_SLOTS.times { |s| sum &+= @layout_scan_counts[s &* LAYOUT_SCAN_STRIDE] }
-      sum
-    end
-
-    def layout_conservative_scans : UInt64
-      sum = 0_u64
-      base = LAYOUT_SCAN_SLOTS &* LAYOUT_SCAN_STRIDE
-      LAYOUT_SCAN_SLOTS.times { |s| sum &+= @layout_scan_counts[base &+ s &* LAYOUT_SCAN_STRIDE] }
-      sum
-    end
-
     # Bytes a parallel mark scanned, per worker, in its shard
     # (`Heap#mark_shard`): a line that worker already owns, so counting adds
     # no shared write. Folded into `@mark_scanned_bytes` once the cycle's
@@ -450,9 +422,6 @@ module Gcry
     # whole old→young scan, dirty pages and the walk of every old block, so a
     # young key that lives only in an old `@entries` blob must be swept.
     property nursery_old_scan : Bool = true
-    # Hash-kind objects whose own body was word-scanned alongside the entry
-    # walk. Silence here would mean the collision guard is not engaged.
-    getter layout_hash_bodies : UInt64 = 0_u64
     # When true, load `.llvm_stackmaps` and mark_precise_root.
     # Opt-in: GCRY_PRECISE_STACK=1 (hybrid) or =2 (exclusive). See STACK_MAPS.md.
     property precise_stack_roots : Bool = false
@@ -3461,7 +3430,6 @@ module Gcry
       @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
       @bytes_before_gc = @bytes_since_gc.get
       @bytes_reclaimed_since_gc = 0_u64
-      @layout_scan_counts = StaticArray(UInt64, 272).new(0_u64)
       @precise_stack_roots_marked = 0_u64
       @parked_fp_fill_frames = 0_u64
       @parked_fp_fill_bytes = 0_u64

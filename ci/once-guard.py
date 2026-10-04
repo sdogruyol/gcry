@@ -40,7 +40,6 @@ import sys
 # `Crystal.main` and may use whatever initializer reads best.
 GUARDED = [
     "src/gcry/roots.cr",
-    "src/gcry/layout.cr",
     "src/gcry/stw_slots.cr",
     "src/gcry/platform/linux_stw.cr",
     "src/gcry/platform/darwin_stw.cr",
