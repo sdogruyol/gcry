@@ -248,6 +248,13 @@ the history here — would lose its bit to the collector's store, and a lost
 mark is a use-after-free. Worth a review of that path, not a default on 4–10%
 of mark on one architecture.
 
+## Prefetch ring depth is flat
+
+`MARK_PREFETCH_DEPTH` 8 and 32 against 16, on quiet runners against
+`765fb6a` (10 reps, Primes / JsonParsePure / Binarytrees / JsonGenerate):
+every cell within −3.1% … +2.7% Σ mark on x86-64 and aarch64, with no
+consistent sign. 16 stays.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of
