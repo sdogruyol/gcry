@@ -35,11 +35,11 @@ Under `-Dgc_none`, `require "gcry"` reopens Crystal’s `GC` module. Everyday co
 | `Gcry.dump_heap(io)` | Live-object NDJSON dump (debug; large heaps may take seconds) |
 | `Gcry.dump_heap_addresses` / `heap_dump_gone` / `heap_dump_new` | Address-set dump + leak diff helpers |
 | `Gcry::Trace` | NDJSON event log (`GCRY_TRACE=1`); writes via `LibC.write` (no JSON/OpenSSL in GC path) |
-| `Gcry.register_layout(T)` / `register_hash(K,V)` | Precise scan tables |
+| `Gcry.register_layout(T)` / `register_hash(K,V)` | Layout tables; the mark reads none since 2026-10-04 |
 | `Gcry.register_set(T)` | `register_hash(T, Nil)` for `Set(T)` backing |
 | `Gcry.register_layouts` | Auto-register concrete `Reference` subclasses (opt-in `GCRY_AUTO_LAYOUTS=1`; skip with `GCRY_DISABLE_AUTO_LAYOUTS=1`) |
 
-Process GC calls `Layout.register_builtins` at init (curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` maps). Whole-program `Gcry.register_layouts` is **opt-in** (`GCRY_AUTO_LAYOUTS=1`) — Linux HTTP thr regresses ~7pp on Kemal `/json` vs builtins-only. The compile-time `@unsafe_layouts` blacklist (Cry, Crystal::*, LibC::*) keeps conservative scanning for stdlib/runtime internals whose layouts shift across versions.
+Process GC calls `Layout.register_builtins` at init (curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` maps), and whole-program `Gcry.register_layouts` is opt-in. Since 2026-10-04 the mark reads none of these tables: a mixed union's buffer begins with its first element's type id, which collided with registered maps and swept live objects, so every non-atomic block is scanned conservatively (`docs/SOUND-DEFAULTS.md`, second axis). Whether registration stays is open (ROADMAP).
 
 ## Class `Gcry::Heap`
 

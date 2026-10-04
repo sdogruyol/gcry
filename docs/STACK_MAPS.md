@@ -48,7 +48,7 @@ oracle: `Type#has_inner_pointers?` + `CRYSTAL_DUMP_TYPE_INFO`.
 
 `Heap#run_collection` (STW) → explicit roots → fiber/thread pins →
 `Roots.scan_range` / `scan_mutator` → `mark_root_candidate` → `mark_loop` →
-`scan_object` (layout-precise on heap edges).
+`scan_object` (conservative on heap edges since 2026-10-04).
 
 Plug-in sites: `scan_mutator_stack`, `scan_all_fiber_roots`,
 `scan_other_thread_stacks` / `push_stack`.
