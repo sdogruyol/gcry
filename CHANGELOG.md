@@ -96,6 +96,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1.21.0 by default, under `GCRY_STRESS=1` and under `GCRY_SOUND=1`, with the
   same counts as Boehm.
 
+- **Unsupported targets fail to compile, with the reason.** FreeBSD, OpenBSD,
+  NetBSD, DragonFly, Solaris, Android and every 32-bit target used to build
+  a collector that could not work there. On those targets there is no
+  platform layer, the root scan reads 8-byte words, and STW captures
+  registers for x86_64 and aarch64 only. `src/gcry/platform/os.cr` now
+  raises at compile time and says to keep Crystal's default GC.
+
 ## [0.34.0] - 2026-10-04
 
 ### Fixed
