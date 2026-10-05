@@ -36,6 +36,18 @@ module Gcry
       @parallel_mark_workers = @force_serial_mark ? 1 : value.clamp(1, 16)
     end
 
+    # The process GC's default worker count for *cpus* CPUs (gc_override.cr
+    # has the measurements): two up to 7 CPUs, then one per four CPUs, at most
+    # `cpus − 1` and 8, at least 1.
+    def self.default_mark_workers(cpus : Int32) : Int32
+      small = cpus - 1 < 2 ? cpus - 1 : 2
+      wide = cpus // 4 + 1
+      wide = cpus - 1 if wide > cpus - 1
+      wide = 8 if wide > 8
+      n = small > wide ? small : wide
+      n < 1 ? 1 : n
+    end
+
     # Below this many live bytes at the last major, mark serially even with
     # helpers configured (`GCRY_PARALLEL_MARK_MIN_LIVE`, default 0: always
     # parallel). A small heap gives four workers nothing to divide and still
@@ -152,6 +164,7 @@ module Gcry
     protected def shutdown_mark_workers : Nil
       @mark_shutdown.set(1)
       @mark_epoch.add(1)
+      wake_mark_helpers
 
       if @mark_pthread_mode || @mark_pthread_count > 0
         @mark_pthread_count.times do |i|
@@ -179,6 +192,7 @@ module Gcry
       @mark_parallel = false
       @mark_shutdown.set(0)
       @mark_workers_busy.set(0)
+      @mark_sleepers.set(0)
       @mark_lock = Crystal::SpinLock.new
       @mark_epoch = Atomic(UInt64).new(0_u64)
       # The forking thread keeps its slot (it becomes the sole thread), but the
@@ -475,6 +489,13 @@ module Gcry
       # so lateness costs parallelism, never correctness. Polling rather than a
       # condition variable because there is no lost wake-up to reason about,
       # and Windows maps this layer's mutex to an SRWLOCK with no condvar.
+      #
+      # On Linux the sleep is a `futex` wait with the same timeout, which the
+      # master cuts short when a cycle starts (`wake_mark_helpers`). Between
+      # two collections of an allocation storm the helpers are asleep, and a
+      # sleep that only timed out joined each mark up to 5 ms late: with the
+      # helpers spinning instead, Σ mark fell 10–15% on JsonParsePure and
+      # Primes at four workers, and by 15–50% on JsonParseSerializable.
       idle = 0
       nap = MARK_IDLE_SLEEP_NS
       while @mark_shutdown.get == 0
@@ -484,11 +505,7 @@ module Gcry
             idle += 1
             Intrinsics.pause
           else
-            req = uninitialized Gcry::OS::Timespec
-            req.tv_sec = typeof(req.tv_sec).new(0)
-            req.tv_nsec = typeof(req.tv_nsec).new(nap)
-            rem = uninitialized Gcry::OS::Timespec
-            Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+            wait_for_mark_epoch(local_epoch, nap)
             nap = nap * 2 > MARK_IDLE_SLEEP_MAX_NS ? MARK_IDLE_SLEEP_MAX_NS : nap * 2
           end
           next
@@ -524,6 +541,51 @@ module Gcry
       end
     end
 
+    {% if flag?(:linux) %}
+      FUTEX_WAIT_PRIVATE = 128
+      FUTEX_WAKE_PRIVATE = 129
+      SYS_FUTEX          = {{ flag?(:aarch64) ? 98 : 202 }}
+    {% end %}
+
+    # One idle helper's sleep of at most `nap_ns`, cut short on Linux by the
+    # next cycle's `wake_mark_helpers`.
+    #
+    # The helper counts itself a sleeper before it reads the wake word and
+    # then the epoch; the master bumps the epoch before it reads the sleeper
+    # count. Both sides are sequentially consistent RMWs followed by loads, so
+    # either the helper sees the new epoch and does not sleep, or the master
+    # sees the sleeper and bumps the word, which makes the wait return at
+    # once or wakes it. The timeout stays as before, so a lost wake-up could
+    # only cost what the plain sleep always did.
+    private def wait_for_mark_epoch(local_epoch : UInt64, nap_ns : Int32) : Nil
+      req = uninitialized Gcry::OS::Timespec
+      req.tv_sec = typeof(req.tv_sec).new(0)
+      req.tv_nsec = typeof(req.tv_nsec).new(nap_ns)
+      {% if flag?(:linux) %}
+        @mark_sleepers.add(1)
+        seq = @mark_wake.get
+        if @mark_epoch.get == local_epoch && @mark_shutdown.get == 0
+          LibC.syscall(LibC::Long.new(SYS_FUTEX), pointerof(@mark_wake).as(Int32*), LibC::Long.new(FUTEX_WAIT_PRIVATE),
+            LibC::Long.new(seq), pointerof(req), Pointer(Void).null, LibC::Long.new(0))
+        end
+        @mark_sleepers.add(-1)
+      {% else %}
+        rem = uninitialized Gcry::OS::Timespec
+        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+      {% end %}
+    end
+
+    # After an epoch bump: wake the helpers that are in `wait_for_mark_epoch`.
+    # No syscall while none is (they are still spinning on the epoch).
+    private def wake_mark_helpers : Nil
+      {% if flag?(:linux) %}
+        return if @mark_sleepers.get == 0
+        @mark_wake.add(1)
+        LibC.syscall(LibC::Long.new(SYS_FUTEX), pointerof(@mark_wake).as(Int32*), LibC::Long.new(FUTEX_WAKE_PRIVATE),
+          LibC::Long.new(Int32::MAX), Pointer(Void).null, Pointer(Void).null, LibC::Long.new(0))
+      {% end %}
+    end
+
     private def mark_loop : Nil
       # The live bytes the last major's sweep measured; this cycle's sweep has
       # not run yet.
@@ -549,6 +611,7 @@ module Gcry
       @mark_parallel = true
       @mark_lock.unlock
       @mark_epoch.add(1)
+      wake_mark_helpers
       batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
       begin
         loop do

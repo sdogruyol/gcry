@@ -280,6 +280,10 @@ module Gcry
     @mark_slot_claim = Atomic(Int32).new(1)
     @mark_epoch = Atomic(UInt64).new(0_u64)
     @mark_shutdown = Atomic(Int32).new(0)
+    # Linux: the word idle mark helpers `futex`-wait on, bumped when a cycle
+    # starts, and how many are waiting (`wake_mark_helpers`).
+    @mark_wake = Atomic(Int32).new(0)
+    @mark_sleepers = Atomic(Int32).new(0)
     @mark_workers_busy = Atomic(Int32).new(0)
     # In-header mark generation (bits 8–15). clear_all_marks bumps this (O(1))
     # instead of walking the heap; wraps at 255 with a full clear. Synced to
@@ -371,6 +375,8 @@ module Gcry
       # Large chunks use the header generation under both representations.
       BlockHeader.mark_gen = @header_mark_gen
       @mark_shutdown = Atomic(Int32).new(0)
+      @mark_wake = Atomic(Int32).new(0)
+      @mark_sleepers = Atomic(Int32).new(0)
       @mark_workers_busy = Atomic(Int32).new(0)
       @clear_stack_enabled = false
       @clear_stack_bytes = 4096_u64

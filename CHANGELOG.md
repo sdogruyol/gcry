@@ -243,6 +243,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Small heaps:** −12% mark per collection.
   - Source: `bench/log/linux/2026-10-05-alloc-storm-mark/`.
 
+- **Idle Linux mark helpers wake on a futex, and the default worker count
+  grows with the CPUs.**
+  - **Wake-up:** helpers used to join each mark up to 5 ms late, finishing a
+    `nanosleep`. Now the master wakes them when a cycle starts. At 4 workers,
+    JsonParsePure's mark went from 265 to 218 ms with no extra CPU.
+  - **Worker count:** `min(2, CPUs − 1)` up to 7 CPUs, then `CPUs / 4 + 1`,
+    at most 8. On 12 CPUs, Primes goes from 60% to 77% of Boehm's speed and
+    JsonParsePure from 62% to 79%, with peak RSS unchanged (0.90× and 0.79×)
+    and CPU +2–8%. 3- and 4-CPU machines keep two workers.
+
 - **Parallel mark is on by default: `min(2, CPUs − 1)` workers, serial
   below 32 MiB live.** CPUs are counted by affinity, as Crystal's
   `default_workers_count` does. On CI runners, in crystal-metric `--release`

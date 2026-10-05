@@ -130,8 +130,10 @@ describe "process GC (-Dgc_none)" do
     h.tlab_refills.should eq(0)
   end
 
-  # Default since 2026-10-05: min(2, CPUs − 1) workers, one CPU left to the
-  # mutator, serial below 32 MiB live (bench/log/linux/2026-10-05-parallel-mark-default/).
+  # Default since 2026-10-05: two workers up to 7 CPUs (one CPU left to the
+  # mutator), one per four CPUs above that up to eight, serial below 32 MiB
+  # live (bench/log/linux/2026-10-05-parallel-mark-default/,
+  # bench/log/linux/2026-10-05-alloc-storm-mark/).
   it "marks in parallel by default, leaving one CPU and small heaps serial" do
     h = Gcry.default_heap
     cpus = Crystal::System.effective_cpu_count.to_i32
@@ -139,9 +141,15 @@ describe "process GC (-Dgc_none)" do
     if ENV["GCRY_PARALLEL_MARK"]? || ENV["GCRY_PARALLEL_MARK_MIN_LIVE"]?
       pending!("GCRY_PARALLEL_MARK(_MIN_LIVE) is set")
     end
-    h.parallel_mark_workers.should eq(cpus >= 3 ? 2 : 1)
+    h.parallel_mark_workers.should eq(Gcry::Heap.default_mark_workers(cpus))
     h.parallel_mark_workers.should be < cpus if cpus > 1
     h.parallel_mark_min_live.should eq(32_u64 * 1024 * 1024)
+  end
+
+  it "scales the default mark workers with the CPUs" do
+    {1 => 1, 2 => 1, 3 => 2, 4 => 2, 7 => 2, 8 => 3, 12 => 4, 16 => 5, 28 => 8, 64 => 8}.each do |cpus, workers|
+      Gcry::Heap.default_mark_workers(cpus).should eq(workers)
+    end
   end
 
   it "registers atfork handlers on platforms with fork" do

@@ -389,14 +389,25 @@ module GC
   # (`Heap#parallel_mark_min_live`).
   PARALLEL_MARK_DEFAULT_MIN_LIVE = 32_u64 * 1024 * 1024
 
-  # `min(2, CPUs − 1)`, at least 1, with CPUs counted as
-  # `Fiber::ExecutionContext.default_workers_count` does (affinity first, then
-  # the machine) minus its `CRYSTAL_WORKERS` read: `ENV` is unavailable this
-  # early in `GC.init`. Both calls are syscalls into stack buffers.
+  # `max(min(2, CPUs − 1), min(CPUs / 4 + 1, CPUs − 1, 8))`, at least 1:
+  # two up to 7 CPUs, then one more per four CPUs, up to eight. CPUs are
+  # counted as `Fiber::ExecutionContext.default_workers_count` does (affinity
+  # first, then the machine) minus its `CRYSTAL_WORKERS` read: `ENV` is
+  # unavailable this early in `GC.init`. Both calls are syscalls into stack
+  # buffers.
+  #
+  # Up to 7 CPUs this is the `min(2, CPUs − 1)` measured on 3- and 4-CPU CI
+  # runners, where four workers were no better than two except on arm64
+  # (`bench/log/linux/2026-10-05-parallel-mark-default/`). On a 12-CPU host,
+  # once a large payload's scan is split and idle helpers are woken
+  # (2026-10-05), four workers take Primes from 64% to 76% of Boehm's speed
+  # and JsonParsePure from 66% to 74%, for 12% more CPU; six gain two more
+  # points each for 14% more again; eight were no faster than six before
+  # those two changes (`bench/log/linux/2026-10-05-alloc-storm-mark/`).
   private def self.default_parallel_mark_workers : Int32
     cpus = Crystal::System.effective_cpu_count.to_i32
     cpus = System.cpu_count.to_i32 if cpus <= 0
-    (cpus - 1).clamp(1, 2)
+    Gcry::Heap.default_mark_workers(cpus)
   end
 
   # Use Gcry::OS.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
@@ -824,12 +835,13 @@ module GC
         heap.alloc_batch = ab.to_i32
       end
     end
-    # Parallel mark is on by default since 2026-10-05: `min(2, CPUs − 1)`
-    # workers, serial below 32 MiB live. Measured on CI runners, crystal-metric
-    # --release, 5 interleaved reps: two workers gained 8–16 points of Boehm's
-    # speed on every GC-heavy row on x86-64, arm64 and macOS for 2–42% more CPU,
-    # and four were no better than two except on arm64 at up to twice the CPU;
-    # rows below the floor moved ±3 points
+    # Parallel mark is on by default since 2026-10-05, serial below 32 MiB
+    # live: `min(2, CPUs − 1)` workers up to 7 CPUs, one per four CPUs above
+    # (at most 8; `default_parallel_mark_workers`). Measured on CI runners,
+    # crystal-metric --release, 5 interleaved reps: two workers gained 8–16
+    # points of Boehm's speed on every GC-heavy row on x86-64, arm64 and macOS
+    # for 2–42% more CPU, and four were no better than two except on arm64 at
+    # up to twice the CPU; rows below the floor moved ±3 points
     # (`bench/log/linux/2026-10-05-parallel-mark-default/`). Leaving one CPU to
     # the mutator keeps a 2-CPU box serial. `GCRY_PARALLEL_MARK=1` is serial.
     heap.parallel_mark_min_live = PARALLEL_MARK_DEFAULT_MIN_LIVE
