@@ -262,6 +262,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The adaptive threshold is paced: while collections take more than a
+  tenth of the mutator time between them, the next threshold grows up to
+  3× live × factor (and 3× the cap).**
+  - **Why:** live × factor sizes the heap by what survives and never asks
+    how fast the program allocates. Binarytrees, under 5 MiB live, collected
+    every 8 MiB: 259 majors where Boehm, which keeps its heap at its
+    high-water size, takes 85. Primes' growing heap was collected every
+    third of its scanned bytes, with 430 ms of pause in a 1 s run.
+  - **Rule:** after each automatic major, the threshold that would hold this
+    cycle's time to a tenth of the mutator time at the measured allocation
+    rate, divided by the unpaced threshold, clamped to 100–300%. The rate
+    does not move with the threshold, so the pace does not oscillate. A
+    releasing collection (`GC.collect`, the idle collector, the one before
+    an `OutOfMemoryError`) resets it to 100%; carried across the timed run's
+    `GC.collect`, a setup's 3× cost JsonParseSerializable 26% peak RSS for
+    nothing. `GCRY_THRESHOLD_PACE` sets the maximum; 100 turns it off.
+  - **Evidence:** crystal-metric, 4 CPUs, 7 interleaved process-fresh
+    trials: Primes 1.017 → 0.758 s (Boehm 0.715), JsonParsePure 0.497 →
+    0.388 (0.366), Binarytrees 0.617 → 0.564 (0.539). Peak RSS rises where
+    it buys this (Binarytrees 22 → 39 MiB, JsonParseSerializable 437 → 477,
+    JsonParsePure 543 → 575, Primes 595 → 617) and stays under Boehm's on
+    every row. Kemal `/json`: same req/s and peak RSS with pacing on and
+    off. Source: `bench/log/linux/2026-10-06-threshold-pacing/`.
+
 - **The mark looks each scanned block up once, and splits large objects
   between workers.**
   - **Size class in the mark-stack entry:** the entry now carries the block's

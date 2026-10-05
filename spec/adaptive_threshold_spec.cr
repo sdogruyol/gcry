@@ -1,5 +1,12 @@
 require "./spec_helper"
 
+class Gcry::Heap
+  # Stands in for a measured pace: the measurement is wall-clock time.
+  def threshold_pace_pct_for_spec=(pct : UInt64)
+    @threshold_pace_pct = pct
+  end
+end
+
 # The process heap sizes itself from the live set after each major
 # collection (`Heap#adapt_after_sweep`): next threshold = live × factor,
 # floored at 8 MiB (Darwin 16 MiB) and capped at 64 MiB or a third of the
@@ -179,6 +186,40 @@ describe "adaptive collection threshold" do
       heap.empty_chunk_warm_retain.should eq 4_u64 * 1024 * 1024
     ensure
       heap.destroy
+    end
+  end
+
+  describe "pacing" do
+    mib = 1024_u64 * 1024
+
+    it "holds collection time to a tenth of the mutator time, within live × factor and the maximum" do
+      # 8 MiB allocated over 100 ms. A 1 ms cycle is within the target.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 1_000_000_u64, mib * 8, 300_u64).should eq 100
+      # 20 ms needs a 16 MiB threshold to stay a tenth of the mutator time.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64).should eq 200
+      # 50 ms would need 40 MiB: held at the maximum.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 50_000_000_u64, mib * 8, 300_u64).should eq 300
+    end
+
+    it "scales the live-sized threshold, keeps its pace across an unmeasured cycle and drops it on a releasing one" do
+      heap = Gcry::Heap.new
+      begin
+        heap.adaptive_threshold = true
+        heap.threshold_pace_max_pct = 300_u64
+        heap.threshold_pace_pct_for_spec = 250_u64
+        # The first major has no previous one to measure from.
+        heap.collect(scan_stack: false)
+        heap.threshold_pace_pct.should eq 250
+        heap.gc_threshold.should eq min * 250 // 100
+        # Nothing allocated since: no rate to measure, the pace stands.
+        heap.collect(scan_stack: false)
+        heap.gc_threshold.should eq min * 250 // 100
+        heap.collect(scan_stack: false, release_warm: true)
+        heap.threshold_pace_pct.should eq 100
+        heap.gc_threshold.should eq min
+      ensure
+        heap.destroy
+      end
     end
   end
 end

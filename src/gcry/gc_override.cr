@@ -445,6 +445,13 @@ module GC
       # none of the relief.
       heap.gc_threshold = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
       heap.adaptive_threshold = true
+      # Pacing (`Heap::THRESHOLD_PACE_MAX_PCT`): the adaptive threshold grows
+      # up to this percentage of live × factor while collections cost more
+      # than a tenth of the mutator time. 100 turns it off.
+      heap.threshold_pace_max_pct = Gcry::Heap::THRESHOLD_PACE_MAX_PCT
+      if pace = env_u64("GCRY_THRESHOLD_PACE")
+        heap.threshold_pace_max_pct = pace.clamp(100_u64, 1000_u64)
+      end
       # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
       if (ec = env_u64("EC_PARALLELISM")) && ec > 1

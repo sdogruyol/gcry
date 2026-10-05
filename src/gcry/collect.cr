@@ -94,12 +94,82 @@ module Gcry
     @release_warm_this_collect = false
     getter warm_released_collects : UInt64 = 0_u64
 
-    private def adapt_after_sweep : Nil
+    # Pacing: when collections cost more than a tenth of the mutator time
+    # between them, the threshold grows past live × factor, up to
+    # `THRESHOLD_PACE_MAX_PCT` of it (`GCRY_THRESHOLD_PACE`). Live × factor
+    # sizes the heap by what is kept and never asks how fast the program
+    # allocates: Binarytrees, under 5 MiB live, collected every 8 MiB — 259
+    # majors to Boehm's 85 — and Primes' growing heap every third of its
+    # scanned bytes, however much of the run that took. Boehm's schedule is
+    # wider: its heap keeps its high-water size and a collection waits until
+    # that is full. Measured on crystal-metric (4 CPUs, 7 trials,
+    # `bench/log/linux/2026-10-06-threshold-pacing/`): Primes −25% wall,
+    # JsonParsePure −22%, Binarytrees −9%, the RSS for it (Binarytrees 22 →
+    # 39 MiB) still under Boehm's on every row. A program whose collections
+    # are cheap next to its allocation rate keeps live × factor exactly:
+    # Kemal `/json` has the same req/s and peak RSS. A 200% maximum gave
+    # JsonParsePure half the gain; a 20% target gave back a quarter of
+    # Primes'.
+    #
+    # The pace is a threshold that would hold this cycle's cost to the
+    # target — allocation rate × cycle time ÷ target — over the unpaced one.
+    # The allocated bytes and the mutator time both grow with the threshold,
+    # so the rate does not move when the pace does and the pace does not
+    # oscillate. It scales the cap as well as live × factor: a growing
+    # pointer-dense heap (Primes) sits on the cap.
+    THRESHOLD_PACE_MAX_PCT = 300_u64
+    # Collection time as a percentage of the mutator time between collections.
+    THRESHOLD_PACE_TARGET_PCT = 10.0
+    # 100 disables pacing: the library heap and a fixed `GCRY_THRESHOLD`.
+    property threshold_pace_max_pct : UInt64 = 100_u64
+    getter threshold_pace_pct : UInt64 = 100_u64
+    @last_major_end_ns = 0_u64
+
+    # The pace (percent, 100..max_pct) that holds a cycle costing `cycle_ns`
+    # after `mutator_ns` of allocating `allocated` bytes to the target, for a
+    # live-sized threshold `base`.
+    def self.threshold_pace_pct(allocated : UInt64, mutator_ns : UInt64, cycle_ns : UInt64,
+                                base : UInt64, max_pct : UInt64) : UInt64
+      return 100_u64 if mutator_ns == 0_u64 || base == 0_u64
+      paced = allocated.to_f64 * cycle_ns.to_f64 * 100.0 / (mutator_ns.to_f64 * THRESHOLD_PACE_TARGET_PCT)
+      pct = paced * 100.0 / base.to_f64
+      return max_pct if pct >= max_pct.to_f64
+      pct <= 100.0 ? 100_u64 : pct.to_u64
+    end
+
+    private def update_threshold_pace(base : UInt64, cycle_started_ns : UInt64) : UInt64
+      now = monotonic_ns
+      last = @last_major_end_ns
+      @last_major_end_ns = now
+      # A releasing collection (`GC.collect`, the idle collector, the one
+      # before an `OutOfMemoryError`) asks for the footprint back, as it does
+      # of the warm budget. Keeping the pace across it carried a setup phase's
+      # 3× into JsonParseSerializable's timed run, which then went 0.3 s
+      # without collecting what the setup left: peak RSS +26%, wall unchanged.
+      # The next automatic cycle measures the pace afresh.
+      return @threshold_pace_pct = 100_u64 if @release_warm_this_collect
+      # Unmeasurable: the first major, an incremental cycle (its start is the
+      # last slice's), a clock step, or a cycle that did not follow a
+      # threshold's worth of allocation, whose rate says little.
+      return @threshold_pace_pct if cycle_started_ns == 0_u64 || last == 0_u64
+      return @threshold_pace_pct unless last < cycle_started_ns && cycle_started_ns < now
+      return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
+      @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
+        now - cycle_started_ns, base, @threshold_pace_max_pct)
+    end
+
+    # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
+    private def adapt_after_sweep(cycle_started_ns : UInt64 = 0_u64) : Nil
       return unless @adaptive_threshold || @warm_retain_follows_live
       want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
       if @adaptive_threshold
         cap = adaptive_threshold_cap
+        if @threshold_pace_max_pct > 100_u64
+          pace = update_threshold_pace(want < cap ? want : cap, cycle_started_ns)
+          want = want &* pace // 100_u64
+          cap = cap &* pace // 100_u64
+        end
         @gc_threshold = want < cap ? want : cap
       end
       if @warm_retain_follows_live
@@ -2953,7 +3023,7 @@ module Gcry
             # a peer collection can begin and overwrite `@size_class_live_bytes`
             # and `@gc_threshold` before this thread's late write, which then
             # sizes the next threshold and warm budget from two cycles' numbers.
-            adapt_after_sweep
+            adapt_after_sweep(started)
           end
         ensure
           @suppress_collect.sub(1)

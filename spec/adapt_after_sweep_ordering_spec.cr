@@ -4,7 +4,7 @@ require "./spec_helper"
 class Gcry::Heap
   getter adapt_ran_while_collecting_for_spec : Bool? = nil
 
-  private def adapt_after_sweep : Nil
+  private def adapt_after_sweep(cycle_started_ns : UInt64 = 0_u64) : Nil
     @adapt_ran_while_collecting_for_spec = @collecting
     previous_def
   end
