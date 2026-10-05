@@ -253,6 +253,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     JsonParsePure from 62% to 79%, with peak RSS unchanged (0.90× and 0.79×)
     and CPU +2–8%. 3- and 4-CPU machines keep two workers.
 
+- **Linux pre-faults a fresh size-class chunk with one
+  `MADV_POPULATE_WRITE` once the heap passes 32 MiB.** Its cursor is about to
+  write every block anyway. JsonParsePure −5%, Primes −3%, peak RSS +1%.
+  Small heaps and large objects are left alone; populating those cost 11–15%
+  RSS. Kernels before 5.14 answer EINVAL and fault pages as before.
+
 - **Parallel mark is on by default: `min(2, CPUs − 1)` workers, serial
   below 32 MiB live.** CPUs are counted by affinity, as Crystal's
   `default_workers_count` does. On CI runners, in crystal-metric `--release`

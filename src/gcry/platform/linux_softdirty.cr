@@ -116,6 +116,8 @@ module Gcry
     MADV_NOHUGEPAGE = 15
     MADV_FREE       =  8
     MADV_COLD       = 20
+    # Linux 5.14+: fault the range in, writable, in one call.
+    MADV_POPULATE_WRITE = 23
 
     # Drop physical pages while keeping the VMA (MADV_DONTNEED on Linux).
     def self.host_page_size : UInt64

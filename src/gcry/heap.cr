@@ -38,6 +38,10 @@ module Gcry
     # space under Kemal-style churn and inflated RSS via mmap/madvise
     # cycling; the process GC bumps this to 64 MiB (see gc_override.cr).
     DEFAULT_EMPTY_CHUNK_RETAIN = 0_u64
+    # Heap size past which a fresh size-class chunk is populated in one call
+    # rather than faulted in a page at a time (`map_chunk`, Linux). The parallel
+    # mark's live floor: below it a heap is the small, RSS-judged kind.
+    POPULATE_MIN_HEAP = 33554432_u64 # 32 MiB
 
     getter chunk_index_count : Int32 = 0
 
@@ -2758,6 +2762,22 @@ module Gcry
       {% if flag?(:linux) %}
         LibC.madvise(ptr, LibC::SizeT.new(bytes),
           @hugepages ? Platform::MADV_HUGEPAGE : Platform::MADV_NOHUGEPAGE)
+      {% end %}
+      {% if flag?(:linux) %}
+        # Fault a fresh size-class chunk in with one call once the heap is
+        # past `POPULATE_MIN_HEAP`: its cursor is about to write every block,
+        # and 32 separate first-touch faults cost more than one
+        # `MADV_POPULATE_WRITE` (Linux 5.14+; an older kernel returns EINVAL
+        # and the pages fault in as before). The same faults, half the system
+        # time on JsonParsePure: −5% wall there and −3% on Primes, peak RSS
+        # +1%. Below the floor a chunk may stay mostly empty, so a small heap
+        # (Kemal, Binarytrees: +14% RSS when populated) is left alone, and so
+        # is a large object, whose tail an `IO::Memory` or `Array` may never
+        # write (JsonParseSerializable +15% RSS, JsonGenerate +11%)
+        # (`bench/log/linux/2026-10-05-alloc-storm-mark/`).
+        if at.null? && size_class != UInt32::MAX && @heap_size >= POPULATE_MIN_HEAP
+          LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_POPULATE_WRITE)
+        end
       {% end %}
 
       chunk = ptr.as(ChunkHeader*)
