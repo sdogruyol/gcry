@@ -5,11 +5,39 @@ Boehm in `crystal-lang/crystal`. Reviewed on 2026-10-04 against gcry 0.34.0
 (`6650b80`). The perf rows were refreshed on 2026-10-05 from the findings
 committed that day. Crystal 1.21.0 (`57cf7da50`), Linux x86_64.
 
-**Verdict.** gcry is a solid opt-in shard on Linux, macOS and Windows
-(x86_64/aarch64) under the default ExecutionContext at parallelism 1. It is
-not ready to be the default. Every item in the project's own "Phase 4:
-Crystal's Default GC" is unchecked (`ROADMAP.md`, Phase 4), and so is the
-`-Dgc_gcry` compiler PR (`ROADMAP.md`, "Crystal compiler PR").
+**Verdict at review time (2026-10-04).** gcry was a solid opt-in shard on
+Linux, macOS and Windows (x86_64/aarch64) under the default ExecutionContext
+at parallelism 1. It was not ready to be the default. Every item in the
+project's own "Phase 4: Crystal's Default GC" was unchecked (`ROADMAP.md`,
+Phase 4), and so was the `-Dgc_gcry` compiler PR (`ROADMAP.md`, "Crystal
+compiler PR").
+
+## Status after the `readiness` branch (2026-10-05)
+
+| ID | Status | Where |
+|----|--------|-------|
+| E1–E3 | **Fixed** | `layout.cr` resolve check; `Gcry.usable_size`; `crystal_raises_compat.cr` + compiler patch in `bench/log/linux/2026-10-05-raises-cycle/` |
+| B1 | **Fixed**: defaults are root-complete (STW lags 0) | `collect_scan.cr`; `process_spec/regression/14` |
+| B2 | **Closed**: a dying `Thread` is held until proof it is done, on every platform; the root-table race is fixed | `thread_birth_root.cr`; `make thread-death-window`; `process_spec/regression/23` |
+| B3 | **Mostly closed**: parallel mark on by default; the compiler (Parallel EC at CPU count, mt codegen) builds, self-hosts and passes `compiler_spec` under gcry. TLAB and `GCRY_PARALLEL_RELEASE` stay unsupported research arms | `gc_override.cr`; `ci/compiler-spec.sh` |
+| B4 | **Fixed**: compiler self-hosts with gcry; `compiler_spec` 13 641 / 0 failures, the same as Boehm; `crystal i` runs in a gcry-built compiler | `c_abi.cr`, `crystal_string_builder_compat.cr`; CI job `compiler-gcry` |
+| B5 | **Scoped**: unsupported targets fail at compile time with the reason | `platform/os.cr` |
+| B6 | **Proposed**: upstream interface written up | `docs/RFC-GC-BACKEND.md` |
+| B7 | **Fixed**: `spec/std` 18 054 / 0 failures in CI on 1.21.0 (plus `GCRY_STRESS=1`), `latest` and nightly | `ci/std-spec.sh`, job `std-spec` |
+| M1 | **Improved**: parallel mark on by default (`min(2, CPUs−1)`, 32 MiB floor); parallel cycles now feed the adaptive threshold's cap | `gc_override.cr`, `collect_mark.cr` |
+| M3 | **Fixed**: every loaded shared object's writable data is a root (Linux, macOS, Windows) | `platform/*_roots.cr`; `process_spec/regression/16` |
+| M4 | **Fixed**: Boehm's ignore-self finalization order; dangling weak links dropped | `collect_mark.cr`; `process_spec/regression/17`, `20` |
+| M8 | **Fixed**: Boehm's `GC_*` C ABI and `lib LibGC`, including `GC_stackbottom` | `c_abi.cr`; `process_spec/regression/21` |
+| m1–m6 | **Fixed**: nesting `disable`, honest `prof_stats`, `Crystal.trace :gc`, `free` and `realloc` never raise into C callers, `set_stackbottom(thread)`, `GC.sig_suspend/resume` | `gc_override.cr`; `process_spec/regression/18` |
+| m7 | **Mitigated**: one byte of slack on atomic blocks, as under Boehm; the argv patch stays | `heap.cr`; `process_spec/regression/24` |
+| m8 | **Fixed**: docs refreshed | `README.md`, `docs/*` |
+| m9 | **Fixed**: `rbp`/`x29` captured unmangled | `roots.cr`; `process_spec/regression/15` |
+| M2, M5, M6, M7 | **Open**: allocation-storm throughput, open races, TSan/fuzzing, knob surface | below |
+
+Two Crystal bugs turned up along the way, both outside gcry: `raises?` is not
+a fixpoint (§1, E3), and `String::Builder#to_s` writes one byte past its
+buffer (`bench/log/linux/2026-10-05-string-builder-terminator/`). Both have
+patches ready for upstream.
 
 Each item has an ID so later work can refer to it. Evidence is either
 **observed** (run during this review) or **read** (taken from source or docs
