@@ -177,10 +177,18 @@ if mark_arm && heap.parallel_mark_workers <= 1
               "is created and the arm would assert on a gap that cannot occur."
   exit 64
 end
+# Parallel mark is on by default (2026-10-05). Outside `--mark` its helpers
+# would join the gap this arm attributes to its own planted thread, so the arm
+# runs serial. The pool is spawned by the first parallel collection; before
+# any collection there is no helper to have joined yet.
 if !mark_arm && heap.parallel_mark_workers > 1
-  STDERR.puts "GCRY_PARALLEL_MARK>1 outside --mark: the helpers would join the gap " \
-              "this arm attributes to its own planted thread."
-  exit 64
+  if heap.collections == 0
+    heap.parallel_mark_workers = 1
+  else
+    STDERR.puts "GCRY_PARALLEL_MARK>1 outside --mark, and a collection already ran: " \
+                "its helpers would join the gap this arm attributes to its own planted thread."
+    exit 64
+  end
 end
 
 mode = if control
