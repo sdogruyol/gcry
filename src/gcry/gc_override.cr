@@ -1561,9 +1561,17 @@ module GC
       # Emptied chunks are index-removed then munmapped post-STW. A mark miss
       # (or racing flush) makes the pointer unowned while the address is still
       # in the historic heap span — LibC.realloc aborts "invalid pointer".
+      # Abort here too, with the address, rather than raise: GMP calls this as
+      # its C realloc hook (`big/lib_gmp.cr`), and an exception cannot unwind
+      # through its frames. The contents are gone either way, so there is
+      # nothing a caller could recover. Allocation-free, like `GC.free`'s.
       if Gcry.default_heap.in_heap_span?(pointer)
-        raise ArgumentError.new("GC.realloc: not a live gcry allocation" +
-                                Gcry.default_heap.release_note(pointer.address))
+        buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
+        len = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: GC.realloc on 0x")
+        len = Gcry::RawOut.append_hex(buf.to_unsafe, len, pointer.address)
+        len = Gcry::RawOut.append(buf.to_unsafe, len, ", which is in the heap but not a live allocation; aborting\n")
+        Gcry::RawOut.flush(buf.to_unsafe, len)
+        LibC.abort
       end
       bootstrap_realloc(pointer, size)
     else

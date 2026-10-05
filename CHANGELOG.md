@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`GC.realloc` on an in-heap pointer that is not a live allocation aborts
+  with the address instead of raising.** GMP calls `GC.realloc` as its C
+  realloc hook, so the `ArgumentError` unwound through C frames, as
+  `GC.free`'s did. The block's contents are gone either way, so there is
+  nothing a caller could recover. The message is written without
+  allocating.
+
 - **Programs whose exception messages build objects with initialized
   instance variables compile again.** `StackMaps.read_elf_section` used
   `File.open`. Because it is reachable from `GC.malloc`, it was type-checked
