@@ -18,6 +18,17 @@ require "weak_ref"
 # used before it finishes. Without the scrub, a stale copy of a node's address
 # in those dead frames was still read as a root from a parked fiber stack
 # (`GCRY_LIVE_ATTR` counted it under `parked`), and the chain never started.
+#
+# A stale word can also sit in a *live* frame of the spec runner itself, out of
+# any collector's reach: on 2026-10-05, under `GCRY_BITMAP_ALLOC=0`, a slot
+# 5 KB from the stack bottom kept the address an earlier `run_around_each_hooks`
+# allocation had, and the chain node later allocated there was held for 40
+# collections — and with it, as ordered finalization requires, every link
+# after it. Boehm scans the same frames. So each ordering example gets a few
+# attempts on fresh objects (the held node keeps its address, so a rebuilt
+# chain lands elsewhere); every attempt must be an ordered prefix, one link
+# per collection, and one must finish. Nodes carry the attempt's generation,
+# so a held node finalized later is not counted in another example's log.
 
 private module FinalizeLog
   CAP = 32
@@ -29,18 +40,25 @@ private module FinalizeLog
   @@intact = Pointer(Bool).malloc(CAP)
   @@weak_cleared = Pointer(Bool).malloc(CAP)
   @@count = 0
+  @@generation = 0
   class_property weak : WeakRef(OrderedNode)? = nil
 
   def self.reset : Nil
     @@count = 0
     @@weak = nil
+    @@generation += 1
+  end
+
+  def self.generation : Int32
+    @@generation
   end
 
   def self.count : Int32
     @@count
   end
 
-  def self.record(id : Int32, intact : Bool) : Nil
+  def self.record(id : Int32, intact : Bool, generation : Int32) : Nil
+    return if generation != @@generation
     return if @@count >= CAP
     @@ids[@@count] = id
     @@collections[@@count] = Gcry.default_heap.collections
@@ -72,6 +90,7 @@ private class OrderedNode
   getter id : Int32
   property peer : OrderedNode?
   getter? finalized = false
+  @generation : Int32 = FinalizeLog.generation
   # What `XML::Document` does (`@document = self`): a pointer to itself must
   # not count as reaching a finalizable object, or it is never finalized.
   @me : OrderedNode?
@@ -97,7 +116,7 @@ private class OrderedNode
     peer = @peer
     ok = intact? && (peer.nil? || (!peer.finalized? && peer.intact?))
     @finalized = true
-    FinalizeLog.record(@id, ok)
+    FinalizeLog.record(@id, ok, @generation)
   end
 end
 
@@ -165,16 +184,33 @@ private def collect_until(count : Int32, limit : Int32) : Nil
   end
 end
 
+private ATTEMPTS = 3
+
+# The log must be the first links of *expected*, in order, one per
+# collection, each intact. Returns whether all of them were finalized.
+private def ordered_prefix?(expected : Array(Int32)) : Bool
+  ids = FinalizeLog.ids
+  ids.should eq(expected[0, ids.size])
+  FinalizeLog.collections.each_cons_pair { |earlier, later| earlier.should be < later }
+  FinalizeLog.intact.all?.should be_true
+  ids.size == expected.size
+end
+
+# Up to `ATTEMPTS` builds (see the header): each must be an ordered prefix,
+# and one must finish. The finishing attempt's log is left for the caller.
+private def finalized_in_order(expected : Array(Int32), limit : Int32, &build : ->) : Nil
+  ATTEMPTS.times do
+    FinalizeLog.reset
+    on_finished_fiber { build.call }
+    collect_until(expected.size, limit)
+    return if ordered_prefix?(expected)
+  end
+  fail "no attempt of #{ATTEMPTS} finalized all of #{expected}: a node stayed reachable every time"
+end
+
 describe "Regression: ordered finalization (readiness M4)" do
   it "runs the holder's finalizer first and the held object's in a later collection, intact" do
-    FinalizeLog.reset
-    on_finished_fiber { ordered_chain(2, weak_to_second: true) }
-    collect_until(2, 20)
-
-    FinalizeLog.ids.should eq([1, 2])
-    gcs = FinalizeLog.collections
-    gcs[0].should be < gcs[1]
-    FinalizeLog.intact.should eq([true, true])
+    finalized_in_order([1, 2], 20) { ordered_chain(2, weak_to_second: true) }
     # Boehm clears a short disappearing link (`WeakRef`) before it marks from
     # finalizable objects: B is only reachable through A, so the reference to
     # it is gone by the time A's finalizer runs, though B itself is intact.
@@ -184,52 +220,39 @@ describe "Regression: ordered finalization (readiness M4)" do
   end
 
   it "finalizes a chain of 8 strictly in order, one link per collection" do
-    FinalizeLog.reset
-    on_finished_fiber { ordered_chain(8, weak_to_second: false) }
-    collect_until(8, 40)
-
-    FinalizeLog.ids.should eq((1..8).to_a)
-    gcs = FinalizeLog.collections
-    gcs.each_cons_pair { |earlier, later| earlier.should be < later }
-    FinalizeLog.intact.all?.should be_true
+    finalized_in_order((1..8).to_a, 40) { ordered_chain(8, weak_to_second: false) }
   ensure
     FinalizeLog.reset
   end
 
   it "finalizes an object that points at itself" do
-    FinalizeLog.reset
-    on_finished_fiber { ordered_self_pointer }
-    collect_until(1, 10)
-
-    FinalizeLog.ids.should eq([1])
-    FinalizeLog.intact.should eq([true])
+    finalized_in_order([1], 10) { ordered_self_pointer }
   ensure
     FinalizeLog.reset
   end
 
   it "keeps a cycle of finalizable objects allocated and unfinalized, reports it, and orders it once broken" do
-    FinalizeLog.reset
     heap = Gcry.default_heap
-    holder = Pointer(UInt64).malloc(1)
-    cycles_before = heap.finalization_cycles
-    on_finished_fiber { ordered_cycle(holder) }
-    4.times { GC.collect }
+    finished = ATTEMPTS.times.any? do
+      FinalizeLog.reset
+      holder = Pointer(UInt64).malloc(1)
+      cycles_before = heap.finalization_cycles
+      on_finished_fiber { ordered_cycle(holder) }
+      4.times { GC.collect }
 
-    # Boehm never finalizes a cycle under ordered finalization; neither may
-    # this, and it must not reclaim the objects either while they are still
-    # registered. It says so rather than leaking in silence.
-    FinalizeLog.count.should eq(0)
-    heap.finalization_cycles.should be > cycles_before
+      # Boehm never finalizes a cycle under ordered finalization; neither may
+      # this, and it must not reclaim the objects either while they are still
+      # registered. It says so rather than leaking in silence.
+      FinalizeLog.count.should eq(0)
+      heap.finalization_cycles.should be > cycles_before
 
-    intact = Pointer(Bool).malloc(1)
-    on_finished_fiber { break_ordered_cycle(holder, intact) }
-    intact.value.should be_true
-    collect_until(2, 20)
-
-    FinalizeLog.ids.should eq([2, 1])
-    gcs = FinalizeLog.collections
-    gcs[0].should be < gcs[1]
-    FinalizeLog.intact.should eq([true, true])
+      intact = Pointer(Bool).malloc(1)
+      on_finished_fiber { break_ordered_cycle(holder, intact) }
+      intact.value.should be_true
+      collect_until(2, 20)
+      ordered_prefix?([2, 1])
+    end
+    finished.should be_true
   ensure
     FinalizeLog.reset
   end
