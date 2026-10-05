@@ -119,6 +119,13 @@ module Gcry
         len = append_u64(buf, len, "sweep_ns", heap.last_phase_sweep_ns)
         len = append_u64(buf, len, "stw_stop_ns", heap.last_phase_stw_stop_ns)
         len = append_u64(buf, len, "stw_start_ns", heap.last_phase_stw_start_ns)
+        # The schedule the sweep just set, and what sized it: the next major's
+        # threshold, the live bytes it was derived from and the bytes the mark
+        # read. Without them a collection count cannot be told apart from a
+        # threshold change when a trigger policy is being cut.
+        len = append_u64(buf, len, "threshold", heap.gc_threshold)
+        len = append_u64(buf, len, "size_class_live_bytes", heap.size_class_live_bytes)
+        len = append_u64(buf, len, "scanned_bytes", heap.mark_scanned_bytes)
         # Post-STW reclaim (munmap / dormant / page release / large trim).
         append_u64(buf, len, "flush_ns", heap.last_phase_flush_ns)
       end
