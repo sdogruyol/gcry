@@ -125,6 +125,8 @@ end
 heap = Gcry.default_heap
 raise "expected the process GC" unless heap.stop_the_world
 heap.parallel_mark_workers = WORKERS
+# The graph is a few MiB, under the default's serial floor (32 MiB live).
+heap.parallel_mark_min_live = 0_u64
 
 heads = build
 damage = nil.as(String?)
