@@ -1,0 +1,6 @@
+bench                    arm           wall med     min     max  Δ vs base  cpu med  rss MiB
+Revcomp                  base            0.5870   0.572   0.603      +0.0%     2.09      560
+Revcomp                  p2              0.6420   0.624   0.661      +9.4%     2.13      560
+Revcomp                  p2off           0.6380   0.631   0.643      +8.7%     2.14      560
+Revcomp                  p3              0.6120   0.605   0.615      +4.3%     2.11      560
+Revcomp                  p3off           0.6090   0.599   0.628      +3.7%     2.10      560
