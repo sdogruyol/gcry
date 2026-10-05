@@ -3876,7 +3876,14 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       JsonGenerate's peak, and `GCRY_THRESHOLD_MAX=4294967296` takes Primes
       −52% / JsonParsePure −44% for +80% on RegexDna. Past the plan's +5%
       limit, so it waits for an explicit budget
-      (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
+      (`bench/log/linux/2026-10-03-threshold-cap-curve/`). Re-cut against
+      Boehm on 2026-10-05 (`bench/log/linux/2026-10-05-rss-budget-vs-boehm/`):
+      that +80% is RegexDna going from 0.59× to 1.06× Boehm's peak, and at
+      `GCRY_THRESHOLD_MAX=256 MiB` every crystal-metric row stays at or under
+      1.1× Boehm's peak on Linux and macOS while Primes gains 12 (Linux) and
+      23 (macOS) points of Boehm's speed, JsonParsePure 9 and 11. A budget
+      stated against Boehm ("within 10%") rather than against gcry's own
+      default admits it.
 - [ ] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04).** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
