@@ -31,3 +31,15 @@ One hang of the `find_block_race` parent, on Windows x86_64, after a
 deliberately crashed child, with nothing captured: `BoundedChild` only
 captures a stalled *child*, and the job has no debugger. A repeat would want
 the parent's stacks.
+
+## Rate (2026-10-05)
+
+Probe `probe-fbr-windows` on `ea89c48`, windows-latest: the gate's binary
+(`FIND_BLOCK_RACE_RUNS=3`) run 40 times back to back, each watched for 270 s
+— **0 hung, 0 failed**; durations 8 s minimum, 16 s median, 124 s maximum (a
+control child reaching `BoundedChild`'s 120 s deadline, as designed). One in
+one CI run, none in 40 here: rare enough that only the CI job will see the
+next one. The runner has `cdb.exe`
+(`C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\`), and
+`cdb -p <pid> -c "~*kb 25;qd"` on the parent is what a repeat should run;
+`fbr.sh` beside this file is the probe script.
