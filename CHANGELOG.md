@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A parallel mark counts the bytes it scans, so the adaptive threshold's
+  cap grows on large heaps again.** The cap follows `mark_scanned_bytes`, a
+  third of it times the factor (2026-10-03). A parallel cycle counted
+  nothing, which held the cap at its 64 MiB floor. With parallel mark on by
+  default above 32 MiB live, that hit exactly the heaps the cap exists for.
+  Helpers now count into their own cache line, and the master folds the
+  totals in after the cycle. `spec/mt_spec.cr` got 0 against 96 064 before.
+
 - **Atomic blocks get Boehm's byte of slack, so stdlib overruns stay in
   their own block.** Boehm adds a byte to every request, and Crystal's
   stdlib writes past byte buffers that only that byte absorbed:

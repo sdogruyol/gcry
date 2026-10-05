@@ -430,10 +430,14 @@ module Gcry
       user = user_of(chunk, header).as(UInt8*)
       size = block_payload(chunk, header).to_u64
       return if size == 0
-      # Serial mark only. Four helpers adding to one field per object is the
-      # shared-line write that already costs parallel mark its scaling; a
-      # parallel cycle leaves the count short, and the cap stays at its floor.
-      @mark_scanned_bytes &+= size unless @mark_parallel
+      # A shared counter written per object by every helper is the line
+      # parallel mark's scaling already paid for once; helpers count into
+      # their own line and the master folds them in after the cycle.
+      if @mark_parallel
+        count_parallel_scanned_bytes(size)
+      else
+        @mark_scanned_bytes &+= size
+      end
 
       # No type map narrows this scan. `Gcry::Layout` keyed one off the
       # payload's first Int32, and a raw buffer of a mixed union starts with

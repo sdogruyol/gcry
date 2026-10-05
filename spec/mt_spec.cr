@@ -112,6 +112,38 @@ describe "Gcry parallel mark knob" do
     end
   end
 
+  # The adaptive threshold's cap grows with `mark_scanned_bytes`; a parallel
+  # cycle that counted nothing left it at its floor exactly on the large heaps
+  # where parallel mark runs by default.
+  it "counts the bytes a parallel mark scanned like a serial one" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      root = heap.malloc(64)
+      heap.add_root(root)
+      cursor = root
+      2000.times do
+        child = heap.malloc(48)
+        cursor.as(Void**).value = child
+        cursor = child
+      end
+
+      heap.parallel_mark_workers = 1
+      heap.collect(scan_stack: false)
+      serial = heap.mark_scanned_bytes
+      serial.should be > 2000_u64 * 48
+
+      heap.parallel_mark_workers = 4
+      runs = heap.parallel_mark_runs
+      heap.collect(scan_stack: false)
+      heap.parallel_mark_runs.should eq(runs + 1)
+      heap.mark_scanned_bytes.should eq(serial)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "serial mark when workers = 1" do
     heap = Gcry::Heap.new
     begin

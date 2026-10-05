@@ -56,7 +56,8 @@ module Gcry
     # atomic, small or large, counted by `scan_object` as it reads it. It is
     # the mark's own measure of its work, so it needs no notion of which
     # chunks hold what — the freelist allocator mixes kinds in one chunk.
-    # Counted by a serial mark only (`GCRY_PARALLEL_MARK` leaves it short).
+    # Parallel helpers count into their own lines and are folded in after the
+    # cycle (`take_parallel_scanned_bytes`).
     getter mark_scanned_bytes : UInt64 = 0_u64
 
     # The cap grows with the bytes the mark has to *read*, a third of them
@@ -308,6 +309,29 @@ module Gcry
       sum = 0_u64
       base = LAYOUT_SCAN_SLOTS &* LAYOUT_SCAN_STRIDE
       LAYOUT_SCAN_SLOTS.times { |s| sum &+= @layout_scan_counts[base &+ s &* LAYOUT_SCAN_STRIDE] }
+      sum
+    end
+
+    # Bytes a parallel mark scanned, per worker, in word 1 of each worker's
+    # precise-count line above: a line that worker already owns, so counting
+    # adds no shared write. Folded into `@mark_scanned_bytes` once the cycle's
+    # helpers are idle (`take_parallel_scanned_bytes`). Before 2026-10-05 a
+    # parallel cycle counted nothing, which left the adaptive threshold's
+    # scan-based cap at its floor whenever parallel mark ran — and it runs by
+    # default now on exactly the heaps that cap is for.
+    @[AlwaysInline]
+    private def count_parallel_scanned_bytes(size : UInt64) : Nil
+      i = layout_scan_slot &* LAYOUT_SCAN_STRIDE &+ 1
+      @layout_scan_counts.to_unsafe[i] &+= size
+    end
+
+    private def take_parallel_scanned_bytes : UInt64
+      sum = 0_u64
+      LAYOUT_SCAN_SLOTS.times do |s|
+        i = s &* LAYOUT_SCAN_STRIDE &+ 1
+        sum &+= @layout_scan_counts[i]
+        @layout_scan_counts[i] = 0_u64
+      end
       sum
     end
 

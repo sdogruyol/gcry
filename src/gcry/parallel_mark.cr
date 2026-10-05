@@ -580,6 +580,9 @@ module Gcry
         until @mark_workers_busy.get == 0
           Intrinsics.pause
         end
+        # Every helper is past its last scan: no batch can be popped with
+        # `@mark_parallel` false, and busy counts the ones in flight.
+        @mark_scanned_bytes &+= take_parallel_scanned_bytes
       end
     end
   end
