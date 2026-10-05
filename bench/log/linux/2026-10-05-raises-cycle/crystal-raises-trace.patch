@@ -1,0 +1,91 @@
+diff --git a/src/compiler/crystal/semantic/cleanup_transformer.cr b/src/compiler/crystal/semantic/cleanup_transformer.cr
+index fcf2b65..39fb851 100644
+--- a/src/compiler/crystal/semantic/cleanup_transformer.cr
++++ b/src/compiler/crystal/semantic/cleanup_transformer.cr
+@@ -26,6 +26,8 @@ module Crystal
+       self.class_var_initializers.each do |initializer|
+         initializer.node = initializer.node.transform(transformer)
+       end
++
++      transformer.propagate_raises
+     end
+ 
+     def cleanup_type(type, transformer)
+@@ -64,6 +66,20 @@ module Crystal
+   # idea on how to generate code for unreachable branches, because they have no type,
+   # and for now the codegen only deals with typed nodes.
+   class CleanupTransformer < Transformer
++    @raises_progress = [] of Def
++    @raises_trace : String? = ENV["CRYSTAL_RAISES_TRACE"]?
++    @@raises_pending = [] of {Def, Def, Array(Def)}
++    at_exit do
++      if trace = ENV["CRYSTAL_RAISES_TRACE"]?
++        @@raises_pending.each do |(caller, callee, chain)|
++          next if caller.raises? || !callee.raises?
++          STDERR.puts "RAISES-FINAL #{caller.owner}##{caller.name}(#{caller.args.map(&.type?).join(", ")}) -> #{callee.owner}##{callee.name}(#{callee.args.map(&.type?).join(", ")})"
++          if trace == "chain"
++            chain.each { |d| STDERR.puts "    #{d.owner}##{d.name}(#{d.args.map(&.type?).join(", ")}) #{d.location}" }
++          end
++        end
++      end
++    end
+     @transformed : Set(Def)
+ 
+     # The current method we are processing
+@@ -77,6 +93,24 @@ module Crystal
+       @last_is_falsey = false
+     end
+ 
++    # Callee → callers recorded while the callee did not (yet) raise.
++    @raises_callers = Hash(Def, Array(Def)).new.compare_by_identity
++
++    # Propagates `raises?` along every call edge recorded by `transform(Call)`
++    # to a fixpoint. Without it, a call cycle reached through a method that
++    # is still being transformed leaves its callers marked as not raising,
++    # and calls to them are emitted without a landing pad.
++    def propagate_raises : Nil
++      pending = @raises_callers.keys.select(&.raises?)
++      while callee = pending.pop?
++        @raises_callers.delete(callee).try &.each do |caller|
++          next if caller.raises?
++          caller.raises = true
++          pending << caller
++        end
++      end
++    end
++
+     def inside_def!
+       @def_nest_count += 1
+     end
+@@ -598,15 +632,29 @@ module Crystal
+             node.bubbling_exception do
+               @current_def = target_def
+               @def_nest_count += 1
++              @raises_progress << target_def
+               target_def.body = target_def.body.transform(self)
++              @raises_progress.pop
+               @def_nest_count -= 1
+               @current_def = current_def
+             end
+           end
+ 
++          if @raises_trace && current_def && !target_def.raises? && @raises_progress.includes?(target_def)
++            @@raises_pending << {current_def, target_def, @raises_progress[@raises_progress.index!(target_def)..].dup}
++          end
++
+           # If the current call targets a method that raises, the method
+-          # where the call happens also raises.
+-          current_def.raises = true if current_def && target_def.raises?
++          # where the call happens also raises. A target whose body is still
++          # being transformed (a call cycle) may only learn that it raises
++          # later, so remember the edge and settle it in `propagate_raises`.
++          if current_def
++            if target_def.raises?
++              current_def.raises = true
++            elsif !ENV["CRYSTAL_RAISES_NOFIX"]?
++              (@raises_callers[target_def] ||= [] of Def) << current_def
++            end
++          end
+         end
+ 
+         if node.target_defs.not_nil!.empty?
