@@ -1982,8 +1982,9 @@ module Gcry
         report_thread_list_sweep(header)
       end
       user = BlockHeader.user_from(header)
-      was_nursery = BlockHeader.nursery?(header)
-      push_size_class_free(class_index, was_nursery, header, user, payload, swept: true)
+      # The chunk's list, as `Heap#free` explains: rebuilds file it there.
+      nursery = ChunkHeader.nursery?(chunk)
+      push_size_class_free(class_index, nursery, header, user, payload, swept: true)
     end
 
     private def each_block(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil

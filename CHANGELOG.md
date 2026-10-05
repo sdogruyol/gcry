@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A promoted block freed in a nursery chunk goes on the nursery list, so
+  releasing the chunk leaves no node behind.**
+  - **The bug:** `GC.free` and the sweep chose the freelist by the block's
+    NURSERY bit. Every rebuild and page-run unlink chose it by the chunk's.
+    A block promoted by a minor and then freed went on the old list. When a
+    major made its chunk dormant or unmapped it, only the nursery list was
+    rebuilt, so the next allocation of that class wrote into released
+    memory. A nursery rebuild could also link the same block onto a second
+    list.
+  - **The fix:** the list is now the chunk's at all three push sites.
+  - **Evidence:** `make nursery-tlab-smoke` gained a released-chunk arm.
+    Green 6/6; with the fix reverted it reports a stale node 4/4. Under
+    `GCRY_DEBUG_INVARIANTS=1` it was "freelist node … is not a heap pointer".
+  - Nursery mode is opt-in (`-Dgcry_block_headers`, `GCRY_BITMAP_ALLOC=0`).
+    The atomic slack exposed the bug: it moved the gate's 64-byte atomic
+    plants up one class and left a class-3 chunk empty.
+
+- **The mprotect barrier's SIGSEGV handler claims only the faults it
+  caused.** It used to claim every address in its card range.
+  - **Hang:** a read of a chunk the GC had unmapped "unprotected" the page,
+    the `mprotect` failed unseen, and the read faulted forever.
+    `make nursery-tlab-smoke` hung on CI for 34 minutes.
+  - **New rule:** the handler claims a fault only when it is `SEGV_ACCERR` on
+    a page the barrier protected. Card state is one published struct with
+    dirty and protected bitmaps, and the struct a swap retires is freed one
+    swap later, so a handler on SYSMON never reads freed cards.
+  - **Stale protection:** a collection that changes backend unprotects the
+    last arm's pages first. Before, moving from mprotect to soft-dirty left
+    them read-only.
+  - **Evidence:** `spec/barrier_spec.cr` "claims only the faults it caused"
+    fails on the old handler.
+
 - **A parallel mark counts the bytes it scans, so the adaptive threshold's
   cap grows on large heaps again.** The cap follows `mark_scanned_bytes`, a
   third of it times the factor (2026-10-03). A parallel cycle counted

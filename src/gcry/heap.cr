@@ -863,15 +863,22 @@ module Gcry
         return FreeResult::Freed
       end
 
+      # The list is the *chunk's*, not the block's: a block promoted by a minor
+      # keeps living in its nursery chunk, and every rebuild and page-run
+      # unlink (`rebuild_size_class_freelist`, `unlink_free_only_page_runs`)
+      # files a nursery chunk's FREE blocks under the nursery list. Pushing a
+      # promoted block onto the old list left it there when its chunk went
+      # dormant or was unmapped — `nursery_tlab_smoke` then allocated from
+      # unmapped memory — and a nursery rebuild could link it a second time.
+      nursery = ChunkHeader.nursery?(chunk)
       if @tlab_enabled
         # TLAB free is per-thread; counters are Atomic (no @alloc_lock).
-        tlab_free_small(pointer, class_index, payload, BlockHeader.nursery?(header))
+        tlab_free_small(pointer, class_index, payload, nursery)
         bytes_since_gc_sub(payload.to_u64)
         note_explicit_free(payload.to_u64)
         live_objects_dec
       else
         # Non-TLAB: per-size-class freelist lock; counters are Atomic.
-        nursery = BlockHeader.nursery?(header)
         with_freelist_lock(class_index, nursery) do
           push_size_class_free(class_index, nursery, header, pointer, payload)
         end

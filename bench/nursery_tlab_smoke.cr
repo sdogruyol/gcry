@@ -97,6 +97,17 @@ else
   failures << "a major claimed a FREE node on the stack: the TLAB on-stack-freelist claim is back"
 end
 
+# A promoted block freed in its nursery chunk, then the chunk released.
+stale, released = released_chunk_probe(heap)
+if !released
+  failures << "the probe's chunk was not released by the major, so the freelist check below means nothing"
+elsif stale > 0
+  failures << "#{stale} freelist node(s) point into a released chunk: a promoted block freed in a nursery chunk " \
+              "went on the old list, which the chunk's release does not rebuild"
+else
+  puts "  PASS no freelist node points into the released chunk"
+end
+
 # Minor actually collected: an unrooted nursery object must vanish. A
 # leftover word on this frame is not a root (`scan_stack: false`).
 young = GC.malloc(64)
@@ -128,9 +139,16 @@ end
 # with `p` on this frame: a minor, then a major. Heap roots use a
 # different source than the stack, so they only keep the plant alive for
 # the promoting minor.
+#
+# `keep` is the plant's chunk-mate, rooted throughout. Without it the major
+# finds the chunk empty and releases it, and the read of `p`'s header below
+# faults: until 2026-10-05 the twenty 64-byte atomic plants in `main` shared
+# this class and kept the chunk, and the atomic slack moved them one class up.
 @[NoInline]
 def claim_probe(heap : Gcry::Heap) : {Bool, Bool}
   p = GC.malloc(64)
+  keep = GC.malloc(64)
+  heap.add_root(keep)
   heap.add_root(p)
   heap.minor_collect(scan_stack: false)
   heap.delete_root(p)
@@ -146,9 +164,53 @@ def claim_probe(heap : Gcry::Heap) : {Bool, Bool}
   heap.minor_collect(scan_stack: true)
   after_minor = Gcry::BlockHeader.free?(Gcry::BlockHeader.from_user(p))
   heap.collect(scan_stack: true)
+  unless heap.is_heap_ptr(p)
+    STDERR.puts "FAIL: the major released the plant's chunk although `keep` shares it, so its header cannot be read"
+    exit 1
+  end
   after_major = Gcry::BlockHeader.free?(Gcry::BlockHeader.from_user(p))
+  heap.delete_root(keep)
   # Keep `p` live across both collections so the compiler does not drop it
   # below the SP the scrub zeroes.
   LibC.write(2, pointerof(p), 0)
   {after_minor, after_major}
+end
+
+RELEASE_PROBE_SIZE = 1000
+
+# A size class nothing else here allocates, so the plant is alone in its
+# nursery chunk. Promote it, free it, and let a major release the emptied
+# chunk; then every node on both of the class's lists must still be in the
+# heap. Before 2026-10-05 `GC.free` chose the list by the block's NURSERY bit:
+# a promoted block went on the old list, the release rebuilt only the nursery
+# list (the chunk's), and the next allocation of that class wrote into
+# unmapped memory.
+@[NoInline]
+def released_chunk_probe(heap : Gcry::Heap) : {Int32, Bool}
+  q = GC.malloc(RELEASE_PROBE_SIZE)
+  heap.add_root(q)
+  heap.minor_collect(scan_stack: false)
+  heap.delete_root(q)
+  if Gcry::BlockHeader.nursery?(Gcry::BlockHeader.from_user(q))
+    STDERR.puts "FAIL: the release probe's plant is still nursery after a surviving minor"
+    exit 1
+  end
+  GC.free(q)
+  heap.collect(scan_stack: true)
+  released = !heap.is_heap_ptr(q)
+  _, class_index = Gcry::SizeClasses.fit(RELEASE_PROBE_SIZE.to_u64)
+  stale = 0
+  {heap.freelist_for(class_index), heap.nursery_freelist_for(class_index)}.each do |head|
+    node = head
+    steps = 0
+    while !node.null? && steps < 100_000
+      unless heap.is_heap_ptr(node)
+        stale += 1
+        break
+      end
+      node = Gcry::BlockHeader.from_user(node).value.next_free
+      steps += 1
+    end
+  end
+  {stale, released}
 end
