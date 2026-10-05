@@ -2949,6 +2949,10 @@ module Gcry
             if hook = @post_stw_hook
               hook.call(:after_start_world)
             end
+            # Recycling keeps one major's large frees until the next major
+            # (`Heap#recycle_large_mapping`): what the previous one left and
+            # nothing reused goes back now, before this one's frees join it.
+            trim_large_cache(0_u64, defer: false) if @large_recycle && major
             if @lazy_sweep_pending
               trace_sweep = CrystalTrace.start(self)
               t0 = monotonic_ns
@@ -2989,9 +2993,31 @@ module Gcry
             end
             # Anything a mutator queued while the walks were running.
             flush_pending_large_release
-            # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
-            release_large_freelist_pages
-            trim_large_cache(defer: false)
+            if @large_recycle && !@release_warm_this_collect
+              # This cycle's frees stay for `Heap#recycle_large_mapping`, as
+              # they are: an `MADV_FREE` now would cost a page walk here and
+              # a dirtying write per page on reuse. The budget is what they
+              # hold, and every fresh mapping spends it.
+              release_moved_large
+              if major
+                # No more than the large bytes allocated since the last
+                # major: a program that stopped allocating large blocks will
+                # not take them, and the rest goes back here, as without
+                # recycling. Kept, Primes' dead 40 MB sieve was unmapped by
+                # the budget on the mutator instead; the pace, which times
+                # the cycle, then read collections as cheaper and fitted one
+                # more major into the run (`bench/log/linux/2026-10-06-large-recycle/`).
+                keep = @large_alloc_since_major
+                trim_large_cache(keep, defer: false, cap: UInt64::MAX) if @large_free_bytes > keep
+              end
+              @large_recycle_budget = @large_free_bytes
+            else
+              # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
+              release_large_freelist_pages
+              trim_large_cache(defer: false)
+              @large_recycle_budget = 0_u64
+            end
+            @large_alloc_since_major = 0_u64 if major
             @last_phase_flush_ns = monotonic_ns - t_flush
           ensure
             if ec1_lazy

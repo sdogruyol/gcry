@@ -458,6 +458,10 @@ module Gcry
       # chunk no allocator can reach any more, never cleared: the chunk is
       # unmapped, quarantined or queued for release next, never relinked.
       UNLINKING = 512_u32
+      # A large chunk whose data pages `Heap#move_large_contents` handed to a
+      # grown block: its data range reads zeroes and holds no resident page,
+      # so recycling it saves nothing (`Heap#take_large_recycle`).
+      MOVED = 1024_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -607,6 +611,14 @@ module Gcry
 
     def self.set_unlinking(chunk : ChunkHeader*) : Nil
       update_flag(chunk, Flags::UNLINKING, true)
+    end
+
+    def self.moved?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::MOVED) != 0
+    end
+
+    def self.set_moved(chunk : ChunkHeader*) : Nil
+      update_flag(chunk, Flags::MOVED, true)
     end
 
     def self.idle?(chunk : ChunkHeader*) : Bool

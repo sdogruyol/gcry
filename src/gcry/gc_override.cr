@@ -130,6 +130,9 @@ module GC
       # Large-object freelist: no retain (was 4 MiB floor, adaptive → 32 MiB).
       # Escape: GCRY_LARGE_CACHE=<bytes> (adaptive may grow from a non-zero floor).
       heap.large_cache_retain = 0_u64
+      {% if flag?(:linux) %}
+        heap.large_recycle = true
+      {% end %}
     {% end %}
     # No type_id gate on any ambient root, static ones included.
     #
@@ -759,9 +762,11 @@ module GC
     end
 
     # Free large-object bytes to retain after post-collect trim
-    # (Linux process 4 MiB / Darwin 1 MiB; override via GCRY_LARGE_CACHE).
+    # (Linux process 0 / Darwin 1 MiB; override via GCRY_LARGE_CACHE). A
+    # retain asks for the exact-size cache, which recycling replaces.
     if cache = env_u64("GCRY_LARGE_CACHE")
       heap.large_cache_retain = cache
+      heap.large_recycle = false
     end
 
     # `realloc` of a large block moves its pages instead of copying them
@@ -772,6 +777,11 @@ module GC
         Gcry::Platform.move_test_unblocked_us = us
       end
     {% end %}
+
+    # Large blocks reuse the resident pages of large blocks the last major
+    # freed (Linux; `Heap#recycle_large_mapping`). Off: a large block maps
+    # fresh unless a cached chunk has its exact size.
+    heap.large_recycle = false if env_flag_zero?("GCRY_LARGE_RECYCLE")
 
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block

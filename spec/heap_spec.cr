@@ -254,6 +254,67 @@ describe Gcry::Heap do
     end
   end
 
+  {% if flag?(:linux) %}
+    # Recycling hands a cached chunk's pages to a new block at an address the
+    # kernel picks: a stale pointer to the dead block must not name the new
+    # one (that kept Revcomp's 65 MB strings alive), the new block reads
+    # zeroes where the dead one wrote, and a split's remainder and a grown
+    # tail are counted where they are.
+    it "recycles a cached large chunk at a fresh address, zeroed, with the rest still cached" do
+      heap = Gcry::Heap.new
+      begin
+        heap.gc_threshold = UInt64::MAX
+        heap.large_recycle = true
+        # What a major leaves the recycler; with none, a free unmaps.
+        heap.large_recycle_budget = UInt64::MAX
+        live = heap.malloc(200_000)
+        live.as(UInt8*).fill(200_000, 0xCD_u8)
+        live_mapped = heap.large_mapped_bytes
+        old = heap.malloc(1_000_000)
+        old.as(UInt8*).fill(1_000_000, 0xAB_u8)
+        old_mapped = heap.large_mapped_bytes - live_mapped
+        heap.free(old)
+        heap.large_free_bytes.should eq(old_mapped)
+        os_before = Gcry.os_mapped_bytes
+
+        # Smaller: the front of the cached chunk, the rest cached again.
+        front = heap.malloc(400_000)
+        heap.large_recycles.should eq(1)
+        heap.is_heap_ptr(old).should be_false
+        heap.find_block(old).should be_nil
+        front.should_not eq(old)
+        heap.live?(front).should be_true
+        front.as(UInt8*).to_slice(400_000).all?(&.zero?).should be_true
+        front_mapped = heap.large_mapped_bytes - live_mapped - heap.large_free_bytes
+        heap.large_free_bytes.should eq(old_mapped - front_mapped)
+        Gcry.os_mapped_bytes.should eq(os_before)
+
+        # Larger than anything cached: the remainder grown, its tail fresh.
+        rest = heap.large_free_bytes
+        grown = heap.malloc(2_000_000)
+        heap.large_recycles.should eq(2)
+        heap.large_free_bytes.should eq(0)
+        grown.as(UInt8*).to_slice(2_000_000).all?(&.zero?).should be_true
+        grown_mapped = heap.large_mapped_bytes - live_mapped - front_mapped
+        Gcry.os_mapped_bytes.should eq(os_before + grown_mapped - rest)
+
+        # An exact fit moves too.
+        front.as(UInt8*).fill(400_000, 0xEE_u8)
+        heap.free(front)
+        again = heap.malloc(400_000)
+        heap.large_recycles.should eq(3)
+        again.should_not eq(front)
+        heap.is_heap_ptr(front).should be_false
+        again.as(UInt8*).to_slice(400_000).all?(&.zero?).should be_true
+
+        live.as(UInt8*).to_slice(200_000).all? { |b| b == 0xCD_u8 }.should be_true
+        heap.large_mapped_bytes.should eq(heap.heap_size)
+      ensure
+        heap.destroy
+      end
+    end
+  {% end %}
+
   # A trim of several chunks takes them off the list and out of the index in
   # one batch pass (`unlink_detached_large`). The freed chunks are interleaved
   # with live ones on both, so a pass that drops the wrong neighbour, or

@@ -262,6 +262,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Large blocks reuse the resident pages of large blocks the last major
+  freed (Linux process GC), at a fresh address.**
+  - **Why:** every large chunk a major freed was unmapped, and the next
+    large allocation faulted in fresh pages. That was Revcomp's gap to
+    Boehm: with collections off the two run equally fast, and gcry took
+    164.7k minor faults in the timed run against Boehm's 70-84k.
+  - **Rule:** a major keeps the large chunks it freed, up to the large bytes
+    allocated since the previous major, and unmaps the rest as before. A
+    large allocation takes the front of the smallest kept chunk that holds
+    it, else the whole of the largest, and `mremap` moves those pages to a
+    fresh mapping (`MREMAP_FIXED`). Nothing is copied or faulted, and only
+    the bytes a dead object wrote are cleared. Every fresh mapping uses up
+    part of the allowance, and the next major unmaps whatever was not
+    taken. `GC.collect`, the idle collection and a `realloc` that moves its
+    pages work as before. `GCRY_LARGE_RECYCLE=0` turns it off;
+    `GCRY_LARGE_CACHE` turns it off too.
+  - **Why a fresh address:** taking the chunk in place put a new block where
+    a dead one had started. On 5 of 20 Revcomp runs, a stale stack slot left
+    with the dead string's address then kept a 65 MB string alive (peak 588
+    against 526 MiB). After the move, no run showed it.
+  - **Why the limit:** keeping everything moved the unmapping of Primes'
+    dead 40 MB sieve out of the collection and onto the mutator. The pace
+    timed the collection as cheaper and fitted one more major into the run,
+    so 17 of 45 off-runs and 4 of 45 on-runs were in the fast mode. With
+    pacing off, the two arms were equal.
+  - **Evidence:** crystal-metric, one binary against `GCRY_LARGE_RECYCLE=0`,
+    15 trials (9 on the CPU-bound rows). Revcomp 0.533 → 0.521 s (pooled
+    30 trials, −2.8%; Boehm 0.494), whole-process faults 311.5k → 256k.
+    Primes 0.610 both, RegexDna 272 MiB both. No row moves beyond its
+    spread; median peak RSS rises 0.5% at most. Kemal `/json`: 45.8k vs
+    46.3k req/s (spread 43-48k), peak 22.3 vs 22.1 MiB. Revcomp's
+    remaining high peaks (564 or 652 MiB) are as frequent with recycling
+    off (4 of 54 per arm). They come from stale words whose low half a
+    32-bit store overwrote, and those hit whatever chunk straddles a 4 GiB
+    boundary. Source: `bench/log/linux/2026-10-06-large-recycle/`.
+
 - **The adaptive threshold is paced: while collections take more than a
   tenth of the mutator time between them, the next threshold grows up to
   3× live × factor (and 3× the cap).**

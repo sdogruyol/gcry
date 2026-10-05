@@ -42,6 +42,33 @@ module Gcry
     ptr
   end
 
+  {% if flag?(:linux) %}
+    # Moves the pages of `[src, src + len)` onto `dst`, a mapping of *dst_len*
+    # (`>= len`) bytes `os_map` returned, by page table: nothing is copied or
+    # faulted, `dst` past `len` reads zeroes, and `src` is unmapped. Returns
+    # `{moved, dst_kept}`. Refused, `src` is as it was; the call unmaps `dst`
+    # before it validates the source, so `dst` is mapped again where it was
+    # if nothing else took the hole (`dst_kept`, a fresh mapping still
+    # counted), else left to whoever did and no longer counted.
+    def self.os_move(src : Void*, len : UInt64, dst : Void*, dst_len : UInt64) : {Bool, Bool}
+      moved = LibC.mremap(src, LibC::SizeT.new(len), LibC::SizeT.new(dst_len),
+        Platform::MREMAP_MAYMOVE | Platform::MREMAP_FIXED, dst)
+      if moved == dst
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), len,
+          LLVM::AtomicOrdering::Monotonic, false)
+        return {true, true}
+      end
+      back = Gcry::OS.mmap(dst, LibC::SizeT.new(dst_len), Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS | Platform::MAP_FIXED_NOREPLACE, -1, 0)
+      return {false, true} if back == dst || (mmap_failed?(back) && Errno.value == Errno::EEXIST)
+      # A kernel before 4.17 ignores the flag and may map elsewhere.
+      Gcry::OS.munmap(back, LibC::SizeT.new(dst_len)) unless mmap_failed?(back)
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), dst_len,
+        LLVM::AtomicOrdering::Monotonic, false)
+      {false, false}
+    end
+  {% end %}
+
   # Gives back `[ptr, ptr + bytes)`. A failed `munmap` leaves the range mapped,
   # so it leaves the total alone too.
   def self.os_unmap(ptr : Void*, bytes : UInt64) : Nil
