@@ -72,3 +72,22 @@ workers run on this small heap):
 
 Two workers move neither platform past its noise, four cost macOS 14 points.
 The gap is not the share of marking that one thread does.
+
+## It is user CPU, and most of it is the threshold (2026-10-05)
+
+`/usr/bin/time -l`, 5 runs per arm, probe `probe-bt-rusage` on `5cc3ab4`
+(medians; ranges in brackets):
+
+| | macos-latest time | maxrss | involuntary csw | ubuntu-latest time | maxrss |
+|---|---:|---:|---:|---:|---:|
+| Boehm | 0.85 s [0.74–1.00] | 39 MB | ~1 450 | 1.18 s | 51 MB |
+| gcry | 1.06 s [1.00–1.19] | 36 MB | 33–282 | 1.33 s | 22 MB |
+| gcry `GCRY_IDLE_RELEASE_MS=0` | 1.02 s [0.94–1.19] | 36 MB | 29–123 | 1.34 s | 22 MB |
+| gcry `GCRY_THRESHOLD=67108864` | 0.94 s [0.91–0.99] | 74 MB | 33–48 | 1.10 s | 77 MB |
+
+On both platforms user CPU equals wall time and system time is 0.01-0.05 s
+for every arm, so gcry's main thread is not blocked, faulting or descheduled
+more than Boehm's. With a 64 MiB threshold gcry goes from 80% to ~90% of
+Boehm on macOS (and to 106% on Linux) at about twice Boehm's peak RSS there:
+most of the macOS gap is how often it collects at the RSS it keeps, which is
+the open RSS-budget decision, not a mutator defect. What is left is ~5-10%.
