@@ -29,7 +29,10 @@
 #              `Heap#drain_published_staged` makes, but on the thread-creation
 #              path, which is the hottest window for concurrent pushes. Six
 #              threads creating forty each, so the drain runs while the list is
-#              being mutated.
+#              being mutated. The table is first filled with raw pthreads, so
+#              every one of those births finds it full: waiting for the
+#              creators to fill it themselves left the arm vacuous on a fast
+#              runner (darwin arm64, 2026-10-05: 247 births, 0 overflows).
 #
 #   crystal build -Dgc_none bench/thread_staging.cr -o bin/thread_staging
 #   bin/thread_staging
@@ -73,6 +76,8 @@ if ARGV.includes?("--race")
   creators = 6
   each = 40
   before = Gcry::Platform.staged_overflows
+  # Full before the race starts, with entries no drain can release.
+  (Gcry::Platform::STAGED_SLOTS - Gcry::Platform.staged_count).times { spawn_raw }
 
   puts "=== thread staging table ==="
   puts "mode: race (#{creators} threads creating #{each} each, drain under concurrent pushes)"
