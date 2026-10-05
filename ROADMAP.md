@@ -3915,7 +3915,12 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       these marks slower at every worker count until three shared writes were
       removed (2026-10-04); with 4 workers it is now −21% to −62% Σ mark on
       4-vCPU runners (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
-      Not default yet. `GCRY_PARALLEL_MARK_MIN_LIVE` (serial below a live-set
+      Not default yet. Measured as a default on 2026-10-05
+      (`bench/log/linux/2026-10-05-parallel-mark-default/`): two workers with
+      the 32 MiB floor gain 8–16 points of Boehm's speed on the GC-heavy rows
+      on x86-64, arm64 and macOS; four beat two only on arm64 and cost up to
+      2× the CPU elsewhere — a default would be `min(2, CPUs − 1)`.
+      `GCRY_PARALLEL_MARK_MIN_LIVE` (serial below a live-set
       floor) and the helpers' idle backoff leave Kemal at its one-worker
       throughput with four workers and a 32 MiB floor; a default would choose
       the worker count from the CPUs and needs a campaign on it. A SIGPROF profile
