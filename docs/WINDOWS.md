@@ -38,7 +38,9 @@ scrubbing dead stack. Conservative root scans include that red zone.
   readable memory. Root scans advance by region, including across unreadable
   holes, and leave `PAGE_GUARD` pages intact.
 - Writable sections of the main PE executable supply static roots, including
-  zero-initialized class variables. Globals in DLLs require explicit roots.
+  zero-initialized class variables. Since 2026-10-05 so do loaded DLLs, as
+  under Boehm: writable `MEM_IMAGE` regions are walked again whenever a DLL
+  notification changes the module generation (`windows_roots.cr`).
   Per-thread TLS copies are not scanned, matching Linux/macOS policy. Crystal
   threads and fibers are rooted through the runtime thread list and fiber roots;
   application references held only in native TLS require explicit roots.

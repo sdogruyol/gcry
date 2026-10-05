@@ -418,7 +418,9 @@ module Gcry
       {% end %}
     end
 
-    private def self.ensure_probe_pipe : Nil
+    # Public for the platform layer: an untrusted library range is probed
+    # page by page before its first safe range scan has created the pipe.
+    def self.ensure_probe_pipe : Nil
       {% if flag?(:win32) %}
         @@probe_wr = 0
       {% else %}

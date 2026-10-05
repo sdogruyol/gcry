@@ -1,10 +1,12 @@
-# Writable sections of the main PE image hold Crystal's globals/class vars.
-# Like the ELF/Mach-O backends, system libraries are outside this root set.
+# Writable sections of the main PE image hold Crystal's globals/class vars;
+# every other loaded module's writable image pages are roots too (see
+# `refresh_module_ranges`), as they are under Boehm.
 # The PE `.tls` template is not a root — the live block is per thread.
 require "./windows_os"
 @[Link("kernel32")]
 lib LibGcryImage
   fun GetModuleHandleW(name : UInt16*) : Void*
+  fun GetProcAddress(h_module : Void*, name : UInt8*) : Void*
 end
 
 module Gcry::Platform
@@ -68,6 +70,7 @@ module Gcry::Platform
       yield Pointer(Void).new(r.low), Pointer(Void).new(r.high)
       i += 1
     end
+    scan_module_roots { |low, high| yield low, high }
   end
 
   def self.static_root_bytes : UInt64
@@ -105,6 +108,7 @@ module Gcry::Platform
       push_range(low.address, high.address)
     end
     take_main_thread_tls
+    register_dll_notification
 
     if @@range_count > 0
       @@cached_generation = @@maps_generation
@@ -133,6 +137,7 @@ module Gcry::Platform
   private def self.scan_pe_static_roots(& : Void*, Void* ->) : Nil
     base = LibGcryImage.GetModuleHandleW(nil).as(UInt8*)
     return if base.null? || base.as(UInt16*).value != 0x5A4D
+    @@exe_base = base.address
     nt = base + (base + 0x3C).as(UInt32*).value
     return unless nt.as(UInt32*).value == 0x00004550
     count = (nt + 6).as(UInt16*).value
@@ -271,5 +276,179 @@ module Gcry::Platform
     hi = base &+ info.regionSize
     return nil unless base <= addr && addr < hi
     {base, hi}
+  end
+
+  # --------------------------------------------------------------------------
+  # Every other module.
+  #
+  # A DLL's writable data is a root, as it is under Boehm, which on Windows
+  # registers every committed, writable `MEM_IMAGE` region it finds walking
+  # the address space with `VirtualQuery` (`GC_register_dynamic_libraries`,
+  # win32 branch). This is that walk. It needs no loader lock — the PEB's
+  # module list and `EnumProcessModules` both do, and a thread stopped inside
+  # `LoadLibrary` holds it — and it reads the pages' current protection, so a
+  # module mapped as a resource or data file (read-only) is not taken, and a
+  # copy-on-write `.data` is.
+  #
+  # It costs one query per region, heap chunks included, so it is not run per
+  # collection: `LdrRegisterDllNotification` bumps `@@module_generation` on
+  # every load and unload, and the walk reruns when that moved (and on the
+  # same 64-major refresh as the executable's sections). Where the
+  # notification cannot be registered it reruns every collection. A range
+  # left over from a DLL unloaded since the walk is harmless: the safe range
+  # scan on this platform reads only regions `VirtualQuery` reports readable.
+  MEM_IMAGE         = 0x1000000_u32
+  PAGE_GUARD        =     0x100_u32
+  MAX_MODULE_RANGES =          4096
+
+  @@exe_base = 0_u64
+  @@module_ranges_addr = 0_u64
+  @@module_range_count = 0
+  @@module_count = 0
+  @@module_generation = 0_u32
+  @@module_built_generation = 4294967295_u32
+  @@module_built_maps_generation = 4294967295_u32
+  @@module_notify = false
+  @@module_notify_tried = false
+  @@dll_cookie = 0_u64
+  @@shared_lib_roots = true
+
+  # Library ranges on (the default). `false` scans the executable alone,
+  # which is what every build did until 2026-10-05.
+  def self.shared_lib_roots=(value : Bool) : Bool
+    @@shared_lib_roots = value
+  end
+
+  def self.shared_lib_roots? : Bool
+    @@shared_lib_roots
+  end
+
+  def self.static_root_libraries : Int32
+    @@module_count
+  end
+
+  def self.static_root_library_bytes : UInt64
+    total = 0_u64
+    i = 0
+    while i < @@module_range_count
+      r = module_range_at(i).value
+      total += r.high - r.low
+      i += 1
+    end
+    total
+  end
+
+  # The walk reads protections, not headers, so nothing is unresolved.
+  def self.static_root_unresolved : UInt64
+    0_u64
+  end
+
+  # :nodoc:
+  def self.note_dll_change : Nil
+    @@module_generation &+= 1
+  end
+
+  private def self.module_range_at(i : Int32) : RootRange*
+    Pointer(RootRange).new(@@module_ranges_addr) + i
+  end
+
+  # Once, from the init-time resolve. Resolved through `GetProcAddress`
+  # rather than linked: `ntdll.lib` is not on every toolchain's path, and an
+  # absent export must cost a fallback, not the build.
+  private def self.register_dll_notification : Nil
+    return if @@module_notify_tried
+    @@module_notify_tried = true
+    # "ntdll.dll" as UTF-16 without allocating: this runs inside `GC.init`.
+    name = StaticArray(UInt16, 10).new(0_u16)
+    i = 0
+    "ntdll.dll".each_byte do |b|
+      name[i] = b.to_u16
+      i += 1
+    end
+    ntdll = LibGcryImage.GetModuleHandleW(name.to_unsafe)
+    return if ntdll.null?
+    register = LibGcryImage.GetProcAddress(ntdll, "LdrRegisterDllNotification".to_unsafe)
+    return if register.null?
+    callback = ->(reason : UInt32, data : Void*, context : Void*) {
+      Gcry::Platform.note_dll_change
+      nil
+    }
+    status = Proc(UInt32, Void*, Void*, Void*, Int32).new(register, Pointer(Void).null)
+      .call(0_u32, callback.pointer, Pointer(Void).null, pointerof(@@dll_cookie).as(Void*))
+    @@module_notify = status >= 0
+  end
+
+  private def self.scan_module_roots(& : Void*, Void* ->) : Nil
+    return unless @@shared_lib_roots
+    if !@@module_notify || @@module_built_generation != @@module_generation ||
+       @@module_built_maps_generation != @@maps_generation
+      refresh_module_ranges
+    end
+    i = 0
+    while i < @@module_range_count
+      r = module_range_at(i).value
+      yield Pointer(Void).new(r.low), Pointer(Void).new(r.high)
+      i += 1
+    end
+  end
+
+  private def self.refresh_module_ranges : Nil
+    if @@module_ranges_addr == 0
+      bytes = LibC::SizeT.new(MAX_MODULE_RANGES * sizeof(RootRange))
+      ptr = Gcry::OS.mmap(Pointer(Void).null, bytes, Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE, 0, -1, 0)
+      if ptr.null?
+        @@overflow &+= 1
+        return
+      end
+      @@module_ranges_addr = ptr.address
+    end
+    generation = @@module_generation
+    count = 0
+    modules = 0
+    last_base = 0_u64
+    run_lo = 0_u64
+    run_hi = 0_u64
+    addr = 0x10000_u64
+    while true
+      n = LibC.VirtualQuery(Pointer(Void).new(addr), out info, sizeof(LibC::MEMORY_BASIC_INFORMATION))
+      break if n == 0
+      base = info.baseAddress.address
+      size = info.regionSize.to_u64
+      break if size == 0
+      owner = info.allocationBase.address
+      if info.type == MEM_IMAGE && info.state == MEM_COMMIT &&
+         (info.protect & PAGE_WRITABLE_MASK) != 0 && (info.protect & PAGE_GUARD) == 0 &&
+         owner != @@exe_base
+        if owner != last_base
+          modules += 1
+          last_base = owner
+        end
+        if base == run_hi
+          run_hi = base &+ size
+        else
+          count = push_module_range(count, run_lo, run_hi)
+          run_lo = base
+          run_hi = base &+ size
+        end
+      end
+      next_addr = base &+ size
+      break if next_addr <= addr
+      addr = next_addr
+    end
+    count = push_module_range(count, run_lo, run_hi)
+    @@module_range_count = count
+    @@module_count = modules
+    @@module_built_generation = generation
+    @@module_built_maps_generation = @@maps_generation
+  end
+
+  private def self.push_module_range(count : Int32, lo : UInt64, hi : UInt64) : Int32
+    return count if hi <= lo
+    if count >= MAX_MODULE_RANGES
+      @@overflow &+= 1
+      return count
+    end
+    module_range_at(count).value = RootRange.new(lo, hi)
+    count + 1
   end
 end

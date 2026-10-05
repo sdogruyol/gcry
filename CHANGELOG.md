@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shared-library globals are roots on Linux, macOS and Windows, as under
+  Boehm.** Only the executable's writable data used to be scanned. A C
+  library, or Crystal code in a `.so`, that held a GC pointer only in one of
+  its own globals had the object swept.
+  - **Linux:** at `GC.init` gcry records every object's writable `PT_LOAD`
+    minus RELRO. On each collection it walks `r_debug` without taking a lock,
+    to follow `dlopen` and `dlclose`.
+  - **macOS:** dyld's add/remove-image callbacks.
+  - **Windows:** writable `MEM_IMAGE` regions, walked again on DLL
+    notifications.
+  - **Gate:** `process_spec/regression/16_shared_library_static_roots_spec.cr`
+    covers a preloaded library and a `dlopen`ed one; both fail before the
+    change. Darwin and Windows are type-checked here and run on CI.
+  - **Cost:** on a program linking OpenSSL, libyaml and pcre2, +105 KB of
+    roots and +40 µs of pause per collection, the price of scanning what
+    Boehm scans.
+
 - **Linux x86_64: a pointer held only in `rbp` on the collecting thread is a
   root again.** The collector captures its own registers with glibc
   `setjmp`, which stores `rbp` mangled (`PTR_MANGLE`). Crystal on Linux does
