@@ -586,7 +586,21 @@ module Gcry
       {% end %}
     end
 
+    # The drain, with `scan_edges_inline` allowed for its length. Set before
+    # the helpers are woken and cleared after the last of them has finished
+    # its batch, so every scan of this cycle sees one value; any other scan
+    # (the finalizer pass, a library heap's unstopped collect) takes the
+    # `mark_impl` path, which needs no precondition.
     private def mark_loop : Nil
+      @mark_edges_inline = mark_edges_inline_allowed?
+      begin
+        mark_loop_drain
+      ensure
+        @mark_edges_inline = false
+      end
+    end
+
+    private def mark_loop_drain : Nil
       # The live bytes the last major's sweep measured; this cycle's sweep has
       # not run yet.
       if @parallel_mark_workers <= 1 || live_bytes_after_sweep < @parallel_mark_min_live

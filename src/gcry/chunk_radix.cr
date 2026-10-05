@@ -194,9 +194,24 @@ module Gcry
     protected def radix_lookup(addr : UInt64) : ChunkHeader*
       l1 = @radix_l1
       return Pointer(ChunkHeader).null if l1.null?
-      l2 = l1[(addr >> RADIX_L1_SHIFT) & RADIX_L1_MASK]
+      Heap.radix_entry(l1, @radix_granule_shift, @radix_l2_mask, addr)
+    end
+
+    # The two loads, from a table the caller has already read out of `self`.
+    # The mark's inline candidate path (`scan_edges_inline`) keeps the three in
+    # registers for a whole payload; through `self` they would be reloaded per
+    # candidate, after every mark-bit write and push.
+    #
+    # `unsafe_shr`, not `>>`: with a variable amount `Int#>>` guards against a
+    # negative or oversized shift, and Crystal emitted that as an out-of-line
+    # call per lookup (`UInt64@Int#>>`, 1.8% of samples on Primes with one
+    # marker). The granule shift is the page size's log2, set once in
+    # `radix_init`.
+    @[AlwaysInline]
+    protected def self.radix_entry(l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64, addr : UInt64) : ChunkHeader*
+      l2 = l1[addr.unsafe_shr(RADIX_L1_SHIFT) & RADIX_L1_MASK]
       return Pointer(ChunkHeader).null if l2.null?
-      l2[(addr >> @radix_granule_shift) & @radix_l2_mask]
+      l2[addr.unsafe_shr(shift) & l2_mask]
     end
 
     # Not while a parallel mark is running. Every worker resolves every

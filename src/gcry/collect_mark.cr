@@ -578,6 +578,10 @@ module Gcry
         words -= 1
       end
       cursor = user.as(UInt64*)
+      if @mark_edges_inline && skip_lo == skip_hi
+        scan_edges_inline(cursor, words, base_only)
+        return
+      end
       # Most words of a scanned body are not heap addresses: nulls, small
       # integers, hashes, floats. `mark_impl_unlocked` rejects them on its
       # first range test, but only after a call it does not get inlined into,
@@ -592,6 +596,98 @@ module Gcry
         next if w >= skip_lo && w < skip_hi
         mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
       end
+    end
+
+    # Whether `scan_payload` may resolve heap edges itself, for the length of
+    # one `mark_loop` (set and cleared there).
+    @mark_edges_inline : Bool = false
+
+    # The configurations in which `scan_edges_inline` gives exactly
+    # `mark_impl_unlocked`'s answer for a word that lands in a small bitmap
+    # chunk. Each term names a branch of that method the inline path leaves
+    # out: the radix hit taken without `@index_lock` (only under the stop, and
+    # not while the index audit counts lock skips); `occ` as the allocation
+    # answer and the bitmap as the only mark (`bitmap_alloc`, which also
+    # retires the header-mark union); the minor's nursery filter; first-mark
+    # attribution; the misaligned-candidate filter; the thread-list tripwire;
+    # and the double-push catcher.
+    private def mark_edges_inline_allowed? : Bool
+      {% if flag?(:gcry_hl_assert) %}
+        return false
+      {% end %}
+      @world_stopped && !@index_audit && !@radix_l1.null? && @bitmap_alloc && @bitmap_marks &&
+        !@minor_only && !@live_attr_roots && @scan_unaligned_candidates && !ThreadListWatch.armed?
+    end
+
+    # `scan_payload`'s loop with the candidate resolved in place rather than
+    # through a `mark_impl_unlocked` call per word that passes the heap span.
+    #
+    # That call was most of the mark's instructions. Its frame carries a
+    # 500-byte buffer (`report_thread_list_offer` inlines into it), so every
+    # candidate saved and restored six registers; the radix shift went out of
+    # line; and every `self` field was reloaded after each store, so the block
+    # ordinal — a load of the size class and data offset, a checked multiply,
+    # a bounds-checked table read — was derived three times, once each for
+    # `block_allocated?`, `block_marked_in?` and `set_block_mark_in`. Here it
+    # is derived once, with the table, the span and the radix fields in
+    # registers. Serial Σ mark over 7 interleaved runs: Primes 774 → 592 ms,
+    # JsonParsePure 744 → 498, JsonGenerate 812 → 540, JsonParseSerializable
+    # 214 → 141, Binarytrees 104 → 70 (`bench/log/linux/2026-10-06-mark-cost/`).
+    #
+    # The mark bit is read before `occ`: a candidate that is already marked is
+    # rejected either way, and on JsonParsePure 36% of them are, so their
+    # `occ` line is never touched. Every candidate this does not handle in
+    # full — not in the table, outside the chunk's blocks, a large or nursery
+    # chunk — goes to `mark_impl`, which stays the authority.
+    private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool) : Nil
+      lo = @heap_min
+      hi = @heap_max
+      l1 = @radix_l1
+      shift = @radix_granule_shift
+      l2_mask = @radix_l2_mask
+      hits = 0_u64
+      p = cursor
+      finish = cursor + words
+      while p < finish
+        w = p.value
+        p += 1
+        next if w < lo || w >= hi
+        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+        if chunk.null?
+          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+          next
+        end
+        cls = chunk.value.size_class
+        bitmap_words = chunk.value.bitmap_words.to_u64
+        data_start = chunk.address &+ chunk.value.data_offset
+        chunk_end = chunk.address &+ chunk.value.mapped_bytes
+        # `size_class` past the table covers large chunks (`UInt32::MAX`).
+        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
+           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
+          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+          next
+        end
+        hits &+= 1
+        index = cls.to_i32
+        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
+        block_bytes = @block_bytes.unsafe_fetch(index)
+        header_addr = data_start &+ ordinal &* block_bytes
+        # The chunk's tail past its last whole block.
+        next if header_addr &+ block_bytes > chunk_end
+        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+        bit = 1_u64 << (ordinal & 63)
+        mark = occ + bitmap_words
+        next if (mark.value & bit) != 0
+        next if (occ.value & bit) == 0
+        header = Pointer(BlockHeader).new(header_addr)
+        next if base_only && w != BlockHeader.user_from(header).address
+        # `chunk_set_mark` with its relaxed pre-check already done above.
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+        mark_stack_push(mark_entry(chunk, header))
+      end
+      # `radix_note_fast_hit`, once per payload.
+      @radix_fast_hits &+= hits unless @mark_parallel
     end
 
     # Scan length for one object, derived from its **chunk** (Phase 7.6).

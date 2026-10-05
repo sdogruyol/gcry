@@ -285,6 +285,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     JsonParsePure 543 → 575, Primes 595 → 617) and stays under Boehm's on
     every row. Kemal `/json`: same req/s and peak RSS with pacing on and
     off. Source: `bench/log/linux/2026-10-06-threshold-pacing/`.
+- **The mark resolves each candidate word inside the scan loop instead of
+  calling out per word.** One marker now spends a quarter to a third less
+  time marking.
+  - **Why it was slow:** every scanned word that fell in the heap span cost a
+    call to `mark_impl_unlocked`. Its frame holds a 500-byte buffer, so each
+    call saved and restored six registers. The radix shift compiled to an
+    out-of-line call. The block ordinal was worked out three times, for the
+    allocation, mark-read and mark-write checks.
+  - **Now:** `scan_edges_inline` keeps the chunk table and heap bounds in
+    registers and works out the ordinal once. It reads the mark bit before
+    `occ`, so an already-marked block (36% of candidates on JsonParsePure)
+    never touches its `occ` line. Anything else — no table entry, a large or
+    nursery chunk — still goes through `mark_impl`. The fast path runs only
+    inside `mark_loop`, with the world stopped and the bitmap allocator on.
+  - **Mark time, one marker** (7 interleaved runs, 4 CPUs): Primes
+    774 → 592 ms, JsonParsePure 744 → 498, JsonGenerate 812 → 540,
+    JsonParseSerializable 214 → 141, Binarytrees 104 → 70.
+  - **Wall time, default two workers:** Primes 0.969 → 0.878 s,
+    JsonParsePure 0.510 → 0.447 s, Binarytrees 0.619 → 0.585 s. The other
+    rows and peak RSS did not move beyond noise.
+  - **Check:** a shadow build re-derived every inline decision through the
+    old path, and all 180 M decisions across nine benchmarks matched.
+  - Source: `bench/log/linux/2026-10-06-mark-cost/`.
 
 - **The mark looks each scanned block up once, and splits large objects
   between workers.**
