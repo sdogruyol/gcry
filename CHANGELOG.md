@@ -103,6 +103,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registers for x86_64 and aarch64 only. `src/gcry/platform/os.cr` now
   raises at compile time and says to keep Crystal's default GC.
 
+- **Windows has a stack low-water probe (`VirtualQuery`).** All three
+  platforms now take the low-water skip through the same code path. The
+  probe returns the base of a stack's first committed, readable region.
+  Below that there is only reserved, free, `PAGE_GUARD` or no-access memory,
+  which Windows' region-walking safe scan never read anyway. The words
+  scanned are therefore unchanged, and `low_water_skips` and
+  `GCRY_STACK_LOW_WATER=0` now mean something on Windows. It does not change
+  pauses: the guard-start scan already skipped the 8 MiB reserve with one
+  query (`roots.cr` `scan_range_safe`, `Platform.each_readable_region`).
+
 ## [0.34.0] - 2026-10-04
 
 ### Fixed

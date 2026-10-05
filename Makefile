@@ -799,6 +799,8 @@ windows-typecheck: $(BIN)
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stw_sp_spec.cr -o $(BIN)/windows_typecheck_spec_stw >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stack_scrub_spec.cr -o $(BIN)/windows_typecheck_spec_scrub >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/cached_bitmap_pool_race_spec.cr -o $(BIN)/windows_typecheck_spec_pool >/dev/null
+	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stack_low_water_spec.cr -o $(BIN)/windows_typecheck_spec_lw_x86 >/dev/null
+	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc spec/stack_low_water_spec.cr -o $(BIN)/windows_typecheck_spec_lw_arm64 >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/segv_region_report.cr -o $(BIN)/windows_typecheck_srr >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o $(BIN)/windows_typecheck_proc_x86 >/dev/null
 	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o $(BIN)/windows_typecheck_proc_arm64 >/dev/null

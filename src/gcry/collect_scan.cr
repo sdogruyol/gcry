@@ -1059,9 +1059,10 @@ module Gcry
     # and the lag>0 default path (GCRY_STACK_LOW_WATER=0 to disable).
     # Semantics-preserving: pages with neither the present nor the swapped bit
     # set have never been faulted, so they are zero and cannot hold a pointer.
-    # Linux (`/proc/self/pagemap`) and Darwin (`mach_vm_page_range_query`,
-    # `darwin_low_water.cr`); both fall back to the unskipped range whenever the
-    # kernel cannot answer, so a failure only ever widens the scan.
+    # Linux (`/proc/self/pagemap`), Darwin (`mach_vm_page_range_query`,
+    # `darwin_low_water.cr`) and Windows (`VirtualQuery`,
+    # `windows_low_water.cr`); all fall back to the unskipped range whenever
+    # the kernel cannot answer, so a failure only ever widens the scan.
     property stack_low_water_scan : Bool = true
 
     # When a suspended thread's SP sits on a pool fiber, its OS pthread mapping
@@ -1161,24 +1162,23 @@ module Gcry
     end
 
     # Where a whole-stack scan of *fiber* has to start: its low-water mark when
-    # pagemap can say, else `guard`. Everything below the mark is a page that
-    # was never faulted, i.e. zero, so starting there sees every word a scan
-    # from `guard` would. Falls back to `guard` whenever the probe cannot
+    # the platform probe can say, else `guard`. Everything below the mark is a
+    # page that was never faulted, i.e. zero (on Windows: a region the safe scan
+    # would not read either), so starting there sees every word a scan from
+    # `guard` would. Falls back to `guard` whenever the probe cannot
     # answer, so a failure can only ever widen the scan.
     private def low_water_or_guard(fiber : Fiber, guard : UInt64) : UInt64
-      {% if flag?(:linux) || flag?(:darwin) %}
-        if @stack_low_water_scan
-          bottom = fiber.@stack.bottom.address
-          if bottom > guard
-            lw = Platform.stack_low_water(guard, bottom)
-            if lw > guard
-              @low_water_skips += 1
-              @low_water_skipped_bytes += lw - guard
-              return lw
-            end
+      if @stack_low_water_scan
+        bottom = fiber.@stack.bottom.address
+        if bottom > guard
+          lw = Platform.stack_low_water(guard, bottom)
+          if lw > guard
+            @low_water_skips += 1
+            @low_water_skipped_bytes += lw - guard
+            return lw
           end
         end
-      {% end %}
+      end
       guard
     end
 
@@ -1280,35 +1280,33 @@ module Gcry
       # here in a way it is not at lag 0 — the live frames begin within `lag`
       # bytes of `lagged`, so the walk stops after ~lag/PAGE_SIZE entries (64
       # for the 256 KiB default), one pread.
-      {% if flag?(:linux) || flag?(:darwin) %}
-        if @stack_low_water_scan
-          bottom = fiber.@stack.bottom.address
-          # The last precondition, counted because the skip firing once per
-          # fiber and never again had to be explained by one of three things and
-          # the other two are already ruled out (`low_water_misses` is 0 and the
-          # knob is on). `lagged >= bottom` means the saved `stack_top` sits at
-          # least a lag window above the stack's high end — i.e. it does not
-          # describe this stack — so the probe is skipped and the whole window
-          # is scanned.
-          @low_water_unprobed &+= 1 unless bottom > lagged
-          if bottom > lagged
-            lw = Platform.stack_low_water(lagged, bottom)
-            if lw > lagged
-              @low_water_skips += 1
-              @low_water_skipped_bytes += lw - lagged
-              lagged = lw
-            else
-              # The probe ran and found a faulted page at or below the lag
-              # floor, so there is nothing to skip. Counted separately from
-              # "the probe never ran", because the skip firing exactly once per
-              # parked fiber and never again — measured 2026-09-13, 266 skips
-              # whether the run does 1 collection or 20 — has to be one or the
-              # other, and the two have different fixes.
-              @low_water_misses += 1
-            end
+      if @stack_low_water_scan
+        bottom = fiber.@stack.bottom.address
+        # The last precondition, counted because the skip firing once per
+        # fiber and never again had to be explained by one of three things and
+        # the other two are already ruled out (`low_water_misses` is 0 and the
+        # knob is on). `lagged >= bottom` means the saved `stack_top` sits at
+        # least a lag window above the stack's high end — i.e. it does not
+        # describe this stack — so the probe is skipped and the whole window
+        # is scanned.
+        @low_water_unprobed &+= 1 unless bottom > lagged
+        if bottom > lagged
+          lw = Platform.stack_low_water(lagged, bottom)
+          if lw > lagged
+            @low_water_skips += 1
+            @low_water_skipped_bytes += lw - lagged
+            lagged = lw
+          else
+            # The probe ran and found a faulted page at or below the lag
+            # floor, so there is nothing to skip. Counted separately from
+            # "the probe never ran", because the skip firing exactly once per
+            # parked fiber and never again — measured 2026-09-13, 266 skips
+            # whether the run does 1 collection or 20 — has to be one or the
+            # other, and the two have different fixes.
+            @low_water_misses += 1
           end
         end
-      {% end %}
+      end
 
       # What is left to decide the proposal with: of the window this scan still
       # reads after the skip has taken what it can, how much belongs to a fiber
@@ -1747,16 +1745,14 @@ module Gcry
       # ~8 MiB pthread mapping, nearly all of which was never written. Skipping
       # the untouched head sees identical words — a page with neither the
       # present nor the swapped bit has never been faulted, so it is zero.
-      {% if flag?(:linux) || flag?(:darwin) %}
-        if @stack_low_water_scan && low < high
-          lw = Platform.stack_low_water(low, high)
-          if lw > low && lw < high
-            @low_water_skips += 1
-            @low_water_skipped_bytes += lw - low
-            low = lw
-          end
+      if @stack_low_water_scan && low < high
+        lw = Platform.stack_low_water(low, high)
+        if lw > low && lw < high
+          @low_water_skips += 1
+          @low_water_skipped_bytes += lw - low
+          low = lw
         end
-      {% end %}
+      end
 
       Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)

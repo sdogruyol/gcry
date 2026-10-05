@@ -2,6 +2,7 @@ require "./windows_os"
 require "./windows_stack"
 require "./windows_roots"
 require "./windows_stw"
+require "./windows_low_water"
 
 module Gcry::Platform
   enum BarrierBackend
