@@ -52,6 +52,13 @@ module Gcry
 
     # Arm remembered set after a collect (or at incremental begin).
     protected def arm_page_barrier_after_collect : Nil
+      # Whatever the last arm protected is unprotected before anything else
+      # is chosen. The cards are about to be replaced, and a page still
+      # read-only under cards that no longer list it faults with nothing to
+      # claim it. A collection that moved from mprotect to soft-dirty used to
+      # leave such pages behind, with the handler still installed.
+      disarm_mprotect_barrier if @barrier_backend.mprotect?
+
       # Library heaps without process roots: keep full old→young scan (predictable tests).
       unless @scan_static_roots || @prefer_mprotect_barrier || @allow_mprotect_barrier
         @barrier_backend = Platform::BarrierBackend::None
