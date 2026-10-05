@@ -184,6 +184,8 @@ module GC
         heap.set_stackbottom(bounds[1])
       end
     {% end %}
+    # Boehm's `GC_stackbottom`, for code compiled against Boehm (`crystal i`).
+    Gcry::CAbi.init_stackbottom(heap.stack_bottom)
     # Suspended fiber stacks are scanned once inside Heap#scan_all_fiber_roots
     # (with guard clamp). Do not also call push_gc_roots here — that doubled
     # stack word walks under HTTP (many fibers) and dominated STW pauses.
@@ -1919,11 +1921,15 @@ module GC
   {% if !flag?(:without_mt) %}
     def self.set_stackbottom(thread : Thread, stack_bottom : Void*)
       return unless @@gcry_ready
-      Gcry.default_heap.set_stackbottom(stack_bottom) if thread.same?(Thread.current?)
+      return unless thread.same?(Thread.current?)
+      Gcry.default_heap.set_stackbottom(stack_bottom)
+      Gcry::CAbi.note_stackbottom(stack_bottom)
     end
   {% else %}
     def self.set_stackbottom(stack_bottom : Void*)
-      Gcry.default_heap.set_stackbottom(stack_bottom) if @@gcry_ready
+      return unless @@gcry_ready
+      Gcry.default_heap.set_stackbottom(stack_bottom)
+      Gcry::CAbi.note_stackbottom(stack_bottom)
     end
   {% end %}
 

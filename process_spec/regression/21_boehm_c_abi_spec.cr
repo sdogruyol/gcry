@@ -73,7 +73,14 @@ class BoehmAbiLog
   class_property finalized_object = 0_u64
   class_property finalized_data = 0_u64
   class_property other_root : Void** = Pointer(Void*).null
+  class_property initial_stackbottom = Pointer(Void).null
 end
+
+# Read before any example runs: examples (18's `GC.set_stackbottom` among
+# them) move it, as Boehm's would move.
+{% if flag?(:linux) || flag?(:darwin) %}
+  BoehmAbiLog.initial_stackbottom = LibGC.stackbottom
+{% end %}
 
 describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
   it "allocates, and answers GC_base / GC_size / GC_is_heap_ptr for interior pointers" do
@@ -153,4 +160,44 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
     stats.gc_no.should be > before
     stats.heap_size.should be > 0
   end
+
+  {% if flag?(:linux) || flag?(:darwin) %}
+    # `crystal i` interprets the program with `gc/boehm.cr`, whose prelude, under
+    # the interpreter's `without_mt`, reads `$stackbottom = GC_stackbottom` for
+    # the main fiber's stack and resolves it from the compiler binary's own
+    # handle (`Crystal::Loader#load_current_program_handle`). Without the symbol
+    # every `crystal i` run failed with "undefined reference to `GC_stackbottom'".
+    it "defines GC_stackbottom where crystal i looks for it, tracking the main thread's stack bottom" do
+      symbol = LibC.dlsym(LibC.dlopen(nil, LibC::RTLD_LAZY), "GC_stackbottom")
+      symbol.should eq(pointerof(LibGC.stackbottom).as(Void*))
+
+      # Set when the collector starts: the main thread's stack bottom.
+      _, high = Gcry::Platform.current_pthread_stack_bounds.not_nil!
+      marker = 0
+      initial = BoehmAbiLog.initial_stackbottom
+      initial.address.should be > pointerof(marker).address
+      initial.address.should be <= high.address
+
+      # A stack bottom set on the main thread moves it, as in Boehm — through
+      # `GC_set_stackbottom` and through `GC.set_stackbottom` — and one set on
+      # another thread does not.
+      moved = LibGC::StackBase.new(mem_base: high - 64)
+      LibGC.set_stackbottom(nil, pointerof(moved))
+      LibGC.stackbottom.should eq(high - 64)
+      Thread.new do
+        LibGC.get_my_stackbottom(out own)
+        LibGC.set_stackbottom(nil, pointerof(own))
+        {% unless flag?(:without_mt) %} GC.set_stackbottom(Thread.current, own.mem_base) {% end %}
+      end.join
+      LibGC.stackbottom.should eq(high - 64)
+      {% unless flag?(:without_mt) %}
+        GC.set_stackbottom(Thread.current, high)
+        LibGC.stackbottom.should eq(high)
+      {% end %}
+
+      main = LibGC::StackBase.new(mem_base: high)
+      LibGC.set_stackbottom(nil, pointerof(main))
+      LibGC.stackbottom.should eq(high)
+    end
+  {% end %}
 end

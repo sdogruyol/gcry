@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`crystal i` runs in a compiler built with gcry.** Under the interpreter,
+  stdlib's Boehm prelude reads Boehm's `GC_stackbottom` variable for the
+  main fiber. Crystal cannot define a C-named variable, so every run stopped
+  at ``undefined reference to `GC_stackbottom'``. `c_abi.cr` now emits it
+  from inline assembly on Linux and macOS. As in Boehm, it holds the main
+  thread's stack bottom from `GC.init` on and follows `GC_set_stackbottom` /
+  `GC.set_stackbottom` on the main thread. Windows still fails loudly. The
+  three `ci/compiler-interp` programs print the same as under a Boehm-built
+  compiler. `process_spec/regression/21_boehm_c_abi_spec.cr`.
+
 - **The Crystal compiler builds with gcry, and what it compiles links.**
   - **The bug is in Crystal's stdlib.** `String::Builder#to_s` writes its
     terminator one byte past the buffer when the content exactly fills a

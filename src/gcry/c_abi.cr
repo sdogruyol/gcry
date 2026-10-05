@@ -16,10 +16,11 @@
 #
 # Each function either does what Boehm documents, on gcry's heap, or — where
 # gcry has no equivalent and pretending would change the caller's program —
-# prints what is missing and aborts (`Gcry::CAbi.unsupported`). Boehm's three
-# exported *variables* (`GC_gc_no`, `GC_bytes_found`, `GC_current_warn_proc`)
-# cannot be defined from Crystal and are not declared: using them is a compile
-# error rather than a wrong answer.
+# prints what is missing and aborts (`Gcry::CAbi.unsupported`). Of Boehm's
+# exported *variables*, only `GC_stackbottom` is defined, because `crystal i`
+# cannot run a program without it (`gcry_c_stackbottom_storage` below). The
+# other three (`GC_gc_no`, `GC_bytes_found`, `GC_current_warn_proc`) are not
+# declared: using them is a compile error rather than a wrong answer.
 lib LibGC
   alias Int = LibC::Int
   alias SizeT = LibC::SizeT
@@ -89,6 +90,11 @@ lib LibGC
 
   fun get_my_stackbottom = GC_get_my_stackbottom(sb : StackBase*) : ThreadHandle
   fun set_stackbottom = GC_set_stackbottom(th : ThreadHandle, sb : StackBase*) : ThreadHandle
+
+  {% if flag?(:linux) || flag?(:darwin) %}
+    # The main thread's stack bottom (`gcry_c_stackbottom_storage`).
+    $stackbottom = GC_stackbottom : Void*
+  {% end %}
 
   alias OnHeapResizeProc = Word ->
   fun set_on_heap_resize = GC_set_on_heap_resize(OnHeapResizeProc)
@@ -241,6 +247,26 @@ module Gcry
       @@warn_proc = proc
     end
 
+    # The thread `GC.init` ran on: Boehm's main thread, whose stack bottom
+    # `GC_stackbottom` holds.
+    @@main_thread = 0_u64
+
+    # Boehm sets `GC_stackbottom` when the collector starts.
+    def self.init_stackbottom(bottom : Void*) : Nil
+      {% if flag?(:linux) || flag?(:darwin) %}
+        @@main_thread = Platform.current_thread_id
+        LibGC.stackbottom = bottom
+      {% end %}
+    end
+
+    # Boehm's `GC_set_stackbottom` moves `GC_stackbottom` when the stack is the
+    # main thread's. gcry itself never reads the variable back.
+    def self.note_stackbottom(bottom : Void*) : Nil
+      {% if flag?(:linux) || flag?(:darwin) %}
+        LibGC.stackbottom = bottom if Platform.current_thread_id == @@main_thread
+      {% end %}
+    end
+
     # One `before_collect` hook serves both root sources; it runs in the root
     # phase of every collection, world stopped, where `push_stack` is valid —
     # which is where Boehm calls its push-other-roots procedure too.
@@ -264,9 +290,41 @@ module Gcry
 end
 
 # The process GC is initialised by Crystal's `main` before any code that could
-# call this runs; Boehm's own `GC_init` is likewise idempotent.
+# call this runs, and that set `GC_stackbottom`; Boehm's own `GC_init` is
+# likewise idempotent.
 fun gcry_c_init = GC_init : Nil
 end
+
+# `GC_stackbottom`, the one Boehm variable a gcry program defines. Crystal
+# cannot define a data symbol with a C name, so this function's inline
+# assembly emits it into the data section. `crystal i` needs it: it interprets
+# the program with stdlib's `gc/boehm.cr`, which under the interpreter's
+# `without_mt` flag (and no `pkg-config` version for its `@[Link("gc")]`)
+# binds `$stackbottom = GC_stackbottom` and reads it for the main fiber's
+# stack, resolving it from the compiler binary like every `GC_*` call. Without
+# it, every `crystal i` run stopped at "undefined reference to
+# `GC_stackbottom'". Windows keeps that failure: no symbol is defined there.
+{% if flag?(:darwin) %}
+  fun gcry_c_stackbottom_storage : Nil
+    asm(".pushsection __DATA,__data
+         .p2align 3
+         .globl _GC_stackbottom
+         _GC_stackbottom:
+         .quad 0
+         .popsection" :::: "volatile")
+  end
+{% elsif flag?(:linux) %}
+  fun gcry_c_stackbottom_storage : Nil
+    asm(".pushsection .data
+         .p2align 3
+         .globl GC_stackbottom
+         .type GC_stackbottom, @object
+         .size GC_stackbottom, 8
+         GC_stackbottom:
+         .quad 0
+         .popsection" :::: "volatile")
+  end
+{% end %}
 
 fun gcry_c_malloc = GC_malloc(size : LibGC::SizeT) : Void*
   GC.malloc(size)
@@ -419,7 +477,9 @@ fun gcry_c_get_my_stackbottom = GC_get_my_stackbottom(sb : LibGC::StackBase*) : 
 end
 
 fun gcry_c_set_stackbottom = GC_set_stackbottom(th : LibGC::ThreadHandle, sb : LibGC::StackBase*) : LibGC::ThreadHandle
-  Gcry.default_heap?.try &.set_stackbottom(sb.value.mem_base)
+  bottom = sb.value.mem_base
+  Gcry.default_heap?.try &.set_stackbottom(bottom)
+  Gcry::CAbi.note_stackbottom(bottom)
   th
 end
 
