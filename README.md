@@ -370,7 +370,7 @@ Defaults tuned for process GC. Change after you measure:
 | `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), floored at 8 MiB, capped at 64 MiB (`GCRY_THRESHOLD_MAX`) or a third of the bytes the mark scanned |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program layout registration; no effect on the mark since 2026-10-04 |
 | `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
-| `GCRY_PARALLEL_MARK=N` | Experimental parallel mark workers (default 1) |
+| `GCRY_PARALLEL_MARK=N` | Mark workers (default `min(2, CPUs − 1)`, serial below 32 MiB live; `1` = serial) |
 | `GCRY_STRESS=1` | Collect every N allocs (debug) |
 
 Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.

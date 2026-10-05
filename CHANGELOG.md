@@ -152,6 +152,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Parallel mark is on by default: `min(2, CPUs − 1)` workers, serial
+  below 32 MiB live.** CPUs are counted by affinity, as Crystal's
+  `default_workers_count` does. On CI runners, in crystal-metric `--release`
+  with 5 interleaved reps, two workers gained 8–16 points of Boehm's speed
+  on every GC-heavy row (x86-64, arm64, macOS) for 2–42% more CPU. Four
+  were no better than two except on arm64, at up to twice the CPU. Heaps
+  below the floor moved ±3 points
+  (`bench/log/linux/2026-10-05-parallel-mark-default/`). One CPU is left to
+  the mutator, so a 2-CPU machine stays serial. `GCRY_PARALLEL_MARK=1` is
+  serial. Stress: process_spec, `make parallel-mark-process` and
+  `parallel-mark-stress`, plus the whole of `spec/std` with the floor at 0
+  so every collection runs parallel; all green.
+
 - **Marking is faster without the layouts, a third faster on JSON.** The
   `Hash` walk waited on a cache miss for every small `Hash`'s entries, and
   every scanned object paid a layout lookup. Against 0.34.0 on CI runners,

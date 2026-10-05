@@ -127,8 +127,21 @@ describe "process GC (-Dgc_none)" do
     heap.should_not be_nil
     h = heap.not_nil!
     h.tlab_enabled?.should be_false # default; GCRY_TLAB=1 enables at init
-    h.parallel_mark_workers.should eq(1)
     h.tlab_refills.should eq(0)
+  end
+
+  # Default since 2026-10-05: min(2, CPUs − 1) workers, one CPU left to the
+  # mutator, serial below 32 MiB live (bench/log/linux/2026-10-05-parallel-mark-default/).
+  it "marks in parallel by default, leaving one CPU and small heaps serial" do
+    h = Gcry.default_heap
+    cpus = Crystal::System.effective_cpu_count.to_i32
+    cpus = System.cpu_count.to_i32 if cpus <= 0
+    if ENV["GCRY_PARALLEL_MARK"]? || ENV["GCRY_PARALLEL_MARK_MIN_LIVE"]?
+      pending!("GCRY_PARALLEL_MARK(_MIN_LIVE) is set")
+    end
+    h.parallel_mark_workers.should eq(cpus >= 3 ? 2 : 1)
+    h.parallel_mark_workers.should be < cpus if cpus > 1
+    h.parallel_mark_min_live.should eq(32_u64 * 1024 * 1024)
   end
 
   it "registers atfork handlers on platforms with fork" do

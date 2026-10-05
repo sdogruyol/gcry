@@ -378,6 +378,21 @@ module GC
   # `GCRY_EMPTY_CHUNK_RETAIN` was given: one Parallel major threshold.
   PARALLEL_DORMANT_DEFAULT_RETAIN = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
 
+  # Live bytes below which the default parallel mark stays serial: a small
+  # heap gives helpers nothing to divide and still pays their wake-up
+  # (`Heap#parallel_mark_min_live`).
+  PARALLEL_MARK_DEFAULT_MIN_LIVE = 32_u64 * 1024 * 1024
+
+  # `min(2, CPUs − 1)`, at least 1, with CPUs counted as
+  # `Fiber::ExecutionContext.default_workers_count` does (affinity first, then
+  # the machine) minus its `CRYSTAL_WORKERS` read: `ENV` is unavailable this
+  # early in `GC.init`. Both calls are syscalls into stack buffers.
+  private def self.default_parallel_mark_workers : Int32
+    cpus = Crystal::System.effective_cpu_count.to_i32
+    cpus = System.cpu_count.to_i32 if cpus <= 0
+    (cpus - 1).clamp(1, 2)
+  end
+
   # Use Gcry::OS.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
   private def self.apply_env_config(heap : Gcry::Heap) : Nil
     heap.root_phase_timing = env_flag_one?("GCRY_ROOT_PHASE_TIMING")
@@ -803,11 +818,22 @@ module GC
         heap.alloc_batch = ab.to_i32
       end
     end
+    # Parallel mark is on by default since 2026-10-05: `min(2, CPUs − 1)`
+    # workers, serial below 32 MiB live. Measured on CI runners, crystal-metric
+    # --release, 5 interleaved reps: two workers gained 8–16 points of Boehm's
+    # speed on every GC-heavy row on x86-64, arm64 and macOS for 2–42% more CPU,
+    # and four were no better than two except on arm64 at up to twice the CPU;
+    # rows below the floor moved ±3 points
+    # (`bench/log/linux/2026-10-05-parallel-mark-default/`). Leaving one CPU to
+    # the mutator keeps a 2-CPU box serial. `GCRY_PARALLEL_MARK=1` is serial.
+    heap.parallel_mark_min_live = PARALLEL_MARK_DEFAULT_MIN_LIVE
     if min_live = env_u64("GCRY_PARALLEL_MARK_MIN_LIVE")
       heap.parallel_mark_min_live = min_live
     end
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
+    else
+      heap.parallel_mark_workers = default_parallel_mark_workers
     end
     # Research only: pin mark workers at 1 even if a later assignment asks
     # for more. `make parallel-mark-process --disabled` is the red arm —

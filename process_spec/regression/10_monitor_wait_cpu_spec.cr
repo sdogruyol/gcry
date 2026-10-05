@@ -6,8 +6,10 @@ require "spec"
 # than its ~10 ms period. The wait spun on `pause` for the whole stop, so every
 # collection's pause also burned a second core: a third of crystal-metric
 # Primes' CPU (user 4.1 s on 2.7 s wall, 2.55 s after the fix). The pause runs
-# one thread here (no parallel mark), so the process's CPU time across a run
-# of long collections is about their wall time, and was about twice that.
+# the collecting thread plus `parallel_mark_workers - 1` mark helpers (one
+# helper by default since 2026-10-05, on a live set this size), so the
+# process's CPU time across a run of long collections is about workers × wall
+# time, and a spinning Monitor adds one more core on top.
 class MonitorWaitNode
   property next_node : MonitorWaitNode?
   property payload = 0_i64
@@ -68,9 +70,12 @@ describe "the Monitor's wait for a stopped world" do
     length.should eq(1_500_000)
     collections.should be > 3
     collections.should be < 100
+    # Each marker is a core of CPU for the pause; a spinning Monitor is one
+    # more. 0.4 of a core is the margin the serial version of this check had.
+    workers = Gcry.default_heap.parallel_mark_workers
     ratio = cpu / wall
-    if ratio >= 1.4
-      fail "process CPU #{cpu.round(3)} s over #{wall.round(3)} s of back-to-back collections (#{collections}): ratio #{ratio.round(2)}"
+    if ratio >= workers + 0.4
+      fail "process CPU #{cpu.round(3)} s over #{wall.round(3)} s of back-to-back collections (#{collections}) with #{workers} marker(s): ratio #{ratio.round(2)}"
     end
   end
 end
