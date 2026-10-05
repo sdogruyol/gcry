@@ -1,0 +1,14 @@
+# Examples of Crystal's spec/std that may fail under GCRY_STRESS=1 by design.
+# Each assumes no collection runs between two statements. A collection every
+# 256 allocations breaks that assumption without anything being wrong. Read by
+# `ci/std-spec.sh --allow-failures` for the stress rerun only; the normal run
+# allows nothing.
+
+# Log::Builder "should allow recreation of deallocated logs": `builder.for`
+# recreates ten logs and drops them, so each one is held only by the
+# builder's WeakRef until the next line counts them. A collection in between
+# clears some of those WeakRefs, which is correct. Under Boehm it holds only
+# because no collection happens to run there; it fails the same way under
+# gcry's stress mode at every commit back to before this branch (5 of 5 runs,
+# together with the sync specs before it).
+spec/std/log/builder_spec.cr:230

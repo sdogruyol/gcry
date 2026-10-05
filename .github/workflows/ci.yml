@@ -1120,12 +1120,16 @@ jobs:
 
       # The same binaries with a collection every 256 allocations: the suite
       # as a GC stress test. Pinned compiler only, to bound runner minutes.
+      # Examples slow down several-fold, so the per-example timeout is raised
+      # from 15 s. The allow list names the examples that assume no collection
+      # runs between two statements; anything else still fails the step.
       - name: spec/std under gcry, GCRY_STRESS=1
         if: matrix.crystal == '1.21.0'
         env:
           GCRY_STRESS: "1"
           GCRY_STRESS_EVERY: "256"
-        run: ci/std-spec.sh --chunks 4 --no-build
+          STD_SPEC_TIMEOUT: "120"
+        run: ci/std-spec.sh --chunks 4 --no-build --allow-failures ci/std-spec-stress-allow.txt
 
   # The Crystal compiler built with gcry as its own GC: the largest Crystal
   # program there is, multi-module codegen across threads, gigabytes of heap.
