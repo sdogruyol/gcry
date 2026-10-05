@@ -1,0 +1,7 @@
+bench                    arm           wall med     min     max    Δ vs on  cpu med  rss MiB
+Primes                   on              0.5960   0.569   0.640      +0.0%     0.75      620
+Primes                   off             0.5950   0.565   0.639      -0.2%     0.75      619
+Revcomp                  on              0.5230   0.512   0.550      +0.0%     1.96      522
+Revcomp                  off             0.5410   0.527   0.565      +3.4%     2.00      527
+RegexDna                 on              1.7000   1.688   1.755      +0.0%     2.35      272
+RegexDna                 off             1.7000   1.692   1.748      +0.0%     2.36      272

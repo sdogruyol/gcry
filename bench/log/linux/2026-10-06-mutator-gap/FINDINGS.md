@@ -220,3 +220,8 @@ counter drift.
 - Next: apply the patch, run the gates, a final 9-trial A/B with
   `GCRY_LARGE_RECYCLE=0` as the same-binary control, Primes at 15 trials;
   then change 2 as its own commit with the same.
+- Change 1 finished in `../2026-10-06-large-recycle/`: the Revcomp
+  bimodal peak was the recycler handing a dead string's address back (fixed
+  by moving the pages to a fresh mapping), and the Primes delta was the pace
+  timing the unmap (fixed by keeping no more than the large bytes allocated
+  since the previous major). Change 2 is still open.
