@@ -420,11 +420,7 @@ module Gcry
       loop do
         while count < MARK_PREFETCH_DEPTH && !stack.empty?
           h = stack.pop
-          # Header line and the payload's first line — the type_id gate and the
-          # first scanned word both live there.
-          a = mark_entry_header(h)
-          Kernels.prefetch_read(a.as(Void*))
-          Kernels.prefetch_read((a.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+          prefetch_mark_entry(h)
           ring[(head + count) % MARK_PREFETCH_DEPTH] = h
           count += 1
         end
@@ -433,6 +429,47 @@ module Gcry
         head = (head + 1) % MARK_PREFETCH_DEPTH
         count -= 1
         scan_object(h)
+      end
+    end
+
+    # Bytes of a small payload `prefetch_mark_entry` asks for, at most.
+    MARK_PREFETCH_MAX_BYTES = 256_u64
+
+    # Prefetch what `scan_object` will read of one entry: every line of a
+    # tagged (small) block up to `MARK_PREFETCH_MAX_BYTES`, as its class gives
+    # the length; the first line, and the payload's, of anything else.
+    #
+    # It used to be the first line only. Once the candidates were resolved in
+    # place (`scan_edges_inline`), the scan's own word loads were the largest
+    # stall left in the serial mark — 38% of `scan_edges_inline`'s samples on
+    # Primes waited on a payload word — since a small object starts anywhere
+    # in a line, and the scanned ones average 53 bytes on Primes and 100 on
+    # JsonParsePure. Whole payloads, serial Σ mark over 7 interleaved runs:
+    # Primes 592 → 493 ms, JsonParsePure 498 → 392 ms; Binarytrees,
+    # JsonGenerate and JsonParseSerializable +1 to +7%, at the edge of their
+    # run-to-run spread, wall time unchanged. Against 403 ms at this cap,
+    # JsonParsePure took 488 ms capped at 64 bytes and 457 ms at 128; 512
+    # bytes and 1 KiB were no faster. Fixed prefetches in place of the loop —
+    # first and last line (514 ms), or three lines (436 ms) — lost most or
+    # part of it (`bench/log/linux/2026-10-06-mark-cost/`). Lines are taken as
+    # 64 bytes: on a 128-byte-line core every second prefetch names a line
+    # already requested.
+    @[AlwaysInline]
+    private def prefetch_mark_entry(entry : BlockHeader*) : Nil
+      a = mark_entry_header(entry).address
+      Kernels.prefetch_read(Pointer(Void).new(a))
+      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+      if tag == 0 || tag == MARK_ENTRY_TAG_REST
+        Kernels.prefetch_read(Pointer(Void).new(a &+ BlockHeader::SIZE))
+        return
+      end
+      bytes = @block_bytes.unsafe_fetch(tag.to_i32 &- 1)
+      bytes = MARK_PREFETCH_MAX_BYTES if bytes > MARK_PREFETCH_MAX_BYTES
+      line = (a | 63_u64) &+ 1
+      finish = a &+ bytes
+      while line < finish
+        Kernels.prefetch_read(Pointer(Void).new(line))
+        line &+= 64
       end
     end
 

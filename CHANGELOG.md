@@ -285,6 +285,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     JsonParsePure 543 → 575, Primes 595 → 617) and stays under Boehm's on
     every row. Kemal `/json`: same req/s and peak RSS with pacing on and
     off. Source: `bench/log/linux/2026-10-06-threshold-pacing/`.
+
+- **The mark prefetches a small block's whole payload, not only its first
+  line.** A popped entry's size class gives the payload's length, so the
+  drain and the parallel batch scan now prefetch every line of it, up to
+  256 bytes.
+  - **Why:** once candidates were resolved inline, 38% of the inline loop's
+    samples on Primes were waits on payload words. Scanned objects average
+    53 bytes on Primes and 100 on JsonParsePure, and a small object can
+    start anywhere in a line, so many of them span two or three lines.
+  - **Mark time, one marker** (7 interleaved runs): Primes 592 → 493 ms,
+    JsonParsePure 498 → 392 ms. Binarytrees, JsonGenerate and
+    JsonParseSerializable moved +1 to +7%, at the edge of their spread.
+  - **Wall time, default two workers:** Primes 0.878 → 0.859 s,
+    JsonParsePure 0.447 → 0.435 s. The other rows and peak RSS did not move
+    beyond noise.
+  - **Caps:** 64 and 128 bytes gave back most and a third of the
+    JsonParsePure gain; 512 bytes and 1 KiB were no faster.
+  - Source: `bench/log/linux/2026-10-06-mark-cost/`.
+
 - **The mark resolves each candidate word inside the scan loop instead of
   calling out per word.** One marker now spends a quarter to a third less
   time marking.

@@ -288,8 +288,8 @@ module Gcry
       set_pushbuf_n(slot, 0)
     end
 
-    # Scan a batch with the serial drain's prefetch: header line and first
-    # payload line of the object `MARK_PREFETCH_DEPTH` ahead, while this one
+    # Scan a batch with the serial drain's prefetch (`prefetch_mark_entry`)
+    # of the object `MARK_PREFETCH_DEPTH` ahead, while this one
     # scans. The batch scan had none, and mark is latency-bound — on 64-byte
     # objects the serial drain is **27.6% slower** without its ring
     # (`GCRY_PREFETCH=0`, t=+12.9), which is about the whole gap between two
@@ -309,18 +309,14 @@ module Gcry
       ahead = m < MARK_PREFETCH_DEPTH ? m : MARK_PREFETCH_DEPTH
       j = 0
       while j < ahead
-        h = mark_entry_header(batch[j].as(BlockHeader*))
-        Kernels.prefetch_read(h.as(Void*))
-        Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+        prefetch_mark_entry(batch[j].as(BlockHeader*))
         j += 1
       end
       i = 0
       while i < m
         k = i + MARK_PREFETCH_DEPTH
         if k < m
-          h = mark_entry_header(batch[k].as(BlockHeader*))
-          Kernels.prefetch_read(h.as(Void*))
-          Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+          prefetch_mark_entry(batch[k].as(BlockHeader*))
         end
         scan_object(batch[i].as(BlockHeader*))
         i += 1
