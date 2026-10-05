@@ -86,6 +86,21 @@ included.
 | gcry | 4364 | 0 | 0 |
 | gcry, `GCRY_STRESS=1 GCRY_STRESS_EVERY=256` | 4364 | 0 | 0 |
 
+**After item 2 (2026-10-05): the whole suite.** `ci/std-spec.sh` takes
+`spec/std` from the compiler's own commit. It builds the suite in chunks to
+stay clear of E4 (four here), and runs it. It finds no failure gcry causes:
+
+| Compiler | Backend | Examples | Failures | Errors | Pending |
+|----------|---------|---------:|---------:|-------:|--------:|
+| 1.21.0 | Boehm | 18 054 | 0 | 0 | 30 |
+| 1.21.0 | gcry | 18 054 | 0 | 0 | 30 |
+| 1.21.0 | gcry, `GCRY_STRESS=1 GCRY_STRESS_EVERY=256` | 18 054 | 0 | 0 | 30 |
+| 1.21.0 | gcry, `GCRY_SOUND=1` | 18 054 | 0 | 0 | 30 |
+| 1.21.1 | gcry | 18 068 | 0 | 0 | 30 |
+
+CI job `std-spec` runs the suite on 1.21.0, including a `GCRY_STRESS=1`
+rerun, on `latest`, and on `nightly`, which is allowed to fail.
+
 ### E1: the private recursive alias that breaks compilation
 
 Minimal reproducer (does not compile with `-Dgc_none`):
@@ -177,8 +192,8 @@ end
 | **B3** | **Parallel ExecutionContext is not a supported default.** The compiler itself runs `Fiber::ExecutionContext.default.resize(default_workers_count)`. gcry ships Parallel only as opt-in with TLAB off; `GCRY_TLAB` / `GCRY_PARALLEL_RELEASE` are unsupported; Parallel-specific UAF/SEGV reports are still open. | read: `compiler/crystal.cr:11-12`; `docs/POLICY.md` Threading; `docs/INTEGRATION.md` Scope; `ROADMAP.md` nested_spawn_uaf, 2026-08-10 soak SEGV |
 | **B4** | **No compiler self-host and no interpreter story.** The compiler has never been built or run with gcry. `crystal i` resolves `GC_*` symbols from the host compiler binary, and gcry exports no `GC_*` C ABI (only `gcry_register_finalizer` (win32), `gcry_mark_worker_main`, `gcry_stw_watchdog_main`). | read: `compiler/crystal/interpreter/context.cr:441-460`; grep of `src/` |
 | **B5** | **Platforms.** No platform layer for FreeBSD, OpenBSD, NetBSD, DragonFly or Solaris (`collect.cr:1-20` has no `else`). Android is untested, and its fast path uses `@[ThreadLocal]`, which Crystal avoids there. 32-bit (i386, armhf) compiles with no error but scans roots in 8-byte strides and never installs the STW SP-capture handler. A per-platform rollout ("default on Linux first", ROADMAP Phase 4) would scope this down. | read: `roots.cr:285-289,329-333`; `platform/linux_stw.cr:52-56,610-613`; `platform/os.cr:3-6`; `bitmap_alloc.cr:174-179` |
-| **B6** | **No upstream-grade runtime interface.** gcry reads private stdlib ivars (`Fiber@stack`, `@context.stack_top`, `Thread@current_fiber/@main_fiber/@name/@system_handle`, ExecutionContext `@schedulers/@global_queue`, `Fiber@@fibers.@mutex`), keys the monitor exemption on `Thread#name == "SYSMON"`, reopens `Fiber::ExecutionContext::Monitor`, and gates thread staging on `flag?(:gc_none)` (a future `-Dgc_gcry` would compile it out silently). CI pins Crystal 1.21.0 only, so a stdlib rename is caught by nothing. | read: `collect_stw.cr:759,992`; `collect_scan.cr:360-424,1131-1177`; `monitor_gate.cr:230`; `gc_override.cr:1695-1768`; `.github/workflows/ci.yml:79-92` |
-| **B7** | **Crystal's own suites are not in CI.** See §1. At review time std_spec did not compile (E1) and one exception was miscompiled (E3); both are fixed as of 2026-10-05, and the GC subset passes. compiler_spec has never been tried, and nothing runs either suite in CI. | observed |
+| **B6** | **No upstream-grade runtime interface.** gcry reads private stdlib ivars (`Fiber@stack`, `@context.stack_top`, `Thread@current_fiber/@main_fiber/@name/@system_handle`, ExecutionContext `@schedulers/@global_queue`, `Fiber@@fibers.@mutex`), keys the monitor exemption on `Thread#name == "SYSMON"`, reopens `Fiber::ExecutionContext::Monitor`, and gates thread staging on `flag?(:gc_none)` (a future `-Dgc_gcry` would compile it out silently). Every gcry gate pins Crystal 1.21.0. Only `std-spec` also runs `latest` and `nightly`, so a stdlib rename that silently compiles a root source out is caught only if spec/std happens to exercise it. | read: `collect_stw.cr:759,992`; `collect_scan.cr:360-424,1131-1177`; `monitor_gate.cr:230`; `gc_override.cr:1695-1768`; `.github/workflows/ci.yml:79-92` |
+| **B7** | **Crystal's own suites are not in CI.** See §1. At review time std_spec did not compile (E1) and one exception was miscompiled (E3). Both are fixed as of 2026-10-05, and **std_spec now passes in full and runs in CI** (`std-spec` job). compiler_spec has never been tried. | observed |
 
 ## 3. Major gaps
 
@@ -217,7 +232,7 @@ end
    - E3: `crystal_raises_compat.cr`, plus a compiler patch in
      `bench/log/linux/2026-10-05-raises-cycle/`.
    - Still open: filing the compiler issue/PR upstream.
-2. **B7.** Add a CI job that builds and runs `spec/std` under gcry (the wrapper in §1) against the pinned Crystal and against `latest`/nightly. Target 100%.
+2. **B7 — std_spec part done 2026-10-05.** The CI job `std-spec` runs it on 1.21.0 with a `GCRY_STRESS=1` rerun, on `latest`, and on `nightly`. compiler_spec is folded into 5.
 3. **B1.** Make the sound profile the default.
 4. **B3 / M1.** Make Parallel EC a first-class mode: TLAB, the open UAF family, and parallel mark defaulting to `min(2, CPUs−1)`.
 5. **B4.** Build the compiler with gcry and run `compiler_spec`. Decide the interpreter path: a `GC_*` C-ABI shim, or the interpreter keeping Boehm.
@@ -226,6 +241,6 @@ end
 
 ## 6. Limits of this review
 
-- Only a subset of std_spec ran, because of E4. Specs outside that subset are untested under gcry.
+- std_spec ran in full only on Linux x86_64, with Crystal 1.21.0 and 1.21.1.
 - compiler_spec, the interpreter and non-Linux platforms were not executed.
 - Most "read" items come from source and doc reading at the cited lines; they were not reproduced.
