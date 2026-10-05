@@ -36,6 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs on one Intel macOS build and none on another. The buffers are cleared
   once copied (`bench/log/macos/2026-10-05-dead-register-copies/`).
 
+- **A `rescue` around `String.new(Pointer(UInt8).null, 3)` catches its
+  `ArgumentError` again.** Crystal sets a method's `raises?` once, while its
+  cleanup pass walks call targets, so a method reached through a call cycle
+  can be left marked as not raising, and calls to it get no landing pad. The
+  bug is the compiler's; stock Boehm programs hit it too
+  (`begin 5.clamp(...3) rescue … end` is unhandled on 1.21.0). gcry's
+  collector, being Crystal code, closes extra cycles (`String::Builder` →
+  `GC.malloc_atomic` → gcry → `Errno#message` → `String.new`), and
+  `String.new(chars, bytesize, size)` was left uncatchable — Crystal's own
+  `spec/std/string_spec.cr:2237`. gcry now reopens that method with
+  `@[Raises]`. A compiler patch that propagates the flag to a fixpoint, with
+  a codegen spec, is in `bench/log/linux/2026-10-05-raises-cycle/`.
+
 - **A program with a private recursive alias compiles.** `GC.init` compiles
   `Gcry.register_layouts` and `Layout.register_scan_caps` into every program
   (they run only behind `GCRY_AUTO_LAYOUTS` / `GCRY_SCAN_CAPS`), and both
