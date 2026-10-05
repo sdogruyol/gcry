@@ -235,6 +235,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI builds the Crystal compiler with gcry, uses it, self-hosts it, and
+  runs `crystal i` in it** (`ci/compiler-spec.sh`, job `compiler-gcry`).
+  Every push builds stage 1 and has it compile and run gcry's samples and
+  Crystal's `binary-trees`. Stage 1 then builds the compiler again, and an
+  interpreter-enabled build runs `ci/compiler-interp/*.cr`. The whole
+  `compiler_spec` runs weekly and on dispatch.
+
 - **gcry programs define Boehm's `GC_*` C ABI and `lib LibGC`**
   (`src/gcry/c_abi.cr`). `crystal i` resolves `LibGC` from the compiler
   binary, and shards bind it directly; Crystal's `spec/std` is one of them.

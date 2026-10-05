@@ -13,6 +13,9 @@
 .tmp-*/
 # `ci/std-spec.sh`: the crystal-lang/crystal checkout whose spec/std it runs
 /.std-spec/
+# `ci/compiler-spec.sh`: the crystal-lang/crystal checkout it builds, and the
+# compilers and spec binaries it builds from it
+/.compiler-gcry/
 
 # Local bench Postgres / Cursor project bits (not ship)
 .bench-pg/

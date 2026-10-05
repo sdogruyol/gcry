@@ -1127,6 +1127,43 @@ jobs:
           GCRY_STRESS_EVERY: "256"
         run: ci/std-spec.sh --chunks 4 --no-build
 
+  # The Crystal compiler built with gcry as its own GC: the largest Crystal
+  # program there is, multi-module codegen across threads, gigabytes of heap.
+  # It found a stdlib buffer overrun Boehm's slack hides (String::Builder,
+  # bench/log/linux/2026-10-05-string-builder-terminator/). Every push builds
+  # it, compiles and runs programs with it, has it build itself again
+  # (stage 2), and runs `crystal i` in an interpreter-enabled build, since the
+  # interpreter binds Boehm's C ABI from the compiler binary. The whole
+  # compiler_spec suite (13 641 examples, the same counts as Boehm on
+  # 2026-10-05) is weekly and on dispatch: it is a long release build.
+  compiler-gcry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    name: compiler built with gcry
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
+        continue-on-error: true
+        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Compiler build dependencies
+        run: sudo apt-get install -y -qq llvm-dev libffi-dev libpcre2-dev libgc-dev libyaml-dev libxml2-dev libssl-dev zlib1g-dev libgmp-dev
+
+      - name: Build the compiler with gcry, use it, self-host
+        run: ci/compiler-spec.sh compiler smoke stage2
+
+      - name: crystal i in a gcry-built compiler
+        run: ci/compiler-spec.sh interpreter interp
+
+      - name: Crystal's compiler_spec under gcry
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: ci/compiler-spec.sh spec
+
   # Gates that cost minutes because they **sample**: each drives a rare window
   # many times over, so the cost is the sample size and not the assertion. They
   # were steps of `test (x86_64)` until 2026-09-20, when that job was measured
