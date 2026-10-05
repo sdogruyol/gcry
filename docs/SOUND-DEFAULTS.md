@@ -1,5 +1,43 @@
 # Sound defaults — what gcry costs when it isn't allowed to guess
 
+## Decision, 2026-10-05: the process defaults are the sound profile
+
+`stw_multi_stack_lag` and `stw_multi_pthread_lag` now default to **0** — the
+whole touched stack, from the low-water mark — where they were 256 KiB
+(`src/gcry/collect_scan.cr`, the two `property` definitions and their
+comments). They were the last default knobs that could decline a live
+pointer, so the process GC now reports `soundness == "sound"` with no
+environment at all (`process_spec/regression/14_sound_defaults_spec.cr`).
+The stderr warning that used to fire for a lag of 0 is gone with them.
+`GCRY_SOUND=1` stays: it still forces the whole profile, ahead of the
+individual knobs.
+
+What the decision rests on — README "What the default heuristics cost":
+
+- **EC1:** sound roots are free — RSS, pause and throughput at parity
+  (`bench/log/linux/2026-09-08-heuristics-ab/`).
+- **More than one thread:** the 2026-09-26 CI matrix (`bench/sound_matrix.py`,
+  10 paired rounds, sound ÷ tuned): Linux EC4 pause 3.07 → 4.55 ms (1.45×),
+  req/s 1.01; EC1 pause 0.99×, req/s 1.01; macOS pause 1.22–1.25×, req/s
+  within noise.
+
+Opting back into the bounded scan, for a deployment that has measured the
+pause and accepts the risk:
+
+```sh
+GCRY_STW_STACK_LAG=262144 GCRY_STW_PTHREAD_LAG=262144 ./app
+```
+
+With a non-zero stack lag, `GCRY_PARKED_FIBER_SP` (default on) again decides
+whether a parked fiber is scanned from its saved `stack_top` or through the
+lag window; at lag 0 it has nothing to bound. The sections below are the
+measurement history that led here, and where they say "default" for the lags
+they mean the 256 KiB of the time.
+
+---
+
+## Background (written while the lags were on by default)
+
 gcry's process defaults include a class of knobs that trade **root-scan
 completeness** for throughput or RSS. Each one can decline to mark a pointer
 that is genuinely live. Each is individually argued at its definition site, and
@@ -26,8 +64,8 @@ GCRY_SOUND=1 ./your-app
 | `allow_interior_pointers` | `true` (process, since 0.22.1 — was `false`; `GCRY_DISABLE_INTERIOR=1` restores it) | Two things at once. **(a) Ambient roots:** LLVM may keep only an **interior** pointer live in a register or spill slot while the base is dead — a strength-reduced loop over a `String`/`Array` buffer is the canonical shape, and it is not hypothetical: `make interior-only-buffer` (400k-element `Array` + allocation churn, `--release`) freed the live buffer 3 of 3 with this `false`, which is why it is on by default now. bdwgc as Crystal links it treats interiors as valid, so base-only ambient roots are strictly less conservative than what Crystal's codegen has ever been validated against. **(b) Heap edges out of raw buffers:** `scan_object`'s conservative fallback marks untyped allocations base-only, so an interior pointer stored *inside* a `Slice` or raw buffer is dropped too. That path also keys off `type_id_plausible?`, which made the type_id heuristic steer marking even with `type_id_gate` off — this flag switches both off together. |
 | `scan_unaligned_candidates` | `true` (process, since 0.23.1 — was `false`; `GCRY_ALIGNED_CANDIDATES=1` restores it) | The same, for `str.to_unsafe + 3`. A misaligned interior is a root bdwgc resolves via `GC_base`; gcry dropped it before `find_block` ever ran — and `make unaligned-only-buffer` (a byte-wise `--release` loop holding a 1 MiB `Bytes` by its induction pointer) faulted 3 of 3 with the filter on, which is why it is off by default now. |
 | `type_id_gate` | `false` (since 2026-09-29 — was `true` for static roots; `GCRY_TYPE_ID_GATE=1` restores it) | Rejected a static root whose payload's first `Int32` is `<= 0` or `> 1_000_000`: a heuristic applied to a real reference. It swept `@@buf = Pointer(String).malloc(n)` and `Slice(String)` buffers a class variable held (3 of 3 runs crashed; `make static-raw-buffer-roots`), and on Kemal it rejected one static root in a whole run with pause, post-GC RSS and req/s unchanged, so it went (`bench/log/linux/2026-09-29-static-type-id-gate/`). |
-| `stw_multi_stack_lag` | `256 KiB` | Bounds how far below a parked fiber's `stack_top` another thread's stack is scanned. A live pointer deeper than the lag is never seen. `0` means full `guard → bottom`. |
-| `stw_multi_pthread_lag` | `256 KiB` | Same, for the OS thread mapping when SP sits on a pool fiber. |
+| `stw_multi_stack_lag` | `0` (since 2026-10-05 — was `256 KiB`; `GCRY_STW_STACK_LAG=<bytes>` restores a bound) | Bounds how far below a parked fiber's `stack_top` another thread's stack is scanned. With a non-zero lag, a live pointer deeper than the lag is never seen. `0` means the whole touched stack. |
+| `stw_multi_pthread_lag` | `0` (since 2026-10-05 — was `256 KiB`; `GCRY_STW_PTHREAD_LAG=<bytes>`) | Same, for the OS thread mapping when SP sits on a pool fiber. |
 | `scrub_fibers_enabled` | `false` (was `true`) | Zeroes bytes below a parked fiber's **estimated** SP, from another thread. bdwgc's `GC_clear_stack` only ever wipes below the *calling* thread's own hardware SP — a much stronger guarantee. **Now off by default** — the audit never reached the EC1 window and its RSS justification does not reproduce; see *What `scrub_fibers` costs*. The estimate is exact only because Crystal records `stack_top` before it clears the running flag; when it is not, the wipe lands on live frames and the mid-swap guard is the only thing that prevents it — measured, see *The mid-swap window*. Opt in with `GCRY_SCRUB_FIBERS=1`. |
 | `blacklist_enabled` | `false` (since 2026-09-29 — was `true`; `GCRY_BLACKLIST=1`) | Steers allocation away from pages the type_id gate called false. With the gate off by default nothing feeds it, and fed from free-block candidates instead it moved nothing on Kemal, so it is off too. |
 | `scan_static_roots` | `true` (process) | A heap that never walks BSS/data misses roots by construction. `GCRY_DISABLE_STATIC_ROOTS=1` turns it off and will crash a real program — it is in the profile so the label can never report `sound` while it is off. Library heaps default it *off*, so a library heap must opt in before it can report sound roots. |

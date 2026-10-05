@@ -71,11 +71,17 @@ Never `require "gcry"` as process GC without `-Dgc_none` — you fight Boehm.
 
 | In | Out |
 |----|-----|
-| Linux x86_64 + aarch64, macOS arm64 + x86_64, Crystal ≥ 1.21; EC1 default; Parallel TLAB-off + lazy **supported opt-in** | Parallel as **process default**; Parallel + TLAB / munmap |
+| Linux x86_64 + aarch64, macOS arm64 + x86_64, Windows x86_64 + ARM64 (see below), Crystal ≥ 1.21; EC1 default; Parallel TLAB-off + lazy **supported opt-in** | Parallel as **process default**; Parallel + TLAB / munmap |
 | Full `GC` facade + STW + fiber roots | Deprecated `-Dpreview_mt` |
-| Fork reinit via `pthread_atfork` | Patching Crystal for `-Dgc_gcry` |
+| Fork reinit via `pthread_atfork` | Patching Crystal for `-Dgc_gcry` (proposed upstream: [RFC-GC-BACKEND.md](RFC-GC-BACKEND.md)) |
 | | Precise / moving GC without compiler maps; soft-dirty (Linux-only) |
-| | **Windows** as process GC (see below) |
+| | Any other OS, Android, 32-bit targets — a compile-time `{% raise %}` in `src/gcry/platform/os.cr` stops the build |
+
+**Evidence.** Crystal's whole `spec/std` passes with gcry as the process GC
+(1.21.0: 18 054 examples, 0 failures — the same as Boehm; also under
+`GCRY_STRESS=1` and `GCRY_SOUND=1`), and CI holds it there: `ci/std-spec.sh`,
+job `std-spec` in `.github/workflows/ci.yml`, run against the compiler's own
+commit (`docs/DEFAULT-GC-READINESS.md` §1).
 
 ## Windows
 

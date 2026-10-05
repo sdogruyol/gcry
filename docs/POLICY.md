@@ -57,6 +57,17 @@ Process GC: `stop_the_world = true`. Library `Gcry::Heap` under Boehm: STW off.
 | Sparse pages | `GCRY_PAGE_DONTNEED=1` (Linux opt-in; Darwin default-on) |
 | Fat-app freelist residual | `GCRY_TIGHT_GROW=1` (opt-in; acik ~0.92×; Kemal thr soft — not default) |
 
+## Root completeness
+
+Process-GC defaults decline no live pointer (since 2026-10-05): interior and
+misaligned ambient roots, static roots, and every multi-mutator stack scanned
+whole from its low-water mark (`GCRY_STW_STACK_LAG` / `GCRY_STW_PTHREAD_LAG`
+default **0**). The cost is pause, not throughput: Linux CI EC4 3.07 → 4.55 ms,
+EC1 unchanged, macOS ~1.22–1.25× (2026-09-26,
+[SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)). A non-zero lag restores the bounded
+scan and is a heuristic that can miss a live pointer; `GCRY_SOUND=1` forces
+the whole profile ahead of the individual knobs.
+
 ## Incremental / barriers
 
 Default majors = **full STW**. `GCRY_INCREMENTAL=1` is sounder with soft-dirty or mprotect; without a barrier, sliced majors can miss stores into black objects (JSON/Hash). Prefer default unless measuring pauses.
@@ -79,3 +90,5 @@ Default majors = **full STW**. `GCRY_INCREMENTAL=1` is sounder with soft-dirty o
 | Linux aarch64 | **Supported** (CI) |
 | macOS arm64 / x86_64 | **Supported** (CI `macos-latest`) — Mach STW + dyld roots; Crystal **≥ 1.21**; soft-dirty N/A |
 | musl | Best-effort — verify SP clamp |
+| Windows x86_64 / ARM64 | **Supported** (CI) — `SuspendThread` STW; see [WINDOWS.md](WINDOWS.md) |
+| Other OS, Android, 32-bit | **Refused at compile time** (`src/gcry/platform/os.cr`) — keep Boehm |

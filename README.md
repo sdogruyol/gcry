@@ -53,6 +53,13 @@ to swap Boehm out, one line to swap it back.
 Crystal >= 1.21. Linux (x86_64 + aarch64), macOS (arm64 + x86_64), and
 [Windows x86_64 + ARM64](docs/WINDOWS.md).
 
+Crystal's own standard-library suite passes under gcry: all 18 054 examples
+of `spec/std` (Crystal 1.21.0), held in CI by the `std-spec` job
+([`ci/std-spec.sh`](ci/std-spec.sh)). On any other target — another OS,
+Android, or a 32-bit CPU — `-Dgc_none` + `require "gcry"` stops the build
+with a compile-time error instead of producing a binary
+([`src/gcry/platform/os.cr`](src/gcry/platform/os.cr)).
+
 ---
 
 ## A GC you can actually own
@@ -188,7 +195,7 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 | Kemal `/json` throughput | **112.6%** [106.6, 118.6] *(header layout `-Dgcry_block_headers`: 105.3%; its freelist `GCRY_BITMAP_ALLOC=0`: 74.9%)* |
 | Kemal `/json` peak RSS | **1.07×** *(header layout: 1.30×; 0.95× at 105.1% with `GCRY_THRESHOLD_FACTOR=50` there)* |
 | Kemal `/json` post-`/gc-collect` RSS | **~1.07×** *(31.2 vs 29.3 MB, peak = post-GC; header layout ~1.2× on the CI runner, 15.2 vs 12.9 MB)* |
-| Kemal `/` throughput | **~82%** *(carry v0.16; not re-measured since)* |
+| Kemal `/` throughput | **100.8%** [98.5–103.7] *(CI perf smoke, v0.34.0 window, median [IQR] of 32 runs — [leaderboard](bench/leaderboard.md); hosted-runner wrk, not a paired A/B)* |
 | Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
 | Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
 
@@ -200,7 +207,7 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 |----------|------------------------------------:|
 | Kemal `/json` throughput | **101.9%** [100.9, 103.0] *(header layout: 101.8%; its freelist: 85.5%)* |
 | Kemal `/json` peak footprint | **1.50×** *(post-GC resident 0.99×; header layout 1.97× / 1.20×; freelist 1.78× / 1.07×)* |
-| Kemal `/` throughput | **~91%** *(carry 2026-08-04; not re-measured on 0.24.0)* |
+| Kemal `/` throughput | **110.3%** [100.0–136.4] *(CI perf smoke, v0.34.0 window, 32 runs — [leaderboard](bench/leaderboard.md); hosted-runner wrk, not a paired A/B)* |
 | Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
 | Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
@@ -212,17 +219,22 @@ Freelist-era history (pre-0.24.0, `GCRY_BITMAP_ALLOC=0`; `GCRY_TIGHT_GROW` is fr
 
 ### What the default heuristics cost
 
-Every number above is measured with gcry's **root-completeness heuristics
-armed** — the 256 KiB STW stack lags and, until
-2026-09-29, the static-root `type_id` gate, which was then found to sweep a
-class variable's raw buffer of references and taken out of the default. Each
-can decline to mark a pointer that is genuinely live, so those numbers price
-a collector that is allowed to guess.
-`GCRY_SOUND=1` turns the whole class off:
+**Since 2026-10-05 the process defaults are root-complete** — the sound
+column below. The last two default knobs that could decline a live pointer,
+the 256 KiB multi-mutator STW stack and pthread lags, now default to 0 (the
+whole touched stack; `src/gcry/collect_scan.cr`,
+`process_spec/regression/14_sound_defaults_spec.cr`); the static-root
+`type_id` gate went on 2026-09-29, after it was found to sweep a class
+variable's raw buffer of references. The Kemal and fat-app numbers above were
+measured before that, with the lags armed; the tables below are what the
+change costs. To restore the bounded scan:
 
 ```sh
-GCRY_SOUND=1 ./your-app
+GCRY_STW_STACK_LAG=262144 GCRY_STW_PTHREAD_LAG=262144 ./your-app
 ```
+
+`GCRY_SOUND=1` still forces the whole sound profile, ahead of any individual
+knob. In the tables, "tuned" is the old lagged default and "sound" is today's.
 
 Re-cut on the 0.24.x bitmap default, `bench/log/linux/2026-09-08-heuristics-ab/`
 (Ryzen AI 9 465, 20 rotated rounds × 15 s, identical-binary null control at
@@ -230,8 +242,8 @@ Re-cut on the 0.24.x bitmap default, `bench/log/linux/2026-09-08-heuristics-ab/`
 
 | Kemal `/json`, EC1 | % of Boehm [95% CI] | % of tuned | peak RSS × | pause p50 / p99 |
 |--------------------|--------------------:|-----------:|-----------:|----------------:|
-| tuned (process defaults) | 110.5% [105.5, 115.6] | 100% | 1.29× | 0.78 / 1.58 ms |
-| **sound roots** (`GCRY_SOUND=1`) | **117.0%** [111.3, 122.6] | 106.5% [100.6, 112.5] | **1.29×** | **0.76 / 1.20 ms** |
+| tuned (process defaults until 2026-10-05) | 110.5% [105.5, 115.6] | 100% | 1.29× | 0.78 / 1.58 ms |
+| **sound roots** (`GCRY_SOUND=1`; the default's root profile since 2026-10-05) | **117.0%** [111.3, 122.6] | 106.5% [100.6, 112.5] | **1.29×** | **0.76 / 1.20 ms** |
 | sound + fully conservative bodies | 112.8% [108.0, 117.6] | 102.7% [97.4, 108.0] | 1.28× | 0.76 / 1.29 ms |
 
 **On one mutator thread, sound roots are free.** RSS is identical across the
@@ -274,7 +286,7 @@ since (`GCRY_SCRUB_FIBERS=1`); the per-collection trace showed it moving
 
 ### Pause distribution (Kemal `/json`, Linux)
 
-Tuned defaults, EC1, medians of 20 trials' `/gc-stats` from the session above
+Tuned (pre-2026-10-05) defaults, EC1, medians of 20 trials' `/gc-stats` from the session above
 (`pause_p50_ns` / `pause_p99_ns` / `pause_max_ns`; 589 collections per 15 s):
 
 ```
@@ -350,7 +362,8 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_SOUND=1` | Turn off every root-completeness heuristic. Free on one mutator thread (RSS, pause and throughput at parity, 2026-09-08). With more than one thread it keeps scanning every parked fiber whole: 3.9–5.5× the default's pause (Kemal EC4 4.72 against 1.21 ms on Linux CI, 2026-09-29), throughput within noise |
+| `GCRY_SOUND=1` | Force the whole root-complete profile ahead of any individual knob. The defaults have been that profile since 2026-10-05 ([SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md)) |
+| `GCRY_STW_STACK_LAG` / `GCRY_STW_PTHREAD_LAG` | Bytes; default 0 (whole touched stack). A non-zero lag bounds the multi-mutator stack scan and its pause, and can miss a live pointer deeper than the lag. At 0, Linux CI EC4 pause is 4.55 against 3.07 ms at 256 KiB, req/s unchanged (2026-09-26) |
 | `GCRY_BITMAP_ALLOC=0` | Freelist allocator, the pre-0.24.0 default (Kemal `/json` ~75% of Boehm at 1.87× peak RSS on Linux; ~85% on macOS). Needs `-Dgcry_block_headers`; on the headerless default it warns and is ignored. Not the RSS escape it used to be — the default layout is the lowest-RSS of the three |
 | `GCRY_THRESHOLD_FACTOR` | Warm-chunk budget and adaptive threshold, % of live (default 100). 50 → Kemal 0.95× peak RSS at unchanged throughput, but −12 pp on the fat app |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks (freelist-era knob: ~95% `/json` thr, ~3x RSS on the freelist) |
@@ -374,8 +387,9 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 | [docs/PERF-macos.md](docs/PERF-macos.md) | macOS performance numbers |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm head-to-head |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
+| [docs/RFC-GC-BACKEND.md](docs/RFC-GC-BACKEND.md) | Upstream proposal: `-Dgc_gcry` backend + runtime hooks |
 | [docs/HARDENING.md](docs/HARDENING.md) | All env knobs |
-| [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) | `GCRY_SOUND=1` — what gcry costs with no root heuristics |
+| [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) | Root-complete defaults (2026-10-05) and what the heuristics they replaced cost |
 | [docs/STACK_MAPS.md](docs/STACK_MAPS.md) | Compiler stack maps (research; default off) |
 | [docs/API.md](docs/API.md) | Public API + `/metrics` |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |
