@@ -244,5 +244,6 @@ end
   require "./gcry/gc_override"
   require "./gcry/crystal_process_compat"
   require "./gcry/crystal_raises_compat"
+  require "./gcry/crystal_string_builder_compat"
   require "./gcry/c_abi"
 {% end %}

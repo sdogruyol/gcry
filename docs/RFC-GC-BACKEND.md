@@ -15,7 +15,7 @@ private runtime state and reopening runtime classes. This RFC proposes:
 
 1. a third backend slot, `src/gc/gcry.cr`, selected by `-Dgc_gcry`;
 2. a small, named runtime↔GC interface to replace the private reads;
-3. two stdlib/compiler fixes gcry found that also affect Boehm programs;
+3. three stdlib/compiler fixes gcry found that also affect Boehm programs;
 4. a decision on the interpreter's `GC_*` ABI;
 5. a staged rollout: opt-in flag → Linux default → other platforms.
 
@@ -140,6 +140,27 @@ method).
 larger zeroed granule; an allocator with exact size classes exposes it as
 `EFAULT` (`src/gcry/crystal_process_compat.cr:1-9`, gcry issue #14).
 Proposed: allocate `args.size + 1`. A one-line fix independent of this RFC.
+
+### 3.3 `String::Builder#to_s` writes its terminator past the buffer (stdlib)
+
+`String::Builder#increase_capacity_by` lets the content fill `@capacity`
+exactly (`new_bytesize <= @capacity`), growth is `Math.pw2ceil(new_bytesize)`,
+and `to_s` then stores the NUL at `@buffer[@capacity]`
+(`src/string/builder.cr:105,127,140`): one byte past the allocation whenever
+header plus content is a power of two (116, 244, 500, … bytes of content), or
+fills an initial `String.build(capacity)` buffer. Boehm hides it because it
+adds a byte to every request (`GC_malloc_atomic(128)` is a 144-byte object);
+with exact size classes the store lands on the next block, and that block's
+first write (a `String`'s type id, 1) replaces the terminator. The Crystal
+compiler built with gcry passed such 116-byte mangled names to LLVM, which
+read them up to the next NUL, declared `…\01` functions, and failed to link
+(gcry: `src/gcry/crystal_string_builder_compat.cr`,
+`process_spec/regression/22_string_builder_terminator_spec.cr`). Stock
+Crystal crashes on it under an allocator with no slack
+(`bench/log/linux/2026-10-05-string-builder-terminator/builder_overflow.cr`,
+`-Dgc_none`). Proposed: count the terminator in `increase_capacity_by`
+(`crystal-string-builder-terminator.patch`, same directory; `spec/std`
+`string_builder_spec`, `string_spec` and `io/memory_spec` pass with it).
 
 ## 4. The interpreter's `GC_*` ABI
 

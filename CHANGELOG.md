@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Crystal compiler builds with gcry, and what it compiles links.**
+  - **The bug is in Crystal's stdlib.** `String::Builder#to_s` writes its
+    terminator one byte past the buffer when the content exactly fills a
+    capacity it grew to (12-byte header + 116 bytes = 128).
+  - **Why Boehm hides it:** Boehm adds a byte to every allocation, so the
+    store lands in slack. gcry's 128-byte class is exact, so it landed on the
+    next block.
+  - **What it did to the compiler:** a gcry-built compiler handed LLVM
+    116-byte mangled names whose next block began with a `String`'s type id,
+    1. LLVM declared `…\01` functions, and every program failed to link.
+  - **Fix:** `crystal_string_builder_compat.cr` grows the buffer by the
+    terminator's byte in `to_s`. A stdlib fix is proposed in
+    `bench/log/linux/2026-10-05-string-builder-terminator/`.
+  - **Result:** the gcry-built compiler self-hosts (stage 2) and passes
+    Crystal's whole `compiler_spec`, 13 641 examples with 0 failures, the
+    same counts and pending list as Boehm. Compiling is 4–5% slower.
+  - **Gate:** `process_spec/regression/22_string_builder_terminator_spec.cr`.
+
 - **A dying thread's `Thread` is held until the thread is provably done with
   it, on every platform; correctness no longer depends on the pre-stop
   wait's spins.**
