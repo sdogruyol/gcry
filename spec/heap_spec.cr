@@ -27,6 +27,43 @@ describe Gcry::Heap do
     end
   end
 
+  it "usable_size covers the request, and realloc within it keeps the block" do
+    heap = Gcry::Heap.new
+    heap.gc_threshold = UInt64::MAX
+    begin
+      [1, 16, 17, 255, 8193, 16385, 32769, 100_000].each do |request|
+        ptr = heap.malloc(request)
+        usable = heap.usable_size(ptr)
+        usable.should be >= request.to_u64
+        heap.realloc(ptr, usable).should eq(ptr)
+      end
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "usable_size answers for interior pointers, and 0 outside live blocks" do
+    heap = Gcry::Heap.new
+    heap.gc_threshold = UInt64::MAX
+    begin
+      small = heap.malloc(64)
+      large = heap.malloc(100_000)
+      heap.usable_size(small + 8).should eq(heap.usable_size(small))
+      heap.usable_size(large + 99_999).should eq(heap.usable_size(large))
+
+      foreign = LibC.malloc(64)
+      heap.usable_size(foreign).should eq(0)
+      LibC.free(foreign)
+      heap.usable_size(Pointer(Void).null).should eq(0)
+
+      freed = heap.malloc(64)
+      heap.free(freed)
+      heap.usable_size(freed).should eq(0)
+    ensure
+      heap.destroy
+    end
+  end
+
   # Reuse is representation-specific: the freelist hands a freed block straight
   # back (LIFO); the bitmap pool hands out the lowest free bit, so the freed
   # block comes back within one chunk's worth of allocations. Both are checked

@@ -56,6 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   +9%, its wall time unchanged
   (`bench/log/linux/2026-10-04-layout-union-collision/`).
 
+### Added
+
+- **`Gcry.usable_size(ptr)` / `Heap#usable_size`**, Boehm's `GC_size`: the
+  usable size of the live block containing `ptr` — its base or an interior
+  byte, as Boehm accepts — at least what was requested; 0 when no live gcry
+  block contains it. Crystal's std_spec calls `LibGC.size` on a `String`'s
+  data, which starts inside the block.
+
 ## [0.34.0] - 2026-10-04
 
 ### Fixed

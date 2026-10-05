@@ -584,6 +584,32 @@ module Gcry
       fresh
     end
 
+    # Boehm's `GC_size`: the usable size of the live block containing
+    # `pointer` — its base or any byte inside it, as Boehm accepts — at least
+    # what was requested for it. 0 when no live block of this heap contains
+    # `pointer` (null, freed, LibC, another heap). Crystal's std_spec asks it
+    # about a `String`'s data, which starts inside the block.
+    def usable_size(pointer : Void*) : UInt64
+      found = find_object_with_chunk(pointer)
+      return 0_u64 unless found
+      header, chunk = found
+      owned_size(chunk, header)
+    end
+
+    # What `realloc` copies and `usable_size` reports, for a block already
+    # proven owned in `chunk`.
+    private def owned_size(chunk : ChunkHeader*, header : BlockHeader*) : UInt64
+      if ChunkHeader.large?(chunk)
+        # A large block keeps its header in *both* builds, and its header
+        # holds the size actually requested. `block_payload` would give the
+        # mapping extent instead — an upper bound, and copying that many
+        # bytes reads past the object.
+        ChunkHeader.large_header(chunk).value.size.to_u64
+      else
+        block_payload(chunk, header).to_u64
+      end
+    end
+
     # `realloc`, answering null instead of raising when `pointer` is not a
     # gcry allocation, so `GC.realloc` can route a bootstrap-era pointer to
     # LibC without a lookup of its own.
@@ -601,16 +627,10 @@ module Gcry
       # Size and atomicity from the chunk (7.2 / 7.6). Reading them from the
       # block returns the object's own first words under headerless — a garbage
       # `old_size` here becomes the length of the copy into the new block.
-      old_size = if ChunkHeader.large?(rchunk)
-                   # A large block keeps its header in *both* builds, and its
-                   # header holds the size actually requested. `block_payload`
-                   # would give the mapping extent instead — an upper bound, and
-                   # copying that many bytes reads past the object.
-                   header = ChunkHeader.large_header(rchunk)
-                   header.value.size.to_u64
-                 else
-                   block_payload(rchunk, header).to_u64
-                 end
+      old_size = owned_size(rchunk, header)
+      # A large block's atomicity lives in its chunk's header, not at the user
+      # pointer `from_user` gives under headerless.
+      header = ChunkHeader.large_header(rchunk) if ChunkHeader.large?(rchunk)
       atomic = atomic_of(rchunk, header)
 
       if new_size == 0

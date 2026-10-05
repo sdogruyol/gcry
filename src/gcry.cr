@@ -85,6 +85,12 @@ module Gcry
     default_heap.is_heap_ptr(pointer)
   end
 
+  # Boehm's `GC_size`: the usable size of the live block containing `pointer`
+  # (its base or an interior byte), at least what was requested. 0 otherwise.
+  def self.usable_size(pointer : Void*) : UInt64
+    default_heap.usable_size(pointer)
+  end
+
   def self.collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
     default_heap.collect(scan_stack: scan_stack, roots: roots)
   end
