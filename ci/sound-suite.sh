@@ -9,6 +9,7 @@ mkdir -p bin
 b() { "${CRYSTAL:-crystal}" build -Dgc_none "$@" --error-trace; }
 b samples/sound_profile.cr -o bin/sound_profile
 ./bin/sound_profile
+GCRY_STW_STACK_LAG=262144 ./bin/sound_profile
 GCRY_SOUND=1 ./bin/sound_profile
 GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 ./bin/sound_profile
 b -Dgcry_block_headers samples/sound_profile.cr -o bin/sound_profile_hdr

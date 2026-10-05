@@ -206,7 +206,7 @@ parallel-mark-process: $(BIN)
 parallel-mark-stress: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_storm.cr -o $(BIN)/thread_storm --error-trace
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
-	  GCRY_PARALLEL_MARK=4 $(BIN)/thread_storm --iterations=1000 --workers=10 > $(BIN)/parallel_mark_stress.log 2>&1 || \
+	  GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=0 $(BIN)/thread_storm --iterations=1000 --workers=10 > $(BIN)/parallel_mark_stress.log 2>&1 || \
 	    { tail -20 $(BIN)/parallel_mark_stress.log; echo "FAIL: thread_storm with GCRY_PARALLEL_MARK=4 failed on run $$i"; exit 1; }; \
 	done; echo "ok — 10 of 10 thread_storm runs with four mark workers"
 
@@ -1304,8 +1304,8 @@ thread-census-names: $(BIN)
 	GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names --control
 	GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names
 	GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname
-	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 $(BIN)/thread_census_names --mark
-	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --mark --noname
+	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=0 $(BIN)/thread_census_names --mark
+	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=0 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --mark --noname
 	# The aarch64 shape, reproduced on purpose. That job sets
 	# `GCRY_STW_WATCHDOG_MS` for its whole step, and the watchdog is a raw
 	# Both location arms run `--parked`, where the planted probe sleeps instead
@@ -2216,6 +2216,7 @@ samples: $(BIN)
 sound-profile-smoke: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/sound_profile.cr -o $(BIN)/sound_profile
 	$(BIN)/sound_profile
+	GCRY_STW_STACK_LAG=262144 $(BIN)/sound_profile
 	GCRY_SOUND=1 $(BIN)/sound_profile
 	GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 $(BIN)/sound_profile
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers samples/sound_profile.cr -o $(BIN)/sound_profile_hdr

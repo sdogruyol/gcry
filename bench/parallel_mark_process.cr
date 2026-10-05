@@ -69,7 +69,11 @@ if disabled && !h.force_serial_mark?
 end
 
 old = h.parallel_mark_workers
+old_min_live = h.parallel_mark_min_live
 begin
+  # The process default keeps heaps under 32 MiB live serial; this chain is
+  # far smaller, and the gate is about the parallel path.
+  h.parallel_mark_min_live = 0_u64
   h.parallel_mark_workers = 4
   workers = h.parallel_mark_workers
   if disabled
@@ -150,6 +154,9 @@ begin
   puts "workers=#{workers} runs #{before_runs}->#{runs} stolen #{before_stolen}->#{stolen} chain=#{walked}"
   puts disabled ? "ok — serial mark kept the chain and stole nothing" : "parallel_mark_process ok"
 ensure
-  h.parallel_mark_workers = old if h
+  if h
+    h.parallel_mark_workers = old
+    h.parallel_mark_min_live = old_min_live
+  end
 end
 exit 0

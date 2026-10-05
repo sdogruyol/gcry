@@ -66,8 +66,12 @@ require "../src/gcry"
 {% end %}
 
 # Payload that spans several pages worth of blocks per chunk, so a chunk has
-# both live and dead blocks and the free-page mask has something to say.
-PAYLOAD  =                       192
+# both live and dead blocks and the free-page mask has something to say. 184
+# bytes, not 192: the process GC adds a byte of slack to atomic requests
+# (`Heap#atomic_slack`), and 193 would move the buffer to the 224-byte class,
+# whose chunk has no page-sized tail for the walk arm to release. 184 + 1
+# stays in the 192-byte class the arm was measured on.
+PAYLOAD  =                       184
 KEEP     =                     6_000
 CHURN    =                    60_000
 ROUNDS   =                        12
