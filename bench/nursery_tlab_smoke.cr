@@ -97,15 +97,18 @@ else
   failures << "a major claimed a FREE node on the stack: the TLAB on-stack-freelist claim is back"
 end
 
-# A promoted block freed in its nursery chunk, then the chunk released.
-stale, released = released_chunk_probe(heap)
-if !released
-  failures << "the probe's chunk was not released by the major, so the freelist check below means nothing"
-elsif stale > 0
+# A promoted block freed in its nursery chunk, then a major.
+stale, released, on_old = released_chunk_probe(heap)
+if stale > 0
   failures << "#{stale} freelist node(s) point into a released chunk: a promoted block freed in a nursery chunk " \
               "went on the old list, which the chunk's release does not rebuild"
-else
+elsif on_old
+  failures << "the freed promoted block is on the old list although its chunk is a nursery chunk; " \
+              "releasing that chunk would leave the node dangling"
+elsif released
   puts "  PASS no freelist node points into the released chunk"
+else
+  puts "  PASS the freed promoted block is not on the old list (the major kept its chunk)"
 end
 
 # Minor actually collected: an unrooted nursery object must vanish. A
@@ -179,14 +182,14 @@ end
 RELEASE_PROBE_SIZE = 1000
 
 # A size class nothing else here allocates, so the plant is alone in its
-# nursery chunk. Promote it, free it, and let a major release the emptied
-# chunk; then every node on both of the class's lists must still be in the
-# heap. Before 2026-10-05 `GC.free` chose the list by the block's NURSERY bit:
-# a promoted block went on the old list, the release rebuilt only the nursery
-# list (the chunk's), and the next allocation of that class wrote into
-# unmapped memory.
+# nursery chunk. Promote it, free it, and run a major. Before 2026-10-05
+# `GC.free` chose the list by the block's NURSERY bit: a promoted block went
+# on the old list, a release rebuilt only the nursery list (the chunk's), and
+# the next allocation of that class wrote into unmapped memory. Linux releases
+# the emptied chunk here, so every node on both lists must still be in the
+# heap; macOS keeps it, so the plant must at least not be on the old list.
 @[NoInline]
-def released_chunk_probe(heap : Gcry::Heap) : {Int32, Bool}
+def released_chunk_probe(heap : Gcry::Heap) : {Int32, Bool, Bool}
   q = GC.malloc(RELEASE_PROBE_SIZE)
   heap.add_root(q)
   heap.minor_collect(scan_stack: false)
@@ -200,7 +203,8 @@ def released_chunk_probe(heap : Gcry::Heap) : {Int32, Bool}
   released = !heap.is_heap_ptr(q)
   _, class_index = Gcry::SizeClasses.fit(RELEASE_PROBE_SIZE.to_u64)
   stale = 0
-  {heap.freelist_for(class_index), heap.nursery_freelist_for(class_index)}.each do |head|
+  on_old = false
+  {heap.freelist_for(class_index), heap.nursery_freelist_for(class_index)}.each_with_index do |head, list|
     node = head
     steps = 0
     while !node.null? && steps < 100_000
@@ -208,9 +212,10 @@ def released_chunk_probe(heap : Gcry::Heap) : {Int32, Bool}
         stale += 1
         break
       end
+      on_old = true if list == 0 && node == q
       node = Gcry::BlockHeader.from_user(node).value.next_free
       steps += 1
     end
   end
-  {stale, released}
+  {stale, released, on_old}
 end
