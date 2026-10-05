@@ -520,14 +520,7 @@ module Gcry
     # Confirm the kernel sets soft-dirty after a store (broken on some WSL builds).
     # Uses a dedicated anonymous page — never touch the managed heap.
     protected def soft_dirty_tracks_writes? : Bool
-      page = Gcry::OS.mmap(
-        Pointer(Void).null,
-        LibC::SizeT.new(Platform::PAGE_SIZE),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
-        -1,
-        0,
-      )
+      page = Gcry.os_map(Platform::PAGE_SIZE.to_u64)
       return false if Gcry.mmap_failed?(page)
 
       begin
@@ -539,7 +532,7 @@ module Gcry
         end
         ok && dirty
       ensure
-        Gcry::OS.munmap(page, LibC::SizeT.new(Platform::PAGE_SIZE))
+        Gcry.os_unmap(page, Platform::PAGE_SIZE.to_u64)
       end
     end
 

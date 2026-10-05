@@ -174,9 +174,9 @@ module Gcry
       return if l1.null?
       RADIX_L1_SIZE.times do |i|
         l2 = l1[i]
-        Gcry::OS.munmap(l2.as(Void*), LibC::SizeT.new(@radix_l2_bytes)) unless l2.null?
+        Gcry.os_unmap(l2.as(Void*), @radix_l2_bytes.to_u64) unless l2.null?
       end
-      Gcry::OS.munmap(l1.as(Void*), LibC::SizeT.new(RADIX_L1_SIZE.to_u64 * 8))
+      Gcry.os_unmap(l1.as(Void*), RADIX_L1_SIZE.to_u64 * 8)
       @radix_l1 = Pointer(Pointer(ChunkHeader*)).null
     end
 
@@ -267,9 +267,7 @@ module Gcry
     # manages. Zeroed by the kernel and lazily faulted, which is what keeps a
     # multi-MiB reservation cheap.
     private def radix_map_zeroed(bytes : UInt64) : Void*
-      ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+      ptr = Gcry.os_map(bytes)
       return Pointer(Void).null if Gcry.mmap_failed?(ptr)
       # See the cost note above: one touched entry otherwise faults a whole
       # 2 MiB huge page and the table's RSS stops tracking the live heap.

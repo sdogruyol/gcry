@@ -252,9 +252,7 @@ module Gcry
     protected def ensure_pushbuf(slot : Int32) : Nil
       return if pushbuf_base(slot) != 0_u64
       bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
-      ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+      ptr = Gcry.os_map(bytes)
       return if Gcry.mmap_failed?(ptr)
       @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE] = ptr.address
       set_pushbuf_n(slot, 0)

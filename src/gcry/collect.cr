@@ -1150,7 +1150,7 @@ module Gcry
         # counted, because a quarantine that is always full is not a
         # quarantine and its zero would not mean anything.
         i = @q_head
-        Gcry::OS.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        Gcry.os_unmap(Pointer(Void).new(@q_base[i]), @q_len[i].to_u64)
         @q_head = (i + 1) % QUARANTINE_SLOTS
         @q_count -= 1
         @quarantine_forced_drains &+= 1
@@ -1174,7 +1174,7 @@ module Gcry
       while @q_count > 0
         i = @q_head
         break if @collections - @q_gen[i] < @release_quarantine
-        Gcry::OS.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        Gcry.os_unmap(Pointer(Void).new(@q_base[i]), @q_len[i].to_u64)
         @q_head = (i + 1) % QUARANTINE_SLOTS
         @q_count -= 1
       end
@@ -1647,12 +1647,41 @@ module Gcry
     # After a high-dirty fallback, skip soft-dirty until the next major.
     @soft_dirty_skip_until_major = false
 
-    def enable : Nil
-      @enabled = true
+    # `disable` nests: Boehm's `GC_disable` is a counter (`GC_dont_gc++`), and
+    # collection resumes only when every `disable` has been matched by an
+    # `enable`. A plain flag let an inner `disable … enable` pair — a library
+    # protecting its own critical section — re-enable collection inside the
+    # caller's still-open one.
+    #
+    # The depth and the flag move together under one lock: with an atomic depth
+    # alone, an `enable` taking it to 0 and a `disable` taking it back to 1 can
+    # store their flags in the other order and leave collection on at depth 1.
+    # The readers (`maybe_collect`, the allocator's tight-grow and emergency
+    # paths, `idle_collect`) keep reading the plain `@enabled`.
+    @disable_depth = 0
+    @disable_lock = Crystal::SpinLock.new
+
+    # Undoes one `disable`. Returns false, changing nothing, when collection is
+    # not disabled — `GC.enable` turns that into Boehm's "GC is not disabled".
+    def enable : Bool
+      @disable_lock.sync do
+        return false if @disable_depth == 0
+        @disable_depth -= 1
+        @enabled = true if @disable_depth == 0
+        true
+      end
     end
 
     def disable : Nil
-      @enabled = false
+      @disable_lock.sync do
+        @disable_depth += 1
+        @enabled = false
+      end
+    end
+
+    # How many `disable` calls are still unmatched.
+    def disable_depth : Int32
+      @disable_depth
     end
 
     def add_root(pointer : Void*) : Nil
@@ -2032,6 +2061,54 @@ module Gcry
 
     def note_explicit_free(payload : UInt64) : Nil
       @expl_freed_bytes_since_gc += payload
+    end
+
+    # `GC.free` calls that freed nothing. `GC.free` is the free hook zlib and
+    # GMP are given, so it must not raise (an exception unwinding through C
+    # frames is undefined behaviour) and it must not hand an address in the
+    # heap's span to libc either (glibc aborts on it). It counts the refusal
+    # here and reports the first of each kind on stderr instead. Boehm's
+    # `GC_free` validates nothing in release builds — a stale or double free
+    # corrupts its free lists silently — so ignoring and counting is strictly
+    # safer than the reference, and aborting would turn a free of a block the
+    # sweep already took into the death of a process Boehm would keep running.
+    #
+    # `double_frees`: the block is in a live chunk and already free — a double
+    #   free, or a stale pointer to a block the sweep reclaimed.
+    # `stale_frees`: in the heap's span but not a block it hands out — an
+    #   interior pointer, or a block whose chunk has been released — and the
+    #   corrupted-chunk case (`FreeResult::BadSizeClass`).
+    @double_frees = Atomic(UInt64).new(0_u64)
+    @stale_frees = Atomic(UInt64).new(0_u64)
+
+    def double_frees : UInt64
+      @double_frees.get
+    end
+
+    def stale_frees : UInt64
+      @stale_frees.get
+    end
+
+    # Counts a free `free_result` declined and, the first time per kind, says
+    # so. Allocates nothing: the caller may be zlib or GMP mid-operation.
+    def note_refused_free(pointer : Void*, result : FreeResult) : Nil
+      first = if result.not_allocated?
+                @double_frees.add(1_u64) == 0_u64
+              else
+                @stale_frees.add(1_u64) == 0_u64
+              end
+      return unless first
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: GC.free ignored 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, pointer.address)
+      why = case result
+            when .not_allocated?  then ": the block is already free (double free, or a stale pointer the sweep reclaimed)"
+            when .bad_size_class? then ": its chunk names no size class (corrupted collector metadata)"
+            else                       ": not a live gcry allocation (interior pointer, or its chunk was released)"
+            end
+      len = RawOut.append(buf.to_unsafe, len, why)
+      len = RawOut.append(buf.to_unsafe, len, "; counted in double_frees / stale_frees, reported once per kind\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # Block header for an address in a managed chunk, including FREE blocks.
@@ -2461,6 +2538,7 @@ module Gcry
     private def run_collection_body(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool,
                                     idle : Bool) : Nil
       cols_before = @collections
+      trace_collect = 0_u64
       # Hold post-STW mutex through flush so Parallel EC cannot stop_world
       # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
       return unless acquire_post_stw(coalesce, cols_before, major)
@@ -2484,6 +2562,7 @@ module Gcry
 
         # Pause timer starts after mutex wait so p50/p99 reflect STW work only.
         started = monotonic_ns
+        trace_collect = CrystalTrace.start(self)
         # Owner first, then the flag, with a release fence between them: the
         # re-entrancy guard in `collect` reads the pair as "a cycle is running
         # and it is mine". Set the other way round there is a window in which
@@ -2530,6 +2609,7 @@ module Gcry
           StwWatchdog.enter(StwWatchdog::PHASE_CLEAR)
           @mark_stack.clear
 
+          trace_mark = CrystalTrace.start(self)
           t0 = monotonic_ns
           if major
             # Before the marks are cleared, because the audit is about which
@@ -2636,6 +2716,7 @@ module Gcry
             mark_loop
           end
           @last_phase_mark_ns = monotonic_ns - t0
+          CrystalTrace.finish("collect:mark", trace_mark)
           probe_thread_list_header("the mark", expect_marked: true)
           StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
@@ -2702,9 +2783,11 @@ module Gcry
           @lazy_sweep_pending = sweep_after_world?
           StwWatchdog.enter(StwWatchdog::PHASE_SWEEP)
           unless @lazy_sweep_pending
+            trace_sweep = CrystalTrace.start(self)
             t0 = monotonic_ns
             sweep(major: major, after_world: false)
             @last_phase_sweep_ns = monotonic_ns - t0
+            CrystalTrace.finish("collect:sweep", trace_sweep)
           end
 
           if major
@@ -2758,12 +2841,14 @@ module Gcry
               hook.call(:after_start_world)
             end
             if @lazy_sweep_pending
+              trace_sweep = CrystalTrace.start(self)
               t0 = monotonic_ns
               # The lazy sweep walks `@chunks` with the mutators running, same
               # as the flush passes below — and it was the one that kept
               # `make dormant-flush-race` red after those were fixed.
               during_live_chunk_walk { sweep(major: major, after_world: true) }
               @last_phase_sweep_ns = monotonic_ns - t0
+              CrystalTrace.finish("collect:sweep", trace_sweep)
               @lazy_sweep_pending = false
               if major
                 arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
@@ -2841,6 +2926,7 @@ module Gcry
         clear_sweep_mutator_latch
         unlock_post_stw
       end
+      CrystalTrace.finish("collect", trace_collect)
 
       # The idle thread's collections leave finalizers queued: it has no
       # scheduler or event loop, and a `finalize` such as an

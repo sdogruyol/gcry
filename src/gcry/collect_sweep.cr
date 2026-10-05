@@ -748,7 +748,7 @@ module Gcry
         unless guard_release(run_base, run_total, GUARD_KIND_EMPTY_CHUNK) ||
                refuse_live_release(run_base, run_total, GUARD_KIND_EMPTY_CHUNK) ||
                quarantine_release(run_base, run_total)
-          Gcry::OS.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
+          Gcry.os_unmap(Pointer(Void).new(run_base), run_total)
         end
         chunk = nxt
       end

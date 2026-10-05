@@ -119,7 +119,8 @@ module Gcry
     default_heap.add_root(pointer)
   end
 
-  def self.enable : Nil
+  # Undoes one `disable` (they nest); false when collection was not disabled.
+  def self.enable : Bool
     default_heap.enable
   end
 

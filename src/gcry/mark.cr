@@ -20,7 +20,7 @@ module Gcry
 
     def destroy : Nil
       return if @base.null?
-      Gcry::OS.munmap(@base, LibC::SizeT.new(@mapped_bytes))
+      Gcry.os_unmap(@base, @mapped_bytes.to_u64)
       @base = Pointer(Void).null
       @capacity = 0
       @size = 0
@@ -71,20 +71,13 @@ module Gcry
     end
 
     private def grow(bytes : UInt64) : Nil
-      ptr = Gcry::OS.mmap(
-        Pointer(Void).null,
-        LibC::SizeT.new(bytes),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
-        -1,
-        0
-      )
+      ptr = Gcry.os_map(bytes)
       raise OutOfMemoryError.new("mark stack mmap failed") if Gcry.mmap_failed?(ptr)
 
       new_capacity = (bytes // sizeof(Void*)).to_i32
       unless @base.null?
         @base.as(Void**).copy_to(ptr.as(Void**), @size)
-        Gcry::OS.munmap(@base, LibC::SizeT.new(@mapped_bytes))
+        Gcry.os_unmap(@base, @mapped_bytes.to_u64)
       end
 
       @base = ptr

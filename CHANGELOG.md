@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `GC` API behaves like `gc/boehm.cr`.**
+  - **`GC.disable` nests.** `disable; disable; enable` used to turn
+    collection back on. `GC.enable` with nothing disabled raises `GC is not
+    disabled`.
+  - **`GC.free` never raises.** zlib and GMP call it as their C free hook, so
+    a raise on a stale or double free unwound through C frames. Such frees
+    are now ignored, counted in `Heap#double_frees` / `#stale_frees` and
+    reported once on stderr. Boehm's release build does not check them at
+    all.
+  - **`GC.prof_stats` is honest.** `obtained_from_os_bytes` is the exact
+    mapped total; it used to be an approximation that only grew.
+    `non_gc_bytes` and `markers_m1` are real.
+  - **`Crystal.trace :gc` events** under `-Dtracing`, with Boehm's event
+    names.
+  - **`GC.sig_suspend` / `GC.sig_resume`** read Crystal's own constants.
+  - **`GC.set_stackbottom(thread, …)`** no longer overwrites the calling
+    thread's bottom.
+  - **`-Dwithout_mt` no longer hangs** on the first collection after a
+    `spawn`. `GC.lock_read` is a no-op there, as under Boehm.
+  - **Gate:** `process_spec/regression/18_gc_api_parity_spec.cr`; 5 failures
+    and 3 errors on the old code.
+
 - **Shared-library globals are roots on Linux, macOS and Windows, as under
   Boehm.** Only the executable's writable data used to be scanned. A C
   library, or Crystal code in a `.so`, that held a GC pointer only in one of

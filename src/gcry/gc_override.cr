@@ -1,5 +1,7 @@
 # Reopens Crystal's `GC` module under `-Dgc_none`, forwarding to Gcry.
 
+require "./platform/stw_signals"
+
 {% if flag?(:linux) && flag?(:gnu) %}
   lib LibC
     $__libc_stack_end : Void*
@@ -8,7 +10,12 @@
 
 module GC
   @@gcry_ready = false
-  @@gcry_enabled = true
+  # Bytes `GC.malloc`/`GC.realloc` handed out from libc before the heap was
+  # ready (`bootstrap_malloc`), still live. Nothing ever sweeps them, so they
+  # are `GC.prof_stats.non_gc_bytes` — Boehm's "bytes not considered candidates
+  # for collection". Counted in libc's usable size, the unit the frees below
+  # can recover. A literal, so it is statically initialised before `GC.init`.
+  @@non_gc_bytes = 0_u64
   # Set when fork child cannot reinit (GCRY_DISABLE_ATFORK=1 or install failed).
   @@after_fork_child = false
   @@handle_fork = true
@@ -1489,26 +1496,36 @@ module GC
 
   # :nodoc:
   def self.malloc(size : LibC::SizeT) : Void*
-    check_fork_poison!
-    if @@gcry_ready
-      Gcry.default_heap.malloc(size)
-    else
-      bootstrap_malloc(size, clear: true)
+    Crystal.trace :gc, "malloc", size: size do
+      check_fork_poison!
+      if @@gcry_ready
+        Gcry.default_heap.malloc(size)
+      else
+        bootstrap_malloc(size, clear: true)
+      end
     end
   end
 
   # :nodoc:
   def self.malloc_atomic(size : LibC::SizeT) : Void*
-    check_fork_poison!
-    if @@gcry_ready
-      Gcry.default_heap.malloc_atomic(size)
-    else
-      bootstrap_malloc(size, clear: false)
+    Crystal.trace :gc, "malloc", size: size, atomic: 1 do
+      check_fork_poison!
+      if @@gcry_ready
+        Gcry.default_heap.malloc_atomic(size)
+      else
+        bootstrap_malloc(size, clear: false)
+      end
     end
   end
 
   # :nodoc:
   def self.realloc(pointer : Void*, size : LibC::SizeT) : Void*
+    Crystal.trace :gc, "realloc", size: size do
+      realloc_impl(pointer, size)
+    end
+  end
+
+  private def self.realloc_impl(pointer : Void*, size : LibC::SizeT) : Void*
     check_fork_poison!
     if @@gcry_ready
       # One lookup for the whole call: the heap answers null for a pointer it
@@ -1529,9 +1546,11 @@ module GC
   end
 
   def self.collect
-    return unless @@gcry_ready
-    check_fork_poison!
-    Gcry.default_heap.collect(release_warm: true)
+    Crystal.trace :gc, "collect" do
+      return unless @@gcry_ready
+      check_fork_poison!
+      Gcry.default_heap.collect(release_warm: true)
+    end
   end
 
   # Boehm-compatible: clear unused stack near SP (also GCRY_CLEAR_STACK on alloc).
@@ -1545,28 +1564,53 @@ module GC
     Gcry.default_heap.collect_a_little ? 1 : 0
   end
 
+  # Nests like Boehm's `GC_disable`/`GC_enable` (a counter): collection resumes
+  # when every `disable` is matched (`Heap#enable`). `enable` without an open
+  # `disable` raises the message stdlib's `spec/std/gc_spec.cr` expects.
   def self.enable
-    raise "GC is not disabled" unless !@@gcry_enabled
-    @@gcry_enabled = true
-    Gcry.default_heap.enable if @@gcry_ready
+    raise "GC is not disabled" unless @@gcry_ready && Gcry.default_heap.enable
   end
 
   def self.disable
-    @@gcry_enabled = false
     Gcry.default_heap.disable if @@gcry_ready
   end
 
+  # Never raises. zlib (`Compress::Deflate`) and GMP (`BigInt`) install this
+  # as their C allocator's free callback, so an exception here would unwind
+  # through C frames. A pointer the heap will not free is ignored and counted
+  # (`Heap#note_refused_free`); a pointer outside the heap's span is libc's —
+  # the bootstrap era's, or a foreign one — and goes to `LibC.free`, which is
+  # what `gc/none` does with every pointer. Anything else that escapes the
+  # free path is a collector fault, and Boehm `ABORT`s on those too.
   def self.free(pointer : Void*) : Nil
-    return if pointer.null?
-    if @@gcry_ready && Gcry.default_heap.free_owned?(pointer)
-      # Freed, through one lookup.
-    elsif @@gcry_ready && Gcry.default_heap.in_heap_span?(pointer)
-      # Same class as realloc: emptied+munmapped gcry block is not a LibC ptr.
-      raise ArgumentError.new("GC.free: not a live gcry allocation" +
-                              Gcry.default_heap.release_note(pointer.address))
-    else
-      LibC.free(pointer)
+    Crystal.trace :gc, "free" do
+      free_impl(pointer)
+    rescue
+      # No `ex.message`: a virtual call over every exception class, typed in
+      # Crystal's ivar-initializer pass because this is reachable from the
+      # allocator, broke building the compiler with gcry
+      # (`process_spec/regression/19_ivar_initializer_typing_spec.cr`).
+      buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
+      len = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: an exception escaped the GC.free path, which cannot raise into its C callers (zlib, GMP); aborting\n")
+      Gcry::RawOut.flush(buf.to_unsafe, len)
+      LibC.abort
     end
+  end
+
+  private def self.free_impl(pointer : Void*) : Nil
+    return if pointer.null?
+    if @@gcry_ready
+      heap = Gcry.default_heap
+      result = heap.free_result(pointer)
+      return if result.freed?
+      unless result.unowned? && !heap.in_heap_span?(pointer)
+        # Same class as realloc: an emptied+munmapped gcry block is not a libc
+        # pointer, and glibc aborts on it.
+        heap.note_refused_free(pointer, result)
+        return
+      end
+    end
+    bootstrap_free(pointer)
   end
 
   def self.is_heap_ptr(pointer : Void*) : Bool
@@ -1624,6 +1668,36 @@ module GC
     end
   end
 
+  # Each field against Boehm's `GC_prof_stats_s` (bdwgc `gc.h`), which
+  # `gc/boehm.cr` copies through verbatim:
+  #
+  # - `heap_size` / `free_bytes`: Boehm's `heapsize_full` / `free_bytes_full`
+  #   include memory it unmapped but still holds reserved inside its heap.
+  #   gcry keeps no such reservation — a released chunk is `munmap`ped and
+  #   leaves the heap — so its mapped heap and free bytes are the whole answer.
+  # - `unmapped_bytes`: **not** Boehm's quantity. Boehm's is the amount
+  #   currently unmapped inside its reservation; gcry has none, and reports
+  #   the cumulative bytes it has returned to the OS (`Heap#unmapped_bytes`,
+  #   the same number `GC.stats` gives), which is what Crystal's
+  #   `GC::Stats#unmapped_bytes` describes ("returned to the OS when shrinking").
+  # - `bytes_since_gc`, `bytes_before_gc`, `bytes_reclaimed_since_gc`,
+  #   `reclaimed_bytes_before_gc`, `expl_freed_bytes_since_gc`: the heap's
+  #   counters of the same names, kept with Boehm's meanings.
+  # - `non_gc_bytes`: Boehm's "bytes not considered candidates for
+  #   collection" (its uncollectable allocations). gcry has no uncollectable
+  #   allocation API; what it hands out and never collects is the libc memory
+  #   `GC.malloc` returns before the heap is ready (`@@non_gc_bytes`).
+  # - `gc_no`: completed collections (`Heap#collections`).
+  # - `markers_m1`: Boehm's "marker threads, excluding the initiating one".
+  #   gcry's collecting thread marks too, and `parallel_mark_workers - 1`
+  #   helpers join it (`ensure_mark_worker_pool`), so `GCRY_PARALLEL_MARK=N`
+  #   reports N - 1 and serial marking 0.
+  # - `obtained_from_os_bytes`: everything gcry currently has mapped from the
+  #   OS — heap chunks, the out-of-memory reserve, and the collector's own
+  #   mapped metadata — exactly (`Gcry.os_mapped_bytes`, `src/gcry/os_memory.cr`).
+  #   It is a current level, so it falls when chunks are released; Boehm's
+  #   (`GC_our_mem_bytes`) only grows, because its unmapping keeps the address
+  #   range reserved. Always `>= heap_size`.
   def self.prof_stats
     if @@gcry_ready
       h = Gcry.default_heap
@@ -1633,13 +1707,13 @@ module GC
         unmapped_bytes: h.unmapped_bytes,
         bytes_since_gc: h.bytes_since_gc,
         bytes_before_gc: h.bytes_before_gc,
-        non_gc_bytes: 0_u64,
+        non_gc_bytes: non_gc_bytes,
         gc_no: h.collections,
-        markers_m1: 0_u64,
+        markers_m1: (h.parallel_mark_workers - 1).to_u64,
         bytes_reclaimed_since_gc: h.bytes_reclaimed_since_gc,
         reclaimed_bytes_before_gc: h.reclaimed_bytes_before_gc,
         expl_freed_bytes_since_gc: h.expl_freed_bytes_since_gc,
-        obtained_from_os_bytes: h.heap_size + h.unmapped_bytes,
+        obtained_from_os_bytes: Gcry.os_mapped_bytes,
       )
     else
       ProfStats.new(
@@ -1648,13 +1722,13 @@ module GC
         unmapped_bytes: 0_u64,
         bytes_since_gc: 0_u64,
         bytes_before_gc: 0_u64,
-        non_gc_bytes: 0_u64,
+        non_gc_bytes: non_gc_bytes,
         gc_no: 0_u64,
         markers_m1: 0_u64,
         bytes_reclaimed_since_gc: 0_u64,
         reclaimed_bytes_before_gc: 0_u64,
         expl_freed_bytes_since_gc: 0_u64,
-        obtained_from_os_bytes: 0_u64,
+        obtained_from_os_bytes: Gcry.os_mapped_bytes,
       )
     end
   end
@@ -1782,26 +1856,72 @@ module GC
   end
 
   # :nodoc:
-  # Crystal 1.21+: default is ExecutionContext (`!without_mt`). Only the legacy
-  # `-Dwithout_mt` scheduler uses the single-argument form. ExecutionContext
-  # itself does not call this on fiber swap — see `before_collect` above.
+  # What gcry does with a stack bottom it is told about, and why it needs no
+  # per-thread table: every collection re-derives every thread's bottom from
+  # the fiber that thread is running at the stop, and never trusts a stored one.
+  #   - The collecting thread: `Heap#scan_mutator_stack` scans up to
+  #     `Fiber.current.@stack.bottom` (`collect_scan.cr`), and the
+  #     `before_collect` hook in `GC.init` refreshes `Heap#stack_bottom` from
+  #     the same place before any scan.
+  #   - Every other thread: `Heap#scan_other_thread_stacks` reads
+  #     `thread.@current_fiber.@stack.bottom`, and the stack-bounds snapshot
+  #     taken in `stop_world` for frames below the fiber (`collect_scan.cr`).
+  # So a bottom stored for another thread would never be read. What a stored
+  # value is still read for is the calling thread's own — the
+  # `current_thread_stack_bottom` fallback when the OS will not report
+  # bounds, and crash diagnostics — so only a bottom for `Thread.current` is
+  # kept, and one for another thread no longer overwrites it (until
+  # 2026-10-05 it did, unconditionally). `process_spec` covers the scan half.
+  #
+  # Crystal 1.21's ExecutionContext never calls this; the legacy `-Dwithout_mt`
+  # scheduler calls the one-argument form on every swap, always for the
+  # running thread, which is the one thing it can mean there.
   {% if !flag?(:without_mt) %}
     def self.set_stackbottom(thread : Thread, stack_bottom : Void*)
-      Gcry.default_heap.set_stackbottom(stack_bottom) if @@gcry_ready
+      return unless @@gcry_ready
+      Gcry.default_heap.set_stackbottom(stack_bottom) if thread.same?(Thread.current?)
     end
   {% else %}
     def self.set_stackbottom(stack_bottom : Void*)
       Gcry.default_heap.set_stackbottom(stack_bottom) if @@gcry_ready
     end
   {% end %}
+
+  {% unless flag?(:win32) %}
+    # :nodoc:
+    # The signals the stop-the-world uses, answered from the same constants
+    # the handlers are installed with (`platform/stw_signals.cr`).
+    # `Crystal::System::Thread.sig_suspend` / `sig_resume` defer to these when
+    # `GC` defines them, and `Process` spawn unblocks exactly these in the child.
+    # On Darwin gcry stops threads through Mach and installs no handler of its
+    # own; the pair is then the one Crystal's `init_suspend_resume` installed.
+    def self.sig_suspend : Signal
+      Signal.new(Crystal::System::Thread::GC_STW_SIG_SUSPEND)
+    end
+
+    # :nodoc:
+    def self.sig_resume : Signal
+      Signal.new(Crystal::System::Thread::GC_STW_SIG_RESUME)
+    end
+  {% end %}
+
   # :nodoc:
+  # Not under `-Dwithout_mt`, as in `gc/boehm.cr`. There `Fiber#run` still
+  # calls `unlock_read` once per new fiber while the legacy scheduler never
+  # calls `lock_read`, so forwarding the pair drove the heap's reader count
+  # negative and the next `GC.collect` spun in `write_lock` forever — the first
+  # `spawn` made every later collection hang (2026-10-05, also at HEAD).
   def self.lock_read
-    Gcry.default_heap.lock_read if @@gcry_ready
+    {% unless flag?(:without_mt) %}
+      Gcry.default_heap.lock_read if @@gcry_ready
+    {% end %}
   end
 
   # :nodoc:
   def self.unlock_read
-    Gcry.default_heap.unlock_read if @@gcry_ready
+    {% unless flag?(:without_mt) %}
+      Gcry.default_heap.unlock_read if @@gcry_ready
+    {% end %}
   end
 
   # :nodoc:
@@ -1840,14 +1960,69 @@ module GC
     ptr = LibC.malloc(size)
     raise Gcry::OutOfMemoryError.new("bootstrap malloc failed") if ptr.null?
     ptr.as(UInt8*).clear(size) if clear
+    non_gc_add(libc_usable_size(ptr))
     ptr
   end
 
   private def self.bootstrap_realloc(pointer : Void*, size : LibC::SizeT) : Void*
+    old = pointer.null? ? 0_u64 : libc_usable_size(pointer)
     ptr = LibC.realloc(pointer, size)
     raise Gcry::OutOfMemoryError.new("bootstrap realloc failed") if ptr.null? && size != 0
+    # A failed realloc raised above with *pointer* untouched; past here the old
+    # block is gone (moved, resized, or freed by a zero-size realloc).
+    non_gc_sub(old)
+    non_gc_add(libc_usable_size(ptr)) unless ptr.null?
     ptr
   end
+
+  # Every pointer `free` sends to libc. Outside the heap's span it is the
+  # bootstrap era's — or a foreign libc pointer handed to `GC.free` by mistake,
+  # which `non_gc_sub` saturates against rather than wrapping.
+  private def self.bootstrap_free(pointer : Void*) : Nil
+    non_gc_sub(libc_usable_size(pointer))
+    LibC.free(pointer)
+  end
+
+  private def self.non_gc_bytes : UInt64
+    Atomic::Ops.load(pointerof(@@non_gc_bytes), LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  private def self.non_gc_add(bytes : UInt64) : Nil
+    Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@non_gc_bytes), bytes,
+      LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  private def self.non_gc_sub(bytes : UInt64) : Nil
+    loop do
+      cur = non_gc_bytes
+      nxt = cur > bytes ? cur - bytes : 0_u64
+      _, ok = Atomic::Ops.cmpxchg(pointerof(@@non_gc_bytes), cur, nxt,
+        LLVM::AtomicOrdering::Monotonic, LLVM::AtomicOrdering::Monotonic)
+      return if ok
+    end
+  end
+
+  private def self.libc_usable_size(pointer : Void*) : UInt64
+    {% if flag?(:darwin) %}
+      LibGcryUsableSize.malloc_size(pointer).to_u64
+    {% elsif flag?(:win32) %}
+      LibGcryUsableSize._msize(pointer).to_u64
+    {% else %}
+      LibGcryUsableSize.malloc_usable_size(pointer).to_u64
+    {% end %}
+  end
+end
+
+# How big libc made a block, so `GC.prof_stats.non_gc_bytes` can take back on
+# free exactly what it counted on malloc. One name per supported libc.
+lib LibGcryUsableSize
+  {% if flag?(:darwin) %}
+    fun malloc_size(ptr : Void*) : LibC::SizeT
+  {% elsif flag?(:win32) %}
+    fun _msize(ptr : Void*) : LibC::SizeT
+  {% else %}
+    fun malloc_usable_size(ptr : Void*) : LibC::SizeT
+  {% end %}
 end
 
 {% if flag?(:win32) %}

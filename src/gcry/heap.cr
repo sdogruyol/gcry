@@ -1,4 +1,6 @@
 require "./block"
+require "./os_memory"
+require "./crystal_trace"
 require "./size_classes"
 require "./chunk_layout"
 require "./chunk_radix"
@@ -411,12 +413,12 @@ module Gcry
         # the whole region, and the next `nxt` read faulted — Windows CI run
         # `36109015597`, `spec/oom_reserve_spec.cr`.
         unless ChunkHeader.reserve?(chunk)
-          Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
+          Gcry.os_unmap(chunk.as(Void*), chunk.value.mapped_bytes.to_u64)
         end
         chunk = nxt
       end
       unless @oom_reserve_size == 0
-        Gcry::OS.munmap(Pointer(Void).new(@oom_reserve_base), LibC::SizeT.new(@oom_reserve_size))
+        Gcry.os_unmap(Pointer(Void).new(@oom_reserve_base), @oom_reserve_size)
         @oom_reserve_base = 0_u64
         @oom_reserve_size = 0_u64
         @oom_reserve_used = 0_u64
@@ -734,10 +736,36 @@ module Gcry
       raise ArgumentError.new("pointer is not a gcry allocation") unless free_owned?(pointer)
     end
 
+    # What an explicit free did, for callers that must not raise: `GC.free` is
+    # zlib's and GMP's C allocator callback, and an exception unwinding through
+    # their frames is undefined behaviour.
+    enum FreeResult
+      # Released, or null (a no-op, as C's `free(NULL)`).
+      Freed
+      # Not a block this heap hands out: foreign, interior, or a block whose
+      # chunk has already been released.
+      Unowned
+      # A block of a live chunk that is already free — a double free, or a
+      # stale pointer to a block the sweep reclaimed.
+      NotAllocated
+      # The chunk header names no size class: corrupted collector metadata.
+      BadSizeClass
+    end
+
     # `free`, answering false instead of raising when `pointer` is not a gcry
-    # allocation — the `GC.free` counterpart of `realloc_owned`.
+    # allocation — the `GC.free` counterpart of `realloc_owned`. Still raises on
+    # a double free and on a corrupted chunk; `free_result` never raises.
     def free_owned?(pointer : Void*) : Bool
-      return true if pointer.null?
+      case free_result(pointer)
+      in .freed?          then true
+      in .unowned?        then false
+      in .not_allocated?  then raise ArgumentError.new("double free")
+      in .bad_size_class? then raise ArgumentError.new("bad size class on chunk")
+      end
+    end
+
+    def free_result(pointer : Void*) : FreeResult
+      return FreeResult::Freed if pointer.null?
       header = BlockHeader.from_user(pointer)
       # One lookup for the whole call. It used to be three — inside
       # `owns_user_pointer?`, again here, and a third in each arm below — and
@@ -745,8 +773,8 @@ module Gcry
       # cost +13% on `free` (measured against 287404d). See
       # `owns_user_pointer_in?` and `chunk_for_owned`.
       chunk = chunk_for_owned(pointer)
-      return false unless chunk
-      return false unless owns_user_pointer_in?(pointer, header, chunk)
+      return FreeResult::Unowned unless chunk
+      return FreeResult::Unowned unless owns_user_pointer_in?(pointer, header, chunk)
       large = ChunkHeader.large?(chunk)
       # A large object's header sits behind the object in both builds; under
       # headerless `from_user` is the object itself, and reading its first
@@ -754,7 +782,7 @@ module Gcry
       header = ChunkHeader.large_header(chunk) if large
       # `BlockHeader.free?` is stale on a bitmap chunk for every block the
       # streaming sweep reclaimed, so occupancy is the chunk's to answer.
-      raise ArgumentError.new("double free") unless block_allocated?(chunk, header)
+      return FreeResult::NotAllocated unless block_allocated?(chunk, header)
       if large
         # `header` is already the large header (resolved above), and its size
         # is the size actually requested rather than the mapping extent.
@@ -769,11 +797,11 @@ module Gcry
         trim_large_cache if @large_free_bytes > @large_cache_retain &+ LARGE_FREE_TRIM_SLACK
         Invariant.after_free(self, pointer)
         Trace.after_free(pointer)
-        return true
+        return FreeResult::Freed
       end
 
       class_index = chunk.value.size_class.to_i32
-      raise ArgumentError.new("bad size class on chunk") if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      return FreeResult::BadSizeClass if class_index < 0 || class_index >= SIZE_CLASS_COUNT
       payload = SizeClasses.payload(class_index)
 
       @finalizers.notice_reclaim(pointer)
@@ -805,7 +833,7 @@ module Gcry
         live_objects_dec
         Invariant.after_free(self, pointer)
         Trace.after_free(pointer)
-        return true
+        return FreeResult::Freed
       end
 
       if @tlab_enabled
@@ -827,7 +855,7 @@ module Gcry
       end
       Invariant.after_free(self, pointer)
       Trace.after_free(pointer)
-      true
+      FreeResult::Freed
     end
 
     def is_heap_ptr(pointer : Void*) : Bool
@@ -2448,7 +2476,7 @@ module Gcry
         unless guard_release(base, mapped, GUARD_KIND_LARGE) ||
                refuse_live_release(base, mapped, GUARD_KIND_LARGE) ||
                quarantine_release(base, mapped)
-          Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+          Gcry.os_unmap(chunk.as(Void*), mapped.to_u64)
         end
         user = nxt
       end
@@ -2579,7 +2607,7 @@ module Gcry
             @large_mapped_bytes = sat_sub(@large_mapped_bytes, mapped)
             @unmapped_bytes += mapped
             unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
-              Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+              Gcry.os_unmap(chunk.as(Void*), mapped.to_u64)
             end
             user = nxt
           end
@@ -2638,7 +2666,7 @@ module Gcry
         unless guard_release(base, mapped, GUARD_KIND_LARGE) ||
                refuse_live_release(base, mapped, GUARD_KIND_LARGE) ||
                quarantine_release(base, mapped)
-          Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+          Gcry.os_unmap(chunk.as(Void*), mapped.to_u64)
         end
         user = nxt
       end
@@ -2787,6 +2815,7 @@ module Gcry
       end
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
+      CrystalTrace.heap_resize(self, @heap_size)
       # Inline insert into sorted chunk index. Under TLAB MT this is called
       # from refill_size_class which already holds the size-class freelist
       # lock (via with_freelist_lock), so index_insert is serialised per class.
@@ -2811,14 +2840,7 @@ module Gcry
     end
 
     private def mmap_anonymous(bytes : UInt64) : Void*
-      Gcry::OS.mmap(
-        Pointer(Void).null,
-        LibC::SizeT.new(bytes),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
-        -1,
-        0
-      )
+      Gcry.os_map(bytes)
     end
 
     protected def unlink_chunk(target : ChunkHeader*) : Nil
