@@ -369,7 +369,7 @@ module Gcry::Platform
     return if ntdll.null?
     register = LibGcryImage.GetProcAddress(ntdll, "LdrRegisterDllNotification".to_unsafe)
     return if register.null?
-    callback = ->(reason : UInt32, data : Void*, context : Void*) {
+    callback = ->(_reason : UInt32, _data : Void*, _context : Void*) {
       Gcry::Platform.note_dll_change
       nil
     }
@@ -394,9 +394,9 @@ module Gcry::Platform
 
   private def self.refresh_module_ranges : Nil
     if @@module_ranges_addr == 0
-      bytes = LibC::SizeT.new(MAX_MODULE_RANGES * sizeof(RootRange))
-      ptr = Gcry::OS.mmap(Pointer(Void).null, bytes, Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE, 0, -1, 0)
-      if ptr.null?
+      bytes = MAX_MODULE_RANGES.to_u64 * sizeof(RootRange)
+      ptr = Gcry.os_map(bytes)
+      if Gcry.mmap_failed?(ptr)
         @@overflow &+= 1
         return
       end
@@ -409,7 +409,7 @@ module Gcry::Platform
     run_lo = 0_u64
     run_hi = 0_u64
     addr = 0x10000_u64
-    while true
+    loop do
       n = LibC.VirtualQuery(Pointer(Void).new(addr), out info, sizeof(LibC::MEMORY_BASIC_INFORMATION))
       break if n == 0
       base = info.baseAddress.address

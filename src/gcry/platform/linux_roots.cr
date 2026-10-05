@@ -549,10 +549,8 @@ module Gcry
     # Called from the init-time resolve, after the executable's walk.
     private def self.take_loaded_objects : Nil
       if @@objects_addr == 0
-        bytes = LibC::SizeT.new(MAX_OBJECTS * sizeof(LoadedObject))
-        ptr = Gcry::OS.mmap(Pointer(Void).null, bytes,
-          Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-          Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+        bytes = MAX_OBJECTS.to_u64 * sizeof(LoadedObject)
+        ptr = Gcry.os_map(bytes)
         if Gcry.mmap_failed?(ptr)
           @@static_root_overflow &+= 1
           return

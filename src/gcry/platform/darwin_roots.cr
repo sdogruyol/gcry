@@ -685,10 +685,8 @@ module Gcry
       private def self.register_image_callbacks : Nil
         return if @@images_registered
         return if @@exe_mh == 0
-        bytes = LibC::SizeT.new(MAX_IMAGES * sizeof(DyldImage))
-        ptr = Gcry::OS.mmap(Pointer(Void).null, bytes,
-          Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-          Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+        bytes = MAX_IMAGES.to_u64 * sizeof(DyldImage)
+        ptr = Gcry.os_map(bytes)
         if Gcry.mmap_failed?(ptr)
           @@overflow &+= 1
           return
