@@ -29,3 +29,9 @@ The same evening campaign-053 (`0671a0c`) timed out once in its
 `stw_mt_hdr_tlab_nursery` lane, the same binary and flags (seed 20441), and
 that run's gdb capture has two threads at `scheduler.cr:97` and no collector
 frame: #17486. That is the nearest classified neighbour of this stall.
+
+A second, the next morning: CI run 37268309149 (`cb68f2c`, push), same
+job, 1 stalled of 130, same shape (`stw-mt-2-0` and `stw-mt-2-1` on CPU,
+everything else asleep, no gdb). The job now installs gdb, as the STW seed
+sampler already does, so `run_bounded.sh` can see `scheduler.cr:97` and count
+#17486 as upstream instead of as a failure.

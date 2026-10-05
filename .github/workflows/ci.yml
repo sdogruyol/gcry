@@ -1908,6 +1908,12 @@ jobs:
         with:
           crystal: "1.21.0"
 
+      # Without it a stall cannot be told from crystal-lang/crystal#17486,
+      # which this arm hits too (campaign-054, seed 20724, two threads at
+      # `scheduler.cr:97`), and `run_bounded.sh` counts it as a failure.
+      - name: gdb, for a stall's backtraces
+        run: command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb)
+
       - name: Run the arm that crashed a hundred times
         run: make tlab-nursery-sample
 
