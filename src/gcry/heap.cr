@@ -567,16 +567,30 @@ module Gcry
       ptr
     end
 
+    # Bytes added to every atomic request. Boehm adds one byte to every
+    # request (`EXTRA_BYTES` with all-interior pointers), and Crystal's
+    # stdlib has come to rely on it for byte buffers: `String::Builder#to_s`
+    # writes its terminator one past its buffer, and `BitArray#[](start,
+    # count)` writes a word past `@bits`. gcry's size classes are exact, so
+    # each landed on the next block
+    # (`bench/log/linux/2026-10-05-string-builder-terminator/`). Atomic only:
+    # the overruns found are all in pointer-free buffers. Slack on every
+    # request cost binary-trees 36% more peak RSS; atomic only cost about 1%.
+    # The process GC sets 1 (`GCRY_ATOMIC_SLACK=0` for exact classes); library
+    # heaps stay exact.
+    property atomic_slack : UInt64 = 0_u64
+
     def malloc_atomic(size : Int) : Void*
-      u = fast_alloc(size.to_u64, true)
+      n = size.to_u64 &+ @atomic_slack
+      u = fast_alloc(n, true)
       unless u.null?
-        Invariant.after_malloc(self, u, size.to_u64)
-        Trace.after_malloc(u, size.to_u64, atomic: true)
+        Invariant.after_malloc(self, u, n)
+        Trace.after_malloc(u, n, atomic: true)
         return u
       end
-      ptr = allocate(size.to_u64, atomic: true, clear: false)
-      Invariant.after_malloc(self, ptr, size.to_u64)
-      Trace.after_malloc(ptr, size.to_u64, atomic: true)
+      ptr = allocate(n, atomic: true, clear: false)
+      Invariant.after_malloc(self, ptr, n)
+      Trace.after_malloc(ptr, n, atomic: true)
       ptr
     end
 
@@ -634,6 +648,9 @@ module Gcry
       # pointer `from_user` gives under headerless.
       header = ChunkHeader.large_header(rchunk) if ChunkHeader.large?(rchunk)
       atomic = atomic_of(rchunk, header)
+      # The same slack as `malloc_atomic`, so a buffer grown by `realloc`
+      # keeps the byte past its end that Boehm would have given it.
+      new_size &+= @atomic_slack if atomic && new_size != 0
 
       if new_size == 0
         # Do **not** free `pointer` here, for the same reason the grow path

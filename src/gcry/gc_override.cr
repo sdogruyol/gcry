@@ -174,6 +174,10 @@ module GC
     # Escape for measurement: GCRY_ALIGNED_CANDIDATES=1.
     heap.scan_unaligned_candidates = true
     heap.layout_precise = true
+    # One byte past every atomic block, as Boehm gives every block: stdlib
+    # byte buffers write there (`Heap#atomic_slack`). Escape for measurement:
+    # GCRY_ATOMIC_SLACK=0.
+    heap.atomic_slack = env_flag_zero?("GCRY_ATOMIC_SLACK") ? 0_u64 : 1_u64
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 

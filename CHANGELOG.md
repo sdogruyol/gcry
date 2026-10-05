@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Atomic blocks get Boehm's byte of slack, so stdlib overruns stay in
+  their own block.** Boehm adds a byte to every request, and Crystal's
+  stdlib writes past byte buffers that only that byte absorbed:
+  `String::Builder#to_s`'s terminator, and `BitArray#[](start, count)`, which
+  writes a word past `@bits` when `count % 32 == 0`. gcry's classes are
+  exact, so these writes landed on the next block. The process GC now adds
+  one byte to every atomic request (`GCRY_ATOMIC_SLACK=0` restores exact
+  classes). Cost: about 1% peak RSS on binary-trees; slack on every block
+  would have cost 36%. `process_spec/regression/24_atomic_slack_spec.cr`
+  clobbers 63 words without the slack.
+
 - **`crystal i` runs in a compiler built with gcry.** Under the interpreter,
   stdlib's Boehm prelude reads Boehm's `GC_stackbottom` variable for the
   main fiber. Crystal cannot define a C-named variable, so every run stopped
