@@ -163,6 +163,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **gcry programs define Boehm's `GC_*` C ABI and `lib LibGC`**
+  (`src/gcry/c_abi.cr`). `crystal i` resolves `LibGC` from the compiler
+  binary, and shards bind it directly; Crystal's `spec/std` is one of them.
+  The signatures match stdlib's `gc/boehm.cr`. A function gcry cannot honour
+  aborts with a message rather than silently doing nothing. That covers
+  `GC_set_max_heap_size`, the event hooks, replacing a finalizer and
+  `GC_beginthreadex`. `GC_gc_no`, `GC_bytes_found` and `GC_current_warn_proc`
+  are variables, which Crystal cannot export.
+  `process_spec/regression/21_boehm_c_abi_spec.cr`.
+
 - **`Gcry.usable_size(ptr)` / `Heap#usable_size`**, Boehm's `GC_size`: the
   usable size of the live block containing `ptr` — its base or an interior
   byte, as Boehm accepts — at least what was requested; 0 when no live gcry

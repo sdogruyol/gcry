@@ -68,18 +68,10 @@ echo "std_spec: $version_line, backend $backend, $chunks chunk(s), source $src"
 # requires and data paths resolve as they do for `make std_spec`.
 entry_prelude() {
   echo 'require "./support/mt_abort_timeout"'
+  # Specs call Boehm's `LibGC.size` directly; gcry defines `LibGC` and the
+  # `GC_*` functions behind it (src/gcry/c_abi.cr).
   if [ "$backend" = gcry ]; then
-    cat <<'EOF'
-require "gcry"
-
-# Specs call Boehm's `LibGC.size` directly; gcry's `GC_size` is
-# `Gcry.usable_size`.
-module LibGC
-  def self.size(pointer) : UInt64
-    Gcry.usable_size(pointer.as(Void*))
-  end
-end
-EOF
+    echo 'require "gcry"'
   fi
 }
 
