@@ -230,6 +230,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The mark looks each scanned block up once, and splits large objects
+  between workers.**
+  - **Size class in the mark-stack entry:** the entry now carries the block's
+    size class, so `scan_object` no longer resolves the chunk a second time.
+    Total mark time with one marker: −8.5% on Primes, −7.5% on JsonParsePure.
+  - **Inline chunk-table hit:** under the stop, the hit in
+    `find_block_with_chunk` runs inline: −3% more.
+  - **Large objects:** under parallel mark they are scanned in 64 KiB pieces
+    that any worker can take. At 4 workers, JsonGenerate's mark went from
+    471 to 359 ms.
+  - **Small heaps:** −12% mark per collection.
+  - Source: `bench/log/linux/2026-10-05-alloc-storm-mark/`.
+
 - **Parallel mark is on by default: `min(2, CPUs − 1)` workers, serial
   below 32 MiB live.** CPUs are counted by affinity, as Crystal's
   `default_workers_count` does. On CI runners, in crystal-metric `--release`

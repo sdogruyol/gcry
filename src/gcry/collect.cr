@@ -2170,8 +2170,23 @@ module Gcry
       addr = pointer.address
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
-      chunk = chunk_containing(addr)
-      return nil unless chunk
+      # The radix hit inline, under the stop: this runs once per candidate the
+      # mark accepts, and `chunk_containing` is a call. Anything else — the
+      # lock, the audit, a miss — takes `chunk_containing`, which re-asks the
+      # table and stays the authority.
+      chunk = Pointer(ChunkHeader).null
+      if @world_stopped && !@index_audit
+        hit = radix_lookup(addr)
+        if !hit.null? && ChunkHeader.contains?(hit, addr)
+          radix_note_fast_hit
+          chunk = hit
+        end
+      end
+      if chunk.null?
+        found = chunk_containing(addr)
+        return nil unless found
+        chunk = found
+      end
 
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.large_header(chunk)

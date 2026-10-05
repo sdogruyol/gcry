@@ -137,8 +137,9 @@ module Gcry
         @hl_pushed_base.clear(@hl_pushed_words.to_i) unless @hl_pushed_base.null?
       end
 
-      private def hl_note_push(header : BlockHeader*) : Nil
+      private def hl_note_push(entry : BlockHeader*) : Nil
         return if @hl_pushed_base.null?
+        header = mark_entry_header(entry)
         return if header.address < @hl_pushed_lo
         idx = (header.address - @hl_pushed_lo) >> 4
         w = idx >> 6
@@ -247,7 +248,49 @@ module Gcry
       # Atomic payloads have no edges. The chunk is already resolved here;
       # preserve its mark and attribution without a queue round trip.
       return if atomic_of(chunk, header)
-      mark_stack_push(header)
+      mark_stack_push(mark_entry(chunk, header))
+    end
+
+    # A mark-stack entry is a block header pointer, and the trace's own pushes
+    # carry the block's size class in its top byte (class + 1; 0 = untagged).
+    # `scan_object` then has everything it needs — the payload starts at the
+    # header and its length is the class's — without resolving the chunk a
+    # second time: a radix walk, the chunk header's line and its checks, per
+    # scanned object, for a chunk `mark_impl_unlocked` had in hand at the push.
+    #
+    # The width is what matters on this stack: carrying the chunk as a second
+    # word was +13.4% mark (see `MarkStack#push`). The byte costs nothing —
+    # user-space addresses stop at bit 47 (bit 56 under five-level paging) on
+    # the x86_64 and aarch64 targets gcry is limited to (platform/os.cr).
+    # Large blocks and every other push site (the barrier's re-scan; the
+    # parallel flush copies entries verbatim) stay untagged and take the
+    # resolving path.
+    #
+    # One tag is not a class: `MARK_ENTRY_TAG_REST` names the unscanned rest
+    # of a large payload by the address it resumes at (`scan_large_from`).
+    MARK_ENTRY_TAG_SHIFT =                        56
+    MARK_ENTRY_ADDR_MASK = 0x00FF_FFFF_FFFF_FFFF_u64
+    MARK_ENTRY_TAG_REST  =                  0xFF_u64
+
+    # Under parallel mark a large payload is scanned this many bytes at a
+    # time, the rest pushed where any worker can take it, as Boehm splits a
+    # long range for its markers. Whole, one worker walked JsonGenerate's
+    # 70+ MB `Array(Coordinate)` buffer — every element's candidates resolved
+    # in series — while the others spun on an empty stack: with four workers
+    # its Σ mark was 471 ms whole and 359 ms split.
+    MARK_SPLIT_BYTES = 65536_u64
+
+    @[AlwaysInline]
+    private def mark_entry(chunk : ChunkHeader*, header : BlockHeader*) : BlockHeader*
+      return header if ChunkHeader.large?(chunk)
+      tag = chunk.value.size_class.to_u64 &+ 1
+      Pointer(BlockHeader).new(header.address | (tag << MARK_ENTRY_TAG_SHIFT))
+    end
+
+    # The header an entry names, tag stripped.
+    @[AlwaysInline]
+    private def mark_entry_header(entry : BlockHeader*) : BlockHeader*
+      Pointer(BlockHeader).new(entry.address & MARK_ENTRY_ADDR_MASK)
     end
 
     # First-mark source attribution (GCRY_LIVE_ATTR=1). Counts objects/bytes by
@@ -321,7 +364,14 @@ module Gcry
       size = block_payload(chunk, header).to_u64
       return true if size < 4
 
-      tid = user_of(chunk, header).as(Int32*).value
+      type_id_word_plausible?(user_of(chunk, header).as(UInt8*))
+    end
+
+    # The payload's first Int32 read as a type id, for a non-atomic payload of
+    # at least four bytes.
+    @[AlwaysInline]
+    private def type_id_word_plausible?(user : UInt8*) : Bool
+      tid = user.as(Int32*).value
       # Crystal type ids are dense positive integers (0 is not a real instance id;
       # a leading zero word is typical of Pointer(T) buffers / empty slots).
       return false if tid <= 0
@@ -372,8 +422,9 @@ module Gcry
           h = stack.pop
           # Header line and the payload's first line — the type_id gate and the
           # first scanned word both live there.
-          Kernels.prefetch_read(h.as(Void*))
-          Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+          a = mark_entry_header(h)
+          Kernels.prefetch_read(a.as(Void*))
+          Kernels.prefetch_read((a.as(UInt8*) + BlockHeader::SIZE).as(Void*))
           ring[(head + count) % MARK_PREFETCH_DEPTH] = h
           count += 1
         end
@@ -393,7 +444,29 @@ module Gcry
       end
     end
 
-    private def scan_object(header : BlockHeader*) : Nil
+    private def scan_object(entry : BlockHeader*) : Nil
+      # A tagged entry is a small, non-atomic block of a known class (see
+      # `mark_entry`): its payload and length need no chunk. The rest tag is
+      # the unscanned tail of a large payload.
+      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+      if tag != 0
+        if tag == MARK_ENTRY_TAG_REST
+          from = mark_entry_header(entry).address
+          chunk = chunk_containing(from)
+          return unless chunk && ChunkHeader.large?(chunk)
+          scan_large_from(chunk, ChunkHeader.large_header(chunk), from)
+          return
+        end
+        user = BlockHeader.user_from(mark_entry_header(entry)).as(UInt8*)
+        size = @block_bytes[tag.to_i32 &- 1] &- BlockHeader::SIZE
+        # `type_id_plausible?` for such a block, which is never atomic and
+        # never shorter than four bytes.
+        base_only = !@allow_interior_pointers && !type_id_word_plausible?(user)
+        scan_payload(user, size, base_only, 0_u64, 0_u64)
+        return
+      end
+      header = entry
+
       # The header's ATOMIC flag first, because it can end the call.
       #
       # It is a load off a line the mark stack pop already pulled in;
@@ -417,7 +490,34 @@ module Gcry
       # it once and reusing it beats three separate derivations.
       chunk = chunk_containing(header.address)
       return unless chunk
+      if ChunkHeader.large?(chunk)
+        scan_large_from(chunk, header, user_of(chunk, header).address)
+        return
+      end
       scan_block(chunk, header, 0_u64, 0_u64)
+    end
+
+    # A large payload from byte address `from` on. Under parallel mark at most
+    # `MARK_SPLIT_BYTES` of it, after the rest has gone onto the shared stack
+    # as one `MARK_ENTRY_TAG_REST` entry, so an idle worker takes it while
+    # this one scans. The planted miss of `make mark-audit` drops a payload's
+    # last word, so a payload it applies to is not split.
+    private def scan_large_from(chunk : ChunkHeader*, header : BlockHeader*, from : UInt64) : Nil
+      return if atomic_of(chunk, header)
+      user = user_of(chunk, header).as(UInt8*)
+      size = block_payload(chunk, header).to_u64
+      finish = user.address &+ size
+      return if from >= finish
+      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
+      if @mark_parallel && @mark_test_short_tid == 0 && finish &- from > MARK_SPLIT_BYTES
+        rest = from &+ MARK_SPLIT_BYTES
+        @mark_lock.lock
+        @mark_stack.push(Pointer(BlockHeader).new(rest | (MARK_ENTRY_TAG_REST << MARK_ENTRY_TAG_SHIFT)))
+        @mark_lock.unlock
+        scan_payload(Pointer(UInt8).new(from), MARK_SPLIT_BYTES, base_only, 0_u64, 0_u64)
+        return
+      end
+      scan_payload(Pointer(UInt8).new(from), finish &- from, base_only, 0_u64, 0_u64)
     end
 
     # `scan_object`'s body, chunk resolved. Words in `[skip_lo, skip_hi)` are
@@ -430,6 +530,13 @@ module Gcry
       user = user_of(chunk, header).as(UInt8*)
       size = block_payload(chunk, header).to_u64
       return if size == 0
+      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
+      scan_payload(user, size, base_only, skip_lo, skip_hi)
+    end
+
+    # The words of one payload, `size` bytes at `user`.
+    @[AlwaysInline]
+    private def scan_payload(user : UInt8*, size : UInt64, base_only : Bool, skip_lo : UInt64, skip_hi : UInt64) : Nil
       # A shared counter written per object by every helper is the line
       # parallel mark's scaling already paid for once; helpers count into
       # their own line and the master folds them in after the cycle.
@@ -462,8 +569,8 @@ module Gcry
       # so with @type_id_gate off, the type_id heuristic still steered marking
       # from here. @allow_interior_pointers (on by default; GCRY_DISABLE_INTERIOR) now
       # switches both off together, which is what makes `root_soundness=sound`
-      # a true statement. See docs/SOUND-DEFAULTS.md.
-      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
+      # a true statement. See docs/SOUND-DEFAULTS.md. The callers take that
+      # decision and pass it in as `base_only`.
       word = sizeof(Void*).to_u64
       words = size // word
       # The planted miss of `make mark-audit` (`mark_test_short_tid`).

@@ -49,9 +49,10 @@ module Gcry
     # decision 5, so `scan_object` would not have to re-resolve it. Measured, that
     # was **+13.4% on phase_mark** (t=62.9) purely from doubling this stack —
     # more than the per-object `chunk_containing` it was meant to avoid. The
-    # stack is hot and its width matters more than the lookup does. So
-    # `scan_object` does resolve the chunk, once, behind the header's ATOMIC
-    # early-out.
+    # stack is hot and its width matters more than the lookup does. So the
+    # trace's own pushes carry the block's size class in the entry's top byte
+    # instead, and `scan_object` resolves the chunk only for an untagged entry
+    # (`Heap::MARK_ENTRY_TAG_SHIFT`, collect_mark.cr). Entries are opaque here.
     def push(header : BlockHeader*) : Nil
       if @size >= @capacity
         grow(@mapped_bytes * 2)

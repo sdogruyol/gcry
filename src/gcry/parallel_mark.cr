@@ -295,8 +295,8 @@ module Gcry
       ahead = m < MARK_PREFETCH_DEPTH ? m : MARK_PREFETCH_DEPTH
       j = 0
       while j < ahead
-        h = batch[j]
-        Kernels.prefetch_read(h)
+        h = mark_entry_header(batch[j].as(BlockHeader*))
+        Kernels.prefetch_read(h.as(Void*))
         Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
         j += 1
       end
@@ -304,8 +304,8 @@ module Gcry
       while i < m
         k = i + MARK_PREFETCH_DEPTH
         if k < m
-          h = batch[k]
-          Kernels.prefetch_read(h)
+          h = mark_entry_header(batch[k].as(BlockHeader*))
+          Kernels.prefetch_read(h.as(Void*))
           Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
         end
         scan_object(batch[i].as(BlockHeader*))
