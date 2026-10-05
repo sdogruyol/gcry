@@ -673,11 +673,15 @@ interior-only-buffer: $(BIN)
 # The same for a byte buffer held only by a misaligned induction pointer:
 # the default arm must keep it, the alignment-filter arm must fault. Both red
 # arms get three tries: on Intel macOS the aligned-only arm kept the buffer
-# once in 20 CI runs (2026-10-03), a stale word holding it.
+# once in 20 CI runs (2026-10-03), a stale word holding it. The red arm runs
+# with the atomic slack off: the loop's last pointer, one past the buffer, is
+# aligned, and with the slack it lands inside the block and keeps it whatever
+# the alignment filter does — Boehm's reason for the byte. With the slack on
+# the arm kept the buffer 3 of 3 (2026-10-05, from `a57d0b6`).
 unaligned-only-buffer: $(BIN)
 	$(CRYSTAL) build -Dgc_none --release bench/unaligned_only_buffer.cr -o $(BIN)/unaligned_only_buffer --error-trace
 	$(BIN)/unaligned_only_buffer
-	@for i in 1 2 3; do GCRY_ALIGNED_CANDIDATES=1 $(BIN)/unaligned_only_buffer || exit 0; done; \
+	@for i in 1 2 3; do GCRY_ATOMIC_SLACK=0 GCRY_ALIGNED_CANDIDATES=1 $(BIN)/unaligned_only_buffer || exit 0; done; \
 	  echo "FAIL: the aligned-only arm kept the buffer in 3 of 3 runs"; exit 1
 
 poison-freed: $(BIN)

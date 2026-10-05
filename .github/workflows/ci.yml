@@ -2128,7 +2128,10 @@ jobs:
           if GCRY_DISABLE_INTERIOR=1 bin/interior_only_buffer; then echo "FAIL: the base-only arm kept the buffer"; exit 1; fi
           crystal build -Dgc_none --release bench/unaligned_only_buffer.cr -o bin/unaligned_only_buffer --error-trace
           bin/unaligned_only_buffer
-          if GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
+          # Slack off: the loop's final pointer, one past the buffer, is
+          # aligned and lands on the atomic slack byte, which keeps the buffer
+          # whatever the alignment filter does (see `make unaligned-only-buffer`).
+          if GCRY_ATOMIC_SLACK=0 GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
           ci/sound-suite.sh
           # The idle collector, on by default here since 2026-10-03. Its red
           # arms run directly: mingw make does not hand `! cmd` to a shell.
@@ -2229,7 +2232,7 @@ jobs:
           if GCRY_DISABLE_INTERIOR=1 bin/interior_only_buffer; then echo "FAIL: the base-only arm kept the buffer"; exit 1; fi
           "$cc" build -Dgc_none --release bench/unaligned_only_buffer.cr -o bin/unaligned_only_buffer --error-trace
           bin/unaligned_only_buffer
-          if GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
+          if GCRY_ATOMIC_SLACK=0 GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
           CRYSTAL="$cc" ci/sound-suite.sh
           "$cc" build -Dgc_none bench/idle_release.cr -o bin/idle_release --error-trace
           GCRY_IDLE_RELEASE_MS=50 bin/idle_release
