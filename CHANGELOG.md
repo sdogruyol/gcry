@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The process GC's defaults are root-complete: no root heuristic is armed
+  unless asked for.** Under multi-mutator STW, a parked fiber whose SP no
+  stop recorded was scanned only 256 KiB below its `stack_top`
+  (`stw_multi_stack_lag`), and a thread whose SP sat on a pool fiber only the
+  top 256 KiB of its pthread stack (`stw_multi_pthread_lag`). A live pointer
+  deeper than that was never seen. Both default to 0 now: the whole touched
+  stack, from the low-water mark. Measured on CI runners on 2026-09-26: Linux
+  EC4 pause 3.07 → 4.55 ms with req/s unchanged, EC1 unchanged. `Gcry.soundness`
+  reports `sound` by default. `GCRY_STW_STACK_LAG` / `GCRY_STW_PTHREAD_LAG`
+  restore the bounded scan, and the stderr warning about lag 0 is gone.
+
 - **A buffer of union values no longer loses its elements: the mark reads no
   type layout.** `Gcry::Layout` identified a block by its first `Int32`, and
   a mixed union's buffer starts with its first element's type id. With

@@ -307,9 +307,10 @@ module GC
   # profile turns the whole class off at once so a measurement can answer one
   # question honestly: what does gcry cost when it is not allowed to guess?
   #
-  # (First cut says: less than expected. Kemal /json is ~1pp of throughput and
-  # no RSS movement — see docs/SOUND-DEFAULTS.md. Whether that makes sound the
-  # right *default* is a separate call, and needs more than one host.)
+  # (First cut said: less than expected. Kemal /json is ~1pp of throughput and
+  # no RSS movement — see docs/SOUND-DEFAULTS.md. Since 2026-10-05 the process
+  # defaults are this profile: the last two knobs it moved, the STW stack lags,
+  # default to 0. The profile stays as the switch that forces it whole.)
   #
   #   allow_interior_pointers  LLVM may keep only an interior pointer live in a
   #                            register / spill slot while the base is dead
@@ -816,8 +817,8 @@ module GC
     # Research only: the pre-2026-09-04 pop/busy protocol, which lets the
     # master end a mark cycle while a worker still holds a batch.
     heap.mark_busy_unlocked = true if env_flag_one?("GCRY_MARK_BUSY_UNLOCKED")
-    # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default
-    # 256 KiB (was 512); 0 = full guard→bottom (thr regresses).
+    # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default 0,
+    # the whole touched stack; a non-zero lag trades completeness for pause.
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
     end
@@ -828,9 +829,9 @@ module GC
     if env_flag_zero?("GCRY_STACK_LOW_WATER")
       heap.stack_low_water_scan = false
     end
-    # A parked fiber is scanned from its saved `stack_top` when every thread
-    # that can run a fiber has a recorded SP. `0` keeps the lag window for all
-    # of them (A/B, and the escape hatch).
+    # With a non-zero `GCRY_STW_STACK_LAG`, a parked fiber is scanned from its
+    # saved `stack_top` when every thread that can run a fiber has a recorded
+    # SP. `0` keeps the lag window for all of them (A/B, and the escape hatch).
     heap.parked_fiber_sp = false if env_flag_zero?("GCRY_PARKED_FIBER_SP")
     # `GC.collect`, idle and emergency collections make a multi-mutator heap's
     # empty chunks dormant; `0` keeps them mapped (A/B, escape hatch).
@@ -846,7 +847,8 @@ module GC
       Gcry::Platform.reusable_release = false if env_flag_zero?("GCRY_DARWIN_REUSABLE")
     {% end %}
     # Multi-mutator pthread map when SP is off the OS stack (on a pool fiber).
-    # Default 256 KiB from stack high; 0 = full pthread mapping.
+    # Default 0, the full mapping; a non-zero lag scans that many bytes from
+    # stack high.
     if plag = env_u64("GCRY_STW_PTHREAD_LAG")
       heap.stw_multi_pthread_lag = plag
     end

@@ -1045,14 +1045,15 @@ module Gcry
       !sweep_multi_mutator? || @parallel_empty_chunk_munmap
     end
 
-    # How far below parked stack_top to scan under multi-mutator STW.
-    # Full guard→bottom × N fibers faults/scans historical high-water and
-    # dominated EC4 phase_roots (~100ms+/collect). Mid-swap frames with SP on
-    # the stack are covered by fiber_stack_sp_scan_low / scan_other_thread_stacks;
-    # this lag catches stack_top that lags without a visible SP. Override via
-    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 256 KiB
-    # (2026-08-01 A/B: soft 0/40; quiet thr ≥ 512 KiB default).
-    property stw_multi_stack_lag : UInt64 = 256_u64 * 1024
+    # How far below a parked fiber's `stack_top` to scan under multi-mutator
+    # STW when no recorded thread SP proves where its frames end. 0 — the
+    # default since 2026-10-05 — scans the whole touched stack (from the
+    # low-water mark), so no live pointer is ever declined. A non-zero lag
+    # (`GCRY_STW_STACK_LAG`, bytes) bounds the scan and with it the pause, at
+    # the price of never seeing a pointer deeper than the lag
+    # (docs/SOUND-DEFAULTS.md). Measured cost of 0 on CI runners, 2026-09-26:
+    # Linux EC4 pause 3.07 → 4.55 ms, req/s unchanged; EC1 unchanged.
+    property stw_multi_stack_lag : UInt64 = 0_u64
 
     # Skip the never-written head of a parked fiber stack — on *both* the lag-0
     # and the lag>0 default path (GCRY_STACK_LOW_WATER=0 to disable).
@@ -1063,19 +1064,12 @@ module Gcry
     # kernel cannot answer, so a failure only ever widens the scan.
     property stack_low_water_scan : Bool = true
 
-    # When suspend SP sits on a pool fiber, Parallel still scans the OS pthread
-    # mapping for leftover scheduler frames. Full map (often ~8 MiB × N) dominates
-    # phase_stacks after fiber-scan dedupe. Scan only the top *lag* bytes from
-    # stack high (grows down). Override via GCRY_STW_PTHREAD_LAG; 0 = full map.
-    # Default 256 KiB (2026-08-01: soft 0/40; stacks ~7→~0.4 ms; thr ≥ 71.5% cut).
-    property stw_multi_pthread_lag : UInt64 = 256_u64 * 1024
-
-    # One-shot stderr warning the first time a collect actually lands in the
-    # shape where lag 0 is expensive. Boot is the wrong place to warn: `GCRY_SOUND=1`
-    # sets lag 0 unconditionally, but the knob is *inert* until STW runs with more
-    # than two mutator threads, and at EC1 the whole profile is throughput-neutral.
-    # Warning at boot would cry wolf on the configuration that is fine.
-    @warned_stw_lag_zero = false
+    # When a suspended thread's SP sits on a pool fiber, its OS pthread mapping
+    # can still hold scheduler frames. 0 — the default since 2026-10-05 —
+    # scans the whole mapping (from the low-water mark); a non-zero
+    # `GCRY_STW_PTHREAD_LAG` scans only the top *lag* bytes from stack high
+    # and can miss a deeper pointer.
+    property stw_multi_pthread_lag : UInt64 = 0_u64
 
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     # `GCRY_FULL_SUSPENDED_STACK=1`: decline the SP clamp so a running fiber's
@@ -1242,16 +1236,15 @@ module Gcry
       # window was 1.0 of a 1.95 ms pause p50 (8 of 8 rounds); at EC4, 0.97
       # of ~6.4 ms. `GCRY_PARKED_FIBER_SP=0` restores the lag here.
       #
-      # Not at lag 0: that is `GCRY_SOUND=1` or an explicit
-      # `GCRY_STW_STACK_LAG=0`, a request to scan every parked fiber whole, and
-      # it keeps meaning that.
+      # Not at lag 0, the default: every parked fiber is scanned whole, which
+      # needs no invariant of the runtime's swap order to be complete.
       lag = @stw_multi_stack_lag
       if @parked_fiber_sp && @fiber_sp_all_known && lag != 0
         @fiber_scan_parked_sp &+= 1
         return t
       end
 
-      # 0 ⇒ classic full parked-fiber scan (correctness A/B; thr regresses).
+      # 0 ⇒ full parked-fiber scan, the default.
       #
       # "Full" only has to mean every word that can hold a pointer. A fiber
       # stack is 8 MiB of reserved address space and ~0.05% of it is ever
@@ -1332,26 +1325,6 @@ module Gcry
       lagged
     end
 
-    # lag=0 used to mean scanning every parked fiber guard→bottom, ~8 MiB each:
-    # 19× pause at Kemal EC4, 14.5× on a fat app past ~60 MiB (2026-08-06). The
-    # low-water skip removed that — 13.9× → 1.03× on bench/stw_lag_pause.cr —
-    # so the warning now fires only when the skip is not in play, which is the
-    # only case still carrying the old cost.
-    #
-    # Gcry::OS.write, not STDERR: this runs inside STW and must not allocate.
-    private def warn_stw_lag_zero_once : Nil
-      return if @warned_stw_lag_zero
-      {% if flag?(:linux) || flag?(:darwin) %}
-        return if @stack_low_water_scan && Platform.pagemap_available?
-      {% end %}
-      @warned_stw_lag_zero = true
-      msg = "gcry: WARNING: stw_multi_stack_lag=0 under multi-mutator STW without the " \
-            "low-water skip — every parked fiber stack is scanned in full (measured 19× " \
-            "pause at Parallel EC4, 14.5× on a large heap). Re-enable GCRY_STACK_LOW_WATER, " \
-            "or set GCRY_STW_STACK_LAG. See docs/SOUND-DEFAULTS.md\n"
-      Gcry::OS.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
-    end
-
     # Which window each running fiber's stack scan started from.
     getter fiber_scan_from_sp : UInt64 = 0_u64
     getter fiber_scan_from_guard : UInt64 = 0_u64
@@ -1362,7 +1335,6 @@ module Gcry
       # Parallel / multi-thread STW: extend parked stack_top by LAG (and SP when
       # present). Single-mutator: cheap stack_top clamp (Kemal thr path).
       stw_multi = @world_stopped && multi_mutator_threads?
-      warn_stw_lag_zero_once if stw_multi && @stw_multi_stack_lag == 0
       Fiber.unsafe_each do |fiber|
         fiber_walk_test_delay if @fiber_walk_test_delay_us > 0
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
