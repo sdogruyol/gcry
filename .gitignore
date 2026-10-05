@@ -11,6 +11,8 @@
 # Local scratch (acik rebuild bins, probe trees)
 .tmp/
 .tmp-*/
+# `ci/std-spec.sh`: the crystal-lang/crystal checkout whose spec/std it runs
+/.std-spec/
 
 # Local bench Postgres / Cursor project bits (not ship)
 .bench-pg/
