@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss parallel-dormant darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-death-window thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss parallel-dormant darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-death-window thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -1438,6 +1438,23 @@ thread-birth-root: $(BIN)
 	$(BIN)/thread_birth_root --churn
 	GCRY_THREAD_BIRTH_DEATHS=0 $(BIN)/thread_birth_root --churn-leaking
 
+# A dying thread's `Thread`, across collections it cannot be seen in.
+# `Thread#start` takes itself off Crystal's list and then still reads
+# `@detached` and `@system_handle`, and it waits in between on the fiber
+# list's mutex, which every stop holds — so a thread that leaves the list just
+# before a stop sits through the whole collection held only by its own
+# unscanned stack. The harness parks fire-and-forget threads exactly there and
+# collects; every `Thread` must survive. `--concurrent` has eight creators
+# race on the root table, which lost or crossed 12% of concurrent births until
+# 2026-10-05. The control turns the birth root off and requires the objects to
+# die, so the clean arms are the root's doing. No pre-stop wait in any arm:
+# correctness must not come from its spins.
+thread-death-window: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_death_window.cr -o $(BIN)/thread_death_window --error-trace
+	GCRY_STAGED_WAIT=0 $(BIN)/thread_death_window
+	GCRY_STAGED_WAIT=0 $(BIN)/thread_death_window --concurrent
+	GCRY_STAGED_WAIT=0 GCRY_THREAD_BIRTH_ROOT=0 $(BIN)/thread_death_window --control
+
 # The reproducer for the open "live large object released under load" item —
 # not a gate. `ROADMAP.md` has carried that defect since 2026-08-23 and lost
 # its reproducer: it was found under `wrk` against acikturkiye at about one
@@ -1589,7 +1606,7 @@ thread-uaf-sample: $(BIN)
 	  churn=""; \
 	  if [ -z "$$THREAD_UAF_BIN" ]; then \
 	    churn=$(SAMPLE_DIR)/run-$$i-churn.log; \
-	    GCRY_THREAD_UNSTAGE_ON_DEATH=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
 	      $(BIN)/thread_churn_uaf --child > $$churn 2>&1 || crashes=$$((crashes+1)); \
 	  fi; \
 	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log $$churn; do \
@@ -1610,7 +1627,7 @@ thread-uaf-sample: $(BIN)
 	  while [ "$$gaveup" -lt "$$want" ]; do \
 	    if [ "$$(date +%s)" -ge "$$deadline" ]; then stop="budget"; break; fi; \
 	    extra=$$((extra+1)); f=$(SAMPLE_DIR)/extra-$$extra-churn.log; \
-	    GCRY_THREAD_UNSTAGE_ON_DEATH=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
 	      $(BIN)/thread_churn_uaf --child > $$f 2>&1 || crashes=$$((crashes+1)); \
 	    d=$$(grep -c "is unmarked and about to be swept" $$f || true); \
 	    g=$$(grep -c "GAVE UP" $$f || true); \

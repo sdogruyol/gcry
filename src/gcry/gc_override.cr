@@ -1073,9 +1073,10 @@ module GC
     # The twin: count the gap and do not name it, which is what the census did
     # until 2026-09-19. `make thread-census-names` runs both directions.
     heap.thread_census_names = false if env_flag_zero?("GCRY_THREAD_CENSUS_NAMES")
-    # Root the `Thread` object from `pthread_create` until the thread publishes
-    # itself (src/gcry/thread_birth_root.cr). **On** by default: it closes a
-    # use-after-free, and it is one `add_root` per thread created.
+    # Root the `Thread` object from `pthread_create` until its thread is done
+    # with it (src/gcry/thread_birth_root.cr). **On** by default: it closes a
+    # use-after-free at each end of a thread's life, and it is one `add_root`
+    # per thread created.
     Gcry::ThreadBirthRoot.enabled = false if env_flag_zero?("GCRY_THREAD_BIRTH_ROOT")
     # The twin: record every birth and root nothing, so a run that survives is
     # not credited to the bookkeeping.
@@ -1083,9 +1084,9 @@ module GC
     # Research only: a birth that finds no slot goes unrooted, which is what the
     # table used to do to every birth past the 64th between two collections.
     Gcry::ThreadBirthRoot.overflow_unrooted = true if env_flag_one?("GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED")
-    # Research only: never release a birth root on a thread's death, so a
-    # root ends only where it used to — when `stop_world` finds the thread on
-    # Crystal's list. The control arm for `make thread-birth-root --churn`.
+    # Research only: never release a birth root on a thread's death or a
+    # recycled handle, so every root is held for the life of the process.
+    # The control arm for `make thread-birth-root --churn`.
     Gcry::ThreadBirthRoot.track_deaths = false if env_flag_zero?("GCRY_THREAD_BIRTH_DEATHS")
     # Research only: keep the pthread stack-bounds snapshot at its initial size
     # instead of growing it, which is what a thread list longer than 64 used to
@@ -1152,12 +1153,6 @@ module GC
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).
     Gcry::Platform.staged_no_evict = true if env_flag_one?("GCRY_STAGED_NO_EVICT")
-    # Research only, and a **reproducer for an open defect**: drop a thread's
-    # staging record when it dies. Right on its face, and it crashes — the
-    # pre-stop wait's spin budget is what has been giving a dying thread time
-    # to leave the window where it is off Crystal's list and still using
-    # itself (src/gcry/platform/thread_staging.cr).
-    Gcry::Platform.unstage_on_death = true if env_flag_one?("GCRY_THREAD_UNSTAGE_ON_DEATH")
     # Research only: let the dying-type audit walk every block on a minor
     # collection, where unmarked does not mean dying
     # (src/gcry/thread_block_audit.cr).
@@ -1777,7 +1772,14 @@ module GC
       ret = LibC._beginthreadex(security, stack_size, start_address, arglist, initflag | 4_u32, thrdaddr)
       raise RuntimeError.from_errno("_beginthreadex") if ret.null?
       Gcry::Platform.stage_thread(ret.address)
-      Gcry::ThreadBirthRoot.arm(ret.address, arglist)
+      # gcry's own handle on the thread, so the birth root can end when the
+      # thread has terminated: Crystal closes its copy itself, without calling
+      # into the GC (src/gcry/thread_birth_root.cr, `release_exited`). If the
+      # duplicate cannot be made the root is simply never released.
+      wait = Pointer(Void).null
+      process = LibC.GetCurrentProcess
+      LibC.DuplicateHandle(process, ret, process, pointerof(wait), LibC::SYNCHRONIZE.to_u32, 0, 0_u32)
+      Gcry::ThreadBirthRoot.arm(ret.address, arglist, wait.address)
       # Crystal stores the handle with `@system_handle = GC.beginthreadex(...)`,
       # i.e. after this returns, and the thread publishes itself on the thread
       # list from its own `Thread#start` as soon as it runs. Resumed first, it
@@ -1852,28 +1854,32 @@ module GC
     # kept its root for the life of the process
     # (src/gcry/thread_birth_root.cr).
     #
-    # The mark happens **before** the real call, so it is written while the
-    # handle is still unambiguously this thread's: after `pthread_detach` the
-    # handle is reusable, and a mark landing then could hit a slot `arm` had
-    # already given to a new birth.
+    # A join is stamped once the real call has returned — the thread is gone
+    # — and a detach before it, while the handle is still unambiguously this
+    # thread's: after `pthread_detach` the handle is reusable, and a mark
+    # landing then could hit a slot `arm` had already given to a new birth.
     #
-    # What is deliberately **not** here: dropping the thread's staging
-    # record. It belongs here logically — a dead thread is not a thread being
-    # born, and leaving the record makes every later stop spin its whole
-    # budget waiting for it — and shipping it crashes. See
-    # `GCRY_THREAD_UNSTAGE_ON_DEATH`.
+    # The staging record goes too: a dead thread is not a thread being born,
+    # and a record left behind makes every later stop spend the pre-stop
+    # wait's whole budget on it. This was held back from 2026-09-12 to
+    # 2026-10-05 as the retired unstage-on-death knob, "a reproducer", on the
+    # belief that the wait's spins were what kept a dying thread's `Thread`
+    # alive. They were not: the birth root is, for the whole life, and
+    # `make thread-death-window` holds dying threads in that window across
+    # collections with no wait at all (src/gcry/platform/thread_staging.cr).
     def self.pthread_join(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.unstage_on_death(thread.unsafe_as(UInt64))
-        Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
+        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
+        Gcry::ThreadBirthRoot.joining(thread.unsafe_as(UInt64)) { Gcry::OS.pthread_join(thread, nil) }
+      {% else %}
+        Gcry::OS.pthread_join(thread, nil)
       {% end %}
-      Gcry::OS.pthread_join(thread, nil)
     end
 
     # :nodoc:
     def self.pthread_detach(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.unstage_on_death(thread.unsafe_as(UInt64))
+        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
         Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
       {% end %}
       Gcry::OS.pthread_detach(thread)

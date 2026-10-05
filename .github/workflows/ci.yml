@@ -962,6 +962,17 @@ jobs:
         run: |
           make thread-birth-root
 
+      # The same root at the other end of the life. A dying thread leaves
+      # Crystal's list and then waits on the fiber list's mutex — held by
+      # every stop — before it reads its `Thread` for the last time, so the
+      # root is all that holds that object through the collection. The gate
+      # parks threads there, with and without eight creators racing on the
+      # root table, and its control requires the objects to die with the
+      # root off. No pre-stop wait in any arm.
+      - name: Thread death window
+        run: |
+          make thread-death-window
+
       # The other half of the birth window: the record the pre-stop wait uses.
       # A full staging table used to refuse the birth being handed in — the
       # newest one, i.e. the thread actually inside the window — so that thread
@@ -1855,6 +1866,7 @@ jobs:
           t timeout 300 make ec-queue-audit
           t timeout 300 make thread-block-audit
           t timeout 300 make thread-birth-root
+          t timeout 300 make thread-death-window
           t timeout 300 make dead-stack-root
           # The GCRY_SOUND=1 profile and suite: x86_64 runs it, and this is
           # the arch where register roots were first found missing.
@@ -2066,6 +2078,10 @@ jobs:
           # controls included. Both are use-after-free gates whose red arms
           # fault on this platform.
           make index-grow-race thread-churn-uaf
+          # Windows released a birth root once a stop saw its thread on
+          # Crystal's list, so a dying thread's `Thread` was swept under it;
+          # the root now ends when gcry's own handle on the thread signals.
+          make thread-death-window
           crystal build -Dgc_none --release bench/interior_only_buffer.cr -o bin/interior_only_buffer --error-trace
           bin/interior_only_buffer
           if GCRY_DISABLE_INTERIOR=1 bin/interior_only_buffer; then echo "FAIL: the base-only arm kept the buffer"; exit 1; fi
@@ -2163,6 +2179,7 @@ jobs:
           make CRYSTAL="$cc" poison-freed finalizer-complex mark-audit explicit-collect-barrier
           make CRYSTAL="$cc" parallel-mark-process parallel-mark-termination parallel-mark-stress monitor-gate-deadlock
           make CRYSTAL="$cc" bitmap-marks-freelist stw-slot-precision heap-counters counter-loss
+          make CRYSTAL="$cc" thread-death-window
           # Not stw-mt-sample (see the x86_64 job), and not find-block-race:
           # its `live` control crashed 0 of 40 here, so the gate cannot be
           # credited on this platform.
@@ -2399,7 +2416,7 @@ jobs:
           mkdir -p bin
           make poison-freed poison-holders finalizer-complex holders-find
           make parallel-mark-process parallel-mark-termination parallel-mark-stress monitor-gate-deadlock
-          make thread-birth-root thread-staging nursery-tlab-smoke trace-smoke ignored-knob-warnings
+          make thread-birth-root thread-death-window thread-staging nursery-tlab-smoke trace-smoke ignored-knob-warnings
           make bitmap-marks-freelist mark-audit released-range-report segv-region-report kept-release-report
           make index-grow-race large-cache-race nested-spawn-uaf explicit-collect-barrier
           # Not counter-loss: its plain arm lost an increment on Intel

@@ -33,11 +33,11 @@
 # Two arms:
 #
 #   default       no knobs. The rate the shipped collector has.
-#   amplified     `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, which drops a dead
-#                 thread's staging record and with it the pre-stop wait's
-#                 spin — the accidental delay that was hiding this
-#                 (src/gcry/platform/thread_staging.cr). Roughly 20x the
-#                 rate, and the arm to drive a bisect with.
+#   amplified     `GCRY_STAGED_WAIT=0`, no pre-stop wait for staged threads
+#                 at all. Until 2026-10-05 this arm was
+#                 `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, which removed the wait's
+#                 spins after a thread's death — roughly 20x the rate, and
+#                 the arm to drive a bisect with.
 #
 # Not a CI gate: it fails a small fraction of runs on purpose, and gating on
 # a rate would make every unrelated push flaky. What it *does* assert is
@@ -188,10 +188,13 @@ puts ""
 # exist — at ~1.5% a sighting takes a hundred runs, and a sighting is the
 # only thing that says anything.
 #
-# The other two carry the reproducer knob, which raises the rate about
-# twentyfold by removing the pre-stop wait's accidental delay, and then
-# differ in which victim they can name.
-AMP = {"GCRY_THREAD_UNSTAGE_ON_DEATH" => "1"}
+# The other two run with the pre-stop staged wait off, and then differ in
+# which victim they can name. They used to carry
+# `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, which removed that wait's spins after a
+# thread's death and roughly twentyfold the rate of the 2026-09-13 defect;
+# dropping a dead thread's record is the default since 2026-10-05, so the
+# amplifier is now the wait itself, gone entirely.
+AMP = {"GCRY_STAGED_WAIT" => "0"}
 
 # `--control` restores the defect, and it takes two knobs because the defect
 # took two things. Measured, 12 attempts each:

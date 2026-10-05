@@ -131,14 +131,20 @@ module Gcry
             Intrinsics.pause
           end
         end
+        # A birth root ends on proof that its thread is done with the
+        # `Thread`, never on finding the thread on Crystal's list: the list
+        # stops covering it while it is still running
+        # (src/gcry/thread_birth_root.cr). `@roots` directly, as on Linux:
+        # `@roots_lock` is held across the stop and is not reentrant.
         {% if flag?(:win32) %}
           Thread.unsafe_each do |thread|
-            id = thread.to_unsafe.address
-            Platform.unstage_thread(id)
-            if rooted = ThreadBirthRoot.release(id)
-              @roots.delete(rooted)
-            end
+            Platform.unstage_thread(thread.to_unsafe.address)
           end
+          ThreadBirthRoot.release_exited { |rooted| @roots.delete(rooted) }
+        {% else %}
+          # Until 2026-10-05 Darwin released nothing here at all, so a
+          # birth root ended only when the handle was recycled.
+          ThreadBirthRoot.release_dead(@collections) { |rooted| @roots.delete(rooted) }
         {% end %}
       {% else %}
         # `GCRY_STAGED_WAIT=1`: give a thread that exists but has not published
@@ -208,11 +214,11 @@ module Gcry
           # a thread off the list is one it cannot see. The object was swept
           # in that gap: `bench/log/linux/2026-09-12-thread-life-root/`.
           #
-          # So the root spans the whole life now, and only death ends it —
-          # observed through the `pthread_detach` / `pthread_join` hooks, with
-          # one collection of grace so a thread still finishing keeps it, or
-          # at once when glibc hands the handle to a new thread
-          # (src/gcry/thread_birth_root.cr). `@roots` directly: `@roots_lock`
+          # So the root spans the whole life now, and only proof that the
+          # thread is done with the object ends it — the dying thread's own
+          # `pthread_detach`, a `pthread_join` that has returned, or glibc
+          # handing the handle to a new thread — one collection after the
+          # stamp (src/gcry/thread_birth_root.cr). `@roots` directly: `@roots_lock`
           # is already held by `stop_world_quiescing_roots` and it is not
           # reentrant.
           ThreadBirthRoot.release_dead(@collections) { |rooted| @roots.delete(rooted) }

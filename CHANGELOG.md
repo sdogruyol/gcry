@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A dying thread's `Thread` is held until the thread is provably done with
+  it, on every platform; correctness no longer depends on the pre-stop
+  wait's spins.**
+  - **The window:** `Thread#start` takes itself off Crystal's list. It then
+    waits on the fiber list's mutex, which every stop holds, and only after
+    that reads `@detached` and `@system_handle`. A `Thread` nobody kept is
+    held through that collection by gcry's birth root alone.
+  - **Holes closed:**
+    - Concurrent `Thread.new`s raced on the root table, so a record could be
+      lost or crossed: 11–14% of 9 600 births at once.
+    - Windows released the root when a stop saw the thread on the list, so
+      the death window was uncovered there.
+    - A join was recorded before the real `pthread_join`.
+    - Darwin never released roots, which leaked.
+  - **When the root ends now:** only on proof. That is the dying thread's own
+    detach, a `pthread_join` that has returned, a reused handle, or, on
+    Windows, gcry's duplicate of the thread handle becoming signalled.
+    `GCRY_THREAD_UNSTAGE_ON_DEATH` is gone; its behaviour is the default.
+  - **Gate:** `make thread-death-window` parks 160 threads in the window
+    across three collections with no pre-stop wait. It loses 0 in 200 runs,
+    against 160 of 160 with the root off.
+    `process_spec/regression/23_thread_death_window_spec.cr` is 29/40 red on
+    the old table and 0/200 now.
+
 - **`GC.realloc` on an in-heap pointer that is not a live allocation aborts
   with the address instead of raising.** GMP calls `GC.realloc` as its C
   realloc hook, so the `ArgumentError` unwound through C frames, as

@@ -474,9 +474,8 @@ end
     if value.null?
       GC.pthread_join(thread)
     else
-      Gcry::Platform.unstage_on_death(thread.unsafe_as(UInt64))
-      Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
-      LibC.pthread_join(thread, value)
+      Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
+      Gcry::ThreadBirthRoot.joining(thread.unsafe_as(UInt64)) { LibC.pthread_join(thread, value) }
     end
   end
 
