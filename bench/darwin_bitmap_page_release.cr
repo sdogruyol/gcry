@@ -324,11 +324,17 @@ when "headers"
   end
 when "walk"
   # What the stand-down is standing down from. The walk must actually engage
-  # here, or the arm is measuring the stand-down twice.
-  if d_bytes == 0
-    failures << "walk: GCRY_PAGE_RELEASE_BITMAP_WALK=1 released no bytes from a " \
-                "bitmap chunk, so it is not reaching the walk and the default arm " \
-                "is being compared against itself"
+  # here, or the arm is measuring the stand-down twice. Either counter proves
+  # it did: both are written only inside `release_free_pages_in_chunk` (see
+  # the default arm). Bytes alone are not required — the only pages the walk
+  # can free on a bitmap chunk are a chunk's tail below its last whole block,
+  # and whether a whole page is left there depends on the size class and the
+  # chunk's bitmap header, which moved when atomic blocks gained a byte of
+  # slack (2026-10-05).
+  if d_bytes == 0 && d_skip == 0
+    failures << "walk: GCRY_PAGE_RELEASE_BITMAP_WALK=1 neither released nor examined " \
+                "a run in a bitmap chunk, so it is not reaching the walk and the " \
+                "default arm is being compared against itself"
   end
   # The measured shape of the staleness, and the reason the stand-down is a
   # cost decision rather than a soundness one: on a bitmap chunk
