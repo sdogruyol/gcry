@@ -1,0 +1,6 @@
+Binarytrees            inline     mark    72.23 (  70.22-  85.13)  pause    86.92 (  84.85- 103.12)  wall     0.64 (   0.62-   0.76)  gcs 259
+Binarytrees            new        mark    77.69 (  72.20-  88.81)  pause    93.47 (  86.70- 106.94)  wall     0.65 (   0.63-   0.78)  gcs 259
+JsonGenerate           inline     mark   541.39 ( 534.37- 628.23)  pause   546.18 ( 539.12- 633.32)  wall     0.63 (   0.60-   0.66)  gcs 27
+JsonGenerate           new        mark   578.49 ( 539.39- 681.73)  pause   583.59 ( 543.83- 687.67)  wall     0.64 (   0.60-   0.93)  gcs 27
+JsonParseSerializable  inline     mark   142.18 ( 138.76- 259.69)  pause   145.07 ( 141.59- 263.06)  wall     0.30 (   0.29-   0.36)  gcs 22
+JsonParseSerializable  new        mark   147.97 ( 141.38- 230.24)  pause   150.81 ( 144.31- 233.27)  wall     0.30 (   0.30-   0.45)  gcs 22

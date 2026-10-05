@@ -1,0 +1,15 @@
+Primes                 base       mark   773.51 ( 745.01- 798.07)  pause   775.94 ( 747.18- 800.57)  wall     1.38 (   1.28-   1.44)  gcs 13
+Primes                 inline     mark   591.60 ( 565.58- 599.17)  pause   594.12 ( 567.79- 601.70)  wall     1.20 (   1.11-   1.24)  gcs 13
+Primes                 new        mark   493.15 ( 477.28- 511.85)  pause   495.61 ( 479.56- 514.37)  wall     1.10 (   1.02-   1.15)  gcs 13
+JsonParsePure          base       mark   744.21 ( 731.66- 766.42)  pause   748.36 ( 735.29- 770.61)  wall     0.72 (   0.71-   0.73)  gcs 24
+JsonParsePure          inline     mark   498.41 ( 469.71- 518.47)  pause   502.47 ( 473.39- 522.45)  wall     0.60 (   0.57-   0.61)  gcs 24
+JsonParsePure          new        mark   392.44 ( 377.72- 503.21)  pause   396.50 ( 381.59- 507.22)  wall     0.53 (   0.51-   0.61)  gcs 24
+JsonParseSerializable  base       mark   213.90 ( 209.90- 225.79)  pause   216.81 ( 212.68- 228.76)  wall     0.30 (   0.30-   0.31)  gcs 22
+JsonParseSerializable  inline     mark   140.74 ( 136.32- 145.53)  pause   143.65 ( 139.22- 148.20)  wall     0.30 (   0.29-   0.30)  gcs 22
+JsonParseSerializable  new        mark   142.14 ( 139.07- 147.87)  pause   145.08 ( 141.82- 150.85)  wall     0.30 (   0.29-   0.31)  gcs 22
+JsonGenerate           base       mark   812.04 ( 808.42- 823.00)  pause   817.08 ( 813.45- 828.28)  wall     0.61 (   0.60-   0.63)  gcs 27
+JsonGenerate           inline     mark   540.10 ( 526.85- 552.35)  pause   545.15 ( 531.32- 557.60)  wall     0.61 (   0.60-   0.63)  gcs 27
+JsonGenerate           new        mark   553.15 ( 541.13- 565.35)  pause   558.09 ( 545.68- 570.39)  wall     0.61 (   0.59-   0.62)  gcs 27
+Binarytrees            base       mark   103.93 ( 102.90- 110.24)  pause   118.76 ( 117.29- 126.03)  wall     0.66 (   0.65-   0.68)  gcs 259
+Binarytrees            inline     mark    70.43 (  69.08-  74.64)  pause    84.78 (  83.25-  89.74)  wall     0.63 (   0.62-   0.64)  gcs 259
+Binarytrees            new        mark    74.75 (  72.97-  75.26)  pause    89.15 (  87.62-  91.44)  wall     0.64 (   0.62-   0.65)  gcs 259

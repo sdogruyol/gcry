@@ -1,0 +1,71 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index b65f948..df6e1a9 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -184,6 +184,18 @@ module Gcry
+       set_pushbuf_n(slot, n + 1)
+     end
+ 
++    {% if flag?(:gcry_markprof) %}
++      getter mp_cands = 0_u64
++      getter mp_nochunk = 0_u64
++      getter mp_large = 0_u64
++      getter mp_notalloc = 0_u64
++      getter mp_marked = 0_u64
++      getter mp_new_atomic = 0_u64
++      getter mp_new_push = 0_u64
++      getter mp_objs = 0_u64
++      getter mp_words = 0_u64
++    {% end %}
++
+     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
+       addr = pointer.address
+       if ThreadListWatch.note_candidate(addr)
+@@ -196,10 +208,13 @@ module Gcry
+       # the only one, so the process GC keeps them (GCRY_ALIGNED_CANDIDATES=1
+       # restores the filter for measurement).
+       return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
++      {% if flag?(:gcry_markprof) %} @mp_cands &+= 1 if source == RootSource::Heap {% end %}
+ 
+       found = find_block_with_chunk(pointer)
++      {% if flag?(:gcry_markprof) %} @mp_nochunk &+= 1 if !found && source == RootSource::Heap {% end %}
+       return unless found
+       header, chunk = found
++      {% if flag?(:gcry_markprof) %} @mp_large &+= 1 if ChunkHeader.large?(chunk) && source == RootSource::Heap {% end %}
+ 
+       # A candidate that names a block nobody holds is a stale word, not a root.
+       #
+@@ -217,6 +232,7 @@ module Gcry
+       # stale FREE pointers into USED blocks on the class lists, and it had
+       # already been found corrupting old freelists during a minor
+       # (`make nursery-tlab-smoke`; `bench/log/linux/2026-09-28-tlab-claim-retired/`).
++      {% if flag?(:gcry_markprof) %} @mp_notalloc &+= 1 if !block_allocated?(chunk, header) && source == RootSource::Heap {% end %}
+       return unless block_allocated?(chunk, header)
+       if base_only
+         # Object-base only on ambient roots: interiors into String/Array buffers
+@@ -238,6 +254,7 @@ module Gcry
+         return
+       end
+ 
++      {% if flag?(:gcry_markprof) %} @mp_marked &+= 1 if block_marked_in?(chunk, header) && source == RootSource::Heap {% end %}
+       return if block_marked_in?(chunk, header)
+       if @minor_only && !BlockHeader.nursery?(header)
+         return
+@@ -247,7 +264,9 @@ module Gcry
+       note_first_mark(chunk, header, source) if @live_attr_roots
+       # Atomic payloads have no edges. The chunk is already resolved here;
+       # preserve its mark and attribution without a queue round trip.
++      {% if flag?(:gcry_markprof) %} @mp_new_atomic &+= 1 if atomic_of(chunk, header) && source == RootSource::Heap {% end %}
+       return if atomic_of(chunk, header)
++      {% if flag?(:gcry_markprof) %} @mp_new_push &+= 1 if source == RootSource::Heap {% end %}
+       mark_stack_push(mark_entry(chunk, header))
+     end
+ 
+@@ -537,6 +556,7 @@ module Gcry
+     # The words of one payload, `size` bytes at `user`.
+     @[AlwaysInline]
+     private def scan_payload(user : UInt8*, size : UInt64, base_only : Bool, skip_lo : UInt64, skip_hi : UInt64) : Nil
++      {% if flag?(:gcry_markprof) %} @mp_objs &+= 1; @mp_words &+= size // 8 {% end %}
+       # A shared counter written per object by every helper is the line
+       # parallel mark's scaling already paid for once; helpers count into
+       # their own line and the master folds them in after the cycle.
