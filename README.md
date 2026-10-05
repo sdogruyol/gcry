@@ -55,10 +55,16 @@ Crystal >= 1.21. Linux (x86_64 + aarch64), macOS (arm64 + x86_64), and
 
 Crystal's own standard-library suite passes under gcry: all 18 054 examples
 of `spec/std` (Crystal 1.21.0), held in CI by the `std-spec` job
-([`ci/std-spec.sh`](ci/std-spec.sh)). On any other target — another OS,
-Android, or a 32-bit CPU — `-Dgc_none` + `require "gcry"` stops the build
-with a compile-time error instead of producing a binary
-([`src/gcry/platform/os.cr`](src/gcry/platform/os.cr)).
+([`ci/std-spec.sh`](ci/std-spec.sh)).
+
+The Crystal compiler, built with gcry, also builds itself and passes
+`compiler_spec`: 13 641 examples, 0 failures, the same as Boehm. `crystal i`
+runs in it too, because gcry exports Boehm's `GC_*` C ABI. CI holds both in
+the `compiler-gcry` job ([`ci/compiler-spec.sh`](ci/compiler-spec.sh)).
+
+On any other target — another OS, Android, or a 32-bit CPU — `-Dgc_none` +
+`require "gcry"` stops the build with a compile-time error instead of
+producing a binary ([`src/gcry/platform/os.cr`](src/gcry/platform/os.cr)).
 
 ---
 

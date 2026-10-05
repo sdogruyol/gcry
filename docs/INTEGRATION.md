@@ -83,6 +83,11 @@ Never `require "gcry"` as process GC without `-Dgc_none` — you fight Boehm.
 job `std-spec` in `.github/workflows/ci.yml`, run against the compiler's own
 commit (`docs/DEFAULT-GC-READINESS.md` §1).
 
+The compiler built with gcry builds itself, passes `compiler_spec` (13 641
+examples, 0 failures) and runs `crystal i`. gcry exports Boehm's `GC_*` C
+ABI and a `lib LibGC` (`src/gcry/c_abi.cr`), so shards that bind libgc
+directly link against it. CI: `ci/compiler-spec.sh`, job `compiler-gcry`.
+
 ## Windows
 
 Process GC runs on Windows x86_64 (Crystal's MSVC distribution) and ARM64

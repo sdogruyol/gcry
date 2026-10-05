@@ -24,7 +24,8 @@ compiler PR").
 | B5 | **Scoped**: unsupported targets fail at compile time with the reason | `platform/os.cr` |
 | B6 | **Proposed**: upstream interface written up | `docs/RFC-GC-BACKEND.md` |
 | B7 | **Fixed**: `spec/std` 18 054 / 0 failures in CI on 1.21.0 (plus `GCRY_STRESS=1`), `latest` and nightly | `ci/std-spec.sh`, job `std-spec` |
-| M1 | **Improved**: parallel mark on by default (`min(2, CPUs−1)`, 32 MiB floor); parallel cycles now feed the adaptive threshold's cap | `gc_override.cr`, `collect_mark.cr` |
+| M1 | **Improved**: parallel mark on by default, 32 MiB floor. Workers: `min(2, CPUs−1)` up to 7 CPUs, then `CPUs/4+1`, at most 8. Idle helpers wake on a futex (Linux). Large objects are split across workers. Parallel cycles feed the adaptive threshold's cap | `gc_override.cr`, `parallel_mark.cr`, `collect_mark.cr` |
+| M2 | **Improved, still open**: on a 12-CPU Linux host, as % of Boehm's speed: Primes 60→77%, JsonParsePure 62→79%, JsonParseSerializable 88%, Binarytrees 84%, RegexDna 98%, JsonGenerate 109%. Peak RSS 0.43–0.90× Boehm. Per thread, mark still costs ~2.1× Boehm's | `bench/log/linux/2026-10-05-alloc-storm-mark/` |
 | M3 | **Fixed**: every loaded shared object's writable data is a root (Linux, macOS, Windows) | `platform/*_roots.cr`; `process_spec/regression/16` |
 | M4 | **Fixed**: Boehm's ignore-self finalization order; dangling weak links dropped | `collect_mark.cr`; `process_spec/regression/17`, `20` |
 | M8 | **Fixed**: Boehm's `GC_*` C ABI and `lib LibGC`, including `GC_stackbottom` | `c_abi.cr`; `process_spec/regression/21` |
@@ -32,7 +33,7 @@ compiler PR").
 | m7 | **Mitigated**: one byte of slack on atomic blocks, as under Boehm; the argv patch stays | `heap.cr`; `process_spec/regression/24` |
 | m8 | **Fixed**: docs refreshed | `README.md`, `docs/*` |
 | m9 | **Fixed**: `rbp`/`x29` captured unmangled | `roots.cr`; `process_spec/regression/15` |
-| M2, M5, M6, M7 | **Open**: allocation-storm throughput, open races, TSan/fuzzing, knob surface | below |
+| M5, M6, M7 | **Open**: open races, TSan/fuzzing, knob surface | below |
 
 Two Crystal bugs turned up along the way, both outside gcry: `raises?` is not
 a fixpoint (§1, E3), and `String::Builder#to_s` writes one byte past its
@@ -213,6 +214,9 @@ end
 
 ## 2. Blockers
 
+§2–§4 record the review as it was on 2026-10-04. The status table at the
+top supersedes them.
+
 | ID | Gap | Evidence |
 |----|-----|----------|
 | **B1** | **Defaults are not sound.** Under multi-mutator STW a parked fiber whose SP is unproven is scanned only within `stw_multi_stack_lag` = 256 KiB of its stack top, and a thread whose SP sits on a pool fiber gets only the top `stw_multi_pthread_lag` = 256 KiB of its pthread stack; a live pointer deeper than the lag is never seen. The parked-fiber-from-saved-SP path relies on runtime invariants the collector does not check (swapcontext store order; SYSMON/idle never running user fibers). `GCRY_SOUND=1` is opt-in, although the README measures its cost as ~0 at EC1 and a small pause increase with more threads. | read: `collect_scan.cr:1055,1071,1108`; `docs/SOUND-DEFAULTS.md` knob table and "How to read this" |
@@ -254,21 +258,40 @@ end
 
 ## 5. Suggested order
 
-1. **E1, E2, E3 — done 2026-10-05.**
+1. **E1, E2, E3: done 2026-10-05.**
    - E1: the layout macros skip types this file cannot spell.
    - E2: `Gcry.usable_size`.
    - E3: `crystal_raises_compat.cr`, plus a compiler patch in
      `bench/log/linux/2026-10-05-raises-cycle/`.
    - Still open: filing the compiler issue/PR upstream.
-2. **B7 — std_spec part done 2026-10-05.** The CI job `std-spec` runs it on 1.21.0 with a `GCRY_STRESS=1` rerun, on `latest`, and on `nightly`. compiler_spec is folded into 5.
-3. **B1.** Make the sound profile the default.
-4. **B3 / M1.** Make Parallel EC a first-class mode: TLAB, the open UAF family, and parallel mark defaulting to `min(2, CPUs−1)`.
-5. **B4.** Build the compiler with gcry and run `compiler_spec`. Decide the interpreter path: a `GC_*` C-ABI shim, or the interpreter keeping Boehm.
-6. **B6.** Write an upstream RFC: `src/gc/gcry.cr`, `-Dgc_gcry`, and runtime↔GC hooks to replace the ivar reads and the Monitor reopen. Propose Linux first (B5 scoped by platform).
-7. **M3–M8.** Shared-library roots, ordered finalization, the open races, TSan and fuzzing, and knob and research-code reduction.
+2. **B7: done 2026-10-05.**
+   - The CI job `std-spec` runs `spec/std` on 1.21.0 (with a
+     `GCRY_STRESS=1` rerun), on `latest` and on `nightly`.
+   - The job `compiler-gcry` builds the compiler with gcry and runs
+     `compiler_spec`.
+3. **B1: done.** The sound profile is the default.
+4. **B3 / M1: mostly done.**
+   - Parallel mark is on by default, and the compiler's Parallel EC passes
+     its suite.
+   - TLAB and `GCRY_PARALLEL_RELEASE` remain research arms.
+5. **B4: done.** The compiler self-hosts with gcry. `crystal i` binds gcry's
+   `GC_*` exports (`c_abi.cr`), so the interpreter does not need Boehm.
+6. **B6: proposed.** `docs/RFC-GC-BACKEND.md` covers `src/gc/gcry.cr`,
+   `-Dgc_gcry`, and runtime↔GC hooks to replace the ivar reads and the
+   Monitor reopen. It proposes Linux first.
+7. **Open:**
+   - M2: the mark's per-thread cost, and page reuse between large and small
+     objects.
+   - M5: races.
+   - M6: TSan and fuzzing.
+   - M7: knob and research-code reduction.
+   - Upstream: filing the three stdlib/compiler fixes.
 
 ## 6. Limits of this review
 
-- std_spec ran in full only on Linux x86_64, with Crystal 1.21.0 and 1.21.1.
-- compiler_spec, the interpreter and non-Linux platforms were not executed.
-- Most "read" items come from source and doc reading at the cited lines; they were not reproduced.
+- std_spec ran in full on Linux x86_64 with Crystal 1.21.0, 1.21.1 and
+  nightly.
+- compiler_spec and `crystal i` ran on Linux x86_64 only.
+- macOS and Windows run gcry's own gates in CI, but not Crystal's suites.
+- Most "read" items come from source and doc reading at the cited lines;
+  they were not reproduced.

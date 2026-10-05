@@ -16,7 +16,7 @@ private runtime state and reopening runtime classes. This RFC proposes:
 1. a third backend slot, `src/gc/gcry.cr`, selected by `-Dgc_gcry`;
 2. a small, named runtime↔GC interface to replace the private reads;
 3. three stdlib/compiler fixes gcry found that also affect Boehm programs;
-4. a decision on the interpreter's `GC_*` ABI;
+4. the interpreter's `GC_*` ABI, which gcry now exports;
 5. a staged rollout: opt-in flag → Linux default → other platforms.
 
 ## Evidence that it works
@@ -40,14 +40,23 @@ private runtime state and reopening runtime classes. This RFC proposes:
   footprint on macOS (`bench/log/macos/2026-09-06-bitmap-default-ab/`). CI
   perf smoke, v0.34.0 window: Linux `/json` 104.8%, `/` 100.8%, peak RSS 0.96×
   (`bench/leaderboard.md`).
+- **The compiler self-hosts with gcry.** A compiler built with gcry builds
+  itself. `compiler_spec` passes: 13 641 examples, 0 failures, the same as
+  Boehm. `crystal i` runs in the gcry-built compiler (3 of 3 programs).
+  - CI runs all of this on every push (`ci/compiler-spec.sh`, job
+    `compiler-gcry`).
+  - The gcry-built compiler compiles 4–5% slower than the Boehm-built one.
 - **Platforms.** Linux x86_64/aarch64, macOS arm64/x86_64, Windows
   x86_64/ARM64 ([WINDOWS.md](WINDOWS.md)). Any other target is refused at
   compile time rather than miscompiled (`src/gcry/platform/os.cr:10-16`).
 
-What is **not** evidenced yet, and is a precondition for later stages, not for
-stage 1: the compiler has not been built or run with gcry and
-`compiler_spec` has not been tried (READINESS B4, B7); Parallel
-ExecutionContext is opt-in only, with TLAB off (B3, [POLICY.md](POLICY.md)).
+What is **not** evidenced yet:
+
+- Allocation-storm throughput lags Boehm: Primes 77% and JsonParsePure 79%
+  of its speed on a 12-CPU Linux host (READINESS M2).
+- Crystal's suites have run under gcry only on Linux x86_64.
+- TLAB, under Parallel ExecutionContext, remains a research arm (B3,
+  [POLICY.md](POLICY.md)).
 
 ## 1. Backend selection
 
@@ -165,23 +174,23 @@ Crystal crashes on it under an allocator with no slack
 ## 4. The interpreter's `GC_*` ABI
 
 `crystal i` drops `-lgc` and resolves `GC_*` from the compiler executable
-itself (`src/compiler/crystal/interpreter/context.cr:441-460`). gcry exports
-no `GC_*` C symbols (READINESS B4). Two options:
+itself (`src/compiler/crystal/interpreter/context.cr:441-460`).
 
-- **(a)** the interpreter keeps Boehm: the compiler binary is built with
-  Boehm whatever backend the programs it compiles use. No new ABI.
-- **(b)** `gc/gcry.cr` exports the `GC_*` subset the interpreter binds.
-
-Proposed: **(a)** for stages 1 and 2, since it needs no work and the
-compiler has not yet been self-hosted on gcry; revisit (b) before stage 3.
+- **What gcry exports:** Boehm's `GC_*` functions and a `GC_stackbottom`
+  data symbol, plus a `lib LibGC` for shards that bind it directly
+  (`src/gcry/c_abi.cr`; `process_spec/regression/21_boehm_c_abi_spec.cr`).
+- **Result:** a compiler built with gcry runs `crystal i` (`ci/compiler-spec.sh`,
+  `ci/compiler-interp/`).
+- **Proposed:** `gc/gcry.cr` keeps these exports, so the interpreter follows
+  the backend the compiler was built with. No interpreter change is needed.
 
 ## 5. Staged rollout
 
 | Stage | What | Entry criterion (evidence) |
 |---|---|---|
 | 1 | `-Dgc_gcry` opt-in, all three gcry platforms; Boehm stays default | §1 and §2 merged; `spec/std` green under `-Dgc_gcry` in Crystal's CI as it is in gcry's (`ci/std-spec.sh`); §3.1 merged or the compat file shipped |
-| 2 | Default on Linux x86_64/aarch64; `-Dgc_boehm` as escape hatch | `compiler_spec` and a compiler self-host under gcry (READINESS B4/B7); Parallel ExecutionContext supported by default, which the compiler itself uses (B3); one release of stage 1 with no open live-object-loss report (B2) |
-| 3 | macOS, then Windows default | Same criteria per platform; interpreter decision (§4) revisited |
+| 2 | Default on Linux x86_64/aarch64; `-Dgc_boehm` as escape hatch | `compiler_spec` and a compiler self-host under gcry, which gcry's CI already runs (`compiler-gcry`), in Crystal's CI too; Parallel ExecutionContext supported by default, which the compiler itself uses (B3); one release of stage 1 with no open live-object-loss report (B2) |
+| 3 | macOS, then Windows default | Same criteria per platform |
 
 Platforms outside these stay on Boehm; gcry already refuses to build for
 them (`src/gcry/platform/os.cr:10-16`), so no target silently changes

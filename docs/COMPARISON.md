@@ -41,7 +41,7 @@ The Kemal and fat-app rows were measured while the 256 KiB STW stack lags were s
 
 - You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (unsupported in gcry)
 - You target anything outside Linux, macOS and Windows on x86_64 / aarch64
-- You need `crystal i` (the interpreter resolves Boehm's `GC_*` symbols; gcry exports none — `docs/DEFAULT-GC-READINESS.md` B4)
+- Your workload is an allocation storm with a large pointer heap, and wall time is the bar: gcry runs Primes at 77% and JsonParsePure at 79% of Boehm's speed on a 12-CPU Linux host (`bench/log/linux/2026-10-05-alloc-storm-mark/`)
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
 
 Secondary CLI shapes (tree/JSON/channel): vendored crystal-metric GC subset —
