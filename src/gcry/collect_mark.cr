@@ -417,6 +417,14 @@ module Gcry
       # it once and reusing it beats three separate derivations.
       chunk = chunk_containing(header.address)
       return unless chunk
+      scan_block(chunk, header, 0_u64, 0_u64)
+    end
+
+    # `scan_object`'s body, chunk resolved. Words in `[skip_lo, skip_hi)` are
+    # not followed: `mark_from_children` passes the object's own block there,
+    # every other caller an empty range, which the inline folds away.
+    @[AlwaysInline]
+    private def scan_block(chunk : ChunkHeader*, header : BlockHeader*, skip_lo : UInt64, skip_hi : UInt64) : Nil
       return if atomic_of(chunk, header)
 
       user = user_of(chunk, header).as(UInt8*)
@@ -470,6 +478,7 @@ module Gcry
       words.times do |i|
         w = cursor[i]
         next if w < lo || w >= hi
+        next if w >= skip_lo && w < skip_hi
         mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
       end
     end
@@ -760,16 +769,46 @@ module Gcry
       end
     end
 
+    # Finalizable objects found on a cycle by `enqueue_unreachable_finalizers`,
+    # cumulative: each one is reachable from its own fields, so it is never
+    # finalized and never reclaimed. Boehm warns per object per collection;
+    # this counts every sighting and prints at 1, 2, 4, 8, ...
+    getter finalization_cycles : UInt64 = 0_u64
+
     # After mark, before sweep. Allocation-free (no Crystal Proc/closure).
     # World stopped; registry quiesced at stop_world (no concurrent mutate).
+    # The mark stack is empty on entry: both callers have just drained it.
     #
-    # Boehm rule: enqueue finalizers for unmarked objects, then *resurrect*
-    # them (mark + rematerialize) so sweep does not reclaim before
-    # run_pending. Otherwise Socket/Digest#finalize runs on freed memory
-    # (acik wrk SEGV). Weak links clear while still unmarked. Next collect
-    # reclaims if nothing else holds the object.
+    # Boehm's `GC_finalize` for `GC_register_finalizer_ignore_self`, which is
+    # how Crystal's stdlib registers every finalizer (`gc/boehm.cr`):
+    #
+    # 1. Disappearing links whose target is unmarked are cleared first, while
+    #    the targets still look dead: a `WeakRef` to an object that only a
+    #    dying finalizable reaches reads nil from here on, though the object
+    #    is kept for that finalizer (Boehm's short links do the same).
+    # 2. Ordering. For every unreachable finalizable, mark from its fields —
+    #    not from the object itself, and not through a pointer into its own
+    #    block. A finalizable reached that way is not ready: one that will be
+    #    finalized now still holds it, so it waits for a later collection and
+    #    the holder's finalizer can still use it. A chain of n finalizes over n
+    #    collections, holder first. One that its own fields reach is on a
+    #    cycle and is never ready, as in Boehm.
+    # 3. What is still unmarked is queued and *resurrected* (marked) so the
+    #    sweep does not reclaim it before `run_pending`; otherwise
+    #    Socket/Digest#finalize runs on freed memory (acik wrk SEGV). Its
+    #    fields were marked in 2. Next collect reclaims it if nothing else
+    #    holds it.
+    # 4. A link whose *location* is in a block that is still unmarked — a
+    #    `WeakRef` that died itself — is dropped, without a write: its block
+    #    is about to be reclaimed. Only now, so a `WeakRef` that a dying
+    #    finalizable holds stays registered (Boehm's
+    #    `GC_remove_dangling_disappearing_links`, also after the marking).
+    #
+    # Until 2026-10-05 step 2 was missing: every unreachable finalizable was
+    # queued in one pass and they ran in table order, so a holder's finalizer
+    # could find what it holds already finalized
+    # (`process_spec/regression/17_ordered_finalization_spec.cr`).
     private def enqueue_unreachable_finalizers : Nil
-      # Disappearing links first — targets still look dead for WeakRef.
       i = 0
       while i < @finalizers.link_count
         if unmarked_live_object?(@finalizers.link_object_at(i))
@@ -779,48 +818,144 @@ module Gcry
         end
       end
 
+      # Drained per object, serially, as Boehm's `GC_mark_fo` does: the cycle
+      # check needs the closure of this object alone, and `mark_loop` would
+      # start and stop the parallel pool once per finalizable. Marks only grow
+      # across the loop, so which objects end up ready does not depend on the
+      # table's order.
+      n = @finalizers.entry_count
+      i = 0
+      while i < n
+        obj = @finalizers.entry_object_at(i)
+        if found = unmarked_live_block(obj)
+          header, chunk = found
+          mark_from_children(chunk, header)
+          serial_mark_drain
+          note_finalization_cycle(obj) if block_marked_in?(chunk, header)
+        end
+        i += 1
+      end
+
       i = 0
       while i < @finalizers.entry_count
         obj = @finalizers.entry_object_at(i)
-        if unmarked_live_object?(obj)
+        if found = unmarked_live_block(obj)
+          header, chunk = found
+          count_type_id_false_negative(obj, chunk, header)
           @finalizers.queue_and_remove_entry_at(i)
+          # Its fields were marked above; only its own mark is missing, so
+          # set it rather than push the object to be scanned a second time.
+          #
           # Research only (`finalizer_resurrect = false`,
-          # `GCRY_FINALIZER_NO_RESURRECT=1`): skip the resurrection, so the
-          # sweep reclaims the block and the callback runs on freed memory —
-          # the pre-Boehm-rule behaviour. `make finalizer-complex --broken`
-          # requires the callback to find its object gone.
-          mark_candidate(obj) if @finalizer_resurrect && !obj.null?
+          # `GCRY_FINALIZER_NO_RESURRECT=1`): skip the object's own
+          # resurrection, so the sweep reclaims its block and the callback
+          # runs on freed memory — the pre-Boehm-rule behaviour.
+          # `make finalizer-complex --broken` requires the callback to find
+          # its object gone.
+          if @finalizer_resurrect
+            set_block_mark_in(chunk, header)
+            note_first_mark(chunk, header, RootSource::Heap) if @live_attr_roots
+          end
         else
           i += 1
         end
       end
 
-      mark_loop unless @mark_stack.empty?
+      # Until 2026-10-05 this step was missing: the row outlived its
+      # `WeakRef`, and when the target died later the null of step 1 went
+      # into whatever had reused the `WeakRef`'s block — all 2000 dead
+      # `WeakRef`s of `process_spec/regression/20_dangling_weak_link_spec.cr`
+      # zeroed a word of a reused block.
+      i = 0
+      while i < @finalizers.link_count
+        if dead_link_location?(@finalizers.link_location_at(i))
+          @finalizers.remove_link_at(i)
+        else
+          i += 1
+        end
+      end
+    end
+
+    # The block holding a link location is dead: unmarked now, or already
+    # freed (`GC.free` on the holder, which `notice_reclaim` does not catch —
+    # it matches link *targets*). A location outside the heap (a C slot, a
+    # static) resolves to no block and stays registered.
+    private def dead_link_location?(location : Void*) : Bool
+      found = find_block_with_chunk(location)
+      return false unless found
+      header, chunk = found
+      return true unless block_allocated?(chunk, header)
+      # During a minor an old holder is unmarked and alive.
+      return false if @minor_only && !BlockHeader.nursery?(header)
+      !block_marked_in?(chunk, header)
+    end
+
+    # Push what *header*'s object points at, leaving the object itself
+    # unmarked: Boehm's `GC_ignore_self_finalize_mark_proc`. A word that
+    # resolves into the object's own block is skipped — `XML::Document` holds
+    # `@document = self`, and following that would make every document a
+    # cycle. A longer way back (A -> X -> A) is still followed, and is a cycle.
+    # The range is the one `find_block_with_chunk` resolves to this block.
+    private def mark_from_children(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      lo = header.address
+      hi = if ChunkHeader.large?(chunk)
+             user_of(chunk, header).address &+ header.value.size
+           else
+             lo &+ @block_bytes[chunk.value.size_class.to_i32]
+           end
+      scan_block(chunk, header, lo, hi)
+    end
+
+    private def note_finalization_cycle(obj : Void*) : Nil
+      @finalization_cycles &+= 1
+      count = @finalization_cycles
+      return unless count & (count &- 1) == 0
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: finalization cycle involving 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, obj.address)
+      len = RawOut.append(buf.to_unsafe, len,
+        " — an object with a finalizer reaches itself through its own fields, so neither its " \
+        "finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as " \
+        "Boehm's). Sightings so far: ")
+      len = RawOut.append_u64(buf.to_unsafe, len, count)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # *obj*'s block and chunk when it is allocated, eligible this collection,
+    # and unmarked; nil otherwise.
+    private def unmarked_live_block(obj : Void*) : {BlockHeader*, ChunkHeader*}?
+      return nil if obj.null?
+      found = find_object_with_chunk(obj)
+      return nil unless found
+      header, chunk = found
+      return nil if BlockHeader.free?(header)
+      # During generational minor, old objects are intentionally unmarked.
+      # Only nursery deaths may enqueue finalizers / clear WeakRef links.
+      return nil if @minor_only && !BlockHeader.nursery?(header)
+      # The heap-local mark check, not the static `BlockHeader.marked?`: under
+      # `GCRY_BITMAP=1` the header generation is not where the marks are, and
+      # the static reader would answer for the wrong representation.
+      return nil if block_marked_in?(chunk, header)
+      found
     end
 
     private def unmarked_live_object?(obj : Void*) : Bool
-      return false if obj.null?
-      header = find_object(obj)
-      return false unless header
-      return false if BlockHeader.free?(header)
-      # During generational minor, old objects are intentionally unmarked.
-      # Only nursery deaths may enqueue finalizers / clear WeakRef links.
-      return false if @minor_only && !BlockHeader.nursery?(header)
-      # Use the heap-local mark check, not the static `BlockHeader.marked?`:
-      # under `GCRY_BITMAP=1` the header generation is not where the marks are,
-      # and the static reader would answer for the wrong representation.
-      if heap_marked?(header)
-        return false
-      end
-      # False-negative counter: gate rejected the ambient pointer that pointed
-      # here, but a different root still walked this object. If the page is
-      # also blacklisted (we previously declared similar addresses false), this
-      # is exactly the UAF vector the gate is supposed to prevent — record it
-      # so a production heap can alert on a non-zero rate.
-      if @blacklist_enabled && blacklisted_page?(obj.address) && type_id_plausible?(header)
+      found = unmarked_live_block(obj)
+      return false unless found
+      count_type_id_false_negative(obj, found[1], found[0])
+      true
+    end
+
+    # False-negative counter: gate rejected the ambient pointer that pointed
+    # here, but a different root still walked this object. If the page is
+    # also blacklisted (we previously declared similar addresses false), this
+    # is exactly the UAF vector the gate is supposed to prevent — record it
+    # so a production heap can alert on a non-zero rate.
+    private def count_type_id_false_negative(obj : Void*, chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      if @blacklist_enabled && blacklisted_page?(obj.address) && type_id_plausible?(chunk, header)
         @type_id_root_false_negatives += 1
       end
-      true
     end
   end
 end

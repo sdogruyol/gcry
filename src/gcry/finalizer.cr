@@ -147,6 +147,11 @@ module Gcry
         @links[i].object
       end
 
+      # Where link *i* lives: the word that is nulled when its target dies.
+      def link_location_at(i : Int32) : Void*
+        @links[i].link.as(Void*)
+      end
+
       # Queue finalizer at *i* and swap-remove (does not allocate on GC heap).
       # STW collect only — mutators quiesced via lock_for_stw (see collect_stw).
       def queue_and_remove_entry_at(i : Int32) : Nil
@@ -157,6 +162,12 @@ module Gcry
       # Clear disappearing link at *i* and swap-remove. STW collect only.
       def clear_and_remove_link_at(i : Int32) : Nil
         @links[i].link.value = Pointer(Void).null
+        swap_remove_link(i)
+      end
+
+      # Drop link *i* without touching its location, which belongs to an
+      # object that is about to be reclaimed. STW collect only.
+      def remove_link_at(i : Int32) : Nil
         swap_remove_link(i)
       end
 

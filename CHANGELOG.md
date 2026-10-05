@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A dead `WeakRef` no longer zeroes a word in a reused block.** Its
+  disappearing-link row outlived it. When the target died later, the
+  collector nulled the `WeakRef`'s old `@target` word in whatever had reused
+  the block: in the gate, all 2000 of 2000 dropped `WeakRef`s hit a reused
+  block. Rows whose holder is unmarked are now dropped after finalizer
+  marking, as Boehm's `GC_remove_dangling_disappearing_links` does.
+  `process_spec/regression/20_dangling_weak_link_spec.cr`.
+
+- **Finalizers run in Boehm's order: a holder before what it holds.**
+  - **What Crystal expects:** it registers every finalizer with Boehm's
+    `GC_register_finalizer_ignore_self`. An object held by a dying
+    finalizable waits for a later collection and is intact when its turn
+    comes.
+  - **What gcry did:** it queued them all in one pass. A chain of 8 ran as
+    `[7, 6, 5, 4, 3, 2, 1, 8]` in a single collection.
+  - **Cycles:** a cycle of finalizables is now never finalized, as under
+    Boehm. It is counted in `Heap#finalization_cycles` and reported on stderr
+    when the count reaches 1, 2, 4, …. A direct self-pointer (`XML::Document`)
+    is ignored, as `ignore_self` says.
+  - **Cost:** a wrapper holding a finalizable resource pays +9% per
+    collection, because the resource survives one more cycle. Independent
+    finalizables cost nothing measurable.
+  - **Gate:** `process_spec/regression/17_ordered_finalization_spec.cr`.
+
 - **The `GC` API behaves like `gc/boehm.cr`.**
   - **`GC.disable` nests.** `disable; disable; enable` used to turn
     collection back on. `GC.enable` with nothing disabled raises `GC is not
