@@ -144,6 +144,18 @@ interleaved reps:
 `Hash(String, Int32)` counts, which the `Hash` walk skipped and the
 conservative scan reads.
 
+A second run on the three benches the first left least clear (run
+37245504552, `ea65d06` against `5cc3ab4`, 16 reps):
+
+| bench | x86_64 mark | arm64 mark | x86_64 time | arm64 time |
+|---|---:|---:|---:|---:|
+| JsonParseSerializable | −3.3% | −8.5% | +1.7% | −0.1% |
+| JsonGenerate | −1.2% | −8.2% | −3.8% | +0.6% |
+| Knuckeotide | 46 → 52 ms (+12.7%) | 42 → 46 ms (+9.0%) | +0.5% | +0.7% |
+
+JsonParseSerializable's +3.8% wall time in the first run does not repeat;
+Knuckeotide's few extra milliseconds of mark do, without moving its time.
+
 ## Soak
 
 CI dispatch run 37226315432 on `078bcb2` (the mark with no layout): the
