@@ -974,16 +974,27 @@ module Gcry
 
     # --- ELF section read (Linux) ------------------------------------------------
 
+    # Raw `open`/`pread`, not `File`: this is reached from `GC.malloc` (the
+    # first collection with `GCRY_PRECISE_STACK` loads the table), so whatever
+    # it calls is typed whenever any allocation is — including from an ivar
+    # initializer, which Crystal types before other classes' initializers are
+    # attached. `File.open` pulls in the event loop, fibers and with them every
+    # `Exception#message`; an exception class whose `message` builds an object
+    # with an ivar initializer then fails to compile ("instance variable must
+    # be X, not Nil"). The Crystal compiler is such a program
+    # (`Crystal::ASTNode#@dependencies`), so it could not be built with gcry;
+    # process_spec/regression/19_ivar_initializer_typing_spec.cr is the gate.
+    # It is also the right call mid-collection: no event loop, no fiber.
     private def self.read_elf_section(path : String, name : String) : Bytes?
-      file = File.open(path, "r")
+      fd = LibC.open(path, LibC::O_RDONLY | LibC::O_CLOEXEC)
+      return nil if fd < 0
       begin
         magic = Bytes.new(4)
-        return nil unless file.read(magic) == 4
+        return nil unless pread_full(fd, magic, 0_u64)
         return nil unless magic[0] == 0x7f && magic[1] == 'E'.ord && magic[2] == 'L'.ord && magic[3] == 'F'.ord
 
-        file.seek(0)
         ehdr = Bytes.new(64)
-        return nil unless file.read(ehdr) == 64
+        return nil unless pread_full(fd, ehdr, 0_u64)
         return nil unless ehdr[4] == 2 # ELFCLASS64
         return nil unless ehdr[5] == 1 # little endian
 
@@ -994,21 +1005,18 @@ module Gcry
         return nil if shentsize < 64 || shnum <= 0 || shstrndx >= shnum
 
         shstr = Bytes.new(shentsize)
-        file.seek(shoff + shstrndx * shentsize)
-        return nil unless file.read(shstr) == shentsize
+        return nil unless pread_full(fd, shstr, shoff + shstrndx * shentsize)
         str_off = read_u64(shstr, 24)
         str_size = read_u64(shstr, 32)
         return nil if str_size > 16_u64 * 1024 * 1024
 
         strtab = Bytes.new(str_size)
-        file.seek(str_off)
-        return nil unless file.read(strtab) == str_size.to_i32
+        return nil unless pread_full(fd, strtab, str_off)
 
         i = 0
         while i < shnum
           sh = Bytes.new(shentsize)
-          file.seek(shoff + i * shentsize)
-          return nil unless file.read(sh) == shentsize
+          return nil unless pread_full(fd, sh, shoff + i * shentsize)
           name_off = read_u32(sh, 0)
           sec_name = cstr_at(strtab, name_off)
           if sec_name == name
@@ -1016,18 +1024,33 @@ module Gcry
             size = read_u64(sh, 32)
             return nil if size == 0 || size > 64_u64 * 1024 * 1024
             buf = Bytes.new(size)
-            file.seek(off)
-            return nil unless file.read(buf) == size.to_i32
+            return nil unless pread_full(fd, buf, off)
             return buf
           end
           i += 1
         end
         nil
       ensure
-        file.close
+        LibC.close(fd)
       end
     rescue
       nil
+    end
+
+    # All of *buf* from *offset*, or false; retries short reads and EINTR.
+    private def self.pread_full(fd : Int32, buf : Bytes, offset : UInt64) : Bool
+      done = 0
+      while done < buf.size
+        n = LibC.pread(fd, (buf.to_unsafe + done).as(Void*), LibC::SizeT.new(buf.size - done),
+          LibC::OffT.new(offset + done))
+        if n < 0
+          next if Errno.value == Errno::EINTR
+          return false
+        end
+        return false if n == 0
+        done += n
+      end
+      true
     end
 
     private def self.cstr_at(buf : Bytes, off : UInt32) : String

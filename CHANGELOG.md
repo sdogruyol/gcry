@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Programs whose exception messages build objects with initialized
+  instance variables compile again.** `StackMaps.read_elf_section` used
+  `File.open`. Because it is reachable from `GC.malloc`, it was type-checked
+  while Crystal processed instance-variable initializers, which dragged in
+  every `Exception#message`. The Crystal compiler is one program that failed
+  this way (`instance variable '@dependencies' of Crystal::ASTNode must be
+  Crystal::SmallNodeList, not Nil`). The loader now uses raw `pread`.
+  `process_spec/regression/19_ivar_initializer_typing_spec.cr`.
+
 - **A dead `WeakRef` no longer zeroes a word in a reused block.** Its
   disappearing-link row outlived it. When the target died later, the
   collector nulled the `WeakRef`'s old `@target` word in whatever had reused
