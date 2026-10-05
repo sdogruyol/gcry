@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Linux x86_64: a pointer held only in `rbp` on the collecting thread is a
+  root again.** The collector captures its own registers with glibc
+  `setjmp`, which stores `rbp` mangled (`PTR_MANGLE`). Crystal on Linux does
+  not force frame pointers, so `rbp` is an ordinary callee-saved register,
+  and its value was found only if some frame in the collect chain happened
+  to push it. `Roots.capture_registers` now stores `rbp` (`x29` on aarch64)
+  itself. Gate: `process_spec/regression/15_callee_saved_register_root_spec.cr`.
+  Before the fix, `captures rbp` fails in both debug and release builds.
+
 - **The process GC's defaults are root-complete: no root heuristic is armed
   unless asked for.** Under multi-mutator STW, a parked fiber whose SP no
   stop recorded was scanned only 256 KiB below its `stack_top`

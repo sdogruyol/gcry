@@ -178,6 +178,23 @@ module Gcry
 
     # Shared with the collect-entry diagnostics: Windows GNU does not export
     # the POSIX setjmp symbol. Callers provide REGISTER_BUFFER_SIZE bytes.
+    #
+    # `setjmp` alone does not expose every callee-saved register. x86_64 glibc
+    # PTR_MANGLEs rbp (with rsp and the return address: XOR with a TLS guard,
+    # then a rotate), and Crystal keeps no frame pointer on Linux
+    # (`--frame-pointers auto`), so rbp is an ordinary register LLVM may hold a
+    # pointer in. Whether some frame between that holder and here saved rbp to
+    # the scanned stack is the compiler's choice. The collector's own chain
+    # happens to on 1.21.0, but a small caller does not: a value inline asm
+    # placed in rbp was in neither the buffer nor any frame above the capture,
+    # debug and `--release` alike
+    # (`process_spec/regression/15_callee_saved_register_root_spec.cr`).
+    # So the frame-pointer register is stored as it is, into the last word of
+    # the buffer, past anything a `setjmp` writes (glibc aarch64 reaches 216
+    # bytes when it saves GCSPR; x86_64 glibc 80, Darwin 192). aarch64 gets
+    # the same for x29, which glibc stores plain today but Darwin's libplatform
+    # munges along with lr and sp. Windows `RtlCaptureContext` stores Rbp/Fp
+    # unmangled. rbx, r12-r15 and x19-x28 are stored plain by every `setjmp`.
     @[AlwaysInline]
     def self.capture_registers(buffer : UInt8*) : Nil
       {% if flag?(:win32) %}
@@ -185,6 +202,17 @@ module Gcry
         LibC.RtlCaptureContext(buffer.align_up(16).as(LibC::CONTEXT*))
       {% else %}
         LibSetjmp.setjmp(buffer.as(Void*))
+        {% if flag?(:x86_64) || flag?(:aarch64) %}
+          fp = uninitialized UInt64
+          {% if flag?(:x86_64) %}
+            asm("movq %rbp, $0" : "=r"(fp) :: "volatile")
+          {% else %}
+            asm("mov $0, x29" : "=r"(fp) :: "volatile")
+          {% end %}
+          # Word-aligned so `scan_range`, which aligns inward, reads it.
+          slot = (buffer.address &+ (REGISTER_BUFFER_SIZE - 8)) & ~7_u64
+          Pointer(UInt64).new(slot).value = fp
+        {% end %}
       {% end %}
     end
 
