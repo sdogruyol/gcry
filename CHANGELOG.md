@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs on one Intel macOS build and none on another. The buffers are cleared
   once copied (`bench/log/macos/2026-10-05-dead-register-copies/`).
 
+- **A program with a private recursive alias compiles.** `GC.init` compiles
+  `Gcry.register_layouts` and `Layout.register_scan_caps` into every program
+  (they run only behind `GCRY_AUTO_LAYOUTS` / `GCRY_SCAN_CAPS`), and both
+  spelled every `Reference` subclass from `layout.cr`. A type naming
+  something private to another file — `private alias R = Array(R)?`, as in
+  Crystal's `spec/std/class_spec.cr`, or a class in a private module — does
+  not resolve there, so the program failed with `undefined constant`. Types
+  whose name does not resolve back to themselves are skipped now.
+
 ### Changed
 
 - **Marking is faster without the layouts, a third faster on JSON.** The
