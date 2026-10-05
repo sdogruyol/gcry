@@ -77,6 +77,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block contains it. Crystal's std_spec calls `LibGC.size` on a `String`'s
   data, which starts inside the block.
 
+- **Crystal's own standard-library suite runs under gcry in CI.**
+  `ci/std-spec.sh` takes `spec/std` from the crystal-lang/crystal commit the
+  installed compiler reports and runs it with gcry as the process GC. The
+  new `std-spec` job runs it on 1.21.0 (again under `GCRY_STRESS=1`), on
+  `latest` and on `nightly` (allowed to fail). All 18 054 examples pass on
+  1.21.0 by default, under `GCRY_STRESS=1` and under `GCRY_SOUND=1`, with the
+  same counts as Boehm.
+
 ## [0.34.0] - 2026-10-04
 
 ### Fixed

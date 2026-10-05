@@ -1067,6 +1067,55 @@ jobs:
       - name: GCRY_SOUND=1 profile and correctness suite
         run: ci/sound-suite.sh
 
+  # Crystal's own standard-library suite (spec/std, ~18 000 examples) with gcry
+  # as the process GC — what a default collector has to pass. The suite comes
+  # from the crystal-lang/crystal commit the installed compiler reports, so it
+  # matches the stdlib it tests (ci/std-spec.sh). Four chunks: the single
+  # binary is ~75 MB, and GNU ld 2.46 corrupts its symbol-version table.
+  #
+  # `latest` is back (see `test` above): the releases list answers again, and
+  # this is the gate that tells us a compiler release broke the collector.
+  # Nightly is allowed to fail: it also reports stdlib regressions that are
+  # not gcry's.
+  std-spec:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crystal: "1.21.0"
+          - crystal: latest
+          - crystal: nightly
+            experimental: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: ${{ matrix.experimental == true }}
+    name: std_spec (crystal ${{ matrix.crystal }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
+        continue-on-error: true
+        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ matrix.crystal }}
+
+      - name: Stdlib spec dependencies
+        run: sudo apt-get install -y -qq libxml2-dev libyaml-dev libgmp-dev libssl-dev zlib1g-dev libpcre2-dev
+
+      - name: spec/std under gcry
+        run: ci/std-spec.sh --chunks 4
+
+      # The same binaries with a collection every 256 allocations: the suite
+      # as a GC stress test. Pinned compiler only, to bound runner minutes.
+      - name: spec/std under gcry, GCRY_STRESS=1
+        if: matrix.crystal == '1.21.0'
+        env:
+          GCRY_STRESS: "1"
+          GCRY_STRESS_EVERY: "256"
+        run: ci/std-spec.sh --chunks 4 --no-build
+
   # Gates that cost minutes because they **sample**: each drives a rare window
   # many times over, so the cost is the sample size and not the assertion. They
   # were steps of `test (x86_64)` until 2026-09-20, when that job was measured
