@@ -748,7 +748,9 @@ module Gcry
         # directly, which a crash-rate A/B cannot do at these rates.
         realloc_copy_enter
         begin
-          fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+          unless move_large_contents(rchunk, pointer, fresh, old_size)
+            fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+          end
         ensure
           realloc_copy_leave
         end
@@ -756,6 +758,98 @@ module Gcry
       ensure
         delete_root(pointer) if rooted
       end
+    end
+
+    # Data pages a large block must hold before `realloc` moves them rather
+    # than copies them (`move_large_contents`). Each `mremap` flushes the TLB
+    # of every CPU running the process, so the break-even rises with the
+    # threads that are busy elsewhere. Growing an `IO::Memory` to 512 KiB by
+    # 1 KiB writes, three threads spinning beside it: moving from 64 KiB on
+    # was +10% against copying, from 256 KiB on ±1%; to 1 MiB, −9%; to 4 MiB,
+    # −32%. With nothing else running every size gains (−15%, −28%, −46%)
+    # (`bench/log/linux/2026-10-06-realloc-page-move/`).
+    REALLOC_MOVE_MIN = 262144_u64
+
+    # `realloc` of a large block moves its pages (Linux). Off: every growth
+    # copies (`GCRY_REALLOC_MOVE=0`).
+    property realloc_move : Bool = true
+    # Moves done, and the bytes they did not copy.
+    getter realloc_moves : UInt64 = 0_u64
+    getter realloc_moved_bytes : UInt64 = 0_u64
+
+    # Grow a large block by handing the old block's pages to the new one
+    # instead of copying them (Linux `mremap`, `Platform.move_pages`). True
+    # when `fresh` holds the old contents; false when nothing moved and the
+    # caller copies.
+    #
+    # Crystal grows every `Array`, `IO::Memory` and `String::Builder` through
+    # `realloc`, and a copy into a fresh mapping faults in every page it
+    # writes: JsonParseSerializable grows its 800 000-element array 29 times
+    # (×1.25 a step, 105 MiB of fresh large mappings, 27k of the run's 36k
+    # minor faults), JsonGenerate doubles a 256 MiB `IO::Memory`. A move costs
+    # no copy and no fault, and the old pages leave the resident set at once
+    # instead of at the next sweep.
+    #
+    # Both chunks stay whole. `fresh` is a registered large chunk before
+    # anything moves; the old chunk keeps its header page and its data range
+    # stays mapped, reading zeroes afterwards. A collection finds the contents
+    # in the old block or in `fresh`, both rooted by the caller (`add_root`
+    # and its frame); the instant between, the stop signal is blocked
+    # (`Platform.move_pages`). Not on a thread the stop does not signal (the
+    # Monitor, the idle collector, a thread not yet on Crystal's list): the
+    # world could stop around it with the contents in neither block.
+    #
+    # What a reader of the old block sees changes: zeroes, where the copy left
+    # the old bytes until the sweep. Only a reader that kept the
+    # pre-`realloc` pointer can tell, and Boehm frees that block inside
+    # `GC_realloc`, so such a reader was already reading memory the collector
+    # could hand out again.
+    #
+    # The first page holds the old chunk's header, so its share of the data is
+    # copied; the bytes past the old size in the moved pages are zeroed, as a
+    # fresh mapping's would be.
+    private def move_large_contents(old_chunk : ChunkHeader*, old_user : Void*, fresh : Void*,
+                                    old_size : UInt64) : Bool
+      {% if flag?(:linux) %}
+        return false unless @realloc_move && ChunkHeader.large?(old_chunk)
+        # A page barrier (nursery, incremental mark) tracks writes per page:
+        # under `mprotect` a moved page would carry its protection into the
+        # new block, and a block handed out during an incremental cycle is
+        # black, so its contents must arrive through the barrier. The same
+        # holds for a `realloc` inside a stopped world — the collector's own,
+        # or a thread the stop exempts — where the mark may yet scan the old
+        # block and never scans the new one: the copy leaves the old contents
+        # there to be found, a move would not.
+        return false unless @barrier_backend.none?
+        return false if @incremental_marking || @world_stopped
+        page = Platform.host_page_size
+        old_mapped = old_chunk.value.mapped_bytes
+        return false if old_mapped < page &+ REALLOC_MOVE_MIN
+        new_chunk = chunk_for_owned(fresh)
+        return false unless new_chunk && ChunkHeader.large?(new_chunk)
+        off = old_user.address &- old_chunk.address
+        return false unless off < page && fresh.address &- new_chunk.address == off
+        new_mapped = new_chunk.value.mapped_bytes
+        return false if new_mapped < old_mapped
+        thread = Thread.current?
+        return false if thread.nil? || stw_signal_exempt?(thread)
+        return false unless Platform.page_moves?
+
+        len = old_mapped &- page
+        src = old_chunk.address &+ page
+        ThreadListWatch.check(src, len, ThreadListWatch::SITE_DONTNEED)
+        return false unless Platform.move_pages(src, len, new_chunk.address &+ page, new_mapped &- page, @hugepages)
+        head = page &- off
+        head = old_size if old_size < head
+        fresh.as(UInt8*).copy_from(old_user.as(UInt8*), head)
+        tail = off &+ old_size
+        (new_chunk.as(UInt8*) + tail).clear(old_mapped &- tail) if old_mapped > tail
+        @realloc_moves &+= 1
+        @realloc_moved_bytes &+= len
+        true
+      {% else %}
+        false
+      {% end %}
     end
 
     def free(pointer : Void*) : Nil

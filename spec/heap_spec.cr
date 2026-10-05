@@ -1,5 +1,18 @@
 require "./spec_helper"
 
+module ReallocMoveSpec
+  # Out of line, so the referents' addresses do not stay in the spec's frame
+  # and the moved buffer is what keeps them alive.
+  @[NoInline]
+  def self.store_referents(heap : Gcry::Heap, buf : UInt64*, count : Int32) : Nil
+    count.times do |i|
+      obj = heap.malloc(64).as(UInt64*)
+      8.times { |w| obj[w] = 0xC0DE_0000_u64 | (i &* 8 &+ w) }
+      buf[i] = obj.address
+    end
+  end
+end
+
 describe Gcry::Heap do
   it "rounds sizes to size classes" do
     Gcry::Heap.round_size(0).should eq(16)
@@ -325,6 +338,46 @@ describe Gcry::Heap do
       # New tail is zeroed for non-atomic realloc growth via malloc.
       grown_bytes[16].should eq(0)
       heap.is_heap_ptr(grown).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  # Linux hands a large block's pages to the grown block instead of copying
+  # them (`Heap#move_large_contents`). Every step of a growth chain has to
+  # carry the same bytes, read zeroes past them, and keep what they point at
+  # alive through a collection — the pointers now live only in pages the
+  # kernel moved.
+  it "realloc of a large block keeps contents, zero tail and referents through a growth chain" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      size = 40_000 # words: 320 KB, past REALLOC_MOVE_MIN
+      buf = heap.malloc(size * 8).as(UInt64*)
+      size.times { |i| buf[i] = 0x5EED_0000_0000_u64 | i }
+      referents = 64
+      ReallocMoveSpec.store_referents(heap, buf, referents)
+      12.times do
+        grown = size + size // 2
+        buf = heap.realloc(buf.as(Void*), grown * 8).as(UInt64*)
+        (size...grown).each { |i| buf[i].should eq(0_u64) }
+        (size...grown).each { |i| buf[i] = 0x5EED_0000_0000_u64 | i }
+        size = grown
+      end
+      (referents...size).each { |i| buf[i].should eq(0x5EED_0000_0000_u64 | i) }
+
+      heap.collect
+      # Reuse whatever the collection freed, so a referent it wrongly freed
+      # is overwritten.
+      4096.times { heap.malloc(64).as(UInt64*).value = 0xBAD_u64 }
+      referents.times do |i|
+        obj = Pointer(UInt64).new(buf[i])
+        heap.live?(obj.as(Void*)).should be_true
+        8.times { |w| obj[w].should eq(0xC0DE_0000_u64 | (i &* 8 &+ w)) }
+      end
+      {% if flag?(:linux) %}
+        heap.realloc_moves.should be > 0
+      {% end %}
     ensure
       heap.destroy
     end

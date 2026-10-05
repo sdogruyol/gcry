@@ -764,6 +764,15 @@ module GC
       heap.large_cache_retain = cache
     end
 
+    # `realloc` of a large block moves its pages instead of copying them
+    # (Linux; `Heap#move_large_contents`). Off: copy every growth.
+    heap.realloc_move = false if env_flag_zero?("GCRY_REALLOC_MOVE")
+    {% if flag?(:linux) %}
+      if us = env_u64("GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US")
+        Gcry::Platform.move_test_unblocked_us = us
+      end
+    {% end %}
+
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
     # ordinal's magic reciprocal is exact to — past that a block address would

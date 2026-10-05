@@ -1067,6 +1067,16 @@ oom-no-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/oom_no_hang.cr -o $(BIN)/oom_no_hang --error-trace
 	$(BIN)/oom_no_hang
 
+# Does a stop that lands inside a `realloc` page move still mark everything the
+# moved pages reach? Between the two `mremap` calls of `Platform.move_pages`
+# the contents are in no chunk, and the stop signal is blocked across them.
+# The control (`GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200`) unblocks it and holds
+# the window open, and has to fail or the default arm proves nothing.
+.PHONY: realloc-move-stress
+realloc-move-stress: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/realloc_move_stress.cr -o $(BIN)/realloc_move_stress --error-trace
+	$(BIN)/realloc_move_stress
+
 large-cache-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/large_cache_race.cr -o $(BIN)/large_cache_race --error-trace
 # A gate whose failure mode is a fault should name the address it faulted on.

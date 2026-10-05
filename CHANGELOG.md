@@ -328,6 +328,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     old path, and all 180 M decisions across nine benchmarks matched.
   - Source: `bench/log/linux/2026-10-06-mark-cost/`.
 
+- **Linux grows a large block by moving its pages, not copying them.**
+  `realloc` of a block with at least 256 KiB of data pages hands those pages
+  to the new block with `mremap`, so `Array`, `IO::Memory` and
+  `String::Builder` growth costs no copy and no page fault, and the old pages
+  leave the resident set at once rather than at the next sweep.
+  - **Why:** a growing buffer faulted its whole new mapping in at every step.
+    JsonParseSerializable grows one array 29 times (105 MiB of fresh large
+    mappings, 27k of the run's 36k minor faults); JsonGenerate doubles a
+    256 MiB `IO::Memory`.
+  - **How:** `MREMAP_DONTUNMAP` to an address the kernel picks, then grown
+    into the new chunk as one mapping. The old block stays mapped and reads
+    zeroes; both blocks stay registered and rooted, and the stop signal is
+    blocked across the two calls, the only instant the contents are in
+    neither. `make realloc-move-stress` holds that: 0 of 3 children lose an
+    object under 500 collections, and with the signal left unblocked
+    (`GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US`) 11 of 12 rounds do.
+  - **Evidence** (crystal-metric, interleaved, 4 CPUs): run-window faults on
+    JsonParseSerializable 36.1k → 14.7k (Boehm 16k); JsonParseSerializable
+    0.297 → 0.279 s (90.9% → 96.8% of Boehm, 15 trials), JsonGenerate
+    0.610 → 0.567 s (106% → 114%), Revcomp 0.585 → 0.558 s (86% → 90%,
+    7 trials); peak RSS −12%, −11% and −9% on those rows. Primes,
+    JsonParsePure, Binarytrees and RegexDna move within noise. Below 256 KiB
+    a move lost to the copy with three other threads busy: each `mremap`
+    flushes their TLBs (`bench/log/linux/2026-10-06-realloc-page-move/`).
+  - Off under `vm.overcommit_memory=2`, on kernels before 5.7, while a page
+    barrier is armed or the world is stopped, on threads the stop does not
+    signal, and with `GCRY_REALLOC_MOVE=0`. A grown block costs two kernel
+    mappings (header page and data) where adjacent copies merged into one.
+
 - **The mark looks each scanned block up once, and splits large objects
   between workers.**
   - **Size class in the mark-stack entry:** the entry now carries the block's

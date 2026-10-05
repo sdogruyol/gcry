@@ -1031,6 +1031,15 @@ jobs:
           make chunk-search-race
           make large-cache-race
 
+      # `realloc` grows a large block by moving its pages, and between the two
+      # `mremap` calls the contents are in no chunk. The stop signal is blocked
+      # there; the control arm unblocks it and must lose boxes.
+      - name: Realloc page-move stress
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
+        run: |
+          make realloc-move-stress
+
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
       # plain-store path must be shown to lose some.
