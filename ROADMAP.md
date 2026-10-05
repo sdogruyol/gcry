@@ -3892,11 +3892,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the index, the radix and `@heap_max` under the locks `map_chunk` takes.
       Every large unmap, trim, guard and quarantine path must then release
       the reservation, not `mapped_bytes`.
-- [ ] **macOS: Binarytrees' mutator is 10–20% slower than Boehm's whole run
-      (2026-10-03).** Not the pauses, not faults, not the allocation fast
-      path (faster than Boehm's in isolation), and not how often it collects:
-      on Linux the same split leaves gcry's mutator level with Boehm. Next is
-      an in-process profile on a macOS runner
+- [ ] **macOS: Binarytrees runs at ~80% of Boehm (2026-10-03, narrowed
+      2026-10-05).** User CPU equals wall time and system time is the same as
+      Boehm's, so nothing blocks; parallel mark does not help (four workers
+      cost 14 points). A 64 MiB threshold takes it to ~90% at twice Boehm's
+      peak RSS (and Linux to 106%), so most of the gap is the RSS-budget
+      decision above; ~5-10% of mutator time is left, with the allocation fast
+      path faster than Boehm's in isolation
       (`bench/log/macos/2026-10-03-binarytrees-mutator/`).
 - [ ] **Per-collection mark cost is ~2.6× Boehm's on a large pointer heap
       (2026-10-03).** Same heap, same collection: Primes' largest mark 470 ms
