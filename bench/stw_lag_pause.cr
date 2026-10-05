@@ -43,9 +43,10 @@
 # hiding it.
 #
 # Two assertions, both host-independent:
-#   1. The lags the process booted with match GCRY_SOUND — non-zero without it,
-#      zero with it. Fires if sound-by-default, or a lag default of 0, is ever
-#      reintroduced before the cheap root scan lands.
+#   1. The lags the process booted with match its environment: 0 by default
+#      and under GCRY_SOUND=1 (the sound defaults, 2026-10-05), and the value
+#      of GCRY_STW_STACK_LAG / GCRY_STW_PTHREAD_LAG when one is set. Fires if
+#      a non-zero lag default, which declines live pointers, comes back.
 #   2. The lag-0 pause penalty is at most --max-ratio× the tuned path. Upper
 #      bound only: if the root scan is made cheap enough that lag 0 is
 #      affordable, the ratio collapses toward 1 and this must pass, not fail.
@@ -320,17 +321,16 @@ failures = [] of String
 # 1. The knobs the process actually booted with. An absolute ms budget was the
 #    obvious guard here and is the wrong one: it is host-dependent, needs enough
 #    headroom on a shared runner to stop flaking, and by then it no longer
-#    separates 30 ms from 480 ms reliably. The config assertion catches the same
-#    regression — sound-by-default, or a lag default of 0, reintroduced before
-#    the cheap root scan lands — exactly and without flake.
+#    separates 30 ms from 480 ms reliably. The config assertion catches the
+#    regression that matters — a non-zero lag default, which scans a parked
+#    fiber only near its top and misses a live pointer below — exactly.
 want_sound = ENV["GCRY_SOUND"]? == "1"
-{stack: boot_stack_lag, pthread: boot_pthread_lag}.each do |name, lag|
-  if want_sound && lag != 0
-    failures << "GCRY_SOUND=1 but #{name} lag booted at #{lag}, expected 0"
-    puts "  FAIL boot #{name} lag: #{lag} (expected 0 under GCRY_SOUND=1)"
-  elsif !want_sound && lag == 0
-    failures << "default boot has #{name} lag 0 — the pause trap is now the default path"
-    puts "  FAIL boot #{name} lag: 0 (expected non-zero without GCRY_SOUND)"
+{stack: {boot_stack_lag, "GCRY_STW_STACK_LAG"}, pthread: {boot_pthread_lag, "GCRY_STW_PTHREAD_LAG"}}.each do |name, (lag, var)|
+  expected = want_sound ? 0_u64 : (ENV[var]?.try(&.to_u64?) || 0_u64)
+  if lag != expected
+    why = want_sound ? "GCRY_SOUND=1" : (ENV[var]? ? "#{var}=#{ENV[var]}" : "the sound defaults")
+    failures << "#{name} lag booted at #{lag}, expected #{expected} (#{why})"
+    puts "  FAIL boot #{name} lag: #{lag} (expected #{expected} under #{why})"
   else
     puts "  PASS boot #{name} lag: #{lag}"
   end
