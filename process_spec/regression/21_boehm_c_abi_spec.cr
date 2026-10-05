@@ -70,8 +70,10 @@ private def libc_word : Void**
 end
 
 class BoehmAbiLog
-  class_property finalized_object = 0_u64
-  class_property finalized_data = 0_u64
+  # (masked object, client data) per finalizer run, in libc memory so the log
+  # roots nothing.
+  class_property finalized_log : UInt64* = Pointer(UInt64).null
+  class_property finalized_count = 0
   class_property other_root : Void** = Pointer(Void*).null
   class_property initial_stackbottom = Pointer(Void).null
 end
@@ -125,20 +127,43 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
     live_and_intact?(kept).should be_true
   end
 
+  # A single object can stay reachable through a stale word in the collect
+  # call chain — conservative scanning, under Boehm as much as here. On macOS
+  # arm64 one such block was held through twelve collections once an unrelated
+  # change moved the collector's frames (2026-10-05: no heap block, explicit
+  # root or fiber stack held it; flipped by codegen alone). What this checks is
+  # the callback's contract: it runs, with the client data registered for that
+  # very object. So eight blocks, each with its own data, and at least one must
+  # be finalized.
   it "runs a GC_register_finalizer_ignore_self callback with its client data" do
-    BoehmAbiLog.finalized_object = 0_u64
-    hidden = fresh_block do |p|
-      LibGC.register_finalizer_ignore_self(p, ->(obj : Void*, cd : Void*) {
-        BoehmAbiLog.finalized_object = obj.address ^ MASK
-        BoehmAbiLog.finalized_data = cd.address
-      }, Pointer(Void).new(0x1234_u64), nil, nil)
+    blocks = 8
+    BoehmAbiLog.finalized_log = LibC.malloc(LibC::SizeT.new(blocks * 2 * sizeof(UInt64))).as(UInt64*)
+    BoehmAbiLog.finalized_count = 0
+    hidden = Array(UInt64).new(blocks) do |i|
+      fresh_block do |p|
+        LibGC.register_finalizer_ignore_self(p, ->(obj : Void*, cd : Void*) {
+          k = BoehmAbiLog.finalized_count
+          if k < 8
+            BoehmAbiLog.finalized_log[2 * k] = obj.address ^ MASK
+            BoehmAbiLog.finalized_log[2 * k + 1] = cd.address
+          end
+          BoehmAbiLog.finalized_count = k + 1
+        }, Pointer(Void).new(0x1234_u64 + i), nil, nil)
+      end
     end
     6.times do
-      break unless BoehmAbiLog.finalized_object == 0
+      break if BoehmAbiLog.finalized_count == blocks
       collect(1)
     end
-    BoehmAbiLog.finalized_object.should eq(hidden)
-    BoehmAbiLog.finalized_data.should eq(0x1234)
+    ran = BoehmAbiLog.finalized_count
+    ran.should be > 0
+    ran.should be <= blocks
+    ran.times do |k|
+      index = hidden.index(BoehmAbiLog.finalized_log[2 * k])
+      index.should_not be_nil
+      BoehmAbiLog.finalized_log[2 * k + 1].should eq(0x1234_u64 + index.not_nil!)
+    end
+    LibC.free(BoehmAbiLog.finalized_log.as(Void*))
   end
 
   it "clears a GC_general_register_disappearing_link when its object dies" do
