@@ -606,7 +606,13 @@ module Gcry
       ptr
     end
 
+    # Boehm's `GC_realloc`: null is `malloc(size)`, and size 0 frees
+    # `pointer` and answers null (`mallocx.c`, as C's `realloc` does in glibc).
     def realloc(pointer : Void*, size : Int) : Void*
+      if size == 0 && !pointer.null?
+        free(pointer)
+        return Pointer(Void).null
+      end
       fresh = realloc_owned(pointer, size)
       raise ArgumentError.new("pointer is not a gcry allocation") if fresh.null?
       fresh
@@ -640,7 +646,9 @@ module Gcry
 
     # `realloc`, answering null instead of raising when `pointer` is not a
     # gcry allocation, so `GC.realloc` can route a bootstrap-era pointer to
-    # LibC without a lookup of its own.
+    # LibC without a lookup of its own. A non-null `pointer` with size 0 is
+    # the caller's to free, as `realloc` and `GC.realloc` do: null is this
+    # method's "not mine", so it cannot also mean "freed".
     def realloc_owned(pointer : Void*, size : Int) : Void*
       new_size = size.to_u64
       return malloc(new_size) if pointer.null?
@@ -664,25 +672,7 @@ module Gcry
       # keeps the byte past its end that Boehm would have given it. Saturating
       # for the same reason: wrapped, `realloc(p, SIZE_MAX)` became a zero-byte
       # request and lost the contents.
-      new_size = sat_add(new_size, @atomic_slack) if atomic && new_size != 0
-
-      if new_size == 0
-        # Do **not** free `pointer` here, for the same reason the grow path
-        # below spells out: Crystal stores the result after `realloc` returns,
-        # so until that store the caller's ivar still holds `pointer`. Freeing
-        # it immediately lets a peer Parallel collect reuse the block while an
-        # owner still points at it — the defect that comment was written for,
-        # reachable through a second door.
-        #
-        # Measured before changing it: this path fires **zero** times in a
-        # fiber-spawning workload, and Crystal's stdlib has no caller that
-        # reaches it (`GC.free` appears only in the zlib and GMP allocator
-        # hooks). So this is a trap being closed, not a live defect being
-        # fixed — and closing it costs nothing but the old block's retention
-        # until the next sweep, which is exactly what the grow path already
-        # accepts.
-        return malloc(0)
-      end
+      new_size = sat_add(new_size, @atomic_slack) if atomic
 
       return pointer if new_size <= old_size
 

@@ -1598,6 +1598,14 @@ module GC
 
   private def self.realloc_impl(pointer : Void*, size : LibC::SizeT) : Void*
     check_fork_poison!
+    # Boehm's `GC_realloc(p, 0)` frees `p` and answers NULL (`mallocx.c`), as
+    # glibc's `realloc` does. Through `GC.free`, which never raises (GMP calls
+    # this as its C realloc hook) and hands a bootstrap-era pointer to LibC.
+    # `realloc(NULL, n)` is `malloc(n)`, below.
+    if size == 0 && !pointer.null?
+      free(pointer)
+      return Pointer(Void).null
+    end
     if @@gcry_ready
       # One lookup for the whole call: the heap answers null for a pointer it
       # does not own, which is the LibC bootstrap era's.

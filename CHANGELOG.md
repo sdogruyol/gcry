@@ -175,6 +175,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without its contents. Both fail now, as `GC.malloc(SIZE_MAX)` does
   (`process_spec/regression/31_alloc_size_edges_spec.cr`).
 
+- **`GC.realloc(p, 0)` and `GC_realloc(p, 0)` free `p` and return null, as
+  Boehm's do (`mallocx.c`).** They returned a fresh `malloc(0)` and left `p`
+  for the sweep, so C code that frees by reallocating to zero, as Boehm and
+  glibc allow, kept `p` until a collection and got a block it never asked
+  for. `realloc(NULL, n)` is still `malloc(n)`. `Heap#realloc` does the
+  same on library heaps. `process_spec/regression/31_alloc_size_edges_spec.cr`
+  fails on the old path.
+
 - **`crystal i` runs in a compiler built with gcry.** Under the interpreter,
   stdlib's Boehm prelude reads Boehm's `GC_stackbottom` variable for the
   main fiber. Crystal cannot define a C-named variable, so every run stopped

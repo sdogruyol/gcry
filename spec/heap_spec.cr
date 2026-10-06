@@ -445,6 +445,24 @@ describe Gcry::Heap do
     end
   end
 
+  # Boehm's `GC_realloc(p, 0)` frees `p` and answers null; null grows from
+  # nothing, as `malloc`.
+  it "realloc to zero frees the block and returns null" do
+    heap = Gcry::Heap.new
+    begin
+      {64, 1 << 20}.each do |size|
+        p = heap.malloc(size)
+        heap.usable_size(p).should be >= size
+        heap.realloc(p, 0).null?.should be_true
+        heap.usable_size(p).should eq(0)
+      end
+      q = heap.realloc(Pointer(Void).null, 64)
+      heap.usable_size(q).should be >= 64
+    ensure
+      heap.destroy
+    end
+  end
+
   # Process-GC style: type_id_gate rejects raw buffers on the stack. Growing via
   # realloc must pin the old block so a collect inside allocate cannot reclaim it
   # (Kemal HTTP::Headers Hash resize → double free).
