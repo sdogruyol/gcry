@@ -14,15 +14,26 @@ require "compress/gzip"
 # fresh mapping, it still ran 615 ms.
 #
 # Collections are held off so only the allocation and free paths decide what
-# is mapped and unmapped. Returns {bytes unmapped, chunks mapped}.
-private def maps_during(&) : {UInt64, UInt64}
+# is mapped and unmapped. The large cache is emptied first: chunks a sweep
+# freed in earlier examples are recycled to a fresh address, which the
+# counters read as an unmap and a map although no page went back to the
+# kernel. In a full aarch64 `process_spec` run (CI, 2026-10-06) the gzip loop
+# took 7 such chunks before settling: 500 in-place takes, 2.9 MB "unmapped".
+# Returns {bytes unmapped, in-place large takes, recycles}.
+private def maps_during(warmup : ->, &) : {UInt64, UInt64, UInt64}
+  heap = Gcry.default_heap
+  GC.collect
+  heap.trim_large_cache(0_u64, defer: false, cap: UInt64::MAX)
   GC.disable
   begin
-    heap = Gcry.default_heap
+    # One round first, so the blocks it frees are what the measured rounds
+    # find in the cache.
+    warmup.call
     unmapped = heap.unmapped_bytes
-    mapped = heap.chunks_mapped
+    hits = heap.large_cache_hits
+    recycles = heap.large_recycles
     yield
-    {heap.unmapped_bytes - unmapped, heap.chunks_mapped - mapped}
+    {heap.unmapped_bytes - unmapped, heap.large_cache_hits - hits, heap.large_recycles - recycles}
   ensure
     GC.enable
   end
@@ -30,12 +41,13 @@ end
 
 describe "a large block freed with GC.free" do
   it "is reused in place by the next large allocation of its size" do
-    GC.free(GC.malloc(LibC::SizeT.new(256 * 1024)))
-    unmapped, mapped = maps_during do
-      100.times { GC.free(GC.malloc(LibC::SizeT.new(256 * 1024))) }
+    round = -> { GC.free(GC.malloc(LibC::SizeT.new(256 * 1024))) }
+    unmapped, hits, recycles = maps_during(round) do
+      100.times { round.call }
     end
     unmapped.should eq(0)
-    mapped.should eq(0)
+    hits.should eq(100)
+    recycles.should eq(0)
   end
 
   it "is reused across a gzip stream's allocator callbacks" do
@@ -43,12 +55,13 @@ describe "a large block freed with GC.free" do
     gzip = -> {
       io = IO::Memory.new
       Compress::Gzip::Writer.open(io, &.write(payload))
-      io.bytesize
+      nil
     }
-    gzip.call
-    unmapped, _ = maps_during do
+    unmapped, hits, recycles = maps_during(gzip) do
       100.times { gzip.call }
     end
     unmapped.should eq(0)
+    hits.should be >= 100
+    recycles.should eq(0)
   end
 end
