@@ -14,13 +14,15 @@
 #   churn      every worker also allocates small garbage, so a box the
 #              collector wrongly freed is soon overwritten
 #
-#   default                                  must survive, every box intact
+# The move is opt-in (`GCRY_REALLOC_MOVE=1`), so both arms turn it on:
+#
+#   moving                                   must survive, every box intact
 #   GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200  must fail: the signal is not
 #                                            blocked and the window held open
 #
 #   crystal build -Dgc_none bench/realloc_move_stress.cr -o bin/realloc_move_stress
 #   bin/realloc_move_stress
-#   GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200 bin/realloc_move_stress --child
+#   GCRY_REALLOC_MOVE=1 GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200 bin/realloc_move_stress --child
 
 require "../src/gcry"
 require "./bounded_child"
@@ -105,7 +107,8 @@ if ARGV.includes?("--child")
   collector.join
   heap = Gcry.default_heap
   puts "child: #{Verdict.bad} bad rounds, #{heap.realloc_moves} moves (#{heap.realloc_moved_bytes // 1048576} MiB), #{heap.collections} collections"
-  exit(1) if heap.realloc_moves == 0 && ENV["GCRY_REALLOC_MOVE"]? != "0"
+  # No moves means the arm tested nothing (run without `GCRY_REALLOC_MOVE=1`).
+  exit(1) if heap.realloc_moves == 0
   exit(Verdict.bad > 0 ? 1 : 0)
 end
 
@@ -116,7 +119,7 @@ attempts = (ENV["REALLOC_MOVE_STRESS_ATTEMPTS"]?.try(&.to_i?) || 3)
 puts "=== realloc page-move stress ==="
 puts "#{WORKERS} workers × #{ROUNDS} rounds of #{BOXES} boxes, one collector, #{attempts} attempts per arm"
 
-# The default arm needs every attempt clean; the control needs one failure to
+# The moving arm needs every attempt clean; the control needs one failure to
 # show the harness can see the window, and stops at it.
 def run_arm(exe : String, env : Hash(String, String), attempts : Int32, control : Bool) : {Int32, Int32}
   bad = 0
@@ -126,7 +129,7 @@ def run_arm(exe : String, env : Hash(String, String), attempts : Int32, control 
     tries += 1
     result = BoundedChild.run(exe, ["--child"], env)
     line = result.output.lines.find(&.starts_with?("child:"))
-    puts "  #{control ? "control" : "default"}: #{result.ok ? "ok" : (result.timed_out ? "TIMED OUT" : "FAILED")}#{line ? " — #{line}" : ""}"
+    puts "  #{control ? "control" : "moving"}: #{result.ok ? "ok" : (result.timed_out ? "TIMED OUT" : "FAILED")}#{line ? " — #{line}" : ""}"
     unless result.ok
       bad += 1
       STDERR.puts result.output.lines.last(20).join("\n") unless control
@@ -135,12 +138,12 @@ def run_arm(exe : String, env : Hash(String, String), attempts : Int32, control 
   {bad, tries}
 end
 
-default_bad, default_tries = run_arm(exe, {"GCRY_SEGV_REPORT" => "1"}, attempts, false)
-control_bad, control_tries = run_arm(exe, {"GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US" => "200"}, attempts * 4, true)
+move_bad, move_tries = run_arm(exe, {"GCRY_REALLOC_MOVE" => "1", "GCRY_SEGV_REPORT" => "1"}, attempts, false)
+control_bad, control_tries = run_arm(exe, {"GCRY_REALLOC_MOVE" => "1", "GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US" => "200"}, attempts * 4, true)
 
 puts ""
-puts "default: #{default_bad} of #{default_tries} failed"
+puts "moving: #{move_bad} of #{move_tries} failed"
 puts "control (unblocked, 200 µs window): #{control_bad} of #{control_tries} failed"
-ok = default_bad == 0 && control_bad > 0
+ok = move_bad == 0 && control_bad > 0
 puts ok ? "PASS" : "FAIL"
 exit(ok ? 0 : 1)

@@ -545,23 +545,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     old path, and all 180 M decisions across nine benchmarks matched.
   - Source: `bench/log/linux/2026-10-06-mark-cost/`.
 
-- **Linux grows a large block by moving its pages, not copying them.**
-  `realloc` of a block with at least 256 KiB of data pages hands those pages
-  to the new block with `mremap`, so `Array`, `IO::Memory` and
-  `String::Builder` growth costs no copy and no page fault, and the old pages
-  leave the resident set at once rather than at the next sweep.
-  - **Why:** a growing buffer faulted its whole new mapping in at every step.
-    JsonParseSerializable grows one array 29 times (105 MiB of fresh large
-    mappings, 27k of the run's 36k minor faults); JsonGenerate doubles a
-    256 MiB `IO::Memory`.
+- **Linux can grow a large block by moving its pages rather than copying
+  them: opt-in (`GCRY_REALLOC_MOVE=1`), because the old block reads zeroes
+  afterwards and Crystal's stdlib reads it.** With the knob, `realloc` of a
+  block with at least 256 KiB of data pages hands those pages to the new
+  block with `mremap`, so `Array`, `IO::Memory` and `String::Builder` growth
+  costs no copy and no page fault, and the old pages leave the resident set
+  at once rather than at the next sweep.
+  - **Why off by default:** the stdlib keeps reading a buffer after growing
+    it. `IO::Memory#write` of its own `to_slice` grows `@buffer` and then
+    copies from the slice, the old block; so do `String::Builder#write` and
+    `Array#concat` of a slice over their own buffer. Moving, a 300 KiB
+    self-copy got 303 152 of 307 200 bytes wrong; copying, and under Boehm,
+    none. `process_spec/regression/30_realloc_old_block_readable_spec.cr`
+    fails all three cases with the move on by default.
+  - **What it buys:** a copied buffer faults its whole new mapping in at
+    every growth step. JsonParseSerializable grows one array 29 times
+    (105 MiB of fresh large mappings, 27k of the run's 36k minor faults);
+    JsonGenerate doubles a 256 MiB `IO::Memory`.
   - **How:** `MREMAP_DONTUNMAP` to an address the kernel picks, then grown
     into the new chunk as one mapping. The old block stays mapped and reads
     zeroes; both blocks stay registered and rooted, and the stop signal is
     blocked across the two calls, the only instant the contents are in
-    neither. `make realloc-move-stress` holds that: 0 of 3 children lose an
-    object under 500 collections, and with the signal left unblocked
-    (`GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US`) 11 of 12 rounds do.
-  - **Evidence** (crystal-metric, interleaved, 4 CPUs): run-window faults on
+    neither. `make realloc-move-stress` holds that, with the move on in both
+    arms: 0 of 3 children lose an object under ~170 collections, and with
+    the signal left unblocked (`GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US`) the
+    control does.
+  - **With it on** (crystal-metric, interleaved, 4 CPUs): run-window faults on
     JsonParseSerializable 36.1k → 14.7k (Boehm 16k); JsonParseSerializable
     0.297 → 0.279 s (90.9% → 96.8% of Boehm, 15 trials), JsonGenerate
     0.610 → 0.567 s (106% → 114%), Revcomp 0.585 → 0.558 s (86% → 90%,
@@ -569,10 +579,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     JsonParsePure, Binarytrees and RegexDna move within noise. Below 256 KiB
     a move lost to the copy with three other threads busy: each `mremap`
     flushes their TLBs (`bench/log/linux/2026-10-06-realloc-page-move/`).
-  - Off under `vm.overcommit_memory=2`, on kernels before 5.7, while a page
-    barrier is armed or the world is stopped, on threads the stop does not
-    signal, and with `GCRY_REALLOC_MOVE=0`. A grown block costs two kernel
-    mappings (header page and data) where adjacent copies merged into one.
+  - **What the default gives up** (one binary with and without
+    `GCRY_REALLOC_MOVE=1`, 11 interleaved trials, 4 CPUs): JsonParseSerializable
+    0.321 → 0.338 s, JsonGenerate 0.632 → 0.715 s, Revcomp 0.613 → 0.656 s;
+    peak RSS 416 → 491, 763 → 856, 515 → 562 MiB. Copying, those rows run at
+    93%, 113% and 89% of Boehm. RegexDna does not move
+    (`bench/log/linux/2026-10-06-heap-review/`).
+  - Off unless `GCRY_REALLOC_MOVE=1`; with it, still off under
+    `vm.overcommit_memory=2`, on kernels before 5.7, while a page barrier is
+    armed or the world is stopped, and on threads the stop does not signal.
+    A grown block costs two kernel mappings (header page and data) where
+    adjacent copies merged into one.
 
 - **The mark looks each scanned block up once, and splits large objects
   between workers.**

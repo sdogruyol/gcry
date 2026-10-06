@@ -770,8 +770,10 @@ module GC
     end
 
     # `realloc` of a large block moves its pages instead of copying them
-    # (Linux; `Heap#move_large_contents`). Off: copy every growth.
-    heap.realloc_move = false if env_flag_zero?("GCRY_REALLOC_MOVE")
+    # (Linux; `Heap#move_large_contents`). Opt-in: the old block reads zeroes
+    # afterwards, and Crystal's stdlib reads it (`IO::Memory#write` of its
+    # own `to_slice`; `process_spec/regression/30_realloc_old_block_readable_spec.cr`).
+    heap.realloc_move = true if env_flag_one?("GCRY_REALLOC_MOVE")
     {% if flag?(:linux) %}
       if us = env_u64("GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US")
         Gcry::Platform.move_test_unblocked_us = us

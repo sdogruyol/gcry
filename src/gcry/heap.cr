@@ -775,9 +775,11 @@ module Gcry
     # (`bench/log/linux/2026-10-06-realloc-page-move/`).
     REALLOC_MOVE_MIN = 262144_u64
 
-    # `realloc` of a large block moves its pages (Linux). Off: every growth
-    # copies (`GCRY_REALLOC_MOVE=0`).
-    property realloc_move : Bool = true
+    # `realloc` of a large block moves its pages (Linux). Off by default,
+    # every growth copies; `GCRY_REALLOC_MOVE=1` turns it on. Unsafe for a
+    # program that reads a buffer after growing it, and Crystal's stdlib is
+    # one (`move_large_contents`).
+    property realloc_move : Bool = false
     # Moves done, and the bytes they did not copy.
     getter realloc_moves : UInt64 = 0_u64
     getter realloc_moved_bytes : UInt64 = 0_u64
@@ -804,11 +806,15 @@ module Gcry
     # Monitor, the idle collector, a thread not yet on Crystal's list): the
     # world could stop around it with the contents in neither block.
     #
-    # What a reader of the old block sees changes: zeroes, where the copy left
-    # the old bytes until the sweep. Only a reader that kept the
-    # pre-`realloc` pointer can tell, and Boehm frees that block inside
-    # `GC_realloc`, so such a reader was already reading memory the collector
-    # could hand out again.
+    # What a reader of the old block sees changes: zeroes past its first
+    # page, where the copy leaves the old bytes until the sweep. Boehm leaves
+    # them as well (its `GC_realloc` frees the old block without clearing it),
+    # and Crystal's stdlib reads them: `IO::Memory#write` of its own
+    # `to_slice` grows the buffer and then copies from the slice, which is the
+    # old block. A 300 KiB self-copy got 303 152 of its 307 200 bytes wrong
+    # moving, none copying or under Boehm
+    # (`process_spec/regression/30_realloc_old_block_readable_spec.cr`), which
+    # is why the move is opt-in.
     #
     # The first page holds the old chunk's header, so its share of the data is
     # copied; the bytes past the old size in the moved pages are zeroed, as a
