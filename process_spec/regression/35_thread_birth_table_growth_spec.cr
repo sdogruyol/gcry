@@ -42,8 +42,24 @@ require "spec"
         workers.each(&.join)
       end
       # A joined thread's root is stamped for the next collection and dropped
-      # at the one after (`release_dead`).
-      3.times { GC.collect }
+      # at the one after (`release_dead`), so at least three collections. On
+      # Windows the root ends only once gcry's own handle on the thread
+      # signals (`release_exited`), and `join` does not wait for that: a
+      # thread that finished its block first detached itself in
+      # `Thread#start`, and `Thread#join` of a detached thread returns
+      # without `WaitForSingleObject`. Three collections straight after the
+      # joins left 5-121 roots of threads still exiting, 11 runs in 20 on a
+      # 12-vCPU Windows VM (2026-10-06). So collect until they are back, under
+      # a deadline a table that never releases (the bug) still runs into.
+      deadline = Time.instant + 5.seconds
+      collected = 0
+      loop do
+        GC.collect
+        collected += 1
+        break if collected >= 3 && Gcry::ThreadBirthRoot.outstanding <= baseline
+        break if Time.instant > deadline
+        sleep 1.millisecond
+      end
       Gcry::ThreadBirthRoot.overflows.should eq overflows
       Gcry::ThreadBirthRoot.outstanding.should be <= baseline
     end
