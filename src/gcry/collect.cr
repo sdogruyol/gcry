@@ -1332,9 +1332,24 @@ module Gcry
     getter static_scanned_min : UInt64 = UInt64::MAX
     getter static_scanned_max : UInt64 = 0_u64
 
+    # Library range bytes at the previous collection, for the baseline below.
+    @static_library_last = 0_u64
+
     protected def note_static_scanned(bytes : UInt64) : Nil
       @static_scanned_last = bytes
       @static_scanned_min = bytes if bytes < @static_scanned_min
+      # A library `dlclose`d since the last collection takes its ranges with
+      # it, which is the loader's doing and not a collapse. Lower the baseline
+      # by what the library table lost, so only bytes that vanished while their
+      # object stayed loaded count. Until 2026-10-06 they all did: unloading a
+      # library with a 64 MiB `.bss` printed "static roots collapsed" and
+      # counted a drop (`process_spec/regression/34_dlclose_static_roots_spec.cr`).
+      library_bytes = Platform.static_root_library_bytes
+      if library_bytes < @static_library_last
+        gone = @static_library_last - library_bytes
+        @static_scanned_max = @static_scanned_max > gone ? @static_scanned_max - gone : 0_u64
+      end
+      @static_library_last = library_bytes
       # Report a collapse where it happens. A child that dies of a missed root
       # never reaches the line that prints these counters, so a counter read at
       # exit is a counter read only on the runs that had nothing to say.

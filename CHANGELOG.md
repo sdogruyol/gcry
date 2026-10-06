@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unloading a shared library is no longer reported as a static-root
+  collapse.** The collapse diagnostic compares each collection's scanned
+  static bytes against the most any collection scanned, and a `dlclose`d
+  library's ranges leaving the scan read as globals going missing: "gcry:
+  static roots collapsed to 92400 bytes from 67201328" on stderr and
+  `static_scanned_drops` + 1 after unloading a library with a 64 MiB `.bss`.
+  The baseline now drops by what the library table lost; ranges that vanish
+  while their library stays loaded still count.
+  `process_spec/regression/34_dlclose_static_roots_spec.cr` fails on the old
+  tree (drops 0 → 1) and holds the still-counts direction.
+
 - **`make nursery-tlab-smoke` requires the released chunk on Linux again.**
   Since 2026-10-05 it accepted a kept chunk everywhere, so a Linux major that
   stopped releasing the probe's chunk would have passed with the stale-node
