@@ -198,12 +198,14 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **112.6%** [106.6, 118.6] *(header layout `-Dgcry_block_headers`: 105.3%; its freelist `GCRY_BITMAP_ALLOC=0`: 74.9%)* |
-| Kemal `/json` peak RSS | **1.07×** *(header layout: 1.30×; 0.95× at 105.1% with `GCRY_THRESHOLD_FACTOR=50` there)* |
-| Kemal `/json` post-`/gc-collect` RSS | **~1.07×** *(31.2 vs 29.3 MB, peak = post-GC; header layout ~1.2× on the CI runner, 15.2 vs 12.9 MB)* |
-| Kemal `/` throughput | **100.8%** [98.5–103.7] *(CI perf smoke, v0.34.0 window, median [IQR] of 32 runs — [leaderboard](bench/leaderboard.md); hosted-runner wrk, not a paired A/B)* |
+| Kemal `/json` throughput | **102.0%** *(this tree, 2026-10-06; 0.34.0: 102.9% in the same session)* |
+| Kemal `/json` peak RSS | **1.43×** *(22.3 vs 15.6 MiB)* |
+| Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB)* |
+| Kemal `/` throughput | **86.8%** *(0.34.0: 94.6% in the same session; not GC-bound — the same code moved by NOP padding alone reads 91–98% of 0.34.0)* |
 | Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
 | Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
+
+\*Kemal rows: `bench/log/linux/2026-10-06-pr-benchmarks/` (QEMU x86-64, 12 vCPUs, 11 interleaved trials, server on 3 CPUs, `wrk -c50`). The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
 
 \*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
@@ -389,7 +391,7 @@ Defaults tuned for process GC. Change after you measure:
 | `GCRY_THRESHOLD_PACE` | Most the adaptive threshold is paced up, % (default 300; 100 = off). Collection-bound phases get fewer majors (crystal-metric Primes −25%, JsonParsePure −22%, Binarytrees −9% wall, RSS under Boehm's); Kemal `/json` is not collection-bound and is unchanged |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program layout registration; no effect on the mark since 2026-10-04 |
 | `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
-| `GCRY_PARALLEL_MARK=N` | Mark workers (default `min(2, CPUs − 1)`, serial below 32 MiB live; `1` = serial) |
+| `GCRY_PARALLEL_MARK=N` | Mark workers (default `max(min(2, CPUs − 1), min(CPUs / 4 + 1, CPUs − 1, 8))` — two up to 7 CPUs, four at 12 — serial below 32 MiB live; `1` = serial) |
 | `GCRY_STRESS=1` | Collect every N allocs (debug) |
 
 Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.

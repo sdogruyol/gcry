@@ -68,10 +68,12 @@ in-window `getrusage` and `Gcry.metrics` deltas around `run`. A/B runs are
    no faster than 6 (`ab-pm-sweep` for base).
 6. **Fresh size-class chunks populated in one call once the heap passes
    32 MiB** (`MADV_POPULATE_WRITE`, Linux 5.14+, `map_chunk`). Same fault
-   count, about half the system time (`ab-populate`, 5 trials): JPP −5.1%,
-   Primes −3.0%, peak RSS +1%. Populating every chunk cost Binarytrees +14%
-   RSS (22 → 25 MiB), hence the floor; populating large objects too cost
-   JsonParseSerializable +15% and JsonGenerate +11% RSS, so they are left out.
+   count, about half the system time (`ab-populate`, 5 trials). Shipped as
+   arm `p3` (floor, size classes only): JPP −5.6%, Primes −1.1%, the rest
+   within noise, RSS unchanged. `p1` (every chunk) read JPP −5.1%, Primes
+   −3.0%, but cost Binarytrees +14% RSS (22 → 25 MiB), hence the floor;
+   populating large objects too (`p2`) cost JsonParseSerializable +15% and
+   JsonGenerate +11% RSS, so they are left out.
 
 ## Result (`ab-final`, 7 trials; speed = Boehm s / gcry s)
 

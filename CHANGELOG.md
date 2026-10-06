@@ -418,12 +418,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Linux pre-faults a fresh size-class chunk with one
   `MADV_POPULATE_WRITE` once the heap passes 32 MiB.** Its cursor is about to
-  write every block anyway. JsonParsePure −5%, Primes −3%, peak RSS +1%.
-  Small heaps and large objects are left alone; populating those cost 11–15%
-  RSS. Kernels before 5.14 answer EINVAL and fault pages as before.
+  write every block anyway. As shipped (the 32 MiB floor, size classes
+  only; arm `p3` of `ab-populate`, 5 trials): JsonParsePure −5.6%, Primes
+  −1.1% and the other rows within noise, peak RSS unchanged. Populating
+  every chunk (`p1`) read −5.1% / −3.0% but cost Binarytrees 14% RSS, and
+  populating large objects too cost 11–15% RSS. Kernels before 5.14 answer
+  EINVAL and fault pages as before.
 
-- **Parallel mark is on by default: `min(2, CPUs − 1)` workers, serial
-  below 32 MiB live.** CPUs are counted by affinity, as Crystal's
+- **Parallel mark is on by default, serial below 32 MiB live.** The worker
+  count was `min(2, CPUs − 1)` here and is now `max(min(2, CPUs − 1),
+  min(CPUs / 4 + 1, CPUs − 1, 8))` (see the futex entry above). CPUs are
+  counted by affinity, as Crystal's
   `default_workers_count` does. On CI runners, in crystal-metric `--release`
   with 5 interleaved reps, two workers gained 8–16 points of Boehm's speed
   on every GC-heavy row (x86-64, arm64, macOS) for 2–42% more CPU. Four
