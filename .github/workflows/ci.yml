@@ -1181,7 +1181,7 @@ jobs:
         run: ci/compiler-spec.sh interpreter interp
 
       - name: Crystal's compiler_spec under gcry
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
         run: ci/compiler-spec.sh spec
 
   # Gates that cost minutes because they **sample**: each drives a rare window

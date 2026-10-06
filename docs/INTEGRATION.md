@@ -83,10 +83,12 @@ Never `require "gcry"` as process GC without `-Dgc_none` — you fight Boehm.
 job `std-spec` in `.github/workflows/ci.yml`, run against the compiler's own
 commit (`docs/DEFAULT-GC-READINESS.md` §1).
 
-The compiler built with gcry builds itself, passes `compiler_spec` (13 641
-examples, 0 failures) and runs `crystal i`. gcry exports Boehm's `GC_*` C
-ABI and a `lib LibGC` (`src/gcry/c_abi.cr`; § Boehm's C ABI below). CI:
-`ci/compiler-spec.sh`, job `compiler-gcry`.
+The compiler built with gcry builds itself, passes `compiler_spec` (13 640
+examples, 0 failures, 18 pending; `bench/log/linux/2026-10-06-compiler-spec/`)
+and runs `crystal i`. gcry exports Boehm's `GC_*` C ABI and a `lib LibGC`
+(`src/gcry/c_abi.cr`; § Boehm's C ABI below). CI: `ci/compiler-spec.sh`, job
+`compiler-gcry` (self-host and `crystal i` on every push and pull request,
+`compiler_spec` on pull requests, schedule and dispatch).
 
 ## Boehm's C ABI
 

@@ -195,8 +195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     terminator's byte in `to_s`. A stdlib fix is proposed in
     `bench/log/linux/2026-10-05-string-builder-terminator/`.
   - **Result:** the gcry-built compiler self-hosts (stage 2) and passes
-    Crystal's whole `compiler_spec`, 13 641 examples with 0 failures, the
-    same counts and pending list as Boehm. Compiling is 4–5% slower.
+    Crystal's whole `compiler_spec`: 13 640 examples, 0 failures, 18 pending
+    (`bench/log/linux/2026-10-06-compiler-spec/`).
   - **Gate:** `process_spec/regression/22_string_builder_terminator_spec.cr`.
 
 - **A dying thread's `Thread` is held until the thread is provably done with

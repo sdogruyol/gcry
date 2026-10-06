@@ -41,11 +41,12 @@ private runtime state and reopening runtime classes. This RFC proposes:
   perf smoke, v0.34.0 window: Linux `/json` 104.8%, `/` 100.8%, peak RSS 0.96×
   (`bench/leaderboard.md`).
 - **The compiler self-hosts with gcry.** A compiler built with gcry builds
-  itself. `compiler_spec` passes: 13 641 examples, 0 failures, the same as
-  Boehm. `crystal i` runs in the gcry-built compiler (3 of 3 programs).
-  - CI runs all of this on every push (`ci/compiler-spec.sh`, job
-    `compiler-gcry`).
-  - The gcry-built compiler compiles 4–5% slower than the Boehm-built one.
+  itself and runs `crystal i` (3 of 3 programs); `compiler_spec` run by it
+  passes 13 640 examples, 0 failures, 18 pending
+  (`bench/log/linux/2026-10-06-compiler-spec/`).
+  - CI job `compiler-gcry` (`ci/compiler-spec.sh`): self-host and `crystal i`
+    on every push and pull request, `compiler_spec` on pull requests,
+    schedule and dispatch.
 - **Platforms.** Linux x86_64/aarch64, macOS arm64/x86_64, Windows
   x86_64/ARM64 ([WINDOWS.md](WINDOWS.md)). Any other target is refused at
   compile time rather than miscompiled (`src/gcry/platform/os.cr:10-16`).
