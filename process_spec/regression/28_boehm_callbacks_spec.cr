@@ -201,8 +201,10 @@ describe "GC_malloc out of memory (Boehm parity)" do
       BoehmCallbackLog.warn_message = msg
       BoehmCallbackLog.warn_arg = arg.to_u64
     })
-    # 64 TiB: no host maps it, so the heap's own mapping fails.
-    huge = LibC::SizeT.new(1) << 46
+    # 1 EiB: past every address space gcry runs on (47–57 bits), so the
+    # heap's own mapping fails. 64 TiB did not: macOS mapped it (CI, darwin
+    # native and x86_64, 2026-10-06).
+    huge = LibC::SizeT.new(1) << 60
     kept = LibGC.malloc_atomic(64)
     kept.as(UInt8*).fill(64) { 0x7E_u8 }
     before = Gcry.default_heap.heap_size
