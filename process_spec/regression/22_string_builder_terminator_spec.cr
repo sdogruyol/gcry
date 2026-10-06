@@ -10,6 +10,11 @@ require "spec"
 # lands in slack; gcry's 128-byte class is exact, so it lands on the next
 # block, whose first byte (a `String`'s type id, 1) later overwrites it, and
 # LLVM read the name up to the next NUL. `src/gcry/crystal_string_builder_compat.cr`.
+#
+# The process GC has since given atomic blocks Boehm's byte of slack
+# (`Heap#atomic_slack`), which absorbs the terminator by itself, so with it on
+# these examples pass without the compat patch. They run with the slack off,
+# on exact classes, where only the patch keeps them green.
 
 # The lengths whose header and content fill a size class or a power of two
 # exactly — every capacity `String::Builder` grows to, and every class an
@@ -32,6 +37,13 @@ private def terminator_owned?(s : String) : Bool
 end
 
 describe "String::Builder under gcry's exact size classes" do
+  slack = 0_u64
+  before_all do
+    slack = Gcry.default_heap.atomic_slack
+    Gcry.default_heap.atomic_slack = 0_u64
+  end
+  after_all { Gcry.default_heap.atomic_slack = slack }
+
   it "keeps the terminator inside the string's own block when the content fills a grown buffer" do
     boundary_lengths.each do |n|
       s = String.build { |io| io << "x" * n }
