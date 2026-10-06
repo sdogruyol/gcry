@@ -2783,14 +2783,7 @@ module Gcry
 
           t0 = monotonic_ns
           if @scan_static_roots
-            scanned = 0_u64
-            Platform.scan_static_roots do |low, high|
-              each_static_range_excluding_heap(low, high) do |a, b|
-                scanned += b.address - a.address
-                Roots.scan_range_chunked(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
-              end
-            end
-            note_static_scanned(scanned)
+            note_static_scanned(scan_static_ranges)
           end
           @last_phase_static_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_STACKS)
@@ -3303,11 +3296,7 @@ module Gcry
         scan_all_fiber_roots if scan_stack
         scan_thread_roots if scan_stack && @stop_the_world
         if @scan_static_roots
-          Platform.scan_static_roots do |low, high|
-            each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range_chunked(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
-            end
-          end
+          scan_static_ranges
         end
         if scan_stack
           scan_mutator_stack

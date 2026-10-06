@@ -283,6 +283,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The static-root scan drops non-heap words before the mark call.** Root
+  candidates from data and `.bss` ranges went one by one into
+  `mark_root_candidate`, whose first test rejects anything outside
+  `[heap_min, heap_max)` but only after a call that is not inlined. The scan
+  now makes that test itself, as `scan_payload` does for heap bodies. A
+  shared library with a 64 MiB `.bss` cost 16.0 ms of static phase per
+  collection and now costs 3.5 ms (`--release`, 40 collections, 4 CPUs).
+  Boehm adds 2.1 ms with one marker and 0.8 ms with its default four.
+
 - **Large blocks reuse the resident pages of large blocks the last major
   freed (Linux process GC), at a fresh address.**
   - **Why:** every large chunk a major freed was unmapped, and the next

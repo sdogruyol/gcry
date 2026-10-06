@@ -1774,6 +1774,36 @@ module Gcry
       end
     end
 
+    # Every static range, minus the heap's own chunks, word by word into the
+    # mark. Returns the bytes handed over.
+    #
+    # Words outside `[heap_min, heap_max)` are dropped here, before the call,
+    # as `scan_payload` does for heap bodies: `mark_root_candidate` rejects
+    # them on its first range test, but only after a call `mark_impl_unlocked`
+    # is not inlined into. A shared library's `.bss` is mostly zeros, and a
+    # 64 MiB one cost 16.0 ms of static phase per collection that way; 3.5 ms
+    # with the test here, against 2.1 ms that Boehm adds with one marker
+    # (`--release`, 40 collections, 2026-10-06). The watched thread-list object
+    # `mark_impl_unlocked` notes before its own range test is a heap object, so
+    # nothing it could be offered is dropped. The bounds are read once: no chunk
+    # is mapped or unmapped while the world is stopped.
+    private def scan_static_ranges : UInt64
+      scanned = 0_u64
+      heap_lo = @heap_min
+      heap_hi = @heap_max
+      Platform.scan_static_roots do |low, high|
+        each_static_range_excluding_heap(low, high) do |a, b|
+          scanned += b.address - a.address
+          Roots.scan_range_chunked(a, b, safe: true) do |candidate|
+            w = candidate.address
+            next if w < heap_lo || w >= heap_hi
+            mark_root_candidate(candidate, source: RootSource::Static)
+          end
+        end
+      end
+      scanned
+    end
+
     # Emit [low, high) minus each mapped heap chunk via sorted chunk index merge.
     private def each_static_range_excluding_heap(low : Void*, high : Void*, & : Void*, Void* ->) : Nil
       # No rebuild here any more. `@chunk_index` is maintained incrementally —
