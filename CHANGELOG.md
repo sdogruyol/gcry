@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`make nursery-tlab-smoke` requires the released chunk on Linux again.**
+  Since 2026-10-05 it accepted a kept chunk everywhere, so a Linux major that
+  stopped releasing the probe's chunk would have passed with the stale-node
+  arm checking lists that could not dangle. Linux now fails on a kept chunk;
+  macOS keeps its kept-chunk path. With `GCRY_EMPTY_CHUNK_RETAIN=1073741824`
+  the gate fails where it used to pass, and with `0c5db2e`'s fix reverted it
+  still reports the stale node 3/3.
+
 - **Unsupported targets name the right remedy.** The compile-time refusal on
   32-bit, Android and non-Linux/macOS/Windows targets told every program to
   "build without -Dgc_none", including those already built without it that

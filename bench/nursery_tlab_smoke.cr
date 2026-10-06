@@ -98,6 +98,12 @@ else
 end
 
 # A promoted block freed in its nursery chunk, then a major.
+#
+# Linux must release the chunk. Accepting a kept chunk everywhere (as from
+# 2026-10-05 until 2026-10-06) let the stale-node arm go vacuous unseen: a
+# Linux major that stopped releasing would have printed the kept-chunk PASS
+# and the freelist walk would have checked nothing that could dangle. macOS
+# keeps the chunk, so there only the old-list arm can speak.
 stale, released, on_old = released_chunk_probe(heap)
 if stale > 0
   failures << "#{stale} freelist node(s) point into a released chunk: a promoted block freed in a nursery chunk " \
@@ -108,7 +114,12 @@ elsif on_old
 elsif released
   puts "  PASS no freelist node points into the released chunk"
 else
-  puts "  PASS the freed promoted block is not on the old list (the major kept its chunk)"
+  {% if flag?(:linux) %}
+    failures << "the major kept the probe's emptied chunk, which Linux releases, so the stale-node check above " \
+                "walked lists that could not dangle"
+  {% else %}
+    puts "  PASS the freed promoted block is not on the old list (the major kept its chunk)"
+  {% end %}
 end
 
 # Minor actually collected: an unrooted nursery object must vanish. A
