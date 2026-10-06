@@ -272,12 +272,12 @@ module Gcry
     @mark_pthreads = uninitialized StaticArray(Gcry::OS::PthreadT, 15)
     @mark_pthread_count = 0
     @mark_pthread_mode = false
-    # Per-worker mark-stack shards: a raw mmap'd buffer of up to
-    # `MARK_PUSHBUF_CAP` `Void*` and its count, per slot (`pushbuf_base`,
-    # `pushbuf_n`). 16 slots: slot 0 the collecting (master) thread, 1..15 the
-    # pthread helpers. Raw mmap, not a MarkStack per slot, because these are
-    # created lazily during a collection and a managed allocation there is
-    # forbidden under -Dgc_none.
+    # Per-worker mark-stack shards (`mark_shard`): a raw mmap'd buffer of up
+    # to `MARK_PUSHBUF_CAP` `Void*` as base, top and limit addresses, and the
+    # bytes the worker scanned, per slot. 16 slots: slot 0 the collecting
+    # (master) thread, 1..15 the pthread helpers. Raw mmap, not a MarkStack
+    # per slot, because these are created lazily during a collection and a
+    # managed allocation there is forbidden under -Dgc_none.
     @mark_pushbuf_slots = uninitialized StaticArray(UInt64, 256)
     # Workers claim a slot once (thread-local `@@mark_worker` survives across
     # collections, so the same pthread keeps its slot).
@@ -288,6 +288,9 @@ module Gcry
     # starts, and how many are waiting (`wake_mark_helpers`).
     @mark_wake = Atomic(Int32).new(0)
     @mark_sleepers = Atomic(Int32).new(0)
+    # Markers polling an empty shared stack in a cycle, before they park
+    # (`MarkDrought`).
+    @mark_spinners = Atomic(Int32).new(0)
     @mark_workers_busy = Atomic(Int32).new(0)
     # In-header mark generation (bits 8–15). clear_all_marks bumps this (O(1))
     # instead of walking the heap; wraps at 255 with a full clear. Synced to
@@ -381,6 +384,7 @@ module Gcry
       @mark_shutdown = Atomic(Int32).new(0)
       @mark_wake = Atomic(Int32).new(0)
       @mark_sleepers = Atomic(Int32).new(0)
+      @mark_spinners = Atomic(Int32).new(0)
       @mark_workers_busy = Atomic(Int32).new(0)
       @clear_stack_enabled = false
       @clear_stack_bytes = 4096_u64

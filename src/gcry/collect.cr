@@ -382,25 +382,32 @@ module Gcry
       sum
     end
 
-    # Bytes a parallel mark scanned, per worker, in word 1 of each worker's
-    # precise-count line above: a line that worker already owns, so counting
-    # adds no shared write. Folded into `@mark_scanned_bytes` once the cycle's
+    # Bytes a parallel mark scanned, per worker, in its shard
+    # (`Heap#mark_shard`): a line that worker already owns, so counting adds
+    # no shared write. Folded into `@mark_scanned_bytes` once the cycle's
     # helpers are idle (`take_parallel_scanned_bytes`). Before 2026-10-05 a
     # parallel cycle counted nothing, which left the adaptive threshold's
     # scan-based cap at its floor whenever parallel mark ran — and it runs by
     # default now on exactly the heaps that cap is for.
+    #
+    # `shard` is the scanning thread's when its caller has it, which saves a
+    # thread-local read per object; nil otherwise. A thread with no claimed
+    # slot counts into the master's, as it did into slot 0 of the layout lines.
     @[AlwaysInline]
-    private def count_parallel_scanned_bytes(size : UInt64) : Nil
-      i = layout_scan_slot &* LAYOUT_SCAN_STRIDE &+ 1
-      @layout_scan_counts.to_unsafe[i] &+= size
+    private def count_parallel_scanned_bytes(size : UInt64, shard : MarkShard?) : Nil
+      unless shard
+        w = Heap.mark_worker
+        shard = mark_shard(w < 0 ? 0 : w)
+      end
+      shard[SHARD_SCANNED] &+= size
     end
 
     private def take_parallel_scanned_bytes : UInt64
       sum = 0_u64
-      LAYOUT_SCAN_SLOTS.times do |s|
-        i = s &* LAYOUT_SCAN_STRIDE &+ 1
-        sum &+= @layout_scan_counts[i]
-        @layout_scan_counts[i] = 0_u64
+      MARK_SHARDS.times do |s|
+        shard = mark_shard(s)
+        sum &+= shard[SHARD_SCANNED]
+        shard[SHARD_SCANNED] = 0_u64
       end
       sum
     end

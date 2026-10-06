@@ -35,6 +35,11 @@ module Gcry
       @size == 0
     end
 
+    # Entries held. Read under the lock that guards the stack.
+    def size : Int32
+      @size
+    end
+
     # `empty?` for a reader that does not hold the lock guarding the stack:
     # a parallel-mark worker deciding whether a pop is worth taking that lock.
     # A stale answer only delays it. The load is atomic so it is redone on

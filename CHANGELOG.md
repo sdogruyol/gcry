@@ -120,6 +120,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     unregistered, the same thread keeps 0 of 8 (8 of 8 runs). 20 of 20 runs
     green.
 
+- **Idle parallel-mark workers park instead of polling, and one long list
+  marks in parallel as fast as serially.**
+  - **The bug:** parallel mark is the process default above 32 MiB live,
+    and a helper with nothing to take polled the empty shared stack for the
+    whole mark. On one long linked list, which has nothing to divide, four
+    workers burned 4.0 cores per second of collecting against 1.05 serial.
+    The pause was longer too: 40.1 ms against 31.6 on 3 M nodes. Most of
+    that was the parallel scan path itself, 54 instructions per object more
+    than the serial drain. It made two thread-local reads per object, each
+    an out-of-line call in Crystal, plus a `memcpy` call per node.
+  - **The fix:** after 50 µs without work a marker parks. On Linux it waits
+    on the futex the cycle start already uses. A publisher wakes sleepers
+    when the shared stack holds more than one pop's worth, or when it pushes
+    the rest of a large payload. The end of the cycle wakes them, and so
+    does the batch end that leaves no work, for a parked master. Elsewhere
+    a helper sleeps 100 µs–1 ms and the master keeps polling. Termination
+    detection is unchanged. The scan path is now handed the worker's shard,
+    so it makes no thread-local reads.
+  - **Evidence:** with 4 workers, 1.11 cores and a 31.1 ms pause; serial
+    is 30.3 ms on the same build (`bench/mark_list_heap.cr`,
+    `bench/log/linux/2026-10-06-mark-idle/`). Callgrind: 2 workers now cost
+    0.35% more instructions than serial, and serial is 1.5% cheaper than
+    before. `process_spec/regression/33_idle_mark_helpers_park_spec.cr`
+    reads a CPU/wall ratio of 4.0 against a bound of 1.6 before the fix.
+    `make parallel-mark-termination` stays red in its unlocked arm.
+    crystal-metric, 9 interleaved trials against readiness (`ab-cm-2.txt`):
+    JsonParsePure −3.9%, JsonGenerate −0.4%, Revcomp −0.6%, and the other
+    rows within ±1%, except Primes. Primes was +8.7% at the default two
+    workers in that run and +2.6% in the first, with overlapping ranges,
+    and +2.5% / +1.1% at four. It is not settled.
+  - `10_monitor_wait_cpu_spec` now marks serially. Its `workers + 0.4`
+    bound assumed every worker spins for the whole pause. With parked
+    helpers, a spinning Monitor passed that bound (measured).
+
 - **A promoted block freed in a nursery chunk goes on the nursery list, so
   releasing the chunk leaves no node behind.**
   - **The bug:** `GC.free` and the sweep chose the freelist by the block's

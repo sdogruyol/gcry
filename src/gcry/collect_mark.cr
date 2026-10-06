@@ -159,29 +159,20 @@ module Gcry
       end
     {% end %}
 
-    private def mark_stack_push(header : BlockHeader*) : Nil
+    # `shard` is the pushing thread's parallel-mark shard when the caller has
+    # it; nil otherwise, and under parallel mark it is then looked up out of
+    # line (`push_to_own_shard`, see `Heap#mark_shard`).
+    private def mark_stack_push(header : BlockHeader*, shard : MarkShard? = nil) : Nil
       {% if flag?(:gcry_hl_assert) %} hl_note_push(header) {% end %}
       unless @mark_parallel
         @mark_stack.push(header)
         return
       end
-      slot = Heap.mark_worker
-      # A thread with no claimed slot (should not happen on a mark worker) falls
-      # back to the locked shared push rather than corrupting slot -1.
-      base = slot < 0 ? 0_u64 : pushbuf_base(slot)
-      if base == 0_u64
-        @mark_lock.lock
-        @mark_stack.push(header)
-        @mark_lock.unlock
-        return
+      if shard
+        push_to_shard(header, shard)
+      else
+        push_to_own_shard(header)
       end
-      n = pushbuf_n(slot)
-      if n >= MARK_PUSHBUF_CAP
-        flush_pushbuf(slot)
-        n = 0
-      end
-      Pointer(Void*).new(base)[n] = header.as(Void*)
-      set_pushbuf_n(slot, n + 1)
     end
 
     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
@@ -481,7 +472,7 @@ module Gcry
       end
     end
 
-    private def scan_object(entry : BlockHeader*) : Nil
+    private def scan_object(entry : BlockHeader*, shard : MarkShard? = nil) : Nil
       # A tagged entry is a small, non-atomic block of a known class (see
       # `mark_entry`): its payload and length need no chunk. The rest tag is
       # the unscanned tail of a large payload.
@@ -491,7 +482,7 @@ module Gcry
           from = mark_entry_header(entry).address
           chunk = chunk_containing(from)
           return unless chunk && ChunkHeader.large?(chunk)
-          scan_large_from(chunk, ChunkHeader.large_header(chunk), from)
+          scan_large_from(chunk, ChunkHeader.large_header(chunk), from, shard)
           return
         end
         user = BlockHeader.user_from(mark_entry_header(entry)).as(UInt8*)
@@ -499,7 +490,7 @@ module Gcry
         # `type_id_plausible?` for such a block, which is never atomic and
         # never shorter than four bytes.
         base_only = !@allow_interior_pointers && !type_id_word_plausible?(user)
-        scan_payload(user, size, base_only, 0_u64, 0_u64)
+        scan_payload(user, size, base_only, 0_u64, 0_u64, shard)
         return
       end
       header = entry
@@ -528,10 +519,10 @@ module Gcry
       chunk = chunk_containing(header.address)
       return unless chunk
       if ChunkHeader.large?(chunk)
-        scan_large_from(chunk, header, user_of(chunk, header).address)
+        scan_large_from(chunk, header, user_of(chunk, header).address, shard)
         return
       end
-      scan_block(chunk, header, 0_u64, 0_u64)
+      scan_block(chunk, header, 0_u64, 0_u64, shard)
     end
 
     # A large payload from byte address `from` on. Under parallel mark at most
@@ -539,7 +530,8 @@ module Gcry
     # as one `MARK_ENTRY_TAG_REST` entry, so an idle worker takes it while
     # this one scans. The planted miss of `make mark-audit` drops a payload's
     # last word, so a payload it applies to is not split.
-    private def scan_large_from(chunk : ChunkHeader*, header : BlockHeader*, from : UInt64) : Nil
+    private def scan_large_from(chunk : ChunkHeader*, header : BlockHeader*, from : UInt64,
+                                shard : MarkShard? = nil) : Nil
       return if atomic_of(chunk, header)
       user = user_of(chunk, header).as(UInt8*)
       size = block_payload(chunk, header).to_u64
@@ -548,37 +540,37 @@ module Gcry
       base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
       if @mark_parallel && @mark_test_short_tid == 0 && finish &- from > MARK_SPLIT_BYTES
         rest = from &+ MARK_SPLIT_BYTES
-        @mark_lock.lock
-        @mark_stack.push(Pointer(BlockHeader).new(rest | (MARK_ENTRY_TAG_REST << MARK_ENTRY_TAG_SHIFT)))
-        @mark_lock.unlock
-        scan_payload(Pointer(UInt8).new(from), MARK_SPLIT_BYTES, base_only, 0_u64, 0_u64)
+        publish_mark_entry(Pointer(BlockHeader).new(rest | (MARK_ENTRY_TAG_REST << MARK_ENTRY_TAG_SHIFT)))
+        scan_payload(Pointer(UInt8).new(from), MARK_SPLIT_BYTES, base_only, 0_u64, 0_u64, shard)
         return
       end
-      scan_payload(Pointer(UInt8).new(from), finish &- from, base_only, 0_u64, 0_u64)
+      scan_payload(Pointer(UInt8).new(from), finish &- from, base_only, 0_u64, 0_u64, shard)
     end
 
     # `scan_object`'s body, chunk resolved. Words in `[skip_lo, skip_hi)` are
     # not followed: `mark_from_children` passes the object's own block there,
     # every other caller an empty range, which the inline folds away.
     @[AlwaysInline]
-    private def scan_block(chunk : ChunkHeader*, header : BlockHeader*, skip_lo : UInt64, skip_hi : UInt64) : Nil
+    private def scan_block(chunk : ChunkHeader*, header : BlockHeader*, skip_lo : UInt64, skip_hi : UInt64,
+                           shard : MarkShard? = nil) : Nil
       return if atomic_of(chunk, header)
 
       user = user_of(chunk, header).as(UInt8*)
       size = block_payload(chunk, header).to_u64
       return if size == 0
       base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
-      scan_payload(user, size, base_only, skip_lo, skip_hi)
+      scan_payload(user, size, base_only, skip_lo, skip_hi, shard)
     end
 
     # The words of one payload, `size` bytes at `user`.
     @[AlwaysInline]
-    private def scan_payload(user : UInt8*, size : UInt64, base_only : Bool, skip_lo : UInt64, skip_hi : UInt64) : Nil
+    private def scan_payload(user : UInt8*, size : UInt64, base_only : Bool, skip_lo : UInt64, skip_hi : UInt64,
+                             shard : MarkShard? = nil) : Nil
       # A shared counter written per object by every helper is the line
       # parallel mark's scaling already paid for once; helpers count into
       # their own line and the master folds them in after the cycle.
       if @mark_parallel
-        count_parallel_scanned_bytes(size)
+        count_parallel_scanned_bytes(size, shard)
       else
         @mark_scanned_bytes &+= size
       end
@@ -616,7 +608,7 @@ module Gcry
       end
       cursor = user.as(UInt64*)
       if @mark_edges_inline && skip_lo == skip_hi
-        scan_edges_inline(cursor, words, base_only)
+        scan_edges_inline(cursor, words, base_only, shard)
         return
       end
       # Most words of a scanned body are not heap addresses: nulls, small
@@ -676,7 +668,7 @@ module Gcry
     # `occ` line is never touched. Every candidate this does not handle in
     # full — not in the table, outside the chunk's blocks, a large or nursery
     # chunk — goes to `mark_impl`, which stays the authority.
-    private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool) : Nil
+    private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
       lo = @heap_min
       hi = @heap_max
       l1 = @radix_l1
@@ -721,7 +713,7 @@ module Gcry
         # `chunk_set_mark` with its relaxed pre-check already done above.
         Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
         next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
-        mark_stack_push(mark_entry(chunk, header))
+        mark_stack_push(mark_entry(chunk, header), shard)
       end
       # `radix_note_fast_hit`, once per payload.
       @radix_fast_hits &+= hits unless @mark_parallel
