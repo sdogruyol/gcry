@@ -313,6 +313,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     layout; headerless aborted). Now none run, and they run once the self
     pointer is cleared.
 
+- **Re-registering a disappearing link answers `GC_DUPLICATE` and follows the
+  new object.**
+  - **The bug:** the link got a second row and the call returned 0. When the
+    first target died, the link was cleared even though its new target was
+    alive.
+  - **The fix:** one row per link location, found through an index keyed by
+    location. Registering it again moves the row to the new object and returns
+    1, as Boehm's `GC_register_disappearing_link_inner` does.
+  - **Evidence:** spec 25. The old code answered `[0, 0]` for the two
+    registrations.
+
 - **The `GC` API behaves like `gc/boehm.cr`.**
   - **`GC.disable` nests.** `disable; disable; enable` used to turn
     collection back on. `GC.enable` with nothing disabled raises `GC is not

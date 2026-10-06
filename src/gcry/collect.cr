@@ -1885,12 +1885,14 @@ module Gcry
       @finalizers.index_cap
     end
 
-    def register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Nil
+    # False when *link* was registered already: its row now names *object*
+    # (Boehm's `GC_DUPLICATE`). See `Finalizers::Registry#register_disappearing_link`.
+    def register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Bool
       referent = object
       if referent.null?
         referent = link.value
       end
-      return if referent.null?
+      return true if referent.null?
 
       if (found = find_object_with_chunk(referent))
         header, chunk = found

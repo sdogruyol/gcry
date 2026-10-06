@@ -80,7 +80,7 @@ module Gcry
     # LibC malloc like the tables beside it, never the gcry heap. The caller
     # holds the registry's lock.
     struct PointerIndex
-      # Deleted marker. Address 1 can never be a real object pointer.
+      # Deleted marker. Address 1 is never an object or a link location.
       TOMBSTONE = Pointer(Void).new(1_u64)
 
       @slots : IndexSlot* = Pointer(IndexSlot).null
@@ -193,6 +193,8 @@ module Gcry
       private def hash(key : Void*) : UInt64
         # Objects are at least 16-byte aligned, so the low bits carry nothing.
         # Fibonacci mix on the shifted pointer spreads them across the table.
+        # Two link locations 8 bytes apart start on one slot and the probe
+        # separates them.
         (key.address >> 4) &* 0x9E3779B97F4A7C15_u64
       end
 
@@ -263,6 +265,9 @@ module Gcry
       # which the flags never avoided — but registered objects are the rare case,
       # so on balance this is a small regression traded for the header space.
       @index = PointerIndex.new
+      # Link location -> its row, so a link registered again is found without
+      # a scan of every `WeakRef`'s row (`register_disappearing_link`).
+      @link_index = PointerIndex.new
 
       @entries : Entry* = Pointer(Entry).null
       @entries_size = 0
@@ -282,6 +287,7 @@ module Gcry
         @lock.lock
         begin
           @index.clear
+          @link_index.clear
           LibC.free(@entries.as(Void*)) unless @entries.null?
           LibC.free(@links.as(Void*)) unless @links.null?
           @entries = Pointer(Entry).null
@@ -351,14 +357,30 @@ module Gcry
         previous
       end
 
-      def register_disappearing_link(link : Void**, object : Void*) : Nil
-        return if link.null? || object.null?
+      # Boehm's `GC_general_register_disappearing_link`: one row per link
+      # location. Registering a location again moves its row to *object* and
+      # returns false — Boehm's `GC_DUPLICATE`, after which it, too, clears the
+      # link when the *new* object dies and not the old one. A null *link* or
+      # *object* registers nothing.
+      def register_disappearing_link(link : Void**, object : Void*) : Bool
+        return true if link.null? || object.null?
         @lock.lock
         begin
+          if (i = link_row(link)) >= 0
+            old = @links[i].object
+            if old != object
+              @index.remove(old)
+              @index.add(object)
+              @links[i] = Link.new(link, object)
+            end
+            return false
+          end
           ensure_links_cap(@links_size + 1)
           @links[@links_size] = Link.new(link, object)
           @links_size += 1
           @index.add(object)
+          @link_index.add(link.as(Void*))
+          true
         ensure
           @lock.unlock
         end
@@ -530,6 +552,7 @@ module Gcry
         @lock.lock
         begin
           @index.give_up
+          @link_index.give_up
         ensure
           @lock.unlock
         end
@@ -544,6 +567,19 @@ module Gcry
         @entries[@entries_size] = entry
         @entries_size += 1
         @index.add(entry.object)
+      end
+
+      # The row of *link*, or -1. The link index answers without a scan
+      # unless it is not available (its C allocation failed).
+      private def link_row(link : Void**) : Int32
+        return -1 if @links_size == 0
+        return -1 if @link_index.available? && !@link_index.includes?(link.as(Void*))
+        i = 0
+        while i < @links_size
+          return i if @links[i].link == link
+          i += 1
+        end
+        -1
       end
 
       private def ensure_entries_cap(need : Int32) : Nil
@@ -585,6 +621,7 @@ module Gcry
 
       private def swap_remove_link(i : Int32) : Nil
         @index.remove(@links[i].object)
+        @link_index.remove(@links[i].link.as(Void*))
         last = @links_size - 1
         @links[i] = @links[last] if i != last
         @links_size = last

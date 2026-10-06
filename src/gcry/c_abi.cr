@@ -640,11 +640,11 @@ fun gcry_c_is_heap_ptr = GC_is_heap_ptr(pointer : Void*) : LibGC::Int
   GC.is_heap_ptr(pointer) ? 1 : 0
 end
 
-# 0 is `GC_SUCCESS`. gcry has no duplicate (`GC_DUPLICATE`) report: a second
-# registration of the same link clears it once, like the first.
+# Boehm's `GC_SUCCESS` (0) for a new registration, `GC_DUPLICATE` (1) when
+# *link* was registered already — its registration then follows *obj*, as in
+# Boehm (`GC_register_disappearing_link_inner`).
 fun gcry_c_general_register_disappearing_link = GC_general_register_disappearing_link(link : Void**, obj : Void*) : LibGC::Int
-  Gcry.default_heap.register_disappearing_link(link, obj)
-  0
+  Gcry.default_heap.register_disappearing_link(link, obj) ? 0 : 1
 end
 
 fun gcry_c_register_finalizer = GC_register_finalizer(obj : Void*, fn : LibGC::Finalizer, cd : Void*,

@@ -104,4 +104,29 @@ describe "finalizer registration index" do
       heap.destroy
     end
   end
+
+  it "still finds a link registered again once the link index has given up" do
+    # Without its index the duplicate check scans the rows. Trusting an index
+    # that gave up would answer "new" and add a second row, and the link would
+    # be cleared when its *first* target died.
+    heap = Gcry::Heap.new
+    begin
+      first = heap.malloc(32)
+      second = heap.malloc(32)
+      slot = Pointer(Void*).malloc(1)
+      slot.value = first
+      heap.register_disappearing_link(slot.as(Void**), first).should be_true
+      heap.debug_finalizer_index_give_up
+      slot.value = second
+      heap.register_disappearing_link(slot.as(Void**), second).should be_false
+      heap.finalizer_link_count.should eq(1)
+
+      heap.free(first)
+      slot.value.should eq(second)
+      heap.free(second)
+      slot.value.should eq(Pointer(Void).null)
+    ensure
+      heap.destroy
+    end
+  end
 end

@@ -1,7 +1,7 @@
 require "../../src/gcry"
 require "spec"
 
-# Boehm's finalizer registration, called through its C
+# Boehm's finalizer and disappearing-link registration, called through its C
 # ABI the way `crystal i` and C libraries call it (src/gcry/c_abi.cr).
 #
 # Until 2026-10-06 `GC_register_finalizer*` asked `BlockHeader.finalizer?`
@@ -19,7 +19,10 @@ require "spec"
 # The same entry point also ignored which Boehm call was made: plain
 # `GC_register_finalizer` was treated as `_ignore_self`, so an object holding a
 # pointer to itself was finalized, where Boehm's ordering finds it on a cycle
-# and never finalizes it.
+# and never finalizes it. And re-registering a disappearing link added a second
+# row and returned 0: the link was nulled when its *first* target died, with the
+# target it had been moved to still alive. Boehm answers `GC_DUPLICATE` and
+# moves the one registration to the new object.
 #
 # Blocks are built on a finished fiber that scrubbed its frames, their addresses
 # kept masked, as in 21_boehm_c_abi_spec.cr. A stale word in the collect call
@@ -158,7 +161,7 @@ end
 
 private NO_FINALIZER = {Pointer(Void).null, Pointer(Void).null}
 
-describe "Regression: Boehm finalizer registration" do
+describe "Regression: Boehm finalizer and disappearing-link registration" do
   it "registers on a block whose bytes 4..7 read as the old header flag bit" do
     AbiRegLog.reset(SALT + 0x1000, SALT + 0x2000)
     previous = [] of {Void*, Void*}
@@ -248,5 +251,34 @@ describe "Regression: Boehm finalizer registration" do
     abi_collect(6)
     AbiRegLog.count.should be >= ABI_BLOCKS - 1
     abi_log_matches(own, SALT + 0x6000, 2_u64)
+  end
+
+  it "answers GC_DUPLICATE for a link registered again, and moves it to the new object" do
+    link = LibC.malloc(sizeof(Void*)).as(Void**)
+    holder = Pointer(Void*).malloc(1)
+    answers = [] of Int32
+    abi_block(32, atomic: true) do |p|
+      link.value = p
+      answers << LibGC.general_register_disappearing_link(link, p)
+    end
+    second = abi_block(32, atomic: true) do |p|
+      holder.value = p
+      link.value = p
+      answers << LibGC.general_register_disappearing_link(link, p)
+    end
+    answers.should eq([0, 1])
+
+    # The first object dies, the second is held: the link follows the second.
+    # Read on a scrubbed fiber, so the address read is no root afterwards.
+    3.times { LibGC.collect }
+    follows = false
+    abi_on_fiber { follows = link.value.address == second ^ ABI_MASK }
+    follows.should be_true
+
+    # Once the second dies too, the link is cleared.
+    holder.value = Pointer(Void).null
+    3.times { LibGC.collect }
+    link.value.should eq(Pointer(Void).null)
+    LibC.free(link.as(Void*))
   end
 end
