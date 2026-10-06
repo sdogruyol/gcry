@@ -4,6 +4,12 @@ Host: QEMU x86-64 guest, 12 vCPUs, 11 GiB, Linux, Crystal 1.21.0, `--release`.
 Arms: Boehm (stock Crystal), gcry at `master` (`6650b80`), gcry at `readiness`
 (`25934c6`). Binaries built once, run on an otherwise idle machine.
 
+**Superseded for three rows.** The `readiness` arm here ran with the
+`realloc` page move on by default, which corrupted buffers Crystal's stdlib
+reads after growing them; it is opt-in now. Copying, JsonParseSerializable,
+JsonGenerate and Revcomp run 5%, 12% and 7% slower than with the move, at
+93%, 113% and 89% of Boehm on 4 CPUs (`../2026-10-06-heap-review/`).
+
 ## crystal-metric, process-fresh, 11 interleaved trials, all 12 CPUs
 
 `crystal-metric-summary.txt` / `crystal-metric-raw.json`

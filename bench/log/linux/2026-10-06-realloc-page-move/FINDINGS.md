@@ -1,5 +1,12 @@
 # Page faults on allocation storms: where they come from, and moving pages on `realloc`
 
+**Off by default since the merge review** (`GCRY_REALLOC_MOVE=1` turns it
+on). The old block reads zeroes after a move, and Crystal's stdlib reads it:
+`IO::Memory#write` of its own `to_slice` copies from the old block after
+growing, and a 300 KiB self-copy got 303 152 of 307 200 bytes wrong. The
+measurements below hold for the opt-in; what the default gives up is in
+`../2026-10-06-heap-review/`.
+
 Host: QEMU x86-64 guest, 12 vCPUs shared with two other agents, every build
 and run under `taskset -c 4-7` (gcry counts 4 CPUs, so 2 mark workers),
 Crystal 1.21.0, Linux 7.0, crystal-metric `--release`. Base is `readiness`
