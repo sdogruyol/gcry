@@ -24,8 +24,8 @@ compiler PR").
 | B5 | **Scoped**: unsupported targets fail at compile time with the reason | `platform/os.cr` |
 | B6 | **Proposed**: upstream interface written up | `docs/RFC-GC-BACKEND.md` |
 | B7 | **Fixed**: `spec/std` 18 054 / 0 failures in CI on 1.21.0 (plus `GCRY_STRESS=1`), `latest` and nightly | `ci/std-spec.sh`, job `std-spec` |
-| M1 | **Improved**: parallel mark on by default, 32 MiB floor. Workers: `min(2, CPUs−1)` up to 7 CPUs, then `CPUs/4+1`, at most 8. Idle helpers wake on a futex (Linux). Large objects are split across workers. Parallel cycles feed the adaptive threshold's cap | `gc_override.cr`, `parallel_mark.cr`, `collect_mark.cr` |
-| M2 | **Improved, still open**: on a 12-CPU Linux host, as % of Boehm's speed: Primes 60→77%, JsonParsePure 62→79%, JsonParseSerializable 88%, Binarytrees 84%, RegexDna 98%, JsonGenerate 109%. Peak RSS 0.43–0.90× Boehm. Per thread, mark still costs ~2.1× Boehm's | `bench/log/linux/2026-10-05-alloc-storm-mark/` |
+| M1 | **Fixed**: parallel mark on by default, 32 MiB floor. Workers: `min(2, CPUs−1)` up to 7 CPUs, then `CPUs/4+1`, at most 8. Idle helpers wake on a futex (Linux). Large objects are split across workers. The scan loop resolves candidates inline; one marker now costs about Boehm's single marker on JsonParsePure and 1.3× on Primes | `parallel_mark.cr`, `collect_mark.cr`; `bench/log/linux/2026-10-06-mark-cost/` |
+| M2 | **Fixed** on Linux x86_64: crystal-metric, 12 CPUs, 11 trials, % of Boehm's speed (master → branch): Primes 42→100%, JsonParsePure 43→99%, JsonParseSerializable 92→100%, Binarytrees 82→94%, Revcomp 84→94%, JsonGenerate 107→113%, RegexDna 100→102%. Peak RSS under Boehm's on every GC-bound row | `bench/log/linux/2026-10-06-pr-benchmarks/` |
 | M3 | **Fixed**: every loaded shared object's writable data is a root (Linux, macOS, Windows) | `platform/*_roots.cr`; `process_spec/regression/16` |
 | M4 | **Fixed**: Boehm's ignore-self finalization order; dangling weak links dropped | `collect_mark.cr`; `process_spec/regression/17`, `20` |
 | M8 | **Fixed**: Boehm's `GC_*` C ABI and `lib LibGC`, including `GC_stackbottom` | `c_abi.cr`; `process_spec/regression/21` |

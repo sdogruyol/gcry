@@ -443,6 +443,22 @@ make bench-crystal-metric
 
 ### Process-fresh cut (cite this)
 
+Session: `bench/log/linux/2026-10-06-pr-benchmarks/` (QEMU x86-64, 12 vCPUs, Crystal 1.21.0, 11 interleaved process-fresh trials, `ab.py`). Speed is Boehm wall ÷ gcry wall.
+
+| Bench | speed % Boehm | peak RSS × Boehm |
+|-------|-------------:|-----------------:|
+| Primes | **100%** | 0.94× |
+| JsonParsePure | **99%** | 0.80× |
+| JsonParseSerializable | **100%** | 0.72× |
+| JsonParsePull | 96% | 0.79× |
+| JsonGenerate | **113%** | 0.64× |
+| Binarytrees | 94% | 0.75× |
+| RegexDna | 102% | 0.53× |
+| Revcomp | 94% | 0.60× |
+| Knuckeotide / Brainfuck / Brainfuck2 / Matmul / Threadring | 96–108% | — (≤ 60 MiB) |
+
+### Process-fresh cut, 2026-08-03 (historical)
+
 Session: `bench/log/linux/2026-08-03-crystal-metric-fresh/` (WSL2 i3-12100F, Crystal 1.21, med-of-3, `FILTER=gc`).
 
 | Bench | speed % Boehm | wall × | Notes |

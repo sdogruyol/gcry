@@ -52,8 +52,9 @@ private runtime state and reopening runtime classes. This RFC proposes:
 
 What is **not** evidenced yet:
 
-- Allocation-storm throughput lags Boehm: Primes 77% and JsonParsePure 79%
-  of its speed on a 12-CPU Linux host (READINESS M2).
+- Allocation-storm throughput has been measured at Boehm's level only on
+  Linux x86_64 (READINESS M2: Primes 100%, JsonParsePure 99% of its speed,
+  12 CPUs); arm64 and macOS have not been re-measured since.
 - Crystal's suites have run under gcry only on Linux x86_64.
 - TLAB, under Parallel ExecutionContext, remains a research arm (B3,
   [POLICY.md](POLICY.md)).
