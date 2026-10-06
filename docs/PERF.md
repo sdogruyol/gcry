@@ -443,19 +443,21 @@ make bench-crystal-metric
 
 ### Process-fresh cut (cite this)
 
-Session: `bench/log/linux/2026-10-06-pr-benchmarks/` (QEMU x86-64, 12 vCPUs, Crystal 1.21.0, 11 interleaved process-fresh trials, `ab.py`). Speed is Boehm wall ÷ gcry wall.
+Session: `bench/log/linux/2026-10-06-pr-benchmarks/after-review/` (QEMU x86-64, 12 vCPUs, Crystal 1.21.0, 11 interleaved process-fresh trials, `ab.py`). Speed is Boehm wall ÷ gcry wall; 0.34.0 in parentheses.
 
 | Bench | speed % Boehm | peak RSS × Boehm |
 |-------|-------------:|-----------------:|
-| Primes | **100%** | 0.94× |
-| JsonParsePure | **99%** | 0.80× |
-| JsonParseSerializable | **100%** | 0.72× |
-| JsonParsePull | 96% | 0.79× |
-| JsonGenerate | **113%** | 0.64× |
-| Binarytrees | 94% | 0.75× |
-| RegexDna | 102% | 0.53× |
-| Revcomp | 94% | 0.60× |
-| Knuckeotide / Brainfuck / Brainfuck2 / Matmul / Threadring | 96–108% | — (≤ 60 MiB) |
+| Primes | **100%** (42%) | 0.94× |
+| JsonParsePure | **91%** (42%) | 0.83× |
+| Binarytrees | **94%** (81%) | 0.76× |
+| JsonGenerate | **105%** (105%) | 0.70× |
+| JsonParseSerializable | 88% (89%) | 0.92× |
+| JsonParsePull | 91% (93%) | 0.92× |
+| Revcomp | 84% (82%) | 0.64× |
+| RegexDna | 99% (100%) | 0.53× |
+| Knuckeotide / Brainfuck / Brainfuck2 / Matmul / Threadring | 97–107% | — (≤ 69 MiB) |
+
+Rows that did not move between 0.34.0 and this tree also move ±5–7% between builds of identical collector behaviour (code placement; `…/after-review/attribution-bisect.txt`).
 
 ### Process-fresh cut, 2026-08-03 (historical)
 

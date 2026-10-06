@@ -53,9 +53,10 @@ private runtime state and reopening runtime classes. This RFC proposes:
 
 What is **not** evidenced yet:
 
-- Allocation-storm throughput has been measured at Boehm's level only on
-  Linux x86_64 (READINESS M2: Primes 100%, JsonParsePure 99% of its speed,
-  12 CPUs); arm64 and macOS have not been re-measured since.
+- Allocation-storm throughput is measured only on Linux x86_64 (READINESS
+  M2: Primes 100%, JsonParsePure 91%, Binarytrees 94% of Boehm's speed on
+  12 CPUs; buffer-growth rows such as Revcomp 84%); arm64 and macOS have not
+  been re-measured since.
 - Crystal's suites have run under gcry only on Linux x86_64.
 - TLAB, under Parallel ExecutionContext, remains a research arm (B3,
   [POLICY.md](POLICY.md)).

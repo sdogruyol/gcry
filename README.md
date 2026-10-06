@@ -202,10 +202,10 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **102.0%** *(this tree, 2026-10-06; 0.34.0: 102.9% in the same session)* |
-| Kemal `/json` peak RSS | **1.43×** *(22.3 vs 15.6 MiB)* |
+| Kemal `/json` throughput | **101.8%** *(this tree, 2026-10-06; 0.34.0: 103.4% in the same session)* |
+| Kemal `/json` peak RSS | **1.43×** *(22.2 vs 15.6 MiB)* |
 | Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB)* |
-| Kemal `/` throughput | **86.8%** *(0.34.0: 94.6% in the same session; not GC-bound — the same code moved by NOP padding alone reads 91–98% of 0.34.0)* |
+| Kemal `/` throughput | **90.9%** *(0.34.0: 100.6% in the same session; not GC-bound — the GC is 0.3% of the run, and the same code moved by NOP padding alone reads 91–98% of 0.34.0)* |
 | Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
 | Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
 
@@ -213,17 +213,20 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 \*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
-Allocation storms, crystal-metric (process-fresh, 11 interleaved trials, 12 CPUs, Crystal 1.21.0, 2026-10-06 — `bench/log/linux/2026-10-06-pr-benchmarks/`; rows marked † re-measured on 4 CPUs after the `realloc` page move went opt-in — `bench/log/linux/2026-10-06-heap-review/`):
+Allocation storms, crystal-metric (process-fresh, 11 interleaved trials, 12 CPUs, Crystal 1.21.0, 2026-10-06 — `bench/log/linux/2026-10-06-pr-benchmarks/after-review/`; 0.34.0 in parentheses):
 
 | Bench | gcry speed vs Boehm | peak RSS × Boehm |
 |-------|--------------------:|-----------------:|
-| Primes | **100%** | 0.94× |
-| JsonParsePure | **99%** | 0.80× |
-| JsonParseSerializable † | 93% | 0.92× |
-| JsonGenerate † | **113%** | 0.66× |
-| Binarytrees | 94% | 0.75× |
-| Revcomp † | 89% | 0.64× |
-| RegexDna | 102% | 0.53× |
+| Primes | **100%** (42%) | 0.94× |
+| JsonParsePure | **91%** (42%) | 0.83× |
+| Binarytrees | **94%** (81%) | 0.76× |
+| JsonGenerate | **105%** (105%) | 0.70× |
+| JsonParseSerializable | 88% (89%) | 0.92× |
+| JsonParsePull | 91% (93%) | 0.92× |
+| Revcomp | 84% (82%) | 0.64× |
+| RegexDna | 99% (100%) | 0.53× |
+
+The `realloc` page move (`GCRY_REALLOC_MOVE=1`, opt-in, unsafe for programs that read a buffer after growing it — the stdlib does) gives JsonGenerate 112%, and part of JsonParseSerializable and Revcomp back.
 
 ### macOS (Apple Silicon)
 
