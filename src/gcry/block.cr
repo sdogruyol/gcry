@@ -432,6 +432,12 @@ module Gcry
       # grown block: its data range reads zeroes and holds no resident page,
       # so recycling it saves nothing (`Heap#take_large_recycle`).
       MOVED = 1024_u32
+      # A large chunk cached by the program's own `GC.free` since the last
+      # major, under large-object recycling: the allocation of its exact size
+      # takes it where it stands, as the exact-size cache always did, and not
+      # through the recycler's fresh mapping (`Heap#take_large_free`).
+      # Cleared when taken.
+      FREED = 2048_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -589,6 +595,14 @@ module Gcry
 
     def self.set_moved(chunk : ChunkHeader*) : Nil
       update_flag(chunk, Flags::MOVED, true)
+    end
+
+    def self.freed?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::FREED) != 0
+    end
+
+    def self.set_freed(chunk : ChunkHeader*, value : Bool) : Nil
+      update_flag(chunk, Flags::FREED, value)
     end
 
     def self.idle?(chunk : ChunkHeader*) : Bool

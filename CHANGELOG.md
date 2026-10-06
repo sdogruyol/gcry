@@ -480,6 +480,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     timed the collection as cheaper and fitted one more major into the run,
     so 17 of 45 off-runs and 4 of 45 on-runs were in the fast mode. With
     pacing off, the two arms were equal.
+  - **A block the program frees itself** (`GC.free`, which zlib and GMP
+    call) stays cached between majors up to what the exact-size cache keeps
+    (the large-cache retain plus 2 MiB), and the next allocation of its size
+    takes it in place, as without recycling. At first the cache between
+    majors held only what the last major left, nothing in a loop that does
+    not collect, so each such free unmapped its chunk at once: a
+    20 000-iteration gzip loop ran 752 ms against 310 ms with
+    `GCRY_LARGE_RECYCLE=0` (Boehm 745 ms), unmapping 5.4 GB. Kept but handed
+    out through the fresh mapping it still ran 615 ms; taken in place, 305
+    ms and 1.8 MiB unmapped (`bench/gzip_free_loop.cr`, 4 CPUs).
+    `process_spec/regression/32_large_free_reuse_spec.cr` and
+    `make gzip-free-reuse` fail without it.
   - **Evidence:** crystal-metric, one binary against `GCRY_LARGE_RECYCLE=0`,
     15 trials (9 on the CPU-bound rows). Revcomp 0.533 → 0.521 s (pooled
     30 trials, −2.8%; Boehm 0.494), whole-process faults 311.5k → 256k.

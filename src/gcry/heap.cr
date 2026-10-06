@@ -920,9 +920,15 @@ module Gcry
         live_objects_dec
         @finalizers.notice_reclaim(pointer)
         @large_cached_by_free &+= 1
-        with_alloc_lock { cache_large_chunk(chunk, header) }
+        # Marked for the in-place exact-size take recycling reserves to the
+        # program's own frees (`alloc_large`).
+        with_alloc_lock do
+          ChunkHeader.set_freed(chunk, true)
+          cache_large_chunk(chunk, header)
+        end
         if @large_recycle
-          trim_large_cache(@large_recycle_budget, cap: UInt64::MAX) if @large_free_bytes > @large_recycle_budget
+          keep = large_recycle_keep
+          trim_large_cache(keep, cap: UInt64::MAX) if @large_free_bytes > keep
         elsif @large_free_bytes > @large_cache_retain &+ LARGE_FREE_TRIM_SLACK
           trim_large_cache
         end
@@ -1331,9 +1337,10 @@ module Gcry
         needs_clear = clear && !clean
       end
       # Fresh mappings since the last major spend the recycling budget; the
-      # cache gives back what they spent (`@large_recycle_budget`).
+      # cache gives back what they spent (`large_recycle_keep`).
       if @large_recycle && @large_free_bytes > @large_recycle_budget && !@collecting && !@world_stopped
-        trim_large_cache(@large_recycle_budget, cap: UInt64::MAX)
+        keep = large_recycle_keep
+        trim_large_cache(keep, cap: UInt64::MAX) if @large_free_bytes > keep
       end
 
       # `GCRY_ALWAYS_CLEAR=1` — research arm. Every skip above is a claim that
@@ -2415,8 +2422,17 @@ module Gcry
       @large_alloc_since_major &+= mapped
 
       # Under recycling the cache is the recycler's: it hands even an exact
-      # fit out at a fresh address (`recycle_large_mapping`).
-      if !@large_recycle && (user = take_large_free(mapped))
+      # fit out at a fresh address (`recycle_large_mapping`), so a stale word
+      # naming a block the sweep found dead cannot name its successor. A
+      # chunk the program freed itself is taken in place, as without
+      # recycling: between majors that is all the cache holds, and a fresh
+      # mapping per allocation cost a gzip loop 2× (`bench/gzip_free_loop.cr`).
+      taken = if @large_recycle
+                recycle ? take_large_free(mapped, freed_only: true) : nil
+              else
+                take_large_free(mapped)
+              end
+      if user = taken
         header = BlockHeader.large_header_from_user(user)
         # A cached chunk's pages may have been released reusable at the last
         # major; take them back before anything writes the object.
@@ -2476,6 +2492,19 @@ module Gcry
     # Mapped bytes of every large allocation since the last major: what a
     # major keeps for recycling at most.
     @large_alloc_since_major = 0_u64
+
+    # What the cache may hold between majors under recycling: the budget, but
+    # never less than the exact-size cache keeps without recycling
+    # (`@large_cache_retain` plus `LARGE_FREE_TRIM_SLACK`). The budget only
+    # covers what a major freed, so with a floor of zero a block freed by
+    # `GC.free` went straight back to the kernel and the next allocation of
+    # its size mapped and faulted in a fresh one: zlib's stream state comes
+    # and goes that way, and a gzip loop ran 2.4× slower than with recycling
+    # off (`bench/gzip_free_loop.cr`).
+    private def large_recycle_keep : UInt64
+      floor = @large_cache_retain &+ LARGE_FREE_TRIM_SLACK
+      @large_recycle_budget > floor ? @large_recycle_budget : floor
+    end
 
     # A remainder at least this long becomes a cached chunk of its own when a
     # cached chunk is split; a shorter one is unmapped.
@@ -2765,7 +2794,8 @@ module Gcry
 
     # Exact mapped-size match only — never reuse a fatter VMA for a smaller need
     # (that pinned live RSS for the oversized mapping until the object died).
-    private def take_large_free(mapped_need : UInt64) : Void*?
+    # *freed_only*: only a chunk the program freed (`ChunkHeader.freed?`).
+    private def take_large_free(mapped_need : UInt64, freed_only : Bool = false) : Void*?
       b = self.class.large_bucket(mapped_need)
       prev = Pointer(Void).null
       user = @large_freelists[b]
@@ -2773,7 +2803,8 @@ module Gcry
         header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
-        if chunk.value.mapped_bytes == mapped_need
+        if chunk.value.mapped_bytes == mapped_need && (!freed_only || ChunkHeader.freed?(chunk))
+          ChunkHeader.set_freed(chunk, false)
           # A bucket chain should only ever hold FREE blocks. A USED one means
           # the block was handed out already and something put it back, or
           # never took it off.

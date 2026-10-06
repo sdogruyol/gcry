@@ -1092,6 +1092,15 @@ realloc-move-stress: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/realloc_move_stress.cr -o $(BIN)/realloc_move_stress --error-trace
 	$(BIN)/realloc_move_stress
 
+# Is a large block freed with `GC.free` reused, rather than unmapped at once
+# and mapped fresh by the next allocation? zlib's stream state comes and goes
+# that way; under large-object recycling with nothing kept between majors a
+# gzip loop unmapped 5.4 GB in 20 000 iterations and ran 2.4× slower.
+.PHONY: gzip-free-reuse
+gzip-free-reuse: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/gzip_free_loop.cr -o $(BIN)/gzip_free_loop --error-trace
+	$(BIN)/gzip_free_loop 2000
+
 large-cache-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/large_cache_race.cr -o $(BIN)/large_cache_race --error-trace
 # A gate whose failure mode is a fault should name the address it faulted on.

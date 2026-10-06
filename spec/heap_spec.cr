@@ -259,7 +259,8 @@ describe Gcry::Heap do
     # kernel picks: a stale pointer to the dead block must not name the new
     # one (that kept Revcomp's 65 MB strings alive), the new block reads
     # zeroes where the dead one wrote, and a split's remainder and a grown
-    # tail are counted where they are.
+    # tail are counted where they are. The exception is an exact fit for a
+    # chunk the program freed itself, taken where it is as without recycling.
     it "recycles a cached large chunk at a fresh address, zeroed, with the rest still cached" do
       heap = Gcry::Heap.new
       begin
@@ -298,14 +299,27 @@ describe Gcry::Heap do
         grown_mapped = heap.large_mapped_bytes - live_mapped - front_mapped
         Gcry.os_mapped_bytes.should eq(os_before + grown_mapped - rest)
 
-        # An exact fit moves too.
+        # An exact fit for a chunk the program freed is taken in place, as the
+        # exact-size cache takes it: no mapping, no move.
         front.as(UInt8*).fill(400_000, 0xEE_u8)
         heap.free(front)
         again = heap.malloc(400_000)
-        heap.large_recycles.should eq(3)
-        again.should_not eq(front)
-        heap.is_heap_ptr(front).should be_false
+        heap.large_recycles.should eq(2)
+        again.should eq(front)
+        heap.large_free_bytes.should eq(0)
         again.as(UInt8*).to_slice(400_000).all?(&.zero?).should be_true
+
+        # Any other exact fit moves: here a split's remainder, which nothing
+        # freed explicitly, like the chunks a sweep caches.
+        heap.free(grown)
+        part = heap.malloc(400_000)
+        heap.large_recycles.should eq(3)
+        remainder = heap.large_free_bytes
+        exact = heap.malloc(remainder - Gcry::ChunkHeader.large_data_offset.to_u64)
+        heap.large_recycles.should eq(4)
+        heap.large_free_bytes.should eq(0)
+        heap.live?(part).should be_true
+        heap.live?(exact).should be_true
 
         live.as(UInt8*).to_slice(200_000).all? { |b| b == 0xCD_u8 }.should be_true
         heap.large_mapped_bytes.should eq(heap.heap_size)
