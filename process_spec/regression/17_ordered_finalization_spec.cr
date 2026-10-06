@@ -231,6 +231,12 @@ describe "Regression: ordered finalization (readiness M4)" do
     FinalizeLog.reset
   end
 
+  # A stale word can hold the cycle too, and then it is never seen unreachable
+  # and never reported: the attempt is retried, after its cycle is broken so a
+  # leftover cycle cannot report on a later attempt's behalf (aarch64 CI run
+  # 37394865829 failed here instead of retrying). What no attempt may do is
+  # finalize a cycle, let one be reclaimed, or finalize it out of order once
+  # it is broken.
   it "keeps a cycle of finalizable objects allocated and unfinalized, reports it, and orders it once broken" do
     heap = Gcry.default_heap
     finished = ATTEMPTS.times.any? do
@@ -244,11 +250,12 @@ describe "Regression: ordered finalization (readiness M4)" do
       # this, and it must not reclaim the objects either while they are still
       # registered. It says so rather than leaking in silence.
       FinalizeLog.count.should eq(0)
-      heap.finalization_cycles.should be > cycles_before
+      reported = heap.finalization_cycles > cycles_before
 
       intact = Pointer(Bool).malloc(1)
       on_finished_fiber { break_ordered_cycle(holder, intact) }
       intact.value.should be_true
+      next false unless reported
       collect_until(2, 20)
       ordered_prefix?([2, 1])
     end
