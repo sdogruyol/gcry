@@ -169,7 +169,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one byte to every atomic request (`GCRY_ATOMIC_SLACK=0` restores exact
   classes). Cost: about 1% peak RSS on binary-trees; slack on every block
   would have cost 36%. `process_spec/regression/24_atomic_slack_spec.cr`
-  clobbers 63 words without the slack.
+  clobbers 63 words without the slack. The addition saturates, as Boehm's
+  `SIZET_SAT_ADD`: wrapping, `GC.malloc_atomic(SIZE_MAX)` returned a 16-byte
+  block and `GC.realloc(p, SIZE_MAX)` of an atomic block returned one
+  without its contents. Both fail now, as `GC.malloc(SIZE_MAX)` does
+  (`process_spec/regression/31_alloc_size_edges_spec.cr`).
 
 - **`crystal i` runs in a compiler built with gcry.** Under the interpreter,
   stdlib's Boehm prelude reads Boehm's `GC_stackbottom` variable for the

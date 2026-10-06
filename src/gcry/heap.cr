@@ -591,7 +591,9 @@ module Gcry
     property atomic_slack : UInt64 = 0_u64
 
     def malloc_atomic(size : Int) : Void*
-      n = size.to_u64 &+ @atomic_slack
+      # Saturating, as Boehm's `SIZET_SAT_ADD`: wrapped, `SIZE_MAX` asked for
+      # 0 bytes and got a block; saturated, it fails as `malloc` does.
+      n = sat_add(size.to_u64, @atomic_slack)
       u = fast_alloc(n, true)
       unless u.null?
         Invariant.after_malloc(self, u, n)
@@ -659,8 +661,10 @@ module Gcry
       header = ChunkHeader.large_header(rchunk) if ChunkHeader.large?(rchunk)
       atomic = atomic_of(rchunk, header)
       # The same slack as `malloc_atomic`, so a buffer grown by `realloc`
-      # keeps the byte past its end that Boehm would have given it.
-      new_size &+= @atomic_slack if atomic && new_size != 0
+      # keeps the byte past its end that Boehm would have given it. Saturating
+      # for the same reason: wrapped, `realloc(p, SIZE_MAX)` became a zero-byte
+      # request and lost the contents.
+      new_size = sat_add(new_size, @atomic_slack) if atomic && new_size != 0
 
       if new_size == 0
         # Do **not** free `pointer` here, for the same reason the grow path
@@ -2380,6 +2384,12 @@ module Gcry
     @[AlwaysInline]
     protected def sat_sub(a : UInt64, b : UInt64) : UInt64
       a > b ? a &- b : 0_u64
+    end
+
+    @[AlwaysInline]
+    protected def sat_add(a : UInt64, b : UInt64) : UInt64
+      s = a &+ b
+      s < a ? UInt64::MAX : s
     end
 
     # The pages a dormant chunk's release covers, and so the pages a revival
