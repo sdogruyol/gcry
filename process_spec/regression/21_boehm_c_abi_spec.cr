@@ -131,10 +131,9 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
   # call chain — conservative scanning, under Boehm as much as here. On macOS
   # arm64 one such block was held through twelve collections once an unrelated
   # change moved the collector's frames (2026-10-05: no heap block, explicit
-  # root or fiber stack held it; flipped by codegen alone). What this checks is
-  # the callback's contract: it runs, with the client data registered for that
-  # very object. So eight blocks, each with its own data, and at least one must
-  # be finalized.
+  # root or fiber stack held it; flipped by codegen alone). So eight blocks,
+  # each with its own client data: at least seven must be finalized, each once,
+  # each with the data registered for that very block.
   it "runs a GC_register_finalizer_ignore_self callback with its client data" do
     blocks = 8
     BoehmAbiLog.finalized_log = LibC.malloc(LibC::SizeT.new(blocks * 2 * sizeof(UInt64))).as(UInt64*)
@@ -156,10 +155,12 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
       collect(1)
     end
     ran = BoehmAbiLog.finalized_count
-    ran.should be > 0
+    ran.should be >= blocks - 1
     ran.should be <= blocks
+    finalized = Array(UInt64).new(ran) { |k| BoehmAbiLog.finalized_log[2 * k] }
+    finalized.uniq.size.should eq(ran)
     ran.times do |k|
-      index = hidden.index(BoehmAbiLog.finalized_log[2 * k])
+      index = hidden.index(finalized[k])
       index.should_not be_nil
       BoehmAbiLog.finalized_log[2 * k + 1].should eq(0x1234_u64 + index.not_nil!)
     end
