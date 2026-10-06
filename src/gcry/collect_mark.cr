@@ -1040,8 +1040,9 @@ module Gcry
     # 3. What is still unmarked is queued and *resurrected* (marked) so the
     #    sweep does not reclaim it before `run_pending`; otherwise
     #    Socket/Digest#finalize runs on freed memory (acik wrk SEGV). Its
-    #    fields were marked in 2. Next collect reclaims it if nothing else
-    #    holds it.
+    #    fields were marked in 2. Until its finalizer has run, every later
+    #    collection marks it as a root (`mark_pending_finalizers`); the first
+    #    one after that reclaims it if nothing else holds it.
     # 4. A link whose *location* is in a block that is still unmarked — a
     #    `WeakRef` that died itself — is dropped, without a write: its block
     #    is about to be reclaimed. Only now, so a `WeakRef` that a dying
@@ -1148,6 +1149,19 @@ module Gcry
              lo &+ @block_bytes[chunk.value.size_class.to_i32]
            end
       scan_block(chunk, header, lo, hi)
+    end
+
+    # Root phase: every object queued for finalization and its callback's
+    # closure data, until its finalizer has run (`Registry#each_pending`).
+    # Until 2026-10-06 a queued object was kept only by the collection that
+    # queued it; a second one before `run_pending` — an idle collection, or
+    # another thread's — swept it and queued what it held ahead of it
+    # (`process_spec/regression/26_pending_finalizer_root_spec.cr`).
+    private def mark_pending_finalizers : Nil
+      @finalizers.each_pending do |object, data|
+        mark_candidate(object)
+        mark_candidate(data) unless data.null?
+      end
     end
 
     private def note_finalization_cycle(obj : Void*) : Nil

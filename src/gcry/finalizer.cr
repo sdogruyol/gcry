@@ -7,7 +7,8 @@ module Gcry
   # + 32 KiB IO buffers; finalizers never ran). Boehm-style: registry is
   # invisible to the marker for Entry.object; after mark we enqueue unmarked
   # finalizables, resurrect them through sweep, then run_pending. Callback
-  # closure_data is marked explicitly in collect.
+  # closure_data, and every queued object until its finalizer has run, is
+  # marked explicitly in collect.
   module Finalizers
     alias Callback = Void* -> Nil
 
@@ -79,6 +80,9 @@ module Gcry
       @links : Link* = Pointer(Link).null
       @links_size = 0
       @links_cap = 0
+      # Queued finalizers, newest first. Every collection marks each queued
+      # object (and so what it reaches) until its finalizer has run — see
+      # `each_pending`.
       @pending : PendingNode* = Pointer(PendingNode).null
       @pending_count = 0
       # LibC table mutate vs MT allocators (preview_mt / EC).
@@ -230,26 +234,48 @@ module Gcry
         end
       end
 
+      # One node at a time, each taken off the queue only when its finalizer
+      # is about to run: until then it is still on `@pending`, which every
+      # collection marks from (`each_pending`). A collection that runs while a
+      # finalizer does — another thread's — therefore still keeps every object
+      # queued behind it, and the one running is on this thread's stack.
       def run_pending : Nil
-        @lock.lock
-        node = @pending
-        @pending = Pointer(PendingNode).null
-        @pending_count = 0
-        @lock.unlock
-        # Callbacks outside the lock (may re-enter add / allocate).
-        while node
-          nxt = node.value.next
-          callback = node.value.callback
+        loop do
+          @lock.lock
+          node = @pending
+          unless node.null?
+            @pending = node.value.next
+            @pending_count -= 1
+          end
+          @lock.unlock
+          break if node.null?
           object = node.value.object
+          callback = node.value.callback
           LibC.free(node.as(Void*))
+          # Callbacks outside the lock (may re-enter add / allocate).
           Trace.finalizer("run", object)
           callback.call(object)
-          node = nxt
         end
       end
 
       def pending_count : Int32
         @pending_count
+      end
+
+      # Each queued object and its callback's closure data. They are roots: a
+      # queued object is still to be passed to its finalizer, which may use
+      # what it holds, so a collection before `run_pending` must neither sweep
+      # it nor find what it holds unreachable — that would sweep the holder
+      # under its own finalizer and queue what it holds ahead of it. Boehm
+      # pushes its queue (`finalize_now`) as a root every collection
+      # (`GC_push_finalizer_structures`). World stopped; registry quiesced at
+      # stop_world.
+      def each_pending(& : Void*, Void* ->) : Nil
+        node = @pending
+        until node.null?
+          yield node.value.object, node.value.callback.closure_data
+          node = node.value.next
+        end
       end
 
       def entry_closure_data_at(i : Int32) : Void*

@@ -1761,7 +1761,8 @@ module Gcry
 
     private def mark_metadata_roots : Nil
       # Finalizer/link tables are LibC storage (not GC roots for Entry.object).
-      # Only mark callback closure_data so Proc captures stay alive. Marking the
+      # Only mark callback closure_data so Proc captures stay alive, and the
+      # objects queued for finalization (`mark_pending_finalizers`). Marking the
       # old Crystal Array buffer kept every finalizable object forever (acik
       # TCPSocket/Digest + 32 KiB IO buffers; finalizers never ran).
       # World stopped; registry quiesced at stop_world.
@@ -1772,6 +1773,7 @@ module Gcry
         mark_candidate(data) unless data.null?
         i += 1
       end
+      mark_pending_finalizers
     end
 
     # Every static range, minus the heap's own chunks, word by word into the

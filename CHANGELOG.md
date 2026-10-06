@@ -263,6 +263,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     finalizables cost nothing measurable.
   - **Gate:** `process_spec/regression/17_ordered_finalization_spec.cr`.
 
+- **An object queued for finalization stays alive until its finalizer has
+  run.**
+  - **The bug:** only the collection that queued an object kept it. A second
+    collection before the finalizers ran swept it. The idle collector's
+    collections leave finalizers queued, and another thread can collect too.
+    What the object held was then unreachable, so a finalizable it held was
+    queued ahead of it. The holder's finalizer ran last, on a swept block,
+    and found what it holds already finalized.
+  - **The fix:** every collection marks each queued object and its client
+    data until its finalizer runs, as Boehm roots `finalize_now`.
+    `run_pending` takes one node at a time, so the rest stay queued and
+    rooted while a finalizer runs.
+  - **Evidence:** `process_spec/regression/26_pending_finalizer_root_spec.cr`
+    runs three idle collections and then `GC.collect`. The old code ran the
+    pair `[2, 1]`; it now runs `[1, 2]`, both intact.
+
 - **The `GC` API behaves like `gc/boehm.cr`.**
   - **`GC.disable` nests.** `disable; disable; enable` used to turn
     collection back on. `GC.enable` with nothing disabled raises `GC is not
