@@ -1128,6 +1128,10 @@ module GC
     # Research only: a birth that finds no slot goes unrooted, which is what the
     # table used to do to every birth past the 64th between two collections.
     Gcry::ThreadBirthRoot.overflow_unrooted = true if env_flag_one?("GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED")
+    # Research only: hold the birth table at its first 256 slots instead of
+    # growing it, so a birth can reach the overflow path at all
+    # (`make thread-birth-root --burst`).
+    Gcry::ThreadBirthRoot.nogrow = true if env_flag_one?("GCRY_THREAD_BIRTH_NOGROW")
     # Research only: never release a birth root on a thread's death or a
     # recycled handle, so every root is held for the life of the process.
     # The control arm for `make thread-birth-root --churn`.

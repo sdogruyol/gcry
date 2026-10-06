@@ -69,19 +69,40 @@ module Gcry
     # root" below). `make thread-death-window` parks threads exactly there
     # and collects: none lost, against all of them with the root off.
     #
-    # Overflow still **costs no root**: a birth that finds no slot is rooted
-    # anyway and never released (see `arm`). What the size buys is whether
-    # that root is temporary or permanent, which is a memory question; an
-    # unrooted birth is the use-after-free question.
+    # The table **grows**: slots come in segments of `SLOTS`, and a birth that
+    # finds every slot live maps another segment and takes a slot there, so
+    # there is a slot for every live thread however many there are — Boehm's
+    # thread table is unbounded too. Until 2026-10-06 the table was these 256
+    # slots and nothing else, and every live thread past them took the
+    # overflow path, which roots and can never release: 300 threads alive at
+    # once overflowed 46 times, and all 46 roots were still held after every
+    # thread had been joined and six collections had run
+    # (`process_spec/regression/35_thread_birth_table_growth_spec.cr`).
+    #
+    # Overflow still **costs no root**: a birth that finds no slot because a
+    # segment could not be mapped is rooted anyway and never released (see
+    # `arm`). What a slot buys is whether that root is temporary or
+    # permanent, which is a memory question; an unrooted birth is the
+    # use-after-free question.
+    #
+    # Segments are mapped from the OS (`Gcry.os_map`), never from the heap
+    # this table roots into: `arm` runs right after `pthread_create`, with
+    # the collector free to stop the world around it. They are only ever
+    # appended, by compare-and-swap on the last link, and never unmapped, so
+    # every walk — the collector's inside the stopped world included — can
+    # follow the links without a lock and never meets freed memory. The cost
+    # is the peak thread count's segments, held for the life of the process.
     SLOTS = 256
 
-    # The recorded address is stored **masked**. This table is a class variable,
-    # i.e. static memory that the conservative root scan reads, so a plain
-    # address in it is a root — which would make the twin arm
+    # The recorded address is stored **masked**. Until 2026-10-06 this table
+    # was a class variable, i.e. static memory that the conservative root scan
+    # reads, so a plain address in it was a root — which made the twin arm
     # (`GCRY_THREAD_BIRTH_NOROOT=1`) keep alive exactly what it claims to leave
-    # alone, and would leave the shipped arm unable to say whether the survival
-    # came from `add_root` or from the bookkeeping. Caught by the twin on
-    # aarch64 CI, where it survived; it had passed locally on x86_64.
+    # alone, and left the shipped arm unable to say whether the survival came
+    # from `add_root` or from the bookkeeping. Caught by the twin on aarch64
+    # CI, where it survived; it had passed locally on x86_64. The segments are
+    # anonymous mappings now, which no platform's static scan reads, and the
+    # mask stays so that remains true of the table whatever a scan reads.
     TABLE_MASK = 0x5A5A_A5A5_5A5A_A5A5_u64
 
     # A slot's state, claimed and released by compare-and-swap.
@@ -107,16 +128,28 @@ module Gcry
     # slot reclaimed and re-armed meanwhile cannot be stamped by mistake.
     JOINING = 1_u64 << 63
 
-    @@state = uninitialized StaticArray(UInt32, SLOTS)
-    # Bumped by every `arm` of the slot.
-    @@gen = uninitialized StaticArray(UInt32, SLOTS)
-    @@ids = uninitialized StaticArray(UInt64, SLOTS)
-    @@objects = uninitialized StaticArray(UInt64, SLOTS)
+    # One slot is `SLOT_WORDS` words in its segment: the state and the
+    # generation as two `UInt32`s in word 0, then the handle, the masked
+    # object, the death stamp (`W_DEAD_AT`: the collection the thread was seen
+    # to end at, 0 while it lives, or `JOINING | gen` while a joiner waits for
+    # it), and on Windows gcry's own wait handle (see `release_exited`). A
+    # segment is one link word — the next segment's address, 0 at the tail —
+    # and then `SLOTS` slots. Fresh mappings read zero, which is `FREE`,
+    # generation 0, no death and no next segment.
     {% if flag?(:win32) %}
-      # A handle of gcry's own on each thread, so its exit is observable after
-      # Crystal has closed the one it keeps. See `release_exited`.
-      @@waits = uninitialized StaticArray(UInt64, SLOTS)
+      SLOT_WORDS = 5
+    {% else %}
+      SLOT_WORDS = 4
     {% end %}
+    W_ID      = 1
+    W_OBJECT  = 2
+    W_DEAD_AT = 3
+    W_WAIT    = 4
+
+    # The first segment's address, 0 when even that one could not be mapped.
+    @@head = uninitialized UInt64
+    @@segments = uninitialized Int32
+    @@nogrow = uninitialized Bool
     @@enabled = uninitialized Bool
     @@noroot = uninitialized Bool
     @@overflow_unrooted = uninitialized Bool
@@ -180,9 +213,6 @@ module Gcry
     @@deaths_seen = uninitialized UInt64
     @@deaths_unmatched = uninitialized UInt64
 
-    # The collection a slot's thread was seen to end at, 0 while it lives, or
-    # `JOINING | gen` while a joiner waits for it.
-    @@dead_at = uninitialized StaticArray(UInt64, SLOTS)
     @@released_dead = uninitialized UInt64
     # Slots released because glibc handed their handle to a new thread.
     @@reclaimed = uninitialized UInt64
@@ -197,18 +227,10 @@ module Gcry
     # an early access from a thread that has not finished starting hung the
     # first process that created one.
     def self.init : Nil
-      i = 0
-      while i < SLOTS
-        @@state[i] = FREE
-        @@gen[i] = 0_u32
-        @@ids[i] = 0_u64
-        @@objects[i] = 0_u64
-        @@dead_at[i] = 0_u64
-        {% if flag?(:win32) %}
-          @@waits[i] = 0_u64
-        {% end %}
-        i += 1
-      end
+      @@segments = 0
+      @@nogrow = false
+      @@head = map_segment
+      @@segments = 1 if @@head != 0
       @@deaths_seen = 0_u64
       @@deaths_unmatched = 0_u64
       @@released_dead = 0_u64
@@ -229,6 +251,19 @@ module Gcry
 
     def self.track_deaths=(value : Bool) : Bool
       @@track_deaths = value
+    end
+
+    # Research only: never map a segment past the first, so the table is the
+    # fixed `SLOTS` it was until 2026-10-06 and a birth past that many live
+    # threads takes the overflow path. `make thread-birth-root`'s burst arms
+    # use it to reach that path.
+    def self.nogrow=(value : Bool) : Bool
+      @@nogrow = value
+    end
+
+    # Slots across every mapped segment.
+    def self.capacity : Int32
+      Atomic::Ops.load(pointerof(@@segments), LLVM::AtomicOrdering::Monotonic, false) * SLOTS
     end
 
     def self.noroot=(value : Bool) : Bool
@@ -292,30 +327,35 @@ module Gcry
           heap.delete_root(stale)
         end
       {% end %}
-      i = 0
-      while i < SLOTS
-        if state(i) == FREE && transition(i, FREE, BUSY)
-          @@ids[i] = id
-          @@objects[i] = object.address ^ TABLE_MASK
-          @@dead_at[i] = 0_u64
-          @@gen[i] &+= 1
-          {% if flag?(:win32) %}
-            @@waits[i] = wait
-          {% end %}
-          # Rooted **before** the slot is published, so no release can hand
-          # back an object whose root is not in the set yet.
-          # The twin walks the same table and offers nothing.
-          heap.add_root(object) unless @@noroot
-          count(pointerof(@@armed))
-          count_outstanding(1)
-          publish(i, LIVE)
-          return
+      loop do
+        each_slot do |slot|
+          if state(slot) == FREE && transition(slot, FREE, BUSY)
+            slot[W_ID] = id
+            slot[W_OBJECT] = object.address ^ TABLE_MASK
+            slot[W_DEAD_AT] = 0_u64
+            (slot.as(UInt32*) + 1).value &+= 1
+            {% if flag?(:win32) %}
+              slot[W_WAIT] = wait
+            {% end %}
+            # Rooted **before** the slot is published, so no release can hand
+            # back an object whose root is not in the set yet.
+            # The twin walks the same table and offers nothing.
+            heap.add_root(object) unless @@noroot
+            count(pointerof(@@armed))
+            count_outstanding(1)
+            publish(slot, LIVE)
+            return
+          end
         end
-        i += 1
+        # Every slot was live when walked: add a segment and walk again. A
+        # creator that raced this one to a full table appends its own segment
+        # behind it, so both find a free slot on the next walk.
+        break unless grow
       end
-      # No slot. The root is taken anyway and there is nothing left that can
-      # release it, because nothing records it — so this leaks one `Thread`
-      # object and the graph it holds.
+      # No slot, and no segment could be mapped (or `GCRY_THREAD_BIRTH_NOGROW=1`
+      # holds the table at one). The root is taken anyway and there is nothing
+      # left that can release it, because nothing records it — so this leaks
+      # one `Thread` object and the graph it holds.
       #
       # That is the deliberate side of the trade. The alternative is what this
       # path used to do: count the overflow and return without rooting, which
@@ -343,13 +383,11 @@ module Gcry
       # Never 0: that is the "alive" value, and a death seen before the first
       # collection must still be seen as a death.
       at = heap.collections &+ 1
-      i = 0
-      while i < SLOTS
-        if state(i) == LIVE && @@ids[i] == id && stamp(i, 0_u64, at)
+      each_slot do |slot|
+        if state(slot) == LIVE && slot[W_ID] == id && stamp(slot, 0_u64, at)
           count(pointerof(@@deaths_seen))
           return
         end
-        i += 1
       end
       # No slot: the birth overflowed the table, or the handle was already
       # reclaimed by a later `arm`. Both are accounted for elsewhere.
@@ -365,25 +403,23 @@ module Gcry
     # could lose its root two collections into the wait and spend its death
     # window held only by the joiner's frame.
     def self.joining(id : UInt64, & : -> Int32) : Int32
-      slot = -1
+      slot = Pointer(UInt64).null
       mark = 0_u64
       if id != 0 && @@enabled && @@track_deaths
-        i = 0
-        while i < SLOTS
-          if state(i) == LIVE && @@ids[i] == id
-            pending = JOINING | @@gen[i]
-            if stamp(i, 0_u64, pending)
-              slot = i
+        each_slot do |s|
+          if state(s) == LIVE && s[W_ID] == id
+            pending = JOINING | (s.as(UInt32*) + 1).value
+            if stamp(s, 0_u64, pending)
+              slot = s
               mark = pending
               break
             end
           end
-          i += 1
         end
-        count(pointerof(@@deaths_unmatched)) if slot < 0
+        count(pointerof(@@deaths_unmatched)) if slot.null?
       end
       ret = yield
-      if slot >= 0
+      unless slot.null?
         if ret == 0
           heap = Gcry.default_heap?
           at = heap ? heap.collections &+ 1 : 1_u64
@@ -403,14 +439,12 @@ module Gcry
     # proof its previous owner is gone, so this needs no grace. Runs on a
     # creating thread.
     private def self.reclaim_handle(id : UInt64) : Void*?
-      j = 0
-      while j < SLOTS
-        if state(j) == LIVE && @@ids[j] == id && transition(j, LIVE, BUSY)
-          object = vacate(j)
+      each_slot do |slot|
+        if state(slot) == LIVE && slot[W_ID] == id && transition(slot, LIVE, BUSY)
+          object = vacate(slot)
           count(pointerof(@@reclaimed))
           return object
         end
-        j += 1
       end
       nil
     end
@@ -425,17 +459,15 @@ module Gcry
     # that was in flight when the thread detached.
     def self.release_dead(collection : UInt64, & : Void* ->) : Nil
       return unless @@track_deaths
-      j = 0
-      while j < SLOTS
-        at = Atomic::Ops.load(pointerof(@@dead_at).as(UInt64*) + j, LLVM::AtomicOrdering::Acquire, false)
+      each_slot do |slot|
+        at = Atomic::Ops.load(slot + W_DEAD_AT, LLVM::AtomicOrdering::Acquire, false)
         if at != 0 && (at & JOINING) == 0 && collection > at &&
-           state(j) == LIVE && transition(j, LIVE, BUSY)
+           state(slot) == LIVE && transition(slot, LIVE, BUSY)
           count(pointerof(@@released_dead))
-          if object = vacate(j)
+          if object = vacate(slot)
             yield object
           end
         end
-        j += 1
       end
     end
 
@@ -453,35 +485,33 @@ module Gcry
       # copy does not close this one.
       def self.release_exited(& : Void* ->) : Nil
         return unless @@track_deaths
-        j = 0
-        while j < SLOTS
-          if state(j) == LIVE && (h = @@waits[j]) != 0 &&
+        each_slot do |slot|
+          if state(slot) == LIVE && (h = slot[W_WAIT]) != 0 &&
              LibC.WaitForSingleObject(Pointer(Void).new(h), 0) == LibC::WAIT_OBJECT_0 &&
-             transition(j, LIVE, BUSY)
+             transition(slot, LIVE, BUSY)
             count(pointerof(@@released_dead))
-            if object = vacate(j)
+            if object = vacate(slot)
               yield object
             end
           end
-          j += 1
         end
       end
     {% end %}
 
     # Clear a slot this thread holds `BUSY` and give it back. Returns the
     # object to un-root, or nil when there is none to give back.
-    private def self.vacate(j : Int32) : Void*?
-      object = @@objects[j] ^ TABLE_MASK
-      @@ids[j] = 0_u64
-      @@objects[j] = 0_u64
-      @@dead_at[j] = 0_u64
+    private def self.vacate(slot : UInt64*) : Void*?
+      object = slot[W_OBJECT] ^ TABLE_MASK
+      slot[W_ID] = 0_u64
+      slot[W_OBJECT] = 0_u64
+      slot[W_DEAD_AT] = 0_u64
       {% if flag?(:win32) %}
-        close_wait(@@waits[j])
-        @@waits[j] = 0_u64
+        close_wait(slot[W_WAIT])
+        slot[W_WAIT] = 0_u64
       {% end %}
       count(pointerof(@@released))
       count_outstanding(-1)
-      publish(j, FREE)
+      publish(slot, FREE)
       return nil if @@noroot || object == TABLE_MASK || object == 0
       Pointer(Void).new(object)
     end
@@ -492,26 +522,71 @@ module Gcry
       {% end %}
     end
 
-    @[AlwaysInline]
-    private def self.state(i : Int32) : UInt32
-      Atomic::Ops.load(pointerof(@@state).as(UInt32*) + i, LLVM::AtomicOrdering::Acquire, false)
+    private def self.segment_bytes : UInt64
+      8_u64 + SLOTS.to_u64 * SLOT_WORDS.to_u64 * 8_u64
+    end
+
+    # A zeroed segment from the OS, or 0 when the mapping failed.
+    private def self.map_segment : UInt64
+      ptr = Gcry.os_map(segment_bytes)
+      Gcry.mmap_failed?(ptr) ? 0_u64 : ptr.address
+    end
+
+    # Appends one segment at the tail. False under `GCRY_THREAD_BIRTH_NOGROW=1`
+    # once the first exists, or when the OS refuses the mapping.
+    private def self.grow : Bool
+      return false if @@nogrow && @@head != 0
+      seg = map_segment
+      return false if seg == 0
+      # `@@head` is the link before the first segment, so an empty table and
+      # a full one append the same way.
+      link = pointerof(@@head)
+      loop do
+        old, ok = Atomic::Ops.cmpxchg(link, 0_u64, seg,
+          LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Acquire)
+        break if ok
+        link = Pointer(UInt64).new(old)
+      end
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@segments), 1, LLVM::AtomicOrdering::Monotonic, false)
+      true
+    end
+
+    # Every slot of every segment, in order. Links are read with acquire, so
+    # a segment appended while this walks is either seen whole or not at all.
+    private def self.each_slot(& : UInt64* ->) : Nil
+      seg = Atomic::Ops.load(pointerof(@@head), LLVM::AtomicOrdering::Acquire, false)
+      while seg != 0
+        slot = Pointer(UInt64).new(seg) + 1
+        i = 0
+        while i < SLOTS
+          yield slot
+          slot += SLOT_WORDS
+          i += 1
+        end
+        seg = Atomic::Ops.load(Pointer(UInt64).new(seg), LLVM::AtomicOrdering::Acquire, false)
+      end
     end
 
     @[AlwaysInline]
-    private def self.transition(i : Int32, from : UInt32, to : UInt32) : Bool
-      _, ok = Atomic::Ops.cmpxchg(pointerof(@@state).as(UInt32*) + i, from, to,
+    private def self.state(slot : UInt64*) : UInt32
+      Atomic::Ops.load(slot.as(UInt32*), LLVM::AtomicOrdering::Acquire, false)
+    end
+
+    @[AlwaysInline]
+    private def self.transition(slot : UInt64*, from : UInt32, to : UInt32) : Bool
+      _, ok = Atomic::Ops.cmpxchg(slot.as(UInt32*), from, to,
         LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
       ok
     end
 
     @[AlwaysInline]
-    private def self.publish(i : Int32, value : UInt32) : Nil
-      Atomic::Ops.store(pointerof(@@state).as(UInt32*) + i, value, LLVM::AtomicOrdering::Release, false)
+    private def self.publish(slot : UInt64*, value : UInt32) : Nil
+      Atomic::Ops.store(slot.as(UInt32*), value, LLVM::AtomicOrdering::Release, false)
     end
 
     @[AlwaysInline]
-    private def self.stamp(i : Int32, from : UInt64, to : UInt64) : Bool
-      _, ok = Atomic::Ops.cmpxchg(pointerof(@@dead_at).as(UInt64*) + i, from, to,
+    private def self.stamp(slot : UInt64*, from : UInt64, to : UInt64) : Bool
+      _, ok = Atomic::Ops.cmpxchg(slot + W_DEAD_AT, from, to,
         LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
       ok
     end

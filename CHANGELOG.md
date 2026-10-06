@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `process_spec/regression/34_dlclose_static_roots_spec.cr` fails on the old
   tree (drops 0 → 1) and holds the still-counts direction.
 
+- **The thread birth table grows, so a process with more than 256 live
+  threads no longer leaks their roots.** Every `Thread` is rooted from
+  `pthread_create` until its thread is done with it, through a slot in a
+  256-slot table. A birth that found every slot live was rooted with no slot
+  to release it from, forever: 300 threads alive at once overflowed 46 times,
+  and all 46 roots (each a `Thread`, its closure and its main `Fiber`) were
+  still held after every thread was joined. The table now maps another
+  256-slot segment when it is full — from the OS, appended lock-free and never
+  unmapped, so the stopped world's walk needs no lock — as Boehm's thread
+  table is unbounded. `GCRY_THREAD_BIRTH_NOGROW=1` restores the fixed table,
+  and `make thread-birth-root`'s burst arms use it to reach the overflow path.
+  `process_spec/regression/35_thread_birth_table_growth_spec.cr` (fails on
+  the old tree: overflows 46, expected 0).
+
 - **`make nursery-tlab-smoke` requires the released chunk on Linux again.**
   Since 2026-10-05 it accepted a kept chunk everywhere, so a Linux major that
   stopped releasing the probe's chunk would have passed with the stale-node
