@@ -1,0 +1,15 @@
+gcry:   gzip_free_loop: 20000 iterations in 456.4 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+recycle0: gzip_free_loop: 20000 iterations in 458.5 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+boehm:  gzip_free_loop: 20000 iterations in 1444.1 ms (6540000 bytes out)
+gcry:   gzip_free_loop: 20000 iterations in 426.7 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+recycle0: gzip_free_loop: 20000 iterations in 437.4 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+boehm:  gzip_free_loop: 20000 iterations in 1421.5 ms (6540000 bytes out)
+gcry:   gzip_free_loop: 20000 iterations in 421.7 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+recycle0: gzip_free_loop: 20000 iterations in 401.0 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+boehm:  gzip_free_loop: 20000 iterations in 1384.7 ms (6540000 bytes out)
+gcry:   gzip_free_loop: 20000 iterations in 410.4 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+recycle0: gzip_free_loop: 20000 iterations in 407.1 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+boehm:  gzip_free_loop: 20000 iterations in 1422.7 ms (6540000 bytes out)
+gcry:   gzip_free_loop: 20000 iterations in 397.0 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+recycle0: gzip_free_loop: 20000 iterations in 386.4 ms (6540000 bytes out) unmapped 1836 KiB, 84 chunks mapped, 27 collections 
+boehm:  gzip_free_loop: 20000 iterations in 1423.6 ms (6540000 bytes out)

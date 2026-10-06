@@ -1,0 +1,13 @@
+=== mark on a list-shaped heap: 3000000 nodes, 20 collections, 7 trials ===
+trial 1/7
+trial 2/7
+trial 3/7
+trial 4/7
+trial 5/7
+trial 6/7
+trial 7/7
+arm (workers/par.runs)   stolen    pause       min      mark  gc cpu/w proc cpu/w    wall s
+self 1 (1w/0p)                0   30.4ms    26.7ms    30.0ms      0.99       0.99     0.743
+self default (4w/20p)         0   29.3ms    26.0ms    29.0ms      1.01       1.00     0.720
+self 4 (4w/20p)               0   29.4ms    26.0ms    29.0ms      1.02       1.01     0.724
+rc=0

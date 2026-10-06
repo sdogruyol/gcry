@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Spec 35 no longer fails at random on Windows.** It joined 300 threads
+  and then expected their birth roots back after exactly three collections.
+  In Crystal 1.21, a thread that finishes before it is joined detaches
+  itself, and `Thread#join` then skips `WaitForSingleObject`. Windows ends a
+  birth root only once gcry's handle on the thread signals. So three
+  collections could still find threads that were exiting: 5–121 roots, in 11
+  of 20 standalone runs and 12 of 60 suite runs on a 12-vCPU Windows VM. The
+  roots always drained one or two collections later. The spec now collects
+  until they are back, under a 5 s deadline: 0 failures in 40 runs. The fixed
+  256-slot table (`GCRY_THREAD_BIRTH_NOGROW=1`) still fails it
+  (`bench/log/windows/2026-10-06-vm-validation/`).
+
+- **`ci/windows.ps1` says it needs PowerShell 7.** Under Windows PowerShell
+  5.1 it failed half-way through the first step with "`[System.IO.Path]` does
+  not contain a method named `GetRelativePath`". It now carries
+  `#Requires -Version 7`, and `docs/WINDOWS.md` names `pwsh`.
+
+- **`bench/kemal` builds on Windows.** The `EXTRA_THREADS` block called
+  `LibC.pipe`, which is not bound there (`undefined fun 'pipe' for LibC`).
+  On Windows those threads now sleep with `Sleep(INFINITE)`; other platforms
+  are unchanged.
+
 - **Unloading a shared library is no longer reported as a static-root
   collapse.** The collapse diagnostic compares each collection's scanned
   static bytes against the most any collection scanned, and a `dlclose`d
@@ -706,6 +728,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`bench/log/linux/2026-10-04-layout-union-collision/`).
 
 ### Added
+
+- **Loaded-DLL roots have a Windows regression**
+  (`process_spec/regression/36_windows_dll_static_roots_spec.cr`). The
+  roots shipped on 2026-10-05, but specs 16 and 34 are Linux-only, so
+  nothing exercised the Windows walk. The spec builds a DLL whose global is
+  the only reference to an object, loads it after `GC.init`, and checks the
+  object survives five collections. With `Gcry::Platform.shared_lib_roots =
+  false` (the scan before 2026-10-05) the object is collected; 20 of 20 runs
+  of each. The DLL is built with `cl` found through vswhere (no developer
+  shell needed), or with `cc`/`clang` on the GNU target. Without a compiler
+  the examples are pending.
+
+- **Windows workload numbers**
+  (`bench/log/windows/2026-10-06-vm-validation/`), from a 12-vCPU Windows 11
+  VM:
+  - crystal-metric runs at 87–114% of Boehm's speed, and Kemal at 102.9–106.5%.
+  - Peak working set is at or below Boehm on 10 of 13 rows.
+  - Idle mark helpers that sleep-poll cost nothing measurable (1.01 cores at
+    4 workers).
 
 - **CI builds the Crystal compiler with gcry, uses it, self-hosts it, and
   runs `crystal i` in it** (`ci/compiler-spec.sh`, job `compiler-gcry`).

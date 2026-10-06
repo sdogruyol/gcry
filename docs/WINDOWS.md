@@ -77,14 +77,25 @@ scrubbing dead stack. Conservative root scans include that red zone.
 - The research stack-map walker assumes a SysV fiber context. Windows ignores
   `GCRY_PRECISE_STACK` and `GCRY_PRECISE_FIBERS` with a warning and retains
   conservative stack scanning.
-- Existing Linux/macOS throughput and RSS measurements do not describe Windows.
-  Windows workload benchmarks remain future work. Parallel stress has run on
-  CI runners: about 15 000 bounded runs, no failures on fast runners
+- Workload numbers so far come from one 12-vCPU Windows 11 VM, not physical
+  hardware (`bench/log/windows/2026-10-06-vm-validation/`).
+  - **Throughput.** crystal-metric runs at 87–114% of Boehm's speed, within
+    the Linux band on every row except Binarytrees (112% here). Kemal reaches
+    106.5% of Boehm on `/json` and 102.9% on `/`.
+  - **Memory.** Peak working set is at or below Boehm on 10 of 13 rows. The
+    exceptions are transient peaks: JsonParsePure 1.14×, Knuckeotide 1.6–1.7×
+    (+35 MiB) and Matmul 1.18×. Kemal is at 1.14×.
+  - **Idle mark helpers.** Off Linux they sleep-poll instead of waiting on a
+    futex. On a list-shaped heap, 4 workers use 1.01 cores with a pause on
+    par with serial.
+- Parallel stress has run on CI runners: about 15 000 bounded runs, no
+  failures on fast runners
   (`bench/log/linux/2026-09-30-cross-platform-stress/`).
 
 ## Tests and CI
 
-Run the same checks as the Windows CI matrix:
+Run the same checks as the Windows CI matrix. `ci/windows.ps1` needs
+PowerShell 7 (`pwsh`); Windows PowerShell 5.1 refuses it:
 
 ```powershell
 ./ci/windows.ps1 -Variant default    # headerless layout, bitmap allocator
@@ -98,7 +109,22 @@ fiber stress, JSON churn, and suspended-stack samples. `-Suite specs` or
 `-Suite samples` runs only that part. The default arm also builds a legacy-scheduler
 (`-Dwithout_mt`) smoke sample. Every native exit code is checked.
 
-Windows-specific regressions cover PE roots, guard pages inside root ranges,
-zero-filled page reuse, thread identity, TLS destruction, and independent integer
-and SIMD register roots, stale-context cleanup, and suspension-capacity recovery.
-Unix-only barrier tests remain skipped on Windows.
+The `make` gates run from Git Bash with GNU make, as the `test (windows
+x86_64, gates)` job does. `shards install` (for `bench/kemal`) needs symlink
+rights: enable Developer Mode or use an elevated shell.
+
+Windows-specific regressions cover:
+- PE roots, and loaded-DLL roots
+  (`process_spec/regression/36_windows_dll_static_roots_spec.cr`, which
+  builds its DLL with `cl` found through vswhere, or with `cc`/`clang` on the
+  GNU target);
+- guard pages inside root ranges;
+- zero-filled page reuse;
+- thread identity;
+- TLS destruction;
+- independent integer and SIMD register roots;
+- stale-context cleanup;
+- suspension-capacity recovery.
+
+Unix-only barrier tests and the Linux shared-object specs (16, 34) remain
+skipped on Windows.

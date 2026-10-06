@@ -1,0 +1,10 @@
+Knuckeotide: err result=2880861202, but expected=1459386462 in 0.712s, award 1.0
+GCSTATS gcry collections=54 heap_size=6MiB total_bytes=629MiB os_mapped=19MiB max_pause_ms=2.27
+Knuckeotide: err result=2880861202, but expected=1459386462 in 0.726s, award 1.0
+GCSTATS boehm heap_size=41MiB total_bytes=629MiB
+nopace GCSTATS gcry collections=57 heap_size=6MiB total_bytes=629MiB os_mapped=19MiB max_pause_ms=1.99
+JsonParsePure: err result=JsonParsePure::Coordinate(@x=0.49995358947126856, @y=0.5000557786699196, @z=0.5007583687182323), but expected=JsonParsePure::Coordinate(@x=0.4999535894712113, @y=0.5000557786698896, @z=0.5007583687182091) in 0.421s, award 1.0
+GCSTATS gcry collections=13 heap_size=471MiB total_bytes=1167MiB os_mapped=484MiB max_pause_ms=24.88
+JsonParsePure: err result=JsonParsePure::Coordinate(@x=0.49995358947126856, @y=0.5000557786699196, @z=0.5007583687182323), but expected=JsonParsePure::Coordinate(@x=0.4999535894712113, @y=0.5000557786698896, @z=0.5007583687182091) in 0.350s, award 1.0
+GCSTATS boehm heap_size=474MiB total_bytes=1251MiB
+nopace GCSTATS gcry collections=24 heap_size=445MiB total_bytes=1167MiB os_mapped=459MiB max_pause_ms=29.11

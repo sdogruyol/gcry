@@ -1,0 +1,8 @@
+baseline: collections=1 outstanding=3 armed=3 released=0 released_dead=0 overflows=0 capacity=256 threads_listed=3
+all alive: collections=1 outstanding=303 armed=303 released=0 released_dead=0 overflows=0 capacity=512 threads_listed=304
+joined: collections=1 outstanding=303 armed=303 released=0 released_dead=0 overflows=0 capacity=512 threads_listed=4
+collect 1 +8.3ms: collections=2 outstanding=214 armed=303 released=89 released_dead=89 overflows=0 capacity=512 threads_listed=4
+collect 2 +12.9ms: collections=3 outstanding=49 armed=303 released=254 released_dead=254 overflows=0 capacity=512 threads_listed=4
+collect 3 +15.0ms: collections=4 outstanding=4 armed=303 released=299 released_dead=299 overflows=0 capacity=512 threads_listed=4
+collect 4 +16.9ms: collections=5 outstanding=3 armed=303 released=300 released_dead=300 overflows=0 capacity=512 threads_listed=4
+DRAINED
