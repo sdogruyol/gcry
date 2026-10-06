@@ -2105,10 +2105,11 @@ jobs:
 
   # Linux gates that also hold on Windows. A coverage probe on 2026-10-01 ran
   # each through Git Bash and mingw make on windows-latest. These passed with
-  # their controls; the two buffer gates' red arms are run here directly
-  # because mingw make does not hand `! cmd` to a shell. Not here:
-  # idle-release (unsupported on Windows), the SegvReport gates (POSIX
-  # handler) and nested-spawn-uaf (its control survives on Windows).
+  # their controls; the buffer and idle gates' red arms are run here directly
+  # because mingw make does not hand `! cmd` to a shell. Not here: the
+  # SegvReport gates (POSIX handler) and nested-spawn-uaf (its control
+  # survives on Windows). The idle collector runs at the end of the job: it
+  # has been on by default here since 2026-10-03.
   # ~15 min.
   test-windows-gates:
     runs-on: windows-latest
