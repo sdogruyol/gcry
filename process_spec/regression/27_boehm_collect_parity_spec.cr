@@ -13,10 +13,13 @@ require "spec"
 # Allocates past the heap's threshold with collection disabled, so a
 # collection is due the moment it is enabled again. libc-free: only `LibGC`
 # calls and plain loops, so nothing here allocates once the debt is built.
+# Always allocates once: a debt already past the threshold is still a debt,
+# and an empty loop left `sink` null (CI, freelist layout, 2026-10-06).
 private def build_debt(heap) : Nil
   sink = Pointer(Void).null
-  while heap.bytes_since_gc < heap.gc_threshold
+  loop do
     sink = LibGC.malloc_atomic(64 * 1024)
+    break if heap.bytes_since_gc >= heap.gc_threshold
   end
   sink.null?.should be_false
 end
@@ -59,9 +62,11 @@ describe "GC_collect_a_little (Boehm parity)" do
     saved = heap.incremental_auto
     saved_work = heap.incremental_work
     heap.incremental_auto = true
-    # Small slices, so the cycle spans several calls (two at 16 on Linux's
-    # soft-dirty barrier; the default 1024 finishes this heap in one).
-    heap.incremental_work = 16
+    # Slices small enough that the cycle spans several calls (two at 16 on
+    # this file alone; the default 1024 finishes it in one), sized to the
+    # live heap so the whole `process_spec` heap still ends in a few dozen:
+    # at a flat 16 it took more than 100 000 calls on CI's freelist run.
+    heap.incremental_work = (heap.live_objects // 64).clamp(16_u64, Int32::MAX.to_u64).to_i32
     begin
       LibGC.disable
       begin
@@ -80,6 +85,8 @@ describe "GC_collect_a_little (Boehm parity)" do
       heap.incremental_in_progress?.should be_false
       heap.collections.should be > before
     ensure
+      # Never leave a cycle in progress to the next example.
+      GC.collect if heap.incremental_in_progress?
       heap.incremental_auto = saved
       heap.incremental_work = saved_work
     end
