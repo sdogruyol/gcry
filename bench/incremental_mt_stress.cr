@@ -4,7 +4,7 @@
 # carries {tag, ~tag} in its first 16 bytes and the tag again in its last
 # word; blocks are freed cross-thread, realloc'd, and one fiber forces
 # collections. On a default build it runs clean; with `GCRY_INCREMENTAL=1`
-# (auto slices) or `INC=1` (explicit `GC.collect_a_little`) and four workers
+# (auto slices) or `INC=1` (explicit `Gcry.collect_a_little`) and four workers
 # under `-Dpreview_mt -Dexecution_context` it dies in seconds - SIGSEGV at
 # 0x0 / 0x18 / a heap address, or CORRUPT (a block reissued while held).
 # EC1 with the same knob, and MT with one worker, run clean: the failure
@@ -148,7 +148,9 @@ spawn do
   inc = ENV["INC"]? == "1"
   until Time.monotonic > deadline
     if inc
-      GC.collect_a_little
+      # A slice on every call: `GC.collect_a_little` is Boehm's since
+      # 2026-10-06 and only works when a collection is due.
+      Gcry.collect_a_little
       sleep 1.milliseconds
     else
       GC.collect

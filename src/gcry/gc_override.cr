@@ -192,7 +192,7 @@ module GC
       end
     {% end %}
     # Boehm's `GC_stackbottom`, for code compiled against Boehm (`crystal i`).
-    Gcry::CAbi.init_stackbottom(heap.stack_bottom)
+    {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.init_stackbottom(heap.stack_bottom) {% end %}
     # Suspended fiber stacks are scanned once inside Heap#scan_all_fiber_roots
     # (with guard clamp). Do not also call push_gc_roots here — that doubled
     # stack word walks under HTTP (many fibers) and dominated STW pauses.
@@ -1622,11 +1622,21 @@ module GC
     end
   end
 
+  # Refused while collection is disabled, as Boehm's `GC_gcollect` returns at
+  # `GC_dont_gc` (`GC_try_to_collect_inner`). Until 2026-10-06 this collected
+  # anyway, so a `GC.disable` window — a library's critical section, a
+  # measurement — was broken by any explicit collection inside it
+  # (`process_spec/regression/27_boehm_collect_parity_spec.cr`). The
+  # collector's own collections do not come through here: the emergency retry
+  # before an `OutOfMemoryError` already declines while disabled, like Boehm's
+  # `GC_collect_or_expand`, and the idle collector re-checks under its lock.
   def self.collect
     Crystal.trace :gc, "collect" do
       return unless @@gcry_ready
       check_fork_poison!
-      Gcry.default_heap.collect(release_warm: true)
+      heap = Gcry.default_heap
+      return unless heap.enabled?
+      heap.collect(release_warm: true)
     end
   end
 
@@ -1636,9 +1646,38 @@ module GC
     Gcry.clear_stack
   end
 
+  # Boehm's `GC_collect_a_little`: "do a little work if appropriate", then 1
+  # while an incremental collection is still in progress and 0 once there is
+  # nothing left to do — so `while (GC_collect_a_little()) {}` drains a cycle
+  # and stops. Appropriate means what an allocation would do at this point
+  # (Boehm's `GC_collect_a_little_inner` → `GC_maybe_gc`): another slice of a
+  # cycle in progress, or, once the allocation debt has reached the
+  # threshold, the collection that debt is owed — a sliced one under
+  # `GCRY_INCREMENTAL=1`, a full one otherwise. Below the threshold it does
+  # nothing. Disabled, it does nothing and returns 0 — even with a sliced
+  # cycle left open, where Boehm would keep answering 1 and a caller looping
+  # on it would spin until someone called `GC_enable`.
+  #
+  # It used to start a new incremental cycle on every call and return 1 when
+  # one *finished*: the inverse of Boehm's answer, so the loop above either
+  # stopped at once or collected forever, and it ran with collection
+  # disabled (`process_spec/regression/27_boehm_collect_parity_spec.cr`).
+  # `Gcry.collect_a_little` keeps the slice-on-demand meaning for gcry's
+  # own harnesses.
   def self.collect_a_little : Int
     return 0 unless @@gcry_ready
-    Gcry.default_heap.collect_a_little ? 1 : 0
+    heap = Gcry.default_heap
+    return 0 unless heap.enabled?
+    if heap.incremental_in_progress?
+      heap.collect_a_little(heap.incremental_work)
+    elsif heap.bytes_since_gc >= heap.gc_threshold
+      before = heap.collections
+      heap.collect_a_little(heap.incremental_work) if heap.incremental_auto
+      # No barrier, no slice (`begin_incremental`): the full collection the
+      # allocation path falls back to in that case too.
+      heap.collect(coalesce: true) if heap.collections == before && !heap.incremental_in_progress?
+    end
+    heap.incremental_in_progress? ? 1 : 0
   end
 
   # Nests like Boehm's `GC_disable`/`GC_enable` (a counter): collection resumes
@@ -1969,13 +2008,13 @@ module GC
       return unless @@gcry_ready
       return unless thread.same?(Thread.current?)
       Gcry.default_heap.set_stackbottom(stack_bottom)
-      Gcry::CAbi.note_stackbottom(stack_bottom)
+      {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.note_stackbottom(stack_bottom) {% end %}
     end
   {% else %}
     def self.set_stackbottom(stack_bottom : Void*)
       return unless @@gcry_ready
       Gcry.default_heap.set_stackbottom(stack_bottom)
-      Gcry::CAbi.note_stackbottom(stack_bottom)
+      {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.note_stackbottom(stack_bottom) {% end %}
     end
   {% end %}
 

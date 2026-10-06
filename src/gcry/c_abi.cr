@@ -5,14 +5,19 @@
 # a gcry process. That is the interpreter first of all — `crystal i` interprets
 # the program with the Boehm prelude and resolves its `LibGC` calls from the
 # compiler binary itself (`compiler/crystal/interpreter/context.cr`,
-# `load_current_program_handle`) — and any shard or C library that binds
-# `GC_*` itself (readiness M8; Crystal's own `spec/std` calls `LibGC.size`).
+# `load_current_program_handle`) — then Crystal code calling this `LibGC`
+# (readiness M8; Crystal's own `spec/std` calls `LibGC.size`) and C code
+# linked into the program. A Crystal `lib` of its own that declares a `GC_*`
+# name does not reach them: Crystal 1.21 then leaves gcry's definition of
+# that name out of the program, and the link fails with "undefined
+# reference", identical signature or not.
 #
-# The declarations are `gc/boehm.cr`'s, type for type: Crystal rejects a `fun`
-# definition whose signature differs from a `lib` declaration of the same
-# symbol, so a binding copied from stdlib compiles against these only if they
-# match it. (`GC_get_prof_stats` therefore returns nothing, as stdlib declares
-# it, where Boehm's C returns the bytes written.)
+# The declarations are `gc/boehm.cr`'s, type for type, so code written against
+# stdlib's `LibGC` calls them unchanged: Crystal rejects a `fun` definition
+# whose signature differs from a `lib` declaration of the same symbol.
+# (`GC_get_prof_stats` therefore returns nothing, as stdlib declares it, where
+# Boehm's C returns the bytes written.) Boehm's thread-registration calls,
+# which stdlib does not bind, are declared at the end.
 #
 # Each function either does what Boehm documents, on gcry's heap, or — where
 # gcry has no equivalent and pretending would change the caller's program —
@@ -21,6 +26,9 @@
 # cannot run a program without it (`gcry_c_stackbottom_storage` below). The
 # other three (`GC_gc_no`, `GC_bytes_found`, `GC_current_warn_proc`) are not
 # declared: using them is a compile error rather than a wrong answer.
+#
+# `-Dgcry_no_boehm_abi` leaves this file out (src/gcry.cr), for a program that
+# links libgc itself (docs/INTEGRATION.md § Boehm's C ABI).
 lib LibGC
   alias Int = LibC::Int
   alias SizeT = LibC::SizeT
@@ -141,6 +149,18 @@ lib LibGC
   fun start_world_external = GC_start_world_external
   fun get_suspend_signal = GC_get_suspend_signal : Int
   fun get_thr_restart_signal = GC_get_thr_restart_signal : Int
+
+  # Not in `gc/boehm.cr`: Boehm's registration of threads it did not create.
+  # Declared here, ahead of their definitions, because a Crystal `lib`
+  # declaring a `GC_*` name *after* gcry defines it leaves the definition
+  # out of the program altogether ("undefined reference" at link, observed
+  # with Crystal 1.21 for `GC_malloc` too), so Crystal code reaches them
+  # through these. C code links against them directly.
+  fun register_my_thread = GC_register_my_thread(sb : StackBase*) : Int
+  fun unregister_my_thread = GC_unregister_my_thread : Int
+  fun allow_register_threads = GC_allow_register_threads
+  fun thread_is_registered = GC_thread_is_registered : Int
+  fun get_stack_base = GC_get_stack_base(sb : StackBase*) : Int
 end
 
 module Gcry
@@ -149,6 +169,9 @@ module Gcry
     @@push_other_roots : Proc(Nil)? = nil
     @@start_callback : Proc(Nil)? = nil
     @@warn_proc : LibGC::WarnProc? = nil
+    @@on_collection_event : LibGC::OnCollectionEventProc? = nil
+    @@on_thread_event : LibGC::OnThreadEventProc? = nil
+    @@on_heap_resize : LibGC::OnHeapResizeProc? = nil
     @@roots_hooked = false
 
     # `GC_add_roots` ranges: an immutable `[count, lo0, hi0, lo1, hi1, ...]`
@@ -235,16 +258,206 @@ module Gcry
       @@push_other_roots || -> { }
     end
 
+    # Called at the start of every collection, before the world is stopped,
+    # as Boehm calls it at the start of every full collection
+    # (`GC_notify_full_gc`). Its one stdlib registrant (`gc/boehm.cr`
+    # `GC.init`, so `crystal i`'s interpreted prelude) installs
+    # `GC.lock_write`, which under the interpreter's `without_mt` is empty.
     def self.start_callback=(proc : Proc(Nil)) : Nil
       @@start_callback = proc.pointer.null? ? nil : proc
+      hook_events
     end
 
     def self.start_callback : Void*
       @@start_callback.try(&.pointer) || Pointer(Void).null
     end
 
+    def self.on_collection_event=(proc : LibGC::OnCollectionEventProc) : Nil
+      @@on_collection_event = proc.pointer.null? ? nil : proc
+      hook_events
+    end
+
+    def self.on_collection_event : LibGC::OnCollectionEventProc
+      @@on_collection_event || LibGC::OnCollectionEventProc.new(Pointer(Void).null, Pointer(Void).null)
+    end
+
+    def self.on_thread_event=(proc : LibGC::OnThreadEventProc) : Nil
+      @@on_thread_event = proc.pointer.null? ? nil : proc
+      hook_events
+    end
+
+    def self.on_thread_event : LibGC::OnThreadEventProc
+      @@on_thread_event || LibGC::OnThreadEventProc.new(Pointer(Void).null, Pointer(Void).null)
+    end
+
+    def self.on_heap_resize=(proc : LibGC::OnHeapResizeProc) : Nil
+      @@on_heap_resize = proc.pointer.null? ? nil : proc
+      hook_events
+    end
+
+    def self.on_heap_resize : LibGC::OnHeapResizeProc
+      @@on_heap_resize || LibGC::OnHeapResizeProc.new(Pointer(Void).null, Pointer(Void).null)
+    end
+
+    # The heap's hooks are set only while a C callback wants them, so a
+    # program that sets none pays one nil test per event and nothing else.
+    # No closure captures anything: creating them allocates nothing, and
+    # neither does calling them from inside the stopped world.
+    private def self.hook_events : Nil
+      heap = Gcry.default_heap
+      if @@start_callback || @@on_collection_event
+        heap.collection_event_hook = ->(event : Heap::CollectionEvent) { CAbi.collection_event(event) }
+      else
+        heap.collection_event_hook = nil
+      end
+      if @@on_thread_event
+        heap.thread_event_hook = ->(event : Heap::CollectionEvent, thread : Void*) { CAbi.thread_event(event, thread) }
+      else
+        heap.thread_event_hook = nil
+      end
+      if @@on_heap_resize
+        heap.heap_resize_hook = ->(size : UInt64) { CAbi.heap_resize(size) }
+      else
+        heap.heap_resize_hook = nil
+      end
+    end
+
+    # Boehm runs the start callback, then reports `GC_EVENT_START`.
+    def self.collection_event(event : Heap::CollectionEvent) : Nil
+      if event.start?
+        @@start_callback.try &.call
+      end
+      @@on_collection_event.try &.call(LibGC::EventType.new(event.value))
+    end
+
+    def self.thread_event(event : Heap::CollectionEvent, thread : Void*) : Nil
+      @@on_thread_event.try &.call(LibGC::EventType.new(event.value), thread)
+    end
+
+    def self.heap_resize(size : UInt64) : Nil
+      @@on_heap_resize.try &.call(LibGC::Word.new!(size))
+    end
+
+    # Boehm asserts the procedure is not null; a null one here restores the
+    # default, which prints the warning to stderr as Boehm's default does.
     def self.warn_proc=(proc : LibGC::WarnProc) : Nil
-      @@warn_proc = proc
+      @@warn_proc = proc.pointer.null? ? nil : proc
+    end
+
+    # Boehm's warning for the one condition the two collectors share and
+    # Boehm warns about: an allocation the heap cannot satisfy. Boehm warns
+    # through its warn procedure and its `GC_malloc` returns null
+    # (`GC_collect_or_expand`); gcry's allocator raises `OutOfMemoryError`
+    # instead, which cannot unwind through a C caller, so the C entry points
+    # catch it and answer as Boehm does. The text is Boehm's, a printf format
+    # with one `%lu` for the heap size in MiB, as a warn procedure expects.
+    def self.warn_out_of_memory : Nil
+      mib = (Gcry.default_heap?.try(&.heap_size) || 0_u64) >> 20
+      if proc = @@warn_proc
+        proc.call("GC Warning: Out of Memory! Heap size: %lu MiB. Returning NULL!\n".to_unsafe, LibGC::Word.new!(mib))
+      else
+        buf = uninitialized UInt8[RawOut::LIMIT]
+        len = RawOut.append(buf.to_unsafe, 0, "GC Warning: Out of Memory! Heap size: ")
+        len = RawOut.append_u64(buf.to_unsafe, len, mib)
+        len = RawOut.append(buf.to_unsafe, len, " MiB. Returning NULL!\n")
+        RawOut.flush(buf.to_unsafe, len)
+      end
+    end
+
+    # Boehm's result codes (`gc.h`).
+    GC_SUCCESS       = 0
+    GC_DUPLICATE     = 1
+    GC_UNIMPLEMENTED = 3
+
+    # A thread C created is registered by putting it on Crystal's thread list,
+    # which is the set gcry stops and scans on every platform. Linux and
+    # Darwin only: Windows would need the duplicated handle closed again and
+    # is unbuilt, and OpenBSD/Android keep `Thread.current` in a pthread key
+    # rather than the thread-local cleared below.
+    {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+      # Bit 0: this thread was adopted by `register_my_thread`, so it is the
+      # one to take off the list again — a Crystal thread leaves it in its own
+      # `Thread#start`, and deleting a node twice corrupts the list. Bit 1: the
+      # suspend signal was blocked when it registered. A literal initialiser,
+      # so reading it runs no `__crystal_once` (which would make a `Thread`).
+      @[ThreadLocal]
+      @@adopted : UInt8 = 0_u8
+    {% end %}
+
+    def self.register_my_thread(sb : LibGC::StackBase*) : LibGC::Int
+      {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+        heap = Gcry.default_heap?
+        return GC_UNIMPLEMENTED unless heap && heap.stop_the_world
+        return GC_DUPLICATE if ::Thread.current?
+        bounds = Platform.current_pthread_stack_bounds
+        return GC_UNIMPLEMENTED unless bounds
+        # gcry scans a thread's pthread stack, from its stack pointer up to
+        # the top. A base outside it — a coroutine's or an alternate stack —
+        # names memory gcry would not scan, so it is refused, not accepted.
+        base = sb.null? ? bounds[1] : sb.value.mem_base
+        return GC_UNIMPLEMENTED unless bounds[0].address < base.address && base.address <= bounds[1].address
+        flags = 1_u8
+        {% if flag?(:linux) %}
+          # The stop is a signal on Linux, and a C thread may have it
+          # blocked; a thread that never takes it is never stopped, and the
+          # collector would wait on it for good.
+          mask = uninitialized LibC::SigsetT
+          LibC.pthread_sigmask(LibC::SIG_SETMASK, nil, pointerof(mask))
+          if LibC.sigismember(pointerof(mask), Platform::STW_SIG_SUSPEND) == 1
+            flags |= 2_u8
+            LibC.sigdelset(pointerof(mask), Platform::STW_SIG_SUSPEND)
+            LibC.pthread_sigmask(LibC::SIG_SETMASK, pointerof(mask), nil)
+          end
+        {% end %}
+        # A second mutator from here on, as `GC.pthread_create` arranges.
+        heap.heap_counters_atomic = true unless heap.heap_counters_atomic_pinned
+        # Crystal's constructor for a thread that already exists: its `Thread`
+        # and main fiber over the pthread stack, pushed onto the lists.
+        thread = heap.registering_thread { ::Thread.new }
+        Crystal::System::Thread.current_thread = thread
+        @@adopted = flags
+        GC_SUCCESS
+      {% else %}
+        GC_UNIMPLEMENTED
+      {% end %}
+    end
+
+    # Fiber first, then the thread, then the thread-local: the reverse of
+    # `Thread#start`'s exit. While the thread is still listed it is stopped
+    # and scanned (its pthread stack, once its fiber is gone), and after the
+    # list lets go of it nothing reads the `Thread` again — so unlike a
+    # Crystal thread's exit there is no window to cover with a birth root.
+    def self.unregister_my_thread : LibGC::Int
+      {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+        flags = @@adopted
+        return GC_SUCCESS unless flags & 1_u8 != 0
+        thread = ::Thread.current?
+        return GC_SUCCESS unless thread
+        if fiber = thread.@main_fiber
+          Fiber.inactive(fiber)
+        end
+        ::Thread.gcry_unlist(thread)
+        Crystal::System::Thread.gcry_clear_current_thread
+        @@adopted = 0_u8
+        {% if flag?(:linux) %}
+          if flags & 2_u8 != 0
+            mask = uninitialized LibC::SigsetT
+            LibC.pthread_sigmask(LibC::SIG_SETMASK, nil, pointerof(mask))
+            LibC.sigaddset(pointerof(mask), Platform::STW_SIG_SUSPEND)
+            LibC.pthread_sigmask(LibC::SIG_SETMASK, pointerof(mask), nil)
+          end
+        {% end %}
+      {% end %}
+      GC_SUCCESS
+    end
+
+    # The calling thread's stack bottom, from the OS, never the main thread's
+    # (`GC.current_thread_stack_bottom` falls back to that).
+    def self.get_stack_base(sb : LibGC::StackBase*) : LibGC::Int
+      bounds = Platform.current_pthread_stack_bounds
+      return GC_UNIMPLEMENTED unless bounds
+      sb.value.mem_base = bounds[1]
+      GC_SUCCESS
     end
 
     # The thread `GC.init` ran on: Boehm's main thread, whose stack bottom
@@ -289,6 +502,26 @@ module Gcry
   end
 end
 
+{% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+  class Thread
+    # :nodoc:
+    # Takes a thread `GC_register_my_thread` adopted off the list again; the
+    # list is protected, and a Crystal thread leaves it in `#start`.
+    def self.gcry_unlist(thread : Thread) : Nil
+      threads.delete(thread)
+    end
+  end
+
+  module Crystal::System::Thread
+    # :nodoc:
+    # `current_thread=` takes no nil. A thread that unregistered must not
+    # keep naming a `Thread` the collector may since have swept.
+    def self.gcry_clear_current_thread : Nil
+      @@current_thread = nil
+    end
+  end
+{% end %}
+
 # The process GC is initialised by Crystal's `main` before any code that could
 # call this runs, and that set `GC_stackbottom`; Boehm's own `GC_init` is
 # likewise idempotent.
@@ -326,26 +559,43 @@ end
   end
 {% end %}
 
+# Out of memory, Boehm warns and returns null (`Gcry::CAbi.warn_out_of_memory`).
+# gcry raised `OutOfMemoryError` here until 2026-10-06, and an exception
+# cannot leave a `fun`: the caller's `rescue` never saw it and the process died
+# with "Unhandled exception" (`process_spec/regression/28_boehm_callbacks_spec.cr`).
 fun gcry_c_malloc = GC_malloc(size : LibGC::SizeT) : Void*
   GC.malloc(size)
+    rescue Gcry::OutOfMemoryError
+      Gcry::CAbi.warn_out_of_memory
+      Pointer(Void).null
 end
 
 fun gcry_c_malloc_atomic = GC_malloc_atomic(size : LibGC::SizeT) : Void*
   GC.malloc_atomic(size)
+    rescue Gcry::OutOfMemoryError
+      Gcry::CAbi.warn_out_of_memory
+      Pointer(Void).null
 end
 
+# Null with the old block left as it was, as Boehm's `GC_realloc` fails.
 fun gcry_c_realloc = GC_realloc(ptr : Void*, size : LibGC::SizeT) : Void*
   GC.realloc(ptr, size)
+    rescue Gcry::OutOfMemoryError
+      Gcry::CAbi.warn_out_of_memory
+      Pointer(Void).null
 end
 
 fun gcry_c_free = GC_free(ptr : Void*) : Nil
   GC.free(ptr)
 end
 
+# Boehm's meaning: 1 while an incremental collection is in progress, 0 once
+# there is nothing left to do, and 0 while disabled (`GC.collect_a_little`).
 fun gcry_c_collect_a_little = GC_collect_a_little : LibGC::Int
   GC.collect_a_little
 end
 
+# Nothing while collection is disabled, as in Boehm (`GC.collect`).
 fun gcry_c_gcollect = GC_gcollect : Nil
   GC.collect
 end
@@ -440,11 +690,14 @@ fun gcry_c_get_prof_stats = GC_get_prof_stats(stats : LibGC::ProfStats*, size : 
   pointerof(out).as(UInt8*).copy_to(stats.as(UInt8*), n) unless stats.null?
 end
 
-# Recorded, never called. Its one stdlib registrant (`gc/boehm.cr` `GC.init`)
-# installs `GC.lock_write`, which pairs with the `GC.unlock_write` its
-# `before_collect` does — fiber-swap exclusion that gcry's own stop provides.
-# Calling it would mean running the registrant's code inside the collector
-# (in `crystal i`, the interpreter), where allocating deadlocks.
+# Called on the collecting thread at the start of every collection, before
+# the world is stopped and before `GC_EVENT_START` (`Gcry::CAbi.collection_event`).
+# Until 2026-10-06 it was recorded and never called. Boehm's rule is that it
+# must not allocate; `crystal i`'s registrant runs interpreted code, which
+# does (an `Interpreter` per callback), and that is survivable here because
+# the call comes before the world is stopped or the collector's write lock
+# taken, with the collection flag already up so no allocation in it can
+# start a second collection.
 fun gcry_c_get_start_callback = GC_get_start_callback : Void*
   Gcry::CAbi.start_callback
 end
@@ -483,31 +736,71 @@ fun gcry_c_set_stackbottom = GC_set_stackbottom(th : LibGC::ThreadHandle, sb : L
   th
 end
 
-# Boehm's event hooks feed `-Dtracing` (`CRYSTAL_TRACE=gc`). gcry emits no
-# Boehm events, and a caller that sets one would wait for events that never
-# come; clearing one is fine.
+# Boehm's registration of a thread it did not create (`GC_register_my_thread`
+# and company), until 2026-10-06 absent. The thread goes on Crystal's thread
+# list, which is how gcry stops and scans every thread
+# (`Gcry::CAbi.register_my_thread`); it must unregister before it exits, as
+# Boehm requires, and must not touch the heap after. Linux and Darwin; the
+# others answer `GC_UNIMPLEMENTED` (3). Registration is always allowed, so
+# `GC_allow_register_threads` has nothing to do.
+fun gcry_c_register_my_thread = GC_register_my_thread(sb : LibGC::StackBase*) : LibGC::Int
+  Gcry::CAbi.register_my_thread(sb)
+end
+
+fun gcry_c_unregister_my_thread = GC_unregister_my_thread : LibGC::Int
+  Gcry::CAbi.unregister_my_thread
+end
+
+fun gcry_c_allow_register_threads = GC_allow_register_threads : Nil
+end
+
+# Every Crystal thread is registered, and a C thread once it has called
+# `GC_register_my_thread`.
+fun gcry_c_thread_is_registered = GC_thread_is_registered : LibGC::Int
+  Thread.current? ? 1 : 0
+end
+
+fun gcry_c_get_stack_base = GC_get_stack_base(sb : LibGC::StackBase*) : LibGC::Int
+  Gcry::CAbi.get_stack_base(sb)
+end
+
+# Boehm's event hooks, which stdlib's `-Dtracing` (`CRYSTAL_TRACE=gc`) feeds
+# on. Until 2026-10-06 setting one aborted. Each is called where Boehm calls
+# it, from inside the collector, and must not allocate:
+#
+# - heap resize: each time the heap maps a chunk, with the new heap size
+#   (`Heap#heap_resize_hook`).
+# - collection events: `START`, `PRE_STOP_WORLD`, `POST_STOP_WORLD`,
+#   `MARK_START`, `MARK_END`, `RECLAIM_START`, `RECLAIM_END`,
+#   `PRE_START_WORLD`, `POST_START_WORLD`, `END` (`Heap#collection_event_hook`).
+#   gcry sweeps inside the stop unless the sweep is deferred past it, so the
+#   reclaim pair usually comes before the start-world pair, where Boehm's
+#   comes after.
+# - thread events: `THREAD_SUSPENDED` / `THREAD_UNSUSPENDED` with the thread's
+#   `pthread_t`, once per thread each stop suspends and resumes
+#   (`Heap#thread_event_hook`).
 fun gcry_c_set_on_heap_resize = GC_set_on_heap_resize(proc : LibGC::OnHeapResizeProc) : Nil
-  Gcry::CAbi.unsupported("GC_set_on_heap_resize", "gcry emits no Boehm heap-resize events") unless proc.pointer.null?
+  Gcry::CAbi.on_heap_resize = proc
 end
 
 fun gcry_c_get_on_heap_resize = GC_get_on_heap_resize : LibGC::OnHeapResizeProc
-  LibGC::OnHeapResizeProc.new(Pointer(Void).null, Pointer(Void).null)
+  Gcry::CAbi.on_heap_resize
 end
 
 fun gcry_c_set_on_collection_event = GC_set_on_collection_event(cb : LibGC::OnCollectionEventProc) : Nil
-  Gcry::CAbi.unsupported("GC_set_on_collection_event", "gcry emits no Boehm collection events") unless cb.pointer.null?
+  Gcry::CAbi.on_collection_event = cb
 end
 
 fun gcry_c_get_on_collection_event = GC_get_on_collection_event : LibGC::OnCollectionEventProc
-  LibGC::OnCollectionEventProc.new(Pointer(Void).null, Pointer(Void).null)
+  Gcry::CAbi.on_collection_event
 end
 
 fun gcry_c_set_on_thread_event = GC_set_on_thread_event(cb : LibGC::OnThreadEventProc) : Nil
-  Gcry::CAbi.unsupported("GC_set_on_thread_event", "gcry emits no Boehm thread events") unless cb.pointer.null?
+  Gcry::CAbi.on_thread_event = cb
 end
 
 fun gcry_c_get_on_thread_event = GC_get_on_thread_event : LibGC::OnThreadEventProc
-  LibGC::OnThreadEventProc.new(Pointer(Void).null, Pointer(Void).null)
+  Gcry::CAbi.on_thread_event
 end
 
 fun gcry_c_size = GC_size(addr : Void*) : LibC::SizeT
@@ -544,7 +837,12 @@ end
   end
 {% end %}
 
-# Recorded, never called: gcry has no Boehm warnings to report.
+# Receives Boehm's out-of-memory warning, the one Boehm warning gcry has a
+# matching condition for (`Gcry::CAbi.warn_out_of_memory`). Boehm's others
+# describe its own machinery — blacklisted large blocks, heap sections, the
+# mark stack — which gcry does not have. gcry's own diagnostics stay on
+# stderr: they are not Boehm's, and a warn procedure written for Boehm's
+# format string would misread them.
 fun gcry_c_set_warn_proc = GC_set_warn_proc(proc : LibGC::WarnProc) : Nil
   Gcry::CAbi.warn_proc = proc
 end

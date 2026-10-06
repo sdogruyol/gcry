@@ -271,6 +271,20 @@ compiler-gc-contract: $(BIN)
 	$(CRYSTAL) tool hierarchy src/gcry.cr >/dev/null
 	$(CRYSTAL) tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
 
+# `-Dgcry_no_boehm_abi`: a gcry program that links libgc itself
+# (bench/boehm_abi_optout.cr). First arm, red: built without the flag, gcry's
+# `GC_*` exports and the static libgc's collide at link time, which is what
+# the PR #44 review hit. Second: with the flag it links, `GC_malloc` is
+# libgc's, and both collectors run. Third, red: with Boehm left on Crystal's
+# suspend signals, gcry's first multi-threaded stop faults.
+.PHONY: boehm-abi-optout
+boehm-abi-optout: $(BIN)
+	! $(CRYSTAL) build -Dgc_none bench/boehm_abi_optout.cr -o $(BIN)/boehm_abi_optout_collides 2>$(BIN)/boehm_abi_optout.link.log
+	grep -q "multiple definition of .GC_malloc" $(BIN)/boehm_abi_optout.link.log
+	$(CRYSTAL) build -Dgc_none -Dgcry_no_boehm_abi bench/boehm_abi_optout.cr -o $(BIN)/boehm_abi_optout --error-trace
+	$(BIN)/boehm_abi_optout
+	! BOEHM_SIGNALS=crystal timeout 60 $(BIN)/boehm_abi_optout
+
 kemal-e2e:
 	KEMAL_E2E_DURATION=$${KEMAL_E2E_DURATION:-60} ./bench/kemal_e2e.sh
 

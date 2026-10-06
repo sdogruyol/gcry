@@ -3228,6 +3228,9 @@ module Gcry
       @large_recycle_budget = sat_sub(@large_recycle_budget, bytes) if at.null?
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
       CrystalTrace.heap_resize(self, @heap_size)
+      if hook = @heap_resize_hook
+        hook.call(@heap_size)
+      end
       # Inline insert into sorted chunk index. Under TLAB MT this is called
       # from refill_size_class which already holds the size-class freelist
       # lock (via with_freelist_lock), so index_insert is serialised per class.

@@ -37,27 +37,58 @@ module Gcry
       {% end %}
     end
 
+    # Every collection takes this before it stops the world. The registration
+    # gate comes first and on every platform, unlike `@gc_lock`: Darwin and
+    # Windows need it as much, since what it excludes is a thread that is not
+    # on Crystal's list yet and so would not be stopped at all.
     def lock_write : Nil
+      return unless @stop_the_world
+      @thread_register_gate.write_lock
       {% unless (flag?(:darwin) || flag?(:win32)) %}
-        return unless @stop_the_world
         @gc_lock.write_lock
       {% end %}
     end
 
     def unlock_write : Nil
+      return unless @stop_the_world
       {% unless (flag?(:darwin) || flag?(:win32)) %}
-        return unless @stop_the_world
         @gc_lock.write_unlock
       {% end %}
+      @thread_register_gate.write_unlock
+    end
+
+    # Runs the block — a foreign thread putting itself on Crystal's thread list
+    # (`GC_register_my_thread`) — with no stop in progress and none able to
+    # start. Until the thread is on the list a stop neither suspends nor scans
+    # it, so its new `Thread`, rooted only by its own stack, would be swept
+    # under it, and an allocation of its could run through the middle of the
+    # stop. Collectors take the write side in `lock_write`, before they hold
+    # anything else (`@roots_lock`, the finalizer and TLAB locks come after),
+    # so the block may allocate. It must not collect, which is why the thread
+    # sets `Thread.current` only after the gate is released: without it,
+    # `thread_not_ready_for_collect?` keeps every collection off this thread.
+    def registering_thread(& : -> T) : T forall T
+      @thread_register_gate.read_lock
+      begin
+        yield
+      ensure
+        @thread_register_gate.read_unlock
+      end
     end
 
     # Non-collector threads must not mutate the heap or take GC.lock_read while
     # STW is active (SYSMON is signal-exempt — see stop_world), or during EC1
     # post-STW `@chunks` rebuild / pending munmap (`@block_other_heap`).
+    #
+    # `Thread.current?`, never `Thread.current`: on a thread with no `Thread`
+    # — a C thread allocating, or one inside `GC_register_my_thread` — the
+    # latter makes one, which allocates, which comes back here while the world
+    # is still stopped. A C thread calling `GC_malloc` in a loop beside 200
+    # collections hung the process 3 of 3 with it, and finishes 3 of 3 without.
     private def wait_if_world_stopped_other_thread : Nil
       return unless @world_stopped || @block_other_heap
       owner = @stw_owner
-      return if owner && Thread.current == owner
+      return if owner && Thread.current? == owner
       until !@world_stopped && !@block_other_heap
         Intrinsics.pause
       end
@@ -121,6 +152,7 @@ module Gcry
           raise ex
         end
         @world_stopped = true
+        thread_events(CollectionEvent::ThreadSuspended, current_thread)
         # Every thread is suspended and its registers read. A stall from here
         # to PHASE_FLUSH is not the suspension, and was reported as `suspend`
         # on these two platforms until 2026-10-01 (`bench/stw_watchdog.cr`).
@@ -388,6 +420,9 @@ module Gcry
             end
           end
           @world_stopped = true
+          # Once every suspension is acknowledged, where Boehm reports each
+          # thread as it signals it: a thread reported here is stopped.
+          thread_events(CollectionEvent::ThreadSuspended, current_thread)
           # Past the wait loop and past every ack. Anything that hangs from here
           # to PHASE_FLUSH is not the suspension.
           StwWatchdog.enter(StwWatchdog::PHASE_STOPPED)
@@ -766,6 +801,22 @@ module Gcry
       !name.nil? && name == "SYSMON"
     end
 
+    # `thread_event_hook` once for each thread this stop suspends, or resumes:
+    # the suspend loops' own filter — never the stopping thread, and on Linux
+    # neither a signal-exempt thread nor one the stop abandoned. Called with
+    # `Thread.lock` held, so the list cannot change under the walk.
+    private def thread_events(event : CollectionEvent, current : Thread) : Nil
+      return unless hook = @thread_event_hook
+      Thread.unsafe_each do |thread|
+        next if thread == current
+        {% unless flag?(:darwin) || flag?(:win32) %}
+          next if stw_signal_exempt?(thread)
+          next if suspend_abandoned?(thread.to_unsafe.unsafe_as(UInt64))
+        {% end %}
+        hook.call(event, Pointer(Void).new(thread.to_unsafe.unsafe_as(UInt64)))
+      end
+    end
+
     # stop_world only after root-list / finalizer-table mutators finish
     # (see @roots_lock, Finalizers::Registry#lock_for_stw).
     private def stop_world_quiescing_roots : Nil
@@ -842,6 +893,9 @@ module Gcry
         # collections on macos-latest. `GCRY_STW_LATE_CLEAR=1` restores that
         # order, which is the gate's red arm here too.
         @world_stopped = false unless @stw_late_clear
+        # Before the resume: the platform's resume releases `Thread.lock` on
+        # its way out (`Platform.start_world_threads`), and the walk needs it.
+        thread_events(CollectionEvent::ThreadUnsuspended, current_thread)
         Platform.start_world_threads(current_thread)
         unlock_fiber_list_after_stop
         Platform.clear_thread_sps
@@ -914,6 +968,8 @@ module Gcry
               end
             end
           end
+          # Every thread is running again and `Thread.lock` is still held.
+          thread_events(CollectionEvent::ThreadUnsuspended, current_thread)
           # Research: the redundant delivery, arranged. With the epoch it is
           # declined and counted in `stw_suspend_stale_signals`; without it,
           # each of these suspends a running thread that nothing will ever
@@ -954,6 +1010,7 @@ module Gcry
       @incremental_marking = false
       @inc_active = false
       @gc_lock = Crystal::RWLock.new
+      @thread_register_gate = Crystal::RWLock.new
       @alloc_lock = Crystal::SpinLock.new
       init_freelist_locks
       @roots_lock = Crystal::SpinLock.new

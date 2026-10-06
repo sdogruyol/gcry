@@ -60,7 +60,10 @@ of `spec/std` (Crystal 1.21.0), held in CI by the `std-spec` job
 The Crystal compiler, built with gcry, also builds itself and passes
 `compiler_spec`: 13 641 examples, 0 failures, the same as Boehm. `crystal i`
 runs in it too, because gcry exports Boehm's `GC_*` C ABI. CI holds both in
-the `compiler-gcry` job ([`ci/compiler-spec.sh`](ci/compiler-spec.sh)).
+the `compiler-gcry` job ([`ci/compiler-spec.sh`](ci/compiler-spec.sh)). A
+program that links libgc as well builds with `-Dgcry_no_boehm_abi`, which
+leaves those exports out
+([docs/INTEGRATION.md § Boehm's C ABI](docs/INTEGRATION.md#boehms-c-abi)).
 
 On any other target — another OS, Android, or a 32-bit CPU — `-Dgc_none` +
 `require "gcry"` stops the build with a compile-time error instead of

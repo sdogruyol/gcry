@@ -1068,6 +1068,13 @@ jobs:
         run: |
           make compiler-gc-contract
 
+      # `-Dgcry_no_boehm_abi`: without it a program linking libgc must fail to
+      # link (first arm), with it it links and runs both collectors, and the
+      # last arm must fault with Boehm left on Crystal's stop signals.
+      - name: Boehm C ABI opt-out (program linking libgc)
+        run: |
+          make boehm-abi-optout
+
       # Trace events and heap dump against the live set; the recipe's second
       # arm traces with sampling off and must fail on the missing alloc/free.
       - name: Trace + heap dump smoke

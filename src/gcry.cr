@@ -245,5 +245,12 @@ end
   require "./gcry/crystal_process_compat"
   require "./gcry/crystal_raises_compat"
   require "./gcry/crystal_string_builder_compat"
-  require "./gcry/c_abi"
+  # Boehm's `GC_*` entry points, which `crystal i` and code bound to
+  # `gc/boehm.cr`'s `LibGC` call. `-Dgcry_no_boehm_abi` leaves them out, for a
+  # program that also links libgc itself: Crystal's distribution ships
+  # `libgc.a`, and with it in the link every symbol defined here is a
+  # "multiple definition" error (`make boehm-abi-optout`).
+  {% unless flag?(:gcry_no_boehm_abi) %}
+    require "./gcry/c_abi"
+  {% end %}
 {% end %}

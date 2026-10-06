@@ -55,6 +55,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-Dgc_none`, and the same for `aarch64-linux-android28` and
   `x86_64-unknown-freebsd`.
 
+- **A program that links libgc too builds with `-Dgcry_no_boehm_abi`.** gcry
+  defines Boehm's `GC_*` C ABI for `crystal i`, and with a static libgc in the
+  link — Crystal's distribution ships `lib/crystal/libgc.a` — every one of
+  those names was a "multiple definition" link error, where master linked the
+  same program. The flag leaves the C ABI and `LibGC` out; the default keeps
+  them. Weak definitions were measured and rejected: against an archive, which
+  collector serves a name would depend on which members the link pulls in.
+  With a shared libgc the default links but splits calls between the two
+  collectors, so the flag is for any program that links libgc. On Linux libgc
+  must also move off `SIGPWR`/`SIGXCPU`, Crystal's stop signals, or gcry's
+  first multi-threaded stop faults (SIGSEGV at `0x18`).
+  - **Evidence:** `make boehm-abi-optout` (`bench/boehm_abi_optout.cr`): built
+    without the flag the link fails on `GC_malloc`; with it, it links and runs
+    20 gcry collections across threads beside libgc 8.2.8's own; with Boehm
+    left on `SIGPWR` the same binary faults. docs/INTEGRATION.md § Boehm's C
+    ABI.
+
+- **`GC_collect_a_little` answers as Boehm's does.** It returned 1 when a
+  cycle *finished*, started a new sliced cycle on every call, and ran with
+  collection disabled, so `while (GC_collect_a_little()) {}` stopped at once,
+  and a loop until 0 never ended (10 001 calls answered 1 when nothing was
+  due). It now does what an allocation would do at that point — the next
+  slice of a cycle in progress, or the collection the debt is owed — and
+  returns 1 only while a sliced cycle is in progress; 0 when there is nothing
+  to do and while disabled. `Gcry.collect_a_little` keeps the slice-on-demand
+  meaning, and `bench/incremental_mt_stress.cr`'s `INC=1` arm uses it.
+  - **Evidence:** `process_spec/regression/27_boehm_collect_parity_spec.cr`,
+    4 examples: red 4 of 4 on the unfixed tree, green after.
+
+- **Boehm's callbacks are called.** `GC_set_start_callback` and
+  `GC_set_warn_proc` recorded their procedure and never called it;
+  `GC_set_on_collection_event`, `GC_set_on_thread_event` and
+  `GC_set_on_heap_resize` aborted. The start callback now runs at the start of
+  every collection, before the stop; collection events, per-thread
+  suspend/resume events and heap growth are reported where Boehm reports them.
+  The warn procedure receives Boehm's out-of-memory warning: out of memory,
+  `GC_malloc`, `GC_malloc_atomic` and `GC_realloc` warn and return null, where
+  they raised an `OutOfMemoryError` that cannot leave a C entry point — the
+  caller's `rescue` never ran and the process died with "Unhandled exception".
+  - **Evidence:** `process_spec/regression/28_boehm_callbacks_spec.cr`: before,
+    the start callback ran 0 times in 3 collections, each event setter aborted
+    ("gcry emits no Boehm collection events"), and the out-of-memory example
+    died unhandled; after, 6 of 6 green, including a start callback that
+    allocates, as `crystal i`'s interpreted one does.
+
+- **A thread C created can register with the collector.**
+  `GC_register_my_thread`, `GC_unregister_my_thread`, `GC_thread_is_registered`,
+  `GC_get_stack_base` and `GC_allow_register_threads` were undefined, so a C
+  library's own threads could not make their stacks roots. Registration puts
+  the thread on Crystal's thread list, which is what gcry stops and scans,
+  behind a gate every collection takes before it stops the world, so the new
+  `Thread` cannot be swept and the thread cannot allocate through a stop
+  before it is listed. Linux and macOS; elsewhere `GC_UNIMPLEMENTED`. The
+  same change stops an unregistered C thread that allocates while gcry
+  collects from wedging the process: the wait for a stop called the
+  `Thread.current` that creates a `Thread` (allocating, inside the stop). A
+  C thread calling `GC_malloc` in a loop beside 200 `GC.collect`s hung the
+  unfixed tree 3 of 3 (killed at 60 s) and finishes 3 of 3 now.
+  - **Evidence:** `process_spec/regression/29_boehm_foreign_thread_spec.cr`
+    did not link before; after, a `pthread_create`d thread registers, is on
+    the list while it holds 8 blocks on its stack through 5 collections with
+    churn, keeps all 8, and is off the list after it unregisters and exits;
+    unregistered, the same thread keeps 0 of 8 (8 of 8 runs). 20 of 20 runs
+    green.
+
 - **A promoted block freed in a nursery chunk goes on the nursery list, so
   releasing the chunk leaves no node behind.**
   - **The bug:** `GC.free` and the sweep chose the freelist by the block's

@@ -85,8 +85,84 @@ commit (`docs/DEFAULT-GC-READINESS.md` §1).
 
 The compiler built with gcry builds itself, passes `compiler_spec` (13 641
 examples, 0 failures) and runs `crystal i`. gcry exports Boehm's `GC_*` C
-ABI and a `lib LibGC` (`src/gcry/c_abi.cr`), so shards that bind libgc
-directly link against it. CI: `ci/compiler-spec.sh`, job `compiler-gcry`.
+ABI and a `lib LibGC` (`src/gcry/c_abi.cr`; § Boehm's C ABI below). CI:
+`ci/compiler-spec.sh`, job `compiler-gcry`.
+
+## Boehm's C ABI
+
+Every `-Dgc_none` program that requires gcry defines Boehm's `GC_*` entry
+points, on gcry's heap: `crystal i` resolves its interpreted program's
+`LibGC` calls from the compiler binary, Crystal's `spec/std` calls
+`LibGC.size`, and C code linked into the program can call them. Where gcry
+has no equivalent the call prints what is missing and aborts
+(`GC_set_max_heap_size`; on Windows `GC_beginthreadex` and the signal
+queries). Behaviour that differs from a plain reading of the names, each
+pinned by a regression:
+
+| Call | gcry, as Boehm | Regression |
+|------|----------------|------------|
+| `GC_gcollect`, `GC.collect` | Nothing while collection is disabled (`GC_disable` / `GC.disable`, nested). gcry's own emergency collection already declined while disabled, as Boehm's does. | `process_spec/regression/27_*` |
+| `GC_collect_a_little` | Work only if an allocation would do some now — the next slice of a sliced cycle, or the collection the allocation debt is owed — then 1 while a sliced (`GCRY_INCREMENTAL=1`) cycle is in progress, else 0; 0 while disabled. `Gcry.collect_a_little` keeps the slice-on-demand meaning. | `27_*` |
+| `GC_malloc`, `GC_malloc_atomic`, `GC_realloc` | Out of memory: Boehm's warning through the warn procedure (default: stderr), then null; a failed realloc leaves the block as it was. | `28_*` |
+| `GC_set_warn_proc` | Receives that out-of-memory warning — the one Boehm warning gcry has a matching condition for. gcry's own diagnostics stay on stderr. | `28_*` |
+| `GC_set_start_callback` | Called on the collecting thread at the start of every collection, before the world is stopped. | `28_*` |
+| `GC_set_on_collection_event` | `START`, `PRE/POST_STOP_WORLD`, `MARK_START/END`, `RECLAIM_START/END`, `PRE/POST_START_WORLD`, `END`. gcry sweeps inside the stop unless the sweep is deferred, so the reclaim pair usually precedes the start-world pair. A sliced cycle reports `START`/`MARK_START` when it begins, a stop pair per slice, the rest when it ends. | `28_*` |
+| `GC_set_on_thread_event` | `THREAD_SUSPENDED` / `THREAD_UNSUSPENDED` with the `pthread_t` of each thread a stop suspends and resumes, `GC.stop_world` included. On macOS and Windows the resume is reported just before it happens. | `28_*` |
+| `GC_set_on_heap_resize` | The new heap size each time the heap maps a chunk. | `28_*` |
+| `GC_register_my_thread`, `GC_unregister_my_thread`, `GC_thread_is_registered`, `GC_get_stack_base`, `GC_allow_register_threads` | A thread C created goes on Crystal's thread list — what gcry stops and scans — and comes off it again. Linux and macOS; elsewhere `GC_UNIMPLEMENTED` (3). A stack base outside the thread's pthread stack is refused the same way. As with Boehm, the thread must unregister before it exits and must not touch the heap after. | `29_*` |
+
+Callbacks run inside the collector, most of them with every other thread
+stopped, and must not allocate: Boehm's rule. The start callback is the
+exception in practice — `crystal i` installs an interpreted one, and running
+it allocates — and is called before the world is stopped or the collector's
+write lock taken, so that survives (`28_*`, "survives a start callback that
+allocates").
+
+**A Crystal `lib` that declares a `GC_*` name itself drops gcry's definition
+of that name.** Crystal 1.21 does not emit a top-level `fun` once a later
+`lib` declares the same symbol, so a shard with its own `lib LibGC` (or any
+other lib) binding, say, `GC_size` fails to link with "undefined reference
+to `GC_size'" — observed for `GC_malloc` and `GC_size`, identical
+signatures included. Crystal code calls the C ABI through gcry's own
+`LibGC`, which declares every name it defines, including the thread
+registration calls stdlib does not bind; C code is unaffected.
+
+### Linking libgc too: `-Dgcry_no_boehm_abi`
+
+A program that links libgc itself — a C library that uses Boehm, a shard
+with `@[Link("gc")]` — gets a second definition of every `GC_*` name. With a
+static libgc, which Crystal's distribution ships (`lib/crystal/libgc.a`, the
+first `-lgc` match through `CRYSTAL_LIBRARY_PATH`), the link fails:
+`multiple definition of 'GC_malloc'`, one line per name. Build it with
+**`-Dgcry_no_boehm_abi`**: gcry then defines no `GC_*` symbol and no `LibGC`,
+every `GC_*` call is libgc's, and gcry remains the program's collector
+through `GC.*`. `LibGC` is then the program's own binding, and a compiler
+built with the flag cannot run `crystal i`, which needs gcry's `GC_*`.
+
+With a **shared** libgc the default build links, and that is worse rather
+than better: the program's own `GC_*` calls resolve to gcry's definitions
+while libgc's internal calls stay inside libgc (observed with Debian's
+`libgc.so`: a call to `GC_gcollect` reached the executable's definition,
+`GC_strdup`'s internal `GC_malloc_atomic` stayed in libgc). Use the flag
+whenever the program links libgc, statically or not.
+
+Making gcry's definitions weak so both could coexist was measured and
+rejected: against a static libgc a weak definition loses wherever the
+archive member that defines the strong one is pulled in for some other
+reason, so which collector serves a given `GC_*` name would depend on link
+order and member layout, silently. The flag is all-or-nothing.
+
+Two collectors in one process also share signals. On Linux, libgc's
+`GC_init` installs its thread-suspend handlers on `SIGPWR` and `SIGXCPU`,
+which are Crystal's — and so gcry's — stop-the-world pair; Boehm's handler
+then answers gcry's stops on threads it never registered, and the process
+faults at gcry's first multi-threaded collection (SIGSEGV at `0x18`). Move
+Boehm's pair before anything initialises libgc:
+`GC_set_suspend_signal(SIGRTMIN + 8)` and `GC_set_thr_restart_signal(SIGRTMIN + 9)`.
+`make boehm-abi-optout` (`bench/boehm_abi_optout.cr`) holds all three: the
+default build fails to link against a static libgc, the flag build links and
+runs both collectors across threads, and the same binary with Boehm left on
+`SIGPWR` faults.
 
 ## Windows
 

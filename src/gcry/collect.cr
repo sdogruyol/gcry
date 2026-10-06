@@ -1702,6 +1702,9 @@ module Gcry
     @block_other_heap = false
     # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
     @gc_lock : Crystal::RWLock = Crystal::RWLock.new
+    # Foreign-thread registration against the stop (`lock_write`,
+    # `registering_thread`).
+    @thread_register_gate : Crystal::RWLock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
     # Monotonic span of every address ever mapped — never shrinks on munmap.
@@ -1933,6 +1936,60 @@ module Gcry
       @collecting
     end
 
+    # Has a sliced (incremental) cycle begun and not yet finished? Boehm's
+    # `GC_collection_in_progress`, which `GC_collect_a_little` answers with.
+    def incremental_in_progress? : Bool
+      @inc_active
+    end
+
+    # The points of a collection Boehm reports through
+    # `GC_set_on_collection_event` and `GC_set_on_thread_event`, in the order
+    # of Boehm's `GC_EventType` so the C ABI passes the value straight through.
+    enum CollectionEvent
+      Start
+      MarkStart
+      MarkEnd
+      ReclaimStart
+      ReclaimEnd
+      End
+      PreStopWorld
+      PostStopWorld
+      PreStartWorld
+      PostStartWorld
+      ThreadSuspended
+      ThreadUnsuspended
+    end
+
+    # Called on the collecting thread at each `CollectionEvent` of every
+    # collection on this heap, `ThreadSuspended`/`ThreadUnsuspended` aside.
+    # Between `PostStopWorld` and `PreStartWorld` every other thread is
+    # suspended, wherever it was — possibly holding the allocator's or libc's
+    # locks — so the hook must not allocate, or take a lock a mutator might
+    # hold: nothing would ever release it. The same rule Boehm states for its
+    # event callbacks.
+    property collection_event_hook : Proc(CollectionEvent, Nil)? = nil
+
+    # Called by `stop_world` once per thread it suspended (`ThreadSuspended`)
+    # and by `start_world` once per thread it resumes (`ThreadUnsuspended`),
+    # with the thread's system handle — a `pthread_t` on Unix. Every stop
+    # reports, as Boehm's `GC_suspend_all`/`GC_restart_all` do, including
+    # `GC.stop_world` from outside a collection. `Thread.lock` is held and the
+    # world is stopped: the same rules as `collection_event_hook`.
+    property thread_event_hook : Proc(CollectionEvent, Void*, Nil)? = nil
+
+    # Called with the new heap size each time the heap maps a chunk, on the
+    # allocating thread — Boehm's `GC_set_on_heap_resize`, which reports its
+    # heap growing (`GC_add_to_heap`). Allocation locks may be held, so the
+    # same no-allocation rule applies.
+    property heap_resize_hook : Proc(UInt64, Nil)? = nil
+
+    @[AlwaysInline]
+    private def collection_event(event : CollectionEvent) : Nil
+      if hook = @collection_event_hook
+        hook.call(event)
+      end
+    end
+
     # Explicit collects that returned without running a cycle because the
     # calling thread appeared to be inside its own. Non-zero outside a
     # before-collect callback means a caller was told nothing and got nothing.
@@ -2055,9 +2112,17 @@ module Gcry
         Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
         @collecting = true
         @incremental_marking = true
+        stw_reported = false
         begin
           lock_write
+          # Every slice is a stop of its own, as each of Boehm's incremental
+          # steps is; the cycle's `Start` and `MarkStart` were reported by
+          # `begin_incremental`, and the slice that finishes it reports the
+          # rest.
+          collection_event(CollectionEvent::PreStopWorld)
           stop_world_quiescing_roots
+          stw_reported = true
+          collection_event(CollectionEvent::PostStopWorld)
           # This slice is the third place a bitmap chunk gets swept — the
           # `sweep(major: true)` below runs inside this same stopped world —
           # so the two in-flight roots have to be offered here as well, or a
@@ -2074,8 +2139,11 @@ module Gcry
             end
           end
           if @mark_stack.empty?
+            collection_event(CollectionEvent::MarkEnd)
             enqueue_unreachable_finalizers
+            collection_event(CollectionEvent::ReclaimStart)
             sweep(major: true)
+            collection_event(CollectionEvent::ReclaimEnd)
             adapt_after_sweep
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
@@ -2092,7 +2160,9 @@ module Gcry
             arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
           end
         ensure
+          collection_event(CollectionEvent::PreStartWorld) if stw_reported
           start_world
+          collection_event(CollectionEvent::PostStartWorld) if stw_reported
           unlock_write
           unless @inc_active
             @mark_stack.clear
@@ -2112,6 +2182,7 @@ module Gcry
             @suppress_collect.sub(1)
           end
         end
+        collection_event(CollectionEvent::End) if finished
         @collecting = false
       ensure
         # Ensure flag clears even if flush raised.
@@ -2700,6 +2771,11 @@ module Gcry
         @collector_pthread = Gcry::Platform.current_thread_id
         Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
         @collecting = true
+        # Boehm's order (`GC_try_to_collect_inner`, `GC_stopped_mark`): start,
+        # then the stop, then the mark. With `@collecting` up, so a hook that
+        # allocates against the rule cannot start a collection inside this one.
+        collection_event(CollectionEvent::Start)
+        stw_reported = false
         # Generational mark skips old objects; old→young edges come from
         # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
         # old walk). Finalizers/WeakRef must not treat unmarked old as dead
@@ -2714,7 +2790,10 @@ module Gcry
           # stop_world_quiescing_roots: no mutator frozen mid-add/delete_root.
           lock_write
           t0 = monotonic_ns
+          collection_event(CollectionEvent::PreStopWorld)
           stop_world_quiescing_roots
+          stw_reported = true
+          collection_event(CollectionEvent::PostStopWorld)
           @last_phase_stw_stop_ns = monotonic_ns - t0
           @thread_list_last_major = major
           ThreadListWatch.new_cycle
@@ -2733,6 +2812,7 @@ module Gcry
           StwWatchdog.enter(StwWatchdog::PHASE_CLEAR)
           @mark_stack.clear
 
+          collection_event(CollectionEvent::MarkStart)
           trace_mark = CrystalTrace.start(self)
           t0 = monotonic_ns
           if major
@@ -2834,6 +2914,7 @@ module Gcry
           end
           @last_phase_mark_ns = monotonic_ns - t0
           CrystalTrace.finish("collect:mark", trace_mark)
+          collection_event(CollectionEvent::MarkEnd)
           probe_thread_list_header("the mark", expect_marked: true)
           StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
@@ -2900,11 +2981,13 @@ module Gcry
           @lazy_sweep_pending = sweep_after_world?
           StwWatchdog.enter(StwWatchdog::PHASE_SWEEP)
           unless @lazy_sweep_pending
+            collection_event(CollectionEvent::ReclaimStart)
             trace_sweep = CrystalTrace.start(self)
             t0 = monotonic_ns
             sweep(major: major, after_world: false)
             @last_phase_sweep_ns = monotonic_ns - t0
             CrystalTrace.finish("collect:sweep", trace_sweep)
+            collection_event(CollectionEvent::ReclaimEnd)
           end
 
           if major
@@ -2933,7 +3016,9 @@ module Gcry
         ensure
           t0 = monotonic_ns
           StwWatchdog.enter(StwWatchdog::PHASE_RESUME)
+          collection_event(CollectionEvent::PreStartWorld) if stw_reported
           start_world
+          collection_event(CollectionEvent::PostStartWorld) if stw_reported
           @last_phase_stw_start_ns = monotonic_ns - t0
           unlock_write
           @minor_only = false
@@ -2962,6 +3047,7 @@ module Gcry
             # nothing reused goes back now, before this one's frees join it.
             trim_large_cache(0_u64, defer: false) if @large_recycle && major
             if @lazy_sweep_pending
+              collection_event(CollectionEvent::ReclaimStart)
               trace_sweep = CrystalTrace.start(self)
               t0 = monotonic_ns
               # The lazy sweep walks `@chunks` with the mutators running, same
@@ -2970,6 +3056,7 @@ module Gcry
               during_live_chunk_walk { sweep(major: major, after_world: true) }
               @last_phase_sweep_ns = monotonic_ns - t0
               CrystalTrace.finish("collect:sweep", trace_sweep)
+              collection_event(CollectionEvent::ReclaimEnd)
               @lazy_sweep_pending = false
               if major
                 arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
@@ -3062,6 +3149,9 @@ module Gcry
         ensure
           @suppress_collect.sub(1)
         end
+        # Still holding the post-STW lock, so the next collection's `Start`
+        # cannot be reported before this one's `End`.
+        collection_event(CollectionEvent::End)
       ensure
         @collecting = false
         # Outside a collection the live count is the right answer again; the
@@ -3293,9 +3383,15 @@ module Gcry
       @incremental_marking = true
       @inc_active = true
       @minor_only = false
+      collection_event(CollectionEvent::Start)
+      stw_reported = false
       begin
         lock_write
+        collection_event(CollectionEvent::PreStopWorld)
         stop_world_quiescing_roots
+        stw_reported = true
+        collection_event(CollectionEvent::PostStopWorld)
+        collection_event(CollectionEvent::MarkStart)
         note_collection_begin
         @mark_stack.clear
         clear_all_marks
@@ -3320,7 +3416,9 @@ module Gcry
         # Arm page-dirty barrier for mutator writes between incremental slices.
         arm_page_barrier_after_collect
       ensure
+        collection_event(CollectionEvent::PreStartWorld) if stw_reported
         start_world
+        collection_event(CollectionEvent::PostStartWorld) if stw_reported
         unlock_write
         @collecting = false
       end
