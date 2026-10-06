@@ -1,0 +1,4 @@
+arm         req/s med       min       max  % boehm  HWM MiB     x postGC MiB
+boehm           44964     42845     45235   100.0%     15.6  1.00       15.6
+gcry-master      46491     43830     49762   103.4%     21.0  1.35       13.9
+gcry-readiness      45770     44436     48046   101.8%     22.2  1.43       13.8

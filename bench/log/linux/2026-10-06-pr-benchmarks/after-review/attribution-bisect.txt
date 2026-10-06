@@ -1,0 +1,25 @@
+bench                    arm           wall med     min     max   Δ vs a4c  cpu med  rss MiB
+Revcomp                  a4c             0.5470   0.534   0.578      +0.0%     2.03      562
+Revcomp                  docs            0.5400   0.535   0.547      -1.3%     2.02      562
+Revcomp                  roots           0.5330   0.524   0.551      -2.6%     2.03      562
+Revcomp                  cabi            0.5870   0.578   0.597      +7.3%     2.08      562
+Revcomp                  fin             0.5570   0.546   0.572      +1.8%     2.05      562
+Revcomp                  moveoff         0.5540   0.548   0.564      +1.3%     2.05      562
+Revcomp                  largekeep       0.5650   0.557   0.585      +3.3%     2.05      562
+Revcomp                  head            0.5860   0.578   0.598      +7.1%     2.07      562
+JsonParsePull            a4c             0.2690   0.265   0.270      +0.0%     0.97      496
+JsonParsePull            docs            0.2690   0.264   0.285      +0.0%     0.97      498
+JsonParsePull            roots           0.2690   0.266   0.298      +0.0%     0.96      496
+JsonParsePull            cabi            0.2850   0.280   0.290      +5.9%     0.99      497
+JsonParsePull            fin             0.2820   0.276   0.286      +4.8%     0.99      498
+JsonParsePull            moveoff         0.2750   0.271   0.281      +2.2%     0.99      496
+JsonParsePull            largekeep       0.2760   0.272   0.281      +2.6%     0.98      497
+JsonParsePull            head            0.2830   0.280   0.287      +5.2%     0.99      497
+JsonParseSerializable    a4c             0.2850   0.282   0.292      +0.0%     0.99      496
+JsonParseSerializable    docs            0.2870   0.281   0.291      +0.7%     0.99      502
+JsonParseSerializable    roots           0.2890   0.285   0.294      +1.4%     0.98      496
+JsonParseSerializable    cabi            0.3070   0.301   0.310      +7.7%     1.01      496
+JsonParseSerializable    fin             0.2960   0.291   0.305      +3.9%     1.00      496
+JsonParseSerializable    moveoff         0.2910   0.289   0.293      +2.1%     0.99      498
+JsonParseSerializable    largekeep       0.2950   0.289   0.312      +3.5%     1.02      493
+JsonParseSerializable    head            0.3020   0.295   0.313      +6.0%     1.00      501

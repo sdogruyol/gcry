@@ -1,0 +1,25 @@
+bench                    arm           wall med     min     max Δ vs boehm  cpu med  rss MiB
+JsonParseSerializable    boehm           0.2680   0.263   0.276      +0.0%     1.24      533
+JsonParseSerializable    a4c             0.2750   0.270   0.278      +2.6%     0.94      406
+JsonParseSerializable    head            0.2970   0.296   0.306     +10.8%     1.00      496
+JsonParseSerializable    a4c_norec       0.2770   0.270   0.297      +3.4%     0.94      404
+JsonParseSerializable    head_norec      0.3080   0.301   0.315     +14.9%     1.02      477
+JsonParseSerializable    a4c_nomove      0.2880   0.278   0.294      +7.5%     1.01      492
+JsonParsePull            boehm           0.2630   0.256   0.285      +0.0%     1.20      539
+JsonParsePull            a4c             0.2700   0.267   0.273      +2.7%     0.94      412
+JsonParsePull            head            0.2890   0.279   0.294      +9.9%     0.98      498
+JsonParsePull            a4c_norec       0.2720   0.266   0.282      +3.4%     0.91      408
+JsonParsePull            head_norec      0.2830   0.281   0.295      +7.6%     0.99      500
+JsonParsePull            a4c_nomove      0.2710   0.270   0.275      +3.0%     0.97      497
+Revcomp                  boehm           0.4960   0.484   0.513      +0.0%     1.94      959
+Revcomp                  a4c             0.5240   0.515   0.558      +5.6%     1.99      524
+Revcomp                  head            0.5860   0.574   0.592     +18.1%     2.08      562
+Revcomp                  a4c_norec       0.5390   0.531   0.547      +8.7%     2.02      527
+Revcomp                  head_norec      0.6290   0.623   0.640     +26.8%     2.14      557
+Revcomp                  a4c_nomove      0.5390   0.535   0.542      +8.7%     2.03      562
+JsonParsePure            boehm           0.3370   0.331   0.346      +0.0%     1.61      686
+JsonParsePure            a4c             0.3540   0.337   0.365      +5.0%     1.11      549
+JsonParsePure            head            0.3580   0.349   0.382      +6.2%     1.11      578
+JsonParsePure            a4c_norec       0.3520   0.340   0.368      +4.5%     1.11      553
+JsonParsePure            head_norec      0.3690   0.357   0.383      +9.5%     1.14      566
+JsonParsePure            a4c_nomove      0.3560   0.350   0.376      +5.6%     1.13      569

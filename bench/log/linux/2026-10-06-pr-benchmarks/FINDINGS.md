@@ -1,16 +1,50 @@
 # `readiness` vs `master` vs Boehm — the numbers behind the PR
 
 Host: QEMU x86-64 guest, 12 vCPUs, 11 GiB, Linux, Crystal 1.21.0, `--release`.
-Arms: Boehm (stock Crystal), gcry at `master` (`6650b80`), gcry at `readiness`
-(`25934c6`). Binaries built once, run on an otherwise idle machine.
+Arms: Boehm (stock Crystal), gcry at `master` (`6650b80`), gcry at `readiness`.
+Binaries built once per section, run on an otherwise idle machine.
 
-**Superseded for three rows.** The `readiness` arm here ran with the
-`realloc` page move on by default, which corrupted buffers Crystal's stdlib
-reads after growing them; it is opt-in now. Copying, JsonParseSerializable,
-JsonGenerate and Revcomp run 5%, 12% and 7% slower than with the move, at
-93%, 113% and 89% of Boehm on 4 CPUs (`../2026-10-06-heap-review/`).
+## After the merge review (`readiness` at `2eee648`; later commits are specs only)
 
-## crystal-metric, process-fresh, 11 interleaved trials, all 12 CPUs
+`after-review/`: crystal-metric 11 interleaved process-fresh trials, Kemal 11
+trials. Speed is Boehm wall ÷ gcry wall (median); RSS is peak, median.
+
+| bench | master | **readiness** | peak RSS × Boehm | CPU s, readiness / Boehm |
+|---|---:|---:|---:|---|
+| Primes | 42% | **100%** | 0.94× | 0.80 / 1.15 |
+| JsonParsePure | 42% | **91%** | 0.83× | 1.18 / 1.63 |
+| Binarytrees | 81% | **94%** | 0.76× | 0.54 / 0.61 |
+| JsonGenerate | 105% | 105% | 0.70× | 1.93 / 2.31 |
+| JsonParseSerializable | 89% | 88% | 0.92× | 1.01 / 1.23 |
+| JsonParsePull | 93% | 91% | 0.92× | 0.99 / 1.20 |
+| Revcomp | 82% | 84% | 0.64× | 2.08 / 1.93 |
+| RegexDna | 100% | 99% | 0.53× | |
+| Knuckeotide, Brainfuck(2), Matmul, Threadring | 96–107% | 97–107% | ≤ 69 MiB | |
+
+Kemal: `/json` 101.8% of Boehm (master 103.4%), peak RSS 1.43×, 0.88× after
+`GC.collect`; `/` 90.9% (master 100.6%), layout-sensitive as shown below.
+
+**What the review fixes cost** (`after-review/attribution-*.txt`, same
+session, 9 trials):
+
+- **`realloc` page move, now opt-in.** It corrupted buffers the stdlib reads
+  after growing them. Off by default, JsonGenerate gives back all of its
+  move gain (−4.8% vs −11.8% of Boehm's time with `GCRY_REALLOC_MOVE=1`), and
+  JsonParseSerializable and Revcomp give back part of theirs.
+- **The rest is placement, not behaviour.** With the move off in every arm,
+  binaries built at each merged review fix read Revcomp −2.6% to +7.3%,
+  JsonParsePull 0 to +5.9% and JsonParseSerializable +0.7% to +7.7% against
+  `a4c0dbd`, and not monotonically: a later commit that contains an earlier
+  one's changes reads faster than it (`attribution-bisect.txt`). Serial mark
+  shows the same spread (`attribution-knobs.txt`), so it is not the
+  idle-marker change.
+
+## Before the merge review (`25934c6`)
+
+**Superseded.** The `readiness` arm here ran with the `realloc` page move on
+by default (see above).
+
+### crystal-metric, process-fresh, 11 interleaved trials, all 12 CPUs
 
 `crystal-metric-summary.txt` / `crystal-metric-raw.json`
 (`bench/log/linux/2026-10-05-alloc-storm-mark/ab.py`; one fresh process per
@@ -42,7 +76,7 @@ count), `2026-10-06-threshold-pacing` (fewer majors when collections dominate),
 `2026-10-06-mark-cost` (inline candidate resolution, payload prefetch),
 `2026-10-06-realloc-page-move` and `2026-10-06-large-recycle` (page faults).
 
-## Kemal, 11 interleaved trials, server on CPUs 8-10, `wrk -t1 -c50` on CPU 11
+### Kemal, 11 interleaved trials, server on CPUs 8-10, `wrk -t1 -c50` on CPU 11
 
 | path | Boehm | master | readiness |
 |---|---:|---:|---:|
