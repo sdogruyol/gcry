@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unsupported targets name the right remedy.** The compile-time refusal on
+  32-bit, Android and non-Linux/macOS/Windows targets told every program to
+  "build without -Dgc_none", including those already built without it that
+  `require "gcry"` as a library. It still refuses both, because the library
+  heap cannot run there either: the mark steps a `UInt64*` per
+  `sizeof(Void*)` (`scan_payload`, `Roots.scan_range`), the allocator keeps a
+  `@[ThreadLocal]` cursor, and the other systems have no platform layer. The
+  message now says to drop `require "gcry"` (and `-Dgc_none` under the process
+  GC). Master compiled an i386 library heap; checked with
+  `crystal build --cross-compile --target i386-linux-gnu`, with and without
+  `-Dgc_none`, and the same for `aarch64-linux-android28` and
+  `x86_64-unknown-freebsd`.
+
 - **A promoted block freed in a nursery chunk goes on the nursery list, so
   releasing the chunk leaves no node behind.**
   - **The bug:** `GC.free` and the sweep chose the freelist by the block's

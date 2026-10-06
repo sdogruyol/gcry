@@ -75,7 +75,7 @@ Never `require "gcry"` as process GC without `-Dgc_none` — you fight Boehm.
 | Full `GC` facade + STW + fiber roots | Deprecated `-Dpreview_mt` |
 | Fork reinit via `pthread_atfork` | Patching Crystal for `-Dgc_gcry` (proposed upstream: [RFC-GC-BACKEND.md](RFC-GC-BACKEND.md)) |
 | | Precise / moving GC without compiler maps; soft-dirty (Linux-only) |
-| | Any other OS, Android, 32-bit targets — a compile-time `{% raise %}` in `src/gcry/platform/os.cr` stops the build |
+| | Any other OS, Android, 32-bit targets — a compile-time `{% raise %}` in `src/gcry/platform/os.cr` stops the build, as the process GC and as a library heap alike (the mark reads 8-byte words; the allocator keeps a `@[ThreadLocal]` cursor). The message names the remedy for each: drop `require "gcry"`, and `-Dgc_none` with it, to keep Crystal's default GC |
 
 **Evidence.** Crystal's whole `spec/std` passes with gcry as the process GC
 (1.21.0: 18 054 examples, 0 failures — the same as Boehm; also under
