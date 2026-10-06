@@ -279,6 +279,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     runs three idle collections and then `GC.collect`. The old code ran the
     pair `[2, 1]`; it now runs `[1, 2]`, both intact.
 
+- **`GC_register_finalizer` no longer reads object data as a header flag, and
+  replaces or removes a finalizer as Boehm does.**
+  - **The bug:** it checked for an existing finalizer with
+    `BlockHeader.finalizer?`. Under the default headerless layout that is bit
+    5 of the object's own bytes 4..7. A block whose second 32-bit word is 32
+    aborted with "the object already has a finalizer". Under `crystal i`, a
+    finalizable class whose first `Int32` ivar has bit 5 set killed the
+    interpreter. The bit was never set there either, so a real second
+    registration ran both finalizers, and a null `fn` removed nothing.
+  - **The fix:** the finalizer registry answers. A second registration
+    replaces the finalizer and a null `fn` removes it. The old C function and
+    client data come back through `ofn` / `ocd`, as from Boehm's
+    `GC_register_finalizer_inner`. The C callback and its client data are
+    stored directly, with no Crystal closure allocated per registration. The
+    dead header bits `FINALIZER` / `DISAPPEARING` are gone.
+  - **Evidence:** `process_spec/regression/25_boehm_finalizer_registration_spec.cr`.
+    The old code aborted (exit 134) on the first example and returned null
+    `ofn` / `ocd` on replacement and removal. Under `-Dgcry_block_headers` a
+    second `_ignore_self` registration aborted.
+
+- **Plain `GC_register_finalizer` keeps Boehm's normal ordering.**
+  - **The bug:** it went through the same path as `_ignore_self`, so an
+    object holding a pointer to itself was finalized.
+  - **The fix:** each registration records its ordering. Under Boehm's normal
+    ordering, marking from an object follows a pointer to itself too, so such
+    an object is on a cycle and never finalized. `_ignore_self`, which
+    `GC.add_finalizer` uses, is unchanged.
+    `GC_register_finalizer_no_order` / `_unreachable` stay undefined: stdlib
+    binds neither, and gcry has no unordered finalization.
+  - **Evidence:** spec 25 builds eight self-pointing blocks per call. The old
+    code finalized all 8 registered with `GC_register_finalizer` (header
+    layout; headerless aborted). Now none run, and they run once the self
+    pointer is cleared.
+
 - **The `GC` API behaves like `gc/boehm.cr`.**
   - **`GC.disable` nests.** `disable; disable; enable` used to turn
     collection back on. `GC.enable` with nothing disabled raises `GC is not
@@ -599,9 +633,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binary, and shards bind it directly; Crystal's `spec/std` is one of them.
   The signatures match stdlib's `gc/boehm.cr`. A function gcry cannot honour
   aborts with a message rather than silently doing nothing. That covers
-  `GC_set_max_heap_size`, the event hooks, replacing a finalizer and
-  `GC_beginthreadex`. `GC_gc_no`, `GC_bytes_found` and `GC_current_warn_proc`
-  are variables, which Crystal cannot export.
+  `GC_set_max_heap_size` and `GC_beginthreadex`. `GC_gc_no`, `GC_bytes_found`
+  and `GC_current_warn_proc` are variables, which Crystal cannot export.
   `process_spec/regression/21_boehm_c_abi_spec.cr`.
 
 - **`Gcry.usable_size(ptr)` / `Heap#usable_size`**, Boehm's `GC_size`: the

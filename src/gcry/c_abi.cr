@@ -207,29 +207,37 @@ module Gcry
       heap.user_of(chunk, header)
     end
 
-    # Boehm *replaces* an object's finalizer, and a null *fn* removes it;
-    # gcry's table only adds. Replacing or removing therefore aborts rather
-    # than leaving two finalizers, or one the caller believes is gone. A
-    # pointer that is not the start of a live gcry block is ignored, as Boehm
-    # ignores one outside its heap. Both of Boehm's entry points register
-    # through `Heap#add_finalizer`, the path `GC.add_finalizer` takes.
-    def self.register_finalizer(name : String, object : Void*, fn : LibGC::Finalizer, data : Void*,
-                                old_fn : LibGC::Finalizer*, old_data : Void**) : Nil
-      # Never a previous finalizer to report: a second registration aborts.
-      # The slot is a C function pointer, one word, not a Crystal `Proc`.
-      old_fn.as(Void**).value = Pointer(Void).null unless old_fn.null?
-      old_data.value = Pointer(Void).null unless old_data.null?
+    # Boehm's `GC_register_finalizer` and `_ignore_self`: one finalizer per
+    # object, replaced by a second registration and removed by a null *fn*,
+    # the previous function and client data written to *old_fn* / *old_data*
+    # (nulls when there was none). A pointer that is not the start of a live
+    # gcry block registers nothing and reports nothing, as Boehm does for one
+    # outside its heap. *order* is the call's ordering (`Finalizers::Order`).
+    #
+    # `GC_register_finalizer_no_order` and `_unreachable` are not defined:
+    # stdlib's `gc/boehm.cr` binds neither, and both are Java-style unordered
+    # finalization that gcry's ordering pass does not implement — a program
+    # that calls them fails to link rather than getting ordered finalization.
+    #
+    # Until 2026-10-06 a second registration was caught by reading
+    # `BlockHeader.finalizer?`, which under headerless is a bit of the
+    # object's own bytes 4..7 — and was never set there, so a real second
+    # registration ran both finalizers
+    # (`process_spec/regression/25_boehm_finalizer_registration_spec.cr`).
+    def self.register_finalizer(object : Void*, fn : LibGC::Finalizer, data : Void*,
+                                old_fn : LibGC::Finalizer*, old_data : Void**,
+                                order : Finalizers::Order) : Nil
+      previous = {Pointer(Void).null, Pointer(Void).null}
       heap = Gcry.default_heap?
-      return unless heap
-      found = heap.find_object_with_chunk(object)
-      return unless found
-      header, chunk = found
-      return unless heap.user_of(chunk, header) == object
-      if BlockHeader.finalizer?(header)
-        unsupported(name, "the object already has a finalizer, and gcry cannot replace or remove one")
+      if heap && (found = heap.find_object_with_chunk(object))
+        header, chunk = found
+        if heap.user_of(chunk, header) == object
+          previous = heap.replace_c_finalizer(object, fn.pointer, data, order)
+        end
       end
-      return if fn.pointer.null?
-      heap.add_finalizer(object, ->(o : Void*) { fn.call(o, data) })
+      # The slot is a C function pointer, one word, not a Crystal `Proc`.
+      old_fn.as(Void**).value = previous[0] unless old_fn.null?
+      old_data.value = previous[1] unless old_data.null?
     end
 
     def self.add_roots(low : Void*, high : Void*) : Nil
@@ -641,12 +649,12 @@ end
 
 fun gcry_c_register_finalizer = GC_register_finalizer(obj : Void*, fn : LibGC::Finalizer, cd : Void*,
                                                       ofn : LibGC::Finalizer*, ocd : Void**) : Nil
-  Gcry::CAbi.register_finalizer("GC_register_finalizer", obj, fn, cd, ofn, ocd)
+  Gcry::CAbi.register_finalizer(obj, fn, cd, ofn, ocd, Gcry::Finalizers::Order::Normal)
 end
 
 fun gcry_c_register_finalizer_ignore_self = GC_register_finalizer_ignore_self(obj : Void*, fn : LibGC::Finalizer, cd : Void*,
                                                                               ofn : LibGC::Finalizer*, ocd : Void**) : Nil
-  Gcry::CAbi.register_finalizer("GC_register_finalizer_ignore_self", obj, fn, cd, ofn, ocd)
+  Gcry::CAbi.register_finalizer(obj, fn, cd, ofn, ocd, Gcry::Finalizers::Order::IgnoreSelf)
 end
 
 # gcry runs finalizers itself at the end of each collection — Boehm's default

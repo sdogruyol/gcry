@@ -1023,20 +1023,24 @@ module Gcry
     # World stopped; registry quiesced at stop_world (no concurrent mutate).
     # The mark stack is empty on entry: both callers have just drained it.
     #
-    # Boehm's `GC_finalize` for `GC_register_finalizer_ignore_self`, which is
-    # how Crystal's stdlib registers every finalizer (`gc/boehm.cr`):
+    # Boehm's `GC_finalize`, for both orderings it is asked for
+    # (`Finalizers::Order`): `GC_register_finalizer_ignore_self`, which is how
+    # Crystal's stdlib registers every finalizer (`gc/boehm.cr`), and plain
+    # `GC_register_finalizer` through the C ABI:
     #
     # 1. Disappearing links whose target is unmarked are cleared first, while
     #    the targets still look dead: a `WeakRef` to an object that only a
     #    dying finalizable reaches reads nil from here on, though the object
     #    is kept for that finalizer (Boehm's short links do the same).
     # 2. Ordering. For every unreachable finalizable, mark from its fields —
-    #    not from the object itself, and not through a pointer into its own
-    #    block. A finalizable reached that way is not ready: one that will be
+    #    not from the object itself, and under `IgnoreSelf` not through a
+    #    pointer into its own block. A finalizable reached that way is not
+    #    ready: one that will be
     #    finalized now still holds it, so it waits for a later collection and
     #    the holder's finalizer can still use it. A chain of n finalizes over n
     #    collections, holder first. One that its own fields reach is on a
-    #    cycle and is never ready, as in Boehm.
+    #    cycle and is never ready, as in Boehm — under `Normal`, a pointer to
+    #    itself is such a way back.
     # 3. What is still unmarked is queued and *resurrected* (marked) so the
     #    sweep does not reclaim it before `run_pending`; otherwise
     #    Socket/Digest#finalize runs on freed memory (acik wrk SEGV). Its
@@ -1074,7 +1078,7 @@ module Gcry
         obj = @finalizers.entry_object_at(i)
         if found = unmarked_live_block(obj)
           header, chunk = found
-          mark_from_children(chunk, header)
+          mark_from_children(chunk, header, @finalizers.entry_order_at(i))
           serial_mark_drain
           note_finalization_cycle(obj) if block_marked_in?(chunk, header)
         end
@@ -1136,12 +1140,18 @@ module Gcry
     end
 
     # Push what *header*'s object points at, leaving the object itself
-    # unmarked: Boehm's `GC_ignore_self_finalize_mark_proc`. A word that
-    # resolves into the object's own block is skipped — `XML::Document` holds
-    # `@document = self`, and following that would make every document a
-    # cycle. A longer way back (A -> X -> A) is still followed, and is a cycle.
-    # The range is the one `find_block_with_chunk` resolves to this block.
-    private def mark_from_children(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+    # unmarked. Under `IgnoreSelf` (Boehm's `GC_ignore_self_finalize_mark_proc`)
+    # a word that resolves into the object's own block is skipped —
+    # `XML::Document` holds `@document = self`, and following that would make
+    # every document a cycle. A longer way back (A -> X -> A) is still
+    # followed, and is a cycle. The range is the one `find_block_with_chunk`
+    # resolves to this block. Under `Normal` (`GC_normal_finalize_mark_proc`)
+    # every word is followed, and a pointer to itself marks the object.
+    private def mark_from_children(chunk : ChunkHeader*, header : BlockHeader*, order : Finalizers::Order) : Nil
+      if order.normal?
+        scan_block(chunk, header, 0_u64, 0_u64)
+        return
+      end
       lo = header.address
       hi = if ChunkHeader.large?(chunk)
              user_of(chunk, header).address &+ header.value.size

@@ -59,11 +59,13 @@ module Gcry
       ATOMIC = 2_u32
       # Legacy single-bit MARK (pre mark-gen). Cleared on set/clear; unused for
       # marked? after mark-gen.
-      MARK         =  4_u32
-      LARGE        =  8_u32
-      NURSERY      = 16_u32 # young generation (Phase 6)
-      FINALIZER    = 32_u32 # has at least one finalizer entry
-      DISAPPEARING = 64_u32 # has at least one disappearing link (WeakRef)
+      MARK    =  4_u32
+      LARGE   =  8_u32
+      NURSERY = 16_u32 # young generation (Phase 6)
+      # 32 and 64 were FINALIZER and DISAPPEARING. The finalizer registry's
+      # index replaced them (7.4); `GC_register_finalizer` kept reading the
+      # first, which under headerless is a bit of the object's own data.
+
       # Diagnostic, set alongside FREE by the sweep's freelist link and left
       # clear by an explicit `Heap#free`. A use-after-free report can then say
       # *which* path gave the block back — "the collector decided it was
@@ -242,38 +244,6 @@ module Gcry
 
     def self.clear_mark_user(user : Void*) : Nil
       clear_mark(from_user(user))
-    end
-
-    def self.finalizer?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::FINALIZER) != 0
-    end
-
-    def self.disappearing?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::DISAPPEARING) != 0
-    end
-
-    def self.set_finalizer(header : BlockHeader*) : Nil
-      {% if !flag?(:gcry_block_headers) %}
-        # Nothing reads this flag since 7.4 replaced it with the finalizer
-        # registry's index, and under headerless a small block has no header —
-        # this write would land in the object's own first words.
-        return
-      {% end %}
-      h = header.value
-      h.flags |= Flags::FINALIZER
-      header.value = h
-    end
-
-    def self.set_disappearing(header : BlockHeader*) : Nil
-      {% if !flag?(:gcry_block_headers) %}
-        # Nothing reads this flag since 7.4 replaced it with the finalizer
-        # registry's index, and under headerless a small block has no header —
-        # this write would land in the object's own first words.
-        return
-      {% end %}
-      h = header.value
-      h.flags |= Flags::DISAPPEARING
-      header.value = h
     end
 
     def self.promote(header : BlockHeader*) : Nil

@@ -1847,10 +1847,18 @@ module Gcry
 
     def add_finalizer(object : Void*, callback : Finalizers::Callback) : Nil
       return if object.null?
-      header = BlockHeader.from_user(object)
-      BlockHeader.set_finalizer(header)
       @finalizers.add(object, callback)
       Trace.finalizer("register", object)
+    end
+
+    # Boehm's `GC_register_finalizer*` (src/gcry/c_abi.cr): *object*'s one
+    # finalizer becomes the C function *fn*, called `fn(object, data)`, or is
+    # removed when *fn* is null. Returns the one it replaced as `{fn, cd}`.
+    # *object* is the start of a live block; the caller checks.
+    def replace_c_finalizer(object : Void*, fn : Void*, data : Void*, order : Finalizers::Order) : {Void*, Void*}
+      previous = @finalizers.replace_c(object, fn, data, order)
+      Trace.finalizer(fn.null? ? "unregister" : "register", object)
+      previous
     end
 
     def add_finalizer(object : Void*, &block : Finalizers::Callback) : Nil
@@ -1889,7 +1897,6 @@ module Gcry
         # The chunk-aware user pointer: `user_from` is identity under headerless
         # and would hand back a large object's header slot as its referent.
         referent = user_of(chunk, header)
-        BlockHeader.set_disappearing(header)
       end
       @finalizers.register_disappearing_link(link, referent)
     end
