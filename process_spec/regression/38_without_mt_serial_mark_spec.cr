@@ -10,10 +10,11 @@ require "file_utils"
 # stack unlocked, could lose entries, and the sweep freed live objects. Such
 # a build now marks serially, whatever `GCRY_PARALLEL_MARK` or
 # `Heap#parallel_mark_workers=` asks. This suite is not built with the flag,
-# so a child program is.
+# so a child program is. It sits two levels under the repository root, since
+# `require` takes relative paths, not absolute ones.
 module WithoutMtSerialMarkSpec
   CHILD = <<-CR
-    require #{File.expand_path("../../src/gcry", __DIR__).inspect}
+    require "../../src/gcry"
     heap = Gcry.default_heap
     puts "env=\#{heap.parallel_mark_workers}"
     heap.parallel_mark_workers = 4
@@ -23,7 +24,7 @@ end
 
 describe "-Dwithout_mt parallel mark" do
   it "marks serially by default, under GCRY_PARALLEL_MARK and when set" do
-    dir = File.tempname("gcry-38")
+    dir = File.join(File.expand_path("../..", __DIR__), "bin", "gcry-38-#{Random.new.hex(4)}")
     Dir.mkdir_p(dir)
     begin
       src = File.join(dir, "child.cr")
