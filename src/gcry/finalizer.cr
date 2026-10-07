@@ -489,28 +489,47 @@ module Gcry
         end
       end
 
+      # Set while this thread is in `run_pending`. A finalizer that collects
+      # ends that collection in `run_pending` again, which took the next node
+      # off the queue and ran it one frame deeper: nesting as deep as the
+      # queue was long, a stack overflow at 5 000 (2026-10-07,
+      # `process_spec/regression/37_nested_finalizer_collect_spec.cr`). The
+      # outer loop drains what the inner collection queues. Boehm bounds the
+      # same recursion per thread (`GC_check_finalizer_nested`).
+      @[ThreadLocal]
+      @@draining : Bool = false
+
       # One node at a time, each taken off the queue only when its finalizer
       # is about to run: until then it is still on `@pending`, which every
       # collection marks from (`each_pending`). A collection that runs while a
       # finalizer does — another thread's — therefore still keeps every object
       # queued behind it, and the one running is on this thread's stack.
       def run_pending : Nil
-        loop do
-          @lock.lock
-          node = @pending
-          unless node.null?
-            @pending = node.value.next
-            @pending_count -= 1
+        return if @@draining
+        # Cleared through the address taken here: a finalizer that blocks may
+        # resume on another thread of a parallel execution context.
+        draining = pointerof(@@draining)
+        draining.value = true
+        begin
+          loop do
+            @lock.lock
+            node = @pending
+            unless node.null?
+              @pending = node.value.next
+              @pending_count -= 1
+            end
+            @lock.unlock
+            break if node.null?
+            object = node.value.object
+            callback = node.value.callback
+            c_abi = node.value.c_abi?
+            LibC.free(node.as(Void*))
+            # Callbacks outside the lock (may re-enter add / allocate).
+            Trace.finalizer("run", object)
+            Finalizers.invoke(object, callback, c_abi)
           end
-          @lock.unlock
-          break if node.null?
-          object = node.value.object
-          callback = node.value.callback
-          c_abi = node.value.c_abi?
-          LibC.free(node.as(Void*))
-          # Callbacks outside the lock (may re-enter add / allocate).
-          Trace.finalizer("run", object)
-          Finalizers.invoke(object, callback, c_abi)
+        ensure
+          draining.value = false
         end
       end
 
