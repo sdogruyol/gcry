@@ -13,12 +13,12 @@ require "file_utils"
 # so a child program is. It sits two levels under the repository root, since
 # `require` takes relative paths, not absolute ones.
 module WithoutMtSerialMarkSpec
-  CHILD = <<-CR
+  CHILD = <<-'CR'
     require "../../src/gcry"
     heap = Gcry.default_heap
-    puts "env=\#{heap.parallel_mark_workers}"
+    puts "env=#{heap.parallel_mark_workers}"
     heap.parallel_mark_workers = 4
-    puts "set=\#{heap.parallel_mark_workers}"
+    puts "set=#{heap.parallel_mark_workers}"
     CR
 end
 
