@@ -1283,6 +1283,11 @@ module Gcry
     private def allocate(size : UInt64, atomic : Bool, clear : Bool, recycle : Bool = true) : Void*
       refresh_fast_path
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
+      # No mapping can hold it, and the rounding below would overflow: Boehm
+      # saturates such a request and fails it, as this does.
+      if size > UInt64::MAX - ChunkHeader.large_data_offset.to_u64 - Platform.host_page_size
+        oom!("allocation too large:", size)
+      end
 
       # Cooperative STW for signal-exempt threads (SYSMON): do not mutate the
       # heap while the collector holds the world stopped.
