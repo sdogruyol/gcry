@@ -40,6 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copied out under the mutex and compared outside it, the poll sleeps
   100 µs, and the timeout reports how many victims are still listed.
 
+- **`make idle-rss-after-burst` reruns a run that measured nothing.**
+  - **What failed:** the bench gives up when its dropped 200 MB chain is
+    still live 20 majors later, and that "tests nothing" run failed the job.
+    It happened once on x86_64 CI (run 37583613942).
+  - **The red arm was weak too:** its `!` counted that same exit as the
+    uncapped arm failing as designed.
+  - **Now:** an inconclusive run exits 2 and is repeated, up to three times.
+    The shipped arm must exit 0 and the red arm must exit 1.
+  - **Still open:** the retention itself. On Windows it happens 2–7 runs in
+    100, on master as well. The pinned node, always one node of the chain,
+    is not held by anything the holders search walks: stacks, live heap
+    blocks, static and TLS roots, explicit roots.
+
 - **Unloading a shared library is no longer reported as a static-root
   collapse.** The collapse diagnostic compares each collection's scanned
   static bytes against the most any collection scanned, and a `dlclose`d

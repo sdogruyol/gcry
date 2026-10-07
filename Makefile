@@ -944,12 +944,17 @@ ignored-knob-warnings: $(BIN)
 # no next cycle. Uncapped, a 200 MB burst idled at 78.7 MB RSS against 6.3 MB
 # after `GC.collect`; grace is capped at one threshold since 2026-09-23. The
 # shipped arm must fit the bound and `GCRY_UNMAP_GRACE_UNBOUNDED=1` must not,
-# in the same run, so the gate cannot rot into passing both. ~15 s.
+# in the same run, so the gate cannot rot into passing both. Each arm must
+# answer with its own exit code — 0 for the shipped arm, 1 for the red one —
+# and a run that exits 2 (the burst stayed live, see the bench) is run again,
+# up to three times; until 2026-10-07 the red arm's `!` took that 2 as its
+# failure and the green arm failed the job on it. ~15 s.
 .PHONY: idle-rss-after-burst
 idle-rss-after-burst: $(BIN)
 	@$(CRYSTAL) build -Dgc_none bench/idle_rss_after_burst.cr -o $(BIN)/idle_rss_after_burst --error-trace
-	@$(BIN)/idle_rss_after_burst
-	! GCRY_UNMAP_GRACE_UNBOUNDED=1 $(BIN)/idle_rss_after_burst
+	@for try in 1 2 3; do $(BIN)/idle_rss_after_burst; rc=$$?; [ $$rc -ne 2 ] && break; done; [ $$rc -eq 0 ]
+	@for try in 1 2 3; do GCRY_UNMAP_GRACE_UNBOUNDED=1 $(BIN)/idle_rss_after_burst; rc=$$?; [ $$rc -ne 2 ] && break; done; \
+	  if [ $$rc -ne 1 ]; then echo "FAIL: the uncapped red arm exited $$rc, not 1"; exit 1; fi
 	@echo "ok — the capped arm fits and the uncapped red arm does not"
 
 # `GCRY_IDLE_RELEASE_MS`: a `gc-idle` thread runs one releasing collection once

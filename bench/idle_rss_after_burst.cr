@@ -36,9 +36,18 @@
 # chunks the live data spans, and passed by one chunk in an unoptimised build.
 # The red arm is `GCRY_UNMAP_GRACE_UNBOUNDED=1`, which must fail it.
 #
+# A run whose burst is still live 20 majors after the drop measured nothing
+# and exits **2**, not 1: something conservative kept a node of the 200 MB
+# chain, and the chain kept the rest. Windows reproduces it 2-7 runs in 100,
+# on master too (2026-10-07). The pinned node was never one the holders
+# search could find on a stack, in the heap, in static or TLS roots, or among
+# the explicit roots. CI hit it once on x86_64 Linux (run 37583613942).
+# `make idle-rss-after-burst` reruns such a run rather than reading it as
+# either arm's answer.
+#
 #   crystal build -Dgc_none bench/idle_rss_after_burst.cr -o bin/idle_rss_after_burst
-#   bin/idle_rss_after_burst                                  # PASS
-#   GCRY_UNMAP_GRACE_UNBOUNDED=1 bin/idle_rss_after_burst     # FAIL
+#   bin/idle_rss_after_burst                                  # PASS (exit 0)
+#   GCRY_UNMAP_GRACE_UNBOUNDED=1 bin/idle_rss_after_burst     # FAIL (exit 1)
 
 require "../src/gcry"
 require "json"
@@ -85,8 +94,8 @@ while dropped_at < 0
   if s["size_class_live_bytes"].as_i64 < DROPPED_BELOW
     dropped_at = now
   elsif now - majors > 20
-    puts "FAIL: the burst was still live #{now - majors} majors after it was dropped — this run tests nothing"
-    exit 1
+    puts "INCONCLUSIVE: the burst was still live #{now - majors} majors after it was dropped — this run tests nothing"
+    exit 2
   end
 end
 # ...then exactly one more. Its sweep runs under the budgets in force *now* —
