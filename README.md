@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry beats Boehm on throughput — ~113% on Kemal <code>/json</code> — at ~1.07× its peak RSS (Linux, headerless default).</b>
+  <b>gcry runs Kemal <code>/json</code> at ~102% of Boehm's throughput, at 1.43× its peak RSS and 0.88× after <code>GC.collect</code> (Linux, headerless default, 2026-10-06).</b>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Boehm-parity throughput: ~105% [99, 111] on Kemal `/json` at ~1.3× peak RSS (Linux, 0.24.0); ~102% at ~2.0× peak on macOS.**
+**Kemal `/json`: ~102% of Boehm's throughput at 1.43× peak RSS, 0.88× after `GC.collect` (Linux, 2026-10-06); ~102% at 1.50× peak footprint on macOS (2026-09-06). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
 
 ---
 
@@ -53,15 +53,18 @@ to swap Boehm out, one line to swap it back.
 Crystal >= 1.21. Linux (x86_64 + aarch64), macOS (arm64 + x86_64), and
 [Windows x86_64 + ARM64](docs/WINDOWS.md).
 
-Crystal's own standard-library suite passes under gcry: all 18 054 examples
-of `spec/std` (Crystal 1.21.0), held in CI by the `std-spec` job
-([`ci/std-spec.sh`](ci/std-spec.sh)).
+Crystal's own standard-library suite passes under gcry on Linux x86_64: all
+18 054 examples of `spec/std` (Crystal 1.21.0), held in CI by the `std-spec`
+job ([`ci/std-spec.sh`](ci/std-spec.sh)). macOS and Windows run gcry's own
+gates, not Crystal's suites.
 
-The Crystal compiler, built with gcry, also builds itself and passes
-`compiler_spec`: 13 640 examples, 0 failures, 18 pending
+The Crystal compiler, built with gcry, also builds itself, and `compiler_spec`
+built with gcry as its GC passes: 13 640 examples, 0 failures, 18 pending
 ([CI run 37437660646](https://github.com/sdogruyol/gcry/actions/runs/37437660646)).
-`crystal i` runs in it too, because gcry exports Boehm's `GC_*` C ABI. CI
-holds both in the `compiler-gcry` job ([`ci/compiler-spec.sh`](ci/compiler-spec.sh)). A
+`crystal i` runs in the gcry-built compiler too, because gcry exports the part
+of Boehm's `GC_*` C ABI Crystal uses
+([differences](docs/INTEGRATION.md#boehm-parity)). CI holds both on Linux
+x86_64 in the `compiler-gcry` job ([`ci/compiler-spec.sh`](ci/compiler-spec.sh)). A
 program that links libgc as well builds with `-Dgcry_no_boehm_abi`, which
 leaves those exports out
 ([docs/INTEGRATION.md § Boehm's C ABI](docs/INTEGRATION.md#boehms-c-abi)).
@@ -252,9 +255,10 @@ the 256 KiB multi-mutator STW stack and pthread lags, now default to 0 (the
 whole touched stack; `src/gcry/collect_scan.cr`,
 `process_spec/regression/14_sound_defaults_spec.cr`); the static-root
 `type_id` gate went on 2026-09-29, after it was found to sweep a class
-variable's raw buffer of references. The Kemal and fat-app numbers above were
-measured before that, with the lags armed; the tables below are what the
-change costs. To restore the bounded scan:
+variable's raw buffer of references. The macOS Kemal rows and the fat-app
+numbers above were measured before that, with the lags armed; the Linux Kemal
+rows (2026-10-06) were not. The tables below are what the change costs. To
+restore the bounded scan:
 
 ```sh
 GCRY_STW_STACK_LAG=262144 GCRY_STW_PTHREAD_LAG=262144 ./your-app
@@ -336,7 +340,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Conservative bodies** | Every non-atomic block is word-scanned; no type map narrows a scan since 2026-10-04 (a union buffer's first tag reads as a type id — `docs/SOUND-DEFAULTS.md`) |
-| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` ~**113%** of Boehm at **1.07×** its peak RSS (Linux). `-Dgcry_block_headers` restores the header layout |
+| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **101.8%** of Boehm at **1.43×** its peak RSS, 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
 | **Bitmap allocator** | Process default since 0.24.0 and forced on by the headerless layout — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors. `GCRY_BITMAP_ALLOC=0` is the freelist escape, on `-Dgcry_block_headers` only |
 | **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR`; an explicit `GC.collect`, the idle collector and the collection before an `OutOfMemoryError` release them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal). Multi-threaded programs too since 0.30.0: Kemal at 4 workers reads 20 MB after `GC.collect`, 85 MB before |
 | **macOS reclaim** | `MADV_FREE_REUSABLE` at host page size (16 KiB on Apple Silicon), with `MADV_FREE_REUSE` before reuse, so released pages leave `phys_footprint` at once |
@@ -349,11 +353,11 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 
 gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
 Windows x86_64 + ARM64 have native unit, process-GC, and release-sample CI coverage, plus the Linux race and root gates that hold there.
-Windows workload performance has not been benchmarked; see [support details](docs/WINDOWS.md).
+Windows x86_64 workloads have been measured once, on a 12-vCPU QEMU/KVM VM rather than physical hardware: crystal-metric at 87–114% of Boehm's speed, Kemal `/json` at 106.5% (`bench/log/windows/2026-10-06-vm-validation/`). Windows ARM64 workloads are unmeasured (CI only). See [support details](docs/WINDOWS.md).
 
 | Today | Later / elsewhere |
 |-------|-------------------|
-| **Linux + macOS + Windows x86_64 + ARM64** process GC (Crystal >= 1.21) | Windows workload benchmarks |
+| **Linux + macOS + Windows x86_64 + ARM64** process GC (Crystal >= 1.21) | Windows benchmarks on physical hardware; Windows ARM64 workloads |
 | Default ExecutionContext, **parallelism 1** (PERF headline) | Parallel **supported opt-in:** EC>1 + TLAB off + lazy (~79% `/json`); TLAB-on still experimental |
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |

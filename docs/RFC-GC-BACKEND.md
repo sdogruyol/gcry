@@ -21,12 +21,15 @@ private runtime state and reopening runtime classes. This RFC proposes:
 
 ## Evidence that it works
 
-- **Crystal's whole `spec/std` passes under gcry**: 1.21.0, 18 054 examples,
-  0 failures, 0 errors, 30 pending — identical to Boehm — and the same under
-  `GCRY_STRESS=1 GCRY_STRESS_EVERY=256` and `GCRY_SOUND=1`; 1.21.1: 18 068, 0
-  failures (`docs/DEFAULT-GC-READINESS.md` §1). CI runs it on every push
-  (`ci/std-spec.sh`, job `std-spec` in `.github/workflows/ci.yml`), against the
-  `spec/std` of the compiler's own commit.
+- **Crystal's whole `spec/std` passes under gcry** on Linux x86_64: 1.21.0,
+  18 054 examples, 0 failures, 0 errors, 30 pending — identical to Boehm —
+  and the same under `GCRY_SOUND=1`; under `GCRY_STRESS=1
+  GCRY_STRESS_EVERY=256`, 0 unexpected failures, with one allowlisted example
+  (`ci/std-spec-stress-allow.txt`: `spec/std/log/builder_spec.cr:230` reads
+  WeakRef-only objects after a possible collection, by design); 1.21.1:
+  18 068, 0 failures (`docs/DEFAULT-GC-READINESS.md` §1). CI runs it on every
+  push (`ci/std-spec.sh`, job `std-spec` in `.github/workflows/ci.yml`),
+  against the `spec/std` of the compiler's own commit.
 - **Root-complete defaults.** Since 2026-10-05 no default knob can decline a
   live pointer: the multi-mutator stack lags are 0
   (`src/gcry/collect_scan.cr`, `stw_multi_stack_lag` /
@@ -34,19 +37,25 @@ private runtime state and reopening runtime classes. This RFC proposes:
   `process_spec/regression/14_sound_defaults_spec.cr`. Cost: Linux EC4 pause
   3.07 → 4.55 ms with req/s unchanged, EC1 unchanged, macOS pause ~1.22–1.25×
   (2026-09-26 CI matrix, README "What the default heuristics cost").
-- **Throughput and memory.** Kemal `/json` 112.6% [106.6, 118.6] of Boehm at
-  1.07× peak RSS on Linux (`bench/log/linux/2026-09-06-bitmap-default-ab/`,
-  measured with the lags then in force); 101.9% [100.9, 103.0] at 1.50× peak
-  footprint on macOS (`bench/log/macos/2026-09-06-bitmap-default-ab/`). CI
-  perf smoke, v0.34.0 window: Linux `/json` 104.8%, `/` 100.8%, peak RSS 0.96×
+- **Throughput and memory.** Kemal `/json` 101.8% of Boehm at 1.43× peak RSS,
+  0.88× after `GC.collect`, on Linux (2026-10-06,
+  `bench/log/linux/2026-10-06-pr-benchmarks/after-review/`); 101.9% [100.9,
+  103.0] at 1.50× peak footprint on macOS
+  (`bench/log/macos/2026-09-06-bitmap-default-ab/`, measured with the lags
+  then in force); 106.5% at 1.14× peak working set on Windows x86_64, in a
+  12-vCPU VM (`bench/log/windows/2026-10-06-vm-validation/`). CI perf smoke,
+  v0.34.0 window: Linux `/json` 104.8%, `/` 100.8%, peak RSS 0.96×
   (`bench/leaderboard.md`).
 - **The compiler self-hosts with gcry.** A compiler built with gcry builds
-  itself and runs `crystal i` (3 of 3 programs); `compiler_spec` run by it
-  passes 13 640 examples, 0 failures, 18 pending
-  (`bench/log/linux/2026-10-06-compiler-spec/`).
+  itself and runs `crystal i` (3 of 3 programs). `compiler_spec`, built by
+  the host compiler with gcry linked in (`-Dgc_none`, `require "gcry"`) and
+  run with gcry as the process GC, passes 13 640 examples, 0 failures,
+  18 pending (`bench/log/linux/2026-10-06-compiler-spec/`).
   - CI job `compiler-gcry` (`ci/compiler-spec.sh`): self-host and `crystal i`
     on every push and pull request, `compiler_spec` on pull requests,
     schedule and dispatch.
+- **Boehm's C ABI.** The surface stdlib and `crystal i` use; what differs is
+  listed in [INTEGRATION.md § Boehm parity](INTEGRATION.md#boehm-parity).
 - **Platforms.** Linux x86_64/aarch64, macOS arm64/x86_64, Windows
   x86_64/ARM64 ([WINDOWS.md](WINDOWS.md)). Any other target is refused at
   compile time rather than miscompiled (`src/gcry/platform/os.cr:10-16`).
@@ -55,8 +64,9 @@ What is **not** evidenced yet:
 
 - Allocation-storm throughput is measured only on Linux x86_64 (READINESS
   M2: Primes 100%, JsonParsePure 91%, Binarytrees 94% of Boehm's speed on
-  12 CPUs; buffer-growth rows such as Revcomp 84%); arm64 and macOS have not
-  been re-measured since.
+  12 CPUs; buffer-growth rows such as Revcomp 84%) and once on Windows
+  x86_64 in a 12-vCPU VM (87–114%); arm64 (macOS, Linux, Windows) and macOS
+  have not been re-measured since.
 - Crystal's suites have run under gcry only on Linux x86_64.
 - TLAB, under Parallel ExecutionContext, remains a research arm (B3,
   [POLICY.md](POLICY.md)).
@@ -92,7 +102,7 @@ shard is for the core team; the RFC needs only the flag and the file.
 
 One existing gate must move with it: gcry's `GC.pthread_create` wrapper only
 stages the new `Thread` under `{% if flag?(:gc_none) %}`
-(`src/gcry/gc_override.cr:1696-1767`). Under `-Dgc_gcry` that would compile
+(`GC.pthread_create` in `src/gcry/gc_override.cr`). Under `-Dgc_gcry` that would compile
 out silently. The backend must key those blocks on its own flag.
 
 ## 2. Runtime↔GC hooks to replace private reads
@@ -102,15 +112,15 @@ would replace it. The stdlib owns the hook; the backend calls it.
 
 | gcry reads today | Where | Why the collector needs it | Proposed hook |
 |---|---|---|---|
-| `Fiber#@stack` (`.bottom`, `.pointer`) | `src/gcry/gc_override.cr:198`, `src/gcry/collect_stw.cr:973`, `src/gcry/collect_scan.cr:724`, `src/gcry/stack_scrub.cr:352`, `src/gcry/platform/windows_stack.cr:26` | Stack bounds of every fiber to scan; the running fiber's bottom is refreshed at collect because EC fiber swaps no longer call `set_stackbottom` ([INTEGRATION.md](INTEGRATION.md) "Fiber roots") | `Fiber#gc_stack_bounds : {Void*, Void*}` |
+| `Fiber#@stack` (`.bottom`, `.pointer`) | `GC.init`'s `Fiber.current.@stack.bottom` read in `src/gcry/gc_override.cr`, `src/gcry/collect_stw.cr:973`, `src/gcry/collect_scan.cr:724`, `src/gcry/stack_scrub.cr:352`, `src/gcry/platform/windows_stack.cr:26` | Stack bounds of every fiber to scan; the running fiber's bottom is refreshed at collect because EC fiber swaps no longer call `set_stackbottom` ([INTEGRATION.md](INTEGRATION.md) "Fiber roots") | `Fiber#gc_stack_bounds : {Void*, Void*}` |
 | `Fiber#@context.stack_top` | `src/gcry/collect_scan.cr:860,1214,1218,1454` | Saved SP of a parked fiber; with lag 0 the scan starts from the low-water mark, with a lag from here | `Fiber#gc_saved_stack_pointer : Void*?` (nil while running) |
 | `Thread#@current_fiber`, `Thread#@main_fiber` | `src/gcry/collect.cr:1784`, `src/gcry/idle_release.cr:87`, `src/gcry/platform/windows_stack.cr:25` | Is the thread past `Thread.new` far enough to collect on it; which stack is the thread's own | `Thread#gc_current_fiber?`, `Thread#gc_main_fiber?` |
 | `Thread#@name == "SYSMON"` | `src/gcry/collect.cr:1773-1774`, `src/gcry/collect_stw.cr:759-760` | The EC monitor thread is not signal-suspended; it is held off at a gate instead (`src/gcry/monitor_gate.cr:1-25`). Keyed on a name string | `Thread#gc_role : Role` (`Mutator`, `Monitor`, …) set by the runtime |
-| `Thread#@system_handle` | `src/gcry/poison_holders.cr:678`; written by the Windows `beginthreadex` wrapper, `src/gcry/gc_override.cr:1673-1682` | Suspend/resume and stack query of another thread | `Thread#gc_system_handle` |
+| `Thread#@system_handle` | `src/gcry/poison_holders.cr:678`; written by the Windows wrapper `GC.beginthreadex` (`src/gcry/gc_override.cr`) | Suspend/resume and stack query of another thread | `Thread#gc_system_handle` |
 | `ExecutionContext#@schedulers`, `#@global_queue` | `src/gcry/collect_scan.cr:413-421,604-610` | Run queues and schedulers hold fibers that must be roots while the world is stopped | `Fiber::ExecutionContext.each_gc_root(&)` |
 | `Fiber.@@fibers.@mutex` | `src/gcry/collect_stw.cr:980-993` (reopens `Fiber`) | Stop-the-world must not interrupt a thread inside the fiber list's mutex | `Fiber.gc_lock_list` / `Fiber.gc_unlock_list`, or a documented `GC.before_stop_world` callback |
 | Reopen of `Fiber::ExecutionContext::Monitor` | `src/gcry/monitor_gate.cr:231` | The monitor wakes ~100×/s during a stop and can touch the heap; it must check a gate (`monitor_gate.cr:1-25`) | `GC.monitor_enter` / `GC.monitor_exit` called by the monitor loop (no-ops in Boehm/none) |
-| `GC.pthread_create` / `GC.beginthreadex` staging | `src/gcry/gc_override.cr:1043,1696-1767`; `src/gcry/platform/thread_staging.cr:1-20` | A `Thread` is unreachable from the runtime between `pthread_create` and its own registration; Boehm closes the same gap inside `GC_pthread_create` (`src/gc/boehm.cr:170,402-403`) | Keep the existing `GC.pthread_create` / `GC.beginthreadex` entry points (they already exist for Boehm); document that a backend may root `arg` there |
+| `GC.pthread_create` / `GC.beginthreadex` staging | `GC.pthread_create`, `GC.beginthreadex` in `src/gcry/gc_override.cr`; `src/gcry/platform/thread_staging.cr:1-20` | A `Thread` is unreachable from the runtime between `pthread_create` and its own registration; Boehm closes the same gap inside `GC_pthread_create` (`src/gc/boehm.cr:170,402-403`) | Keep the existing `GC.pthread_create` / `GC.beginthreadex` entry points (they already exist for Boehm); document that a backend may root `arg` there |
 
 Every hook is a method on a stdlib type with a trivial implementation; Boehm
 and `gc/none` need not call them. The gain is that a stdlib rename becomes a

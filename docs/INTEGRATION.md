@@ -78,17 +78,22 @@ Never `require "gcry"` as process GC without `-Dgc_none` — you fight Boehm.
 | | Any other OS, Android, 32-bit targets — a compile-time `{% raise %}` in `src/gcry/platform/os.cr` stops the build, as the process GC and as a library heap alike (the mark reads 8-byte words; the allocator keeps a `@[ThreadLocal]` cursor). The message names the remedy for each: drop `require "gcry"`, and `-Dgc_none` with it, to keep Crystal's default GC |
 
 **Evidence.** Crystal's whole `spec/std` passes with gcry as the process GC
-(1.21.0: 18 054 examples, 0 failures — the same as Boehm; also under
-`GCRY_STRESS=1` and `GCRY_SOUND=1`), and CI holds it there: `ci/std-spec.sh`,
-job `std-spec` in `.github/workflows/ci.yml`, run against the compiler's own
-commit (`docs/DEFAULT-GC-READINESS.md` §1).
+on Linux x86_64 (1.21.0: 18 054 examples, 0 failures — the same as Boehm;
+also under `GCRY_SOUND=1`, and under `GCRY_STRESS=1` with 0 unexpected
+failures and one allowlisted example, see `ci/std-spec-stress-allow.txt`),
+and CI holds it there: `ci/std-spec.sh`, job `std-spec` in
+`.github/workflows/ci.yml`, run against the compiler's own commit
+(`docs/DEFAULT-GC-READINESS.md` §1). macOS and Windows do not run it.
 
-The compiler built with gcry builds itself, passes `compiler_spec` (13 640
-examples, 0 failures, 18 pending; `bench/log/linux/2026-10-06-compiler-spec/`)
-and runs `crystal i`. gcry exports Boehm's `GC_*` C ABI and a `lib LibGC`
-(`src/gcry/c_abi.cr`; § Boehm's C ABI below). CI: `ci/compiler-spec.sh`, job
-`compiler-gcry` (self-host and `crystal i` on every push and pull request,
-`compiler_spec` on pull requests, schedule and dispatch).
+The compiler built with gcry builds itself and runs `crystal i`.
+`compiler_spec`, built by the host compiler with gcry linked in (`-Dgc_none`,
+`require "gcry"`) and run with gcry as the process GC, passes (13 640
+examples, 0 failures, 18 pending; `bench/log/linux/2026-10-06-compiler-spec/`).
+gcry exports the part of Boehm's `GC_*` C ABI Crystal uses, and a `lib LibGC`
+(`src/gcry/c_abi.cr`; § Boehm's C ABI and § Boehm parity below). CI, Linux
+x86_64 only: `ci/compiler-spec.sh`, job `compiler-gcry` (self-host and
+`crystal i` on every push and pull request, `compiler_spec` on pull requests,
+schedule and dispatch).
 
 ## Boehm's C ABI
 
@@ -166,6 +171,41 @@ default build fails to link against a static libgc, the flag build links and
 runs both collectors across threads, and the same binary with Boehm left on
 `SIGPWR` faults.
 
+## Boehm parity
+
+gcry is compatible with the Boehm surface Crystal uses — stdlib's
+`gc/boehm.cr` calls and `crystal i` — not a one-to-one copy of Boehm.
+Verified against `src/gcry/c_abi.cr`, `src/gcry/gc_override.cr` and the
+regressions named.
+
+| Behaviour | Boehm | gcry | Status |
+|-----------|-------|------|--------|
+| `disable` nesting; collect while disabled | Counted; collect does nothing | Same | Matches (`27_*`, `18_*`) |
+| `realloc(p, 0)`, `realloc(NULL, n)` | Free; malloc | Same | Matches (`31_*`) |
+| `GC_register_finalizer*`: `ofn`/`ocd`, NULL removes | Old pair returned, NULL unregisters | Same | Matches (`25_*`) |
+| Normal and ignore-self ordering; cycles | Topological; cycles not finalized | Same | Matches (`17_*`) |
+| Disappearing link registered twice | `GC_DUPLICATE`, link follows the new object | Same | Matches (`c_abi.cr`) |
+| Interior pointers; `Crystal.trace :gc` | Recognized; traced | Same | Matches (`21_*`; `gc_override.cr`) |
+| Queued finalizables | Stay roots until run | Same | Matches (`26_*`) |
+| Finalizer that calls `GC.collect` | Nested finalizers bounded per thread | No nesting on the same thread | Matches (`37_*`) |
+| Oversize `GC_malloc` / `GC_realloc` | NULL | NULL | Matches (`39_*`) |
+| `GC_pthread_create` | Registers the thread | Registers it (Linux, macOS) | Matches (`40_*`) |
+| `GC_add_roots` | Locked, deduplicated | Same | Matches (`41_*`) |
+| Loaded libraries' data | Re-walked every collection | Followed through `r_debug`, also mid-`dlopen`/`dlclose` (Linux) | Matches (`16_*`, `42_*`) |
+| Mark under `-Dwithout_mt` | Safe (libgc's own locks) | Safe: serial, since `Crystal::SpinLock` is a no-op there | Matches (`38_*`) |
+| `GC.add_finalizer` twice | Second replaces first | Both run | Differs |
+| Allocation slack (`EXTRA_BYTES`) | Every block | Atomic blocks only | Differs (`24_*`) |
+| `realloc` shrink / move | — | Shrink keeps the block; on a move the old block is left to the sweep | Differs (`30_*`) |
+| `GC_invoke_finalizers` | Runs pending, returns count | Returns 0 (finalizers run by the collector) | Differs |
+| `GC_set_start_callback` | Full collections, after `GC_EVENT_START` | Every collection (incl. minor, idle), before `GC_EVENT_START` | Differs (`28_*`) |
+| `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Crystal's signals on Linux and Darwin; abort on Windows | Differs |
+| `GC_get_prof_stats` | Returns bytes filled | Returns nothing | Differs |
+| `unmapped_bytes` (stats, `GC_get_heap_usage_safe`) | Currently unmapped | Cumulative bytes returned to the OS | Differs |
+| `GC_set_max_heap_size` | Heap limit | Abort | Differs |
+| Foreign threads on Windows | `GC_register_my_thread`, `GC_beginthreadex` | `GC_UNIMPLEMENTED` (3); `GC_beginthreadex` aborts | Differs (`29_*`) |
+| Not exported | `GC_malloc_uncollectable`, `GC_unregister_disappearing_link`, `GC_move_disappearing_link`, long links, `_no_order` / `_unreachable` finalizers, `GC_remove_roots`, `GC_exclude_static_roots`, `GC_get_heap_size`, `GC_get_gc_no`, `GC_do_blocking`, `GC_call_with_alloc_lock`, `GC_set_finalize_on_demand`, `GC_strdup`, `GC_gc_no` | — | Missing; none used by stdlib or `crystal i` |
+| Collection trigger, marker count, mark-stack overflow | Boehm's policy | gcry's (`GCRY_*`, [POLICY.md](POLICY.md)) | Differs by design |
+
 ## Windows
 
 Process GC runs on Windows x86_64 (Crystal's MSVC distribution) and ARM64
@@ -178,7 +218,10 @@ Process GC runs on Windows x86_64 (Crystal's MSVC distribution) and ARM64
 | `VirtualAlloc` / `VirtualFree` arena mapping | In gcry |
 | Win32 thread suspend / resume STW | In gcry (`SuspendThread` + `GetThreadContext`, FP/SIMD included) |
 | Soft-dirty / mprotect barrier | Not available; full collections only |
-| Windows CI | x86_64 and native ARM64: specs, samples, and the Linux gates that hold there |
+| Large-object recycler, `realloc` page move | Linux-only; `GCRY_LARGE_RECYCLE` / `GCRY_REALLOC_MOVE` have no effect |
+| Boehm C ABI | `GC_register_my_thread` answers `GC_UNIMPLEMENTED`; `GC_beginthreadex` and the signal getters abort (§ Boehm parity) |
+| Windows CI | x86_64 and native ARM64: specs, samples, and the Linux gates that hold there; not Crystal's `spec/std` or `compiler_spec` |
+| Workload numbers | x86_64 on a 12-vCPU QEMU/KVM VM only; ARM64 unmeasured ([WINDOWS.md](WINDOWS.md)) |
 
 ## Crystal source map (1.21)
 

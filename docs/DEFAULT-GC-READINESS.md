@@ -20,18 +20,18 @@ compiler PR").
 | B1 | **Fixed**: defaults are root-complete (STW lags 0) | `collect_scan.cr`; `process_spec/regression/14` |
 | B2 | **Closed**: a dying `Thread` is held until proof it is done, on every platform; the root-table race is fixed | `thread_birth_root.cr`; `make thread-death-window`; `process_spec/regression/23` |
 | B3 | **Mostly closed**: parallel mark on by default; the compiler (Parallel EC at CPU count, mt codegen) builds, self-hosts and passes `compiler_spec` under gcry. TLAB and `GCRY_PARALLEL_RELEASE` stay unsupported research arms | `gc_override.cr`; `ci/compiler-spec.sh` |
-| B4 | **Fixed**: compiler self-hosts with gcry; `compiler_spec` run by the gcry-built compiler: 13 640 examples, 0 failures, 18 pending (CI run 37437660646); `crystal i` runs in it (3 of 3) | `c_abi.cr`, `crystal_string_builder_compat.cr`; CI job `compiler-gcry`; `bench/log/linux/2026-10-06-compiler-spec/` |
+| B4 | **Fixed**: compiler self-hosts with gcry, and `crystal i` runs in the gcry-built compiler (3 of 3). `compiler_spec`, built by the host compiler with gcry linked in (`-Dgc_none`, `require "gcry"`) and run with gcry as the process GC: 13 640 examples, 0 failures, 18 pending (CI run 37437660646). Linux x86_64 only | `c_abi.cr`, `crystal_string_builder_compat.cr`; CI job `compiler-gcry` (`ci/compiler-spec.sh` `step_spec`); `bench/log/linux/2026-10-06-compiler-spec/` |
 | B5 | **Scoped**: unsupported targets fail at compile time with the reason | `platform/os.cr` |
 | B6 | **Proposed**: upstream interface written up | `docs/RFC-GC-BACKEND.md` |
-| B7 | **Fixed**: `spec/std` 18 054 / 0 failures in CI on 1.21.0 (plus `GCRY_STRESS=1`), `latest` and nightly | `ci/std-spec.sh`, job `std-spec` |
-| M1 | **Fixed**: parallel mark on by default, 32 MiB floor. Workers: `min(2, CPUs−1)` up to 7 CPUs, then `CPUs/4+1`, at most 8. Idle helpers wake on a futex (Linux). Large objects are split across workers. The scan loop resolves candidates inline; one marker now costs about Boehm's single marker on JsonParsePure and 1.3× on Primes | `parallel_mark.cr`, `collect_mark.cr`; `bench/log/linux/2026-10-06-mark-cost/` |
-| M2 | **Partly fixed** on Linux x86_64: crystal-metric, 12 CPUs, 11 trials, % of Boehm's speed (master → branch): Primes 42→100%, JsonParsePure 42→91%, Binarytrees 81→94%, JsonGenerate 105→105%; JsonParseSerializable (88%), JsonParsePull (91%) and Revcomp (84%) are where master was — their fault-bound gap needs the `realloc` page move, which is opt-in because it is unsafe for the stdlib. Peak RSS under Boehm's on every GC-bound row | `bench/log/linux/2026-10-06-pr-benchmarks/after-review/` |
-| M3 | **Fixed**: every loaded shared object's writable data is a root (Linux, macOS, Windows) | `platform/*_roots.cr`; `process_spec/regression/16` |
+| B7 | **Fixed**: `spec/std` 18 054 / 0 failures in CI on 1.21.0, `latest` and nightly (Linux x86_64 only). The `GCRY_STRESS=1` rerun has 0 unexpected failures; one example is allowlisted (`spec/std/log/builder_spec.cr:230`, by design: it reads WeakRef-only objects after a possible collection; failed 1 of 5 255 in CI run 37592592091) | `ci/std-spec.sh`, `ci/std-spec-stress-allow.txt`, job `std-spec` |
+| M1 | **Fixed**: parallel mark on by default, 32 MiB floor. Workers: `min(2, CPUs−1)` up to 7 CPUs, then `CPUs/4+1`, at most 8. Idle helpers wake on a futex (Linux); elsewhere they sleep-poll, with no measured cost on Windows (`bench/log/windows/2026-10-06-vm-validation/`). Large objects are split across workers. The scan loop resolves candidates inline; one marker now costs about Boehm's single marker on JsonParsePure and 1.3× on Primes | `parallel_mark.cr`, `collect_mark.cr`; `bench/log/linux/2026-10-06-mark-cost/` |
+| M2 | **Partly fixed** on Linux x86_64: crystal-metric, 12 CPUs, 11 trials, % of Boehm's speed (master → branch): Primes 42→100%, JsonParsePure 42→91%, Binarytrees 81→94%, JsonGenerate 105→105%; JsonParseSerializable (88%), JsonParsePull (91%) and Revcomp (84%) are where master was — their fault-bound gap needs the `realloc` page move, which is opt-in because it is unsafe for the stdlib. Peak RSS under Boehm's on every GC-bound row on Linux. Windows x86_64 (12-vCPU VM): 87–114% of Boehm; peak working set above Boehm's on JsonParsePure (1.14×), Knuckeotide (1.73×) and Matmul (1.18×), transient peaks, not retention | `bench/log/linux/2026-10-06-pr-benchmarks/after-review/`; `bench/log/windows/2026-10-06-vm-validation/` |
+| M3 | **Fixed**: every loaded shared object's writable data is a root (Linux, macOS, Windows) | `platform/*_roots.cr`; `process_spec/regression/16`, `34` (Linux), `36` (Windows: 20 of 20, control arm collects) |
 | M4 | **Fixed**: Boehm's ignore-self finalization order; dangling weak links dropped | `collect_mark.cr`; `process_spec/regression/17`, `20` |
 | M8 | **Fixed**: Boehm's `GC_*` C ABI and `lib LibGC`, including `GC_stackbottom` | `c_abi.cr`; `process_spec/regression/21` |
 | m1–m6 | **Fixed**: nesting `disable`, honest `prof_stats`, `Crystal.trace :gc`, `free` and `realloc` never raise into C callers, `set_stackbottom(thread)`, `GC.sig_suspend/resume` | `gc_override.cr`; `process_spec/regression/18` |
 | m7 | **Mitigated**: one byte of slack on atomic blocks, as under Boehm; the argv patch stays | `heap.cr`; `process_spec/regression/24` |
-| m8 | **Fixed**: docs refreshed | `README.md`, `docs/*` |
+| m8 | **Fixed**: docs refreshed; `INTEGRATION.md` lists Windows as in scope only, and its Boehm parity table names what differs | `README.md`, `docs/*` |
 | m9 | **Fixed**: `rbp`/`x29` captured unmangled | `roots.cr`; `process_spec/regression/15` |
 | M5, M6, M7 | **Open**: open races, TSan/fuzzing, knob surface | below |
 
@@ -123,12 +123,18 @@ stay clear of E4 (four here), and runs it. It finds no failure gcry causes:
 |----------|---------|---------:|---------:|-------:|--------:|
 | 1.21.0 | Boehm | 18 054 | 0 | 0 | 30 |
 | 1.21.0 | gcry | 18 054 | 0 | 0 | 30 |
-| 1.21.0 | gcry, `GCRY_STRESS=1 GCRY_STRESS_EVERY=256` | 18 054 | 0 | 0 | 30 |
+| 1.21.0 | gcry, `GCRY_STRESS=1 GCRY_STRESS_EVERY=256` | 18 054 | 0* | 0 | 30 |
 | 1.21.0 | gcry, `GCRY_SOUND=1` | 18 054 | 0 | 0 | 30 |
 | 1.21.1 | gcry | 18 068 | 0 | 0 | 30 |
 
-CI job `std-spec` runs the suite on 1.21.0, including a `GCRY_STRESS=1`
-rerun, on `latest`, and on `nightly`, which is allowed to fail.
+\*0 unexpected failures. One example is allowlisted for the stress rerun
+(`ci/std-spec-stress-allow.txt`): `spec/std/log/builder_spec.cr:230` reads
+Log objects held only by WeakRefs after a collection may have run, so it can
+fail by design; it failed 1 of 5 255 in CI run 37592592091.
+
+CI job `std-spec` runs the suite on Linux x86_64: on 1.21.0, including a
+`GCRY_STRESS=1` rerun with that allowlist, on `latest`, and on `nightly`,
+which is allowed to fail.
 
 ### E1: the private recursive alias that breaks compilation
 
@@ -225,7 +231,7 @@ top supersedes them.
 | **B4** | **No compiler self-host and no interpreter story.** The compiler has never been built or run with gcry. `crystal i` resolves `GC_*` symbols from the host compiler binary, and gcry exports no `GC_*` C ABI (only `gcry_register_finalizer` (win32), `gcry_mark_worker_main`, `gcry_stw_watchdog_main`). | read: `compiler/crystal/interpreter/context.cr:441-460`; grep of `src/` |
 | **B5** | **Platforms.** No platform layer for FreeBSD, OpenBSD, NetBSD, DragonFly or Solaris (`collect.cr:1-20` has no `else`). Android is untested, and its fast path uses `@[ThreadLocal]`, which Crystal avoids there. 32-bit (i386, armhf) compiles with no error but scans roots in 8-byte strides and never installs the STW SP-capture handler. A per-platform rollout ("default on Linux first", ROADMAP Phase 4) would scope this down. | read: `roots.cr:285-289,329-333`; `platform/linux_stw.cr:52-56,610-613`; `platform/os.cr:3-6`; `bitmap_alloc.cr:174-179` |
 | **B6** | **No upstream-grade runtime interface.** gcry reads private stdlib ivars (`Fiber@stack`, `@context.stack_top`, `Thread@current_fiber/@main_fiber/@name/@system_handle`, ExecutionContext `@schedulers/@global_queue`, `Fiber@@fibers.@mutex`), keys the monitor exemption on `Thread#name == "SYSMON"`, reopens `Fiber::ExecutionContext::Monitor`, and gates thread staging on `flag?(:gc_none)` (a future `-Dgc_gcry` would compile it out silently). Every gcry gate pins Crystal 1.21.0. Only `std-spec` also runs `latest` and `nightly`, so a stdlib rename that silently compiles a root source out is caught only if spec/std happens to exercise it. | read: `collect_stw.cr:759,992`; `collect_scan.cr:360-424,1131-1177`; `monitor_gate.cr:230`; `gc_override.cr:1695-1768`; `.github/workflows/ci.yml:79-92` |
-| **B7** | **Crystal's own suites are not in CI.** See §1. At review time std_spec did not compile (E1) and one exception was miscompiled (E3), and compiler_spec had never been tried. All of that is closed as of 2026-10-06: **std_spec passes in full in CI** (`std-spec` job), and so does compiler_spec under a gcry-built compiler (`compiler-gcry` job; see the status table). | observed |
+| **B7** | **Crystal's own suites are not in CI.** See §1. At review time std_spec did not compile (E1) and one exception was miscompiled (E3), and compiler_spec had never been tried. All of that is closed as of 2026-10-06 on Linux x86_64: **std_spec passes in full in CI** (`std-spec` job), and so does compiler_spec, built by the host compiler with gcry linked in and run with gcry as the process GC (`compiler-gcry` job; see the status table). macOS and Windows still do not run them. | observed |
 
 ## 3. Major gaps
 

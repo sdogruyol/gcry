@@ -20,15 +20,17 @@ Snapshot of gcry **0.34.0** (`shard.yml`) plus the unreleased 2026-10-05 sound d
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
 | Empty-chunk RSS | Released by default | LibGC reclaim |
 | Precise / moving | No (needs compiler) | No |
-| Platforms | **Linux, macOS, Windows** (x86_64 and arm64; soft-dirty Linux-only); other targets fail at compile time (`src/gcry/platform/os.cr`) | Broad |
-| Crystal `spec/std` | **18 054 / 18 054** pass (1.21.0), CI job `std-spec` (`ci/std-spec.sh`) | 18 054 / 18 054 |
-| Kemal `/json`, Linux | **112.6%** [106.6, 118.6] thr at **1.07×** peak RSS — `bench/log/linux/2026-09-06-bitmap-default-ab/` | baseline |
+| Platforms | **Linux, macOS, Windows** (x86_64 and arm64; soft-dirty Linux-only); other targets fail at compile time (`src/gcry/platform/os.cr`). Windows workloads measured on x86_64 in a 12-vCPU VM only, ARM64 unmeasured ([WINDOWS.md](WINDOWS.md)) | Broad |
+| Boehm C ABI | The surface Crystal uses; differences in [INTEGRATION.md § Boehm parity](INTEGRATION.md#boehm-parity) | Full |
+| Crystal `spec/std` | **18 054 / 18 054** pass (1.21.0, Linux x86_64), CI job `std-spec` (`ci/std-spec.sh`); not run on macOS or Windows | 18 054 / 18 054 |
+| Kemal `/json`, Linux | **101.8%** thr at **1.43×** peak RSS, 0.88× after `GC.collect` (2026-10-06) — `bench/log/linux/2026-10-06-pr-benchmarks/after-review/` | baseline |
+| Kemal `/json`, Windows x86_64 (VM) | **106.5%** thr at 1.14× peak working set — `bench/log/windows/2026-10-06-vm-validation/` | baseline |
 | Kemal `/json`, macOS | **101.9%** [100.9, 103.0] thr at **1.50×** peak footprint (0.99× post-GC) — `bench/log/macos/2026-09-06-bitmap-default-ab/` | baseline |
 | Kemal, CI perf smoke (v0.34.0) | Linux `/json` 104.8%, `/` 100.8%, peak RSS 0.96×; macOS `/json` 106.4%, 1.13× — medians, [leaderboard](../bench/leaderboard.md) | baseline |
 | Fat app `/api/v1/`, Linux | 90.8% thr at 1.55× RSS (header layout, 0.24.0) — [ACIKTURKIYE.md](ACIKTURKIYE.md) | baseline |
 | Cost of the sound defaults | EC4 Linux pause 3.07 → 4.55 ms, req/s unchanged; EC1 unchanged; macOS pause ~1.22–1.25× (CI, 2026-09-26, `bench/sound_matrix.py`) | — |
 
-The Kemal and fat-app rows were measured while the 256 KiB STW stack lags were still the default; the last row is what removing them costs.
+The macOS Kemal and fat-app rows were measured while the 256 KiB STW stack lags were still the default; the last row is what removing them costs.
 
 ## Pick gcry when
 
@@ -60,4 +62,4 @@ Secondary CLI shapes (tree/JSON/channel): vendored crystal-metric GC subset —
 
 ## The RSS ceiling
 
-Kemal `/json` on the headerless default sits at 1.07× Boehm's peak RSS on Linux and 0.96× in the CI perf smoke; on macOS every gcry arm sits at the 16 MiB Darwin threshold floor, 1.50× peak footprint and 0.99× post-GC resident (README Performance). The fat app was last cut on the header layout at 1.55× (0.24.0). Stack maps remain research-only for precise roots. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+Kemal `/json` on the headerless default sits at 1.43× Boehm's peak RSS on Linux and 0.88× after `GC.collect` (2026-10-06), and 0.96× in the CI perf smoke; on macOS every gcry arm sits at the 16 MiB Darwin threshold floor, 1.50× peak footprint and 0.99× post-GC resident (README Performance). On Windows, peak working set is not RSS: recommitted pages count again, and the crystal-metric peaks above Boehm (JsonParsePure 1.14×, Knuckeotide 1.73×) are transient ([WINDOWS.md](WINDOWS.md)). The fat app was last cut on the header layout at 1.55× (0.24.0). Stack maps remain research-only for precise roots. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).

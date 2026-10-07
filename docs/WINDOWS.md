@@ -77,17 +77,34 @@ scrubbing dead stack. Conservative root scans include that red zone.
 - The research stack-map walker assumes a SysV fiber context. Windows ignores
   `GCRY_PRECISE_STACK` and `GCRY_PRECISE_FIBERS` with a warning and retains
   conservative stack scanning.
-- Workload numbers so far come from one 12-vCPU Windows 11 VM, not physical
-  hardware (`bench/log/windows/2026-10-06-vm-validation/`).
+- Boehm C ABI (`c_abi.cr`): `GC_register_my_thread` answers
+  `GC_UNIMPLEMENTED` (3), so a C-created thread cannot register (Boehm
+  supports it). `GC_beginthreadex`, `GC_get_suspend_signal` and
+  `GC_get_thr_restart_signal` print what is missing and abort; Boehm's
+  signal getters return -1 here. See
+  [INTEGRATION.md § Boehm parity](INTEGRATION.md#boehm-parity).
+- The large-object recycler and the `realloc` page move are Linux-only:
+  `GCRY_LARGE_RECYCLE` and `GCRY_REALLOC_MOVE` have no effect on Windows
+  (`bench/log/windows/2026-10-06-vm-validation/FINDINGS.md`, specs 30 and 32).
+- Crystal's own suites (`spec/std`, `compiler_spec`) are not run on Windows;
+  their CI jobs are Linux-only.
+- Workload numbers so far come from one 12-vCPU Windows 11 QEMU/KVM VM, not
+  physical hardware (`bench/log/windows/2026-10-06-vm-validation/`). Windows
+  ARM64 workloads are unmeasured; ARM64 has CI coverage only.
   - **Throughput.** crystal-metric runs at 87–114% of Boehm's speed, within
     the Linux band on every row except Binarytrees (112% here). Kemal reaches
     106.5% of Boehm on `/json` and 102.9% on `/`.
-  - **Memory.** Peak working set is at or below Boehm on 10 of 13 rows. The
-    exceptions are transient peaks: JsonParsePure 1.14×, Knuckeotide 1.6–1.7×
-    (+35 MiB) and Matmul 1.18×. Kemal is at 1.14×.
+  - **Memory.** Peak working set (`PeakWorkingSetSize`) is not Linux RSS:
+    decommitted pages that are recommitted count again. It is at or below
+    Boehm on 10 of 13 rows. The exceptions are transient peaks, not
+    retention (heaps at exit match Boehm or are small): JsonParsePure 1.14×,
+    Knuckeotide 1.62–1.73× (+39 MiB) and Matmul 1.18×. Kemal is at 1.14×.
+  - **`err` rows.** Eight crystal-metric benches print `err` on Windows under
+    Boehm too, with the same value in every arm, so the A/B compares
+    identical work.
   - **Idle mark helpers.** Off Linux they sleep-poll instead of waiting on a
-    futex. On a list-shaped heap, 4 workers use 1.01 cores with a pause on
-    par with serial.
+    futex, at no measured cost: on a list-shaped heap, 4 workers use 1.01
+    cores with a pause on par with serial (29.4 vs 30.4 ms).
 - Parallel stress has run on CI runners: about 15 000 bounded runs, no
   failures on fast runners
   (`bench/log/linux/2026-09-30-cross-platform-stress/`).

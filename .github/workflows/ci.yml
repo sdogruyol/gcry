@@ -1154,8 +1154,9 @@ jobs:
   # it, compiles and runs programs with it, has it build itself again
   # (stage 2), and runs `crystal i` in an interpreter-enabled build, since the
   # interpreter binds Boehm's C ABI from the compiler binary. The whole
-  # compiler_spec suite (13 641 examples, the same counts as Boehm on
-  # 2026-10-05) is weekly and on dispatch: it is a long release build.
+  # compiler_spec suite (13 640 examples), built by the host compiler with
+  # gcry linked in, runs on pull requests, weekly and on dispatch: it is a
+  # long release build.
   compiler-gcry:
     runs-on: ubuntu-latest
     timeout-minutes: 90

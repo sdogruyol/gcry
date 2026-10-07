@@ -9,6 +9,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A finalizer that calls `GC.collect` no longer runs the rest of the
+  queue nested inside itself.** Since `run_pending` takes one node at a time
+  (queued objects stay roots until they run), the collection a finalizer
+  started ended in a second `run_pending`, which ran the next finalizer one
+  frame deeper: nesting as deep as the queue. 200 such objects nested 199
+  deep and 5 000 overflowed the stack on Windows; master nested 1 deep, and
+  Boehm bounds the same recursion (`GC_check_finalizer_nested`). A nested
+  `run_pending` on the same thread now returns at once (a `@[ThreadLocal]`
+  flag) and the outer loop drains what the inner collection queued.
+  `process_spec/regression/37_nested_finalizer_collect_spec.cr`: depth
+  2 000 before, 1 after, all 2 000 finalized.
+
+- **Parallel mark is serial under `-Dwithout_mt` off Windows.** Its mark
+  stack is guarded by `Crystal::SpinLock`, which compiles to nothing there,
+  yet parallel mark was on by default: helpers pushed and popped the stack
+  unlocked, could lose entries, and the sweep could free live objects.
+  `Heap#parallel_mark_workers=` now stores 1 in that build and
+  `GCRY_PARALLEL_MARK>1` is ignored with a warning, as `GCRY_IDLE_RELEASE_MS`
+  already is (`38_without_mt_serial_mark_spec.cr`).
+
+- **An allocation no mapping can hold fails as out of memory.**
+  `GC_malloc(SIZE_MAX)`, `GC_malloc_atomic` and `GC_realloc` near `SIZE_MAX`
+  overflowed the rounding in `SizeClasses.fit` / `alloc_large` (the latter
+  with `@alloc_lock` held), and the C ABI rescues only `OutOfMemoryError`,
+  so the process died with "Arithmetic overflow". `Heap#allocate` rejects
+  such sizes before any arithmetic or locking: the C ABI returns NULL, as
+  Boehm does, and `GC.malloc` raises `OutOfMemoryError`
+  (`39_c_abi_oversize_null_spec.cr`: failed 3 of 3 before).
+
+- **`GC_pthread_create` registers the thread it starts, as Boehm does.** It
+  called `pthread_create` with the caller's routine as it was, so the thread
+  was never on Crystal's list: no stop suspended it, nothing scanned its
+  stack, and blocks it held only there were swept under it. The thread now
+  starts on a trampoline (record in libc memory, the caller's `arg` rooted
+  for its life) that registers it with its own stack, runs the routine and
+  unregisters. A registered thread that leaves through `pthread_exit`, or
+  without `GC_unregister_my_thread`, is taken off the list by a pthread-key
+  destructor. Linux and macOS; elsewhere unchanged
+  (`40_gc_pthread_create_registers_spec.cr`).
+
+- **`GC_add_roots` is locked and keeps one entry per range.** It copied the
+  table one entry longer and published it with no lock: 16 threads adding at
+  once kept 2 to 5 of their 16 ranges (20 of 20 runs), and the collector
+  stopped scanning the rest. Every call also appended duplicates and left
+  the previous table behind (about 8·n² bytes). Writers now take an atomic
+  lock (not `Crystal::SpinLock`); a range inside an existing one is a no-op
+  and a same-start range extends it, as in Boehm's `GC_add_roots_inner`. The
+  table grows by doubling, so the tables left behind come to less than the
+  live one (`41_gc_add_roots_concurrent_spec.cr`).
+
+- **A library loaded since the last collection is a root even when the
+  collection finds the loader mid-`dlopen`/`dlclose`.** `sync_loaded_objects`
+  added a missing `link_map` entry only while the namespace read
+  `RT_CONSISTENT`, so a collection that stopped the world while another
+  thread was in `dlopen` or `dlclose` skipped every library loaded since the
+  previous one, and a GC pointer in their globals was not a root. A missing
+  entry is now taken in any state once its program headers read back (each
+  page probed first), and retried next collection otherwise
+  (`42_library_sync_during_dlopen_spec.cr`).
+
 - **Spec 35 no longer fails at random on Windows.** It joined 300 threads
   and then expected their birth roots back after exactly three collections.
   In Crystal 1.21, a thread that finishes before it is joined detaches
@@ -523,6 +583,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose name does not resolve back to themselves are skipped now.
 
 ### Changed
+
+- **Docs say what is Boehm-compatible and what is not, and what Windows
+  covers.** `docs/INTEGRATION.md` has a Boehm parity table: what matches,
+  what differs (`GC.add_finalizer` twice, atomic-only slack,
+  `GC_invoke_finalizers`, start-callback order, signal getters,
+  `GC_get_prof_stats`, missing symbols) and which spec covers each.
+  README, COMPARISON and the RFC no longer claim one-to-one parity, and
+  their Kemal figures are this tree's (101.8% at 1.43× peak RSS) instead of
+  the 2026-09-06 112.6% / 1.07×. The `GCRY_STRESS=1` spec/std rerun is
+  described as 0 *unexpected* failures with one allowlisted example, and
+  `compiler_spec` as built by the host compiler with gcry linked in. The
+  Windows docs now say that the numbers come from a QEMU/KVM VM with ARM64
+  unmeasured, that peak working set is not RSS, that the large recycler and
+  page move are Linux-only, which C ABI calls answer `GC_UNIMPLEMENTED` or
+  abort there, and that Crystal's own suites do not run on Windows.
 
 - **The static-root scan drops non-heap words before the mark call.** Root
   candidates from data and `.bss` ranges went one by one into
