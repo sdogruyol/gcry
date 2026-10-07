@@ -876,11 +876,23 @@ module GC
     if min_live = env_u64("GCRY_PARALLEL_MARK_MIN_LIVE")
       heap.parallel_mark_min_live = min_live
     end
-    if pm = env_u64("GCRY_PARALLEL_MARK")
-      heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
-    else
-      heap.parallel_mark_workers = default_parallel_mark_workers
-    end
+    # Serial under `-Dwithout_mt` off Windows (`Heap#parallel_mark_workers=`):
+    # `Crystal::SpinLock` compiles to nothing there and the shared mark stack
+    # would go unguarded.
+    pm_env = env_u64("GCRY_PARALLEL_MARK")
+    {% if flag?(:without_mt) && !flag?(:win32) %}
+      if pm_env && pm_env > 1
+        warn_unsupported_env("gcry: GCRY_PARALLEL_MARK is ignored under -Dwithout_mt: " \
+                             "the mark stack lock compiles to nothing there\n")
+      end
+      heap.parallel_mark_workers = 1
+    {% else %}
+      if pm = pm_env
+        heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
+      else
+        heap.parallel_mark_workers = default_parallel_mark_workers
+      end
+    {% end %}
     # Research only: pin mark workers at 1 even if a later assignment asks
     # for more. `make parallel-mark-process --disabled` is the red arm —
     # stolen stays 0. Dropping the skip reddens it.

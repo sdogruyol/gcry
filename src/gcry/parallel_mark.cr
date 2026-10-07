@@ -32,8 +32,14 @@ module Gcry
       @parallel_mark_workers
     end
 
+    # Serial under `-Dwithout_mt` off Windows: `Crystal::SpinLock` compiles to
+    # nothing there, so `@mark_lock` would not guard the shared mark stack.
     def parallel_mark_workers=(value : Int32) : Int32
-      @parallel_mark_workers = @force_serial_mark ? 1 : value.clamp(1, 16)
+      {% if flag?(:without_mt) && !flag?(:win32) %}
+        @parallel_mark_workers = 1
+      {% else %}
+        @parallel_mark_workers = @force_serial_mark ? 1 : value.clamp(1, 16)
+      {% end %}
     end
 
     # The process GC's default worker count for *cpus* CPUs (gc_override.cr
