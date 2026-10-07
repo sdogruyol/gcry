@@ -420,11 +420,14 @@ module Gcry
     # `_dl_close_worker`, 2.39):
     #
     # * `dlopen` restores `RT_CONSISTENT` *before* it runs the new object's
-    #   constructors (relocation happens under `RT_ADD`, and writes link-time
-    #   addresses, not anything the program allocated). An object first seen
-    #   in the `RT_ADD` state has run no constructor and not been returned to
-    #   the program, so no global of it can hold a GC pointer yet; it is left
-    #   for the next collection.
+    #   constructors, but a collection that stops the world while *another*
+    #   `dlopen` or `dlclose` is under way still finds every object loaded
+    #   since the last collection on the list, and any of them may already
+    #   hold a GC pointer. So a new entry is taken in any state when its
+    #   headers read back — every page probed first, which also covers the
+    #   object half-mapped by that very `dlopen` — and otherwise left off the
+    #   table, to be tried again by the next collection rather than recorded
+    #   as unresolved for good.
     # * `dlclose` unmaps an object *before* unlinking it. One stopped in
     #   between is still on the list and no longer mapped, so in any state
     #   but `RT_CONSISTENT` every library range is scanned only where the
@@ -746,9 +749,9 @@ module Gcry
             slot.value = o
             hint = idx + 1
           elsif ns_consistent
-            # Mid-`dlopen` (`RT_ADD`) the new object has run no code: it is
-            # taken by the first collection that finds the list consistent.
             add_new_object(addr, ld)
+          else
+            add_mid_change_object(addr, ld)
           end
           map = Pointer(UInt64).new(map &+ 24).value
           steps += 1
@@ -818,6 +821,15 @@ module Gcry
           "gcry: a loaded object's ELF header is not at its load base — its globals are not roots\n")
         RawOut.flush(buf.to_unsafe, len)
       end
+    end
+
+    # Seen while its namespace is mid-`dlopen` / `dlclose`: taken when its
+    # headers already read back, its ranges probed like every library's this
+    # collection; otherwise not recorded, so the next collection tries again.
+    private def self.add_mid_change_object(addr : UInt64, ld : UInt64) : Nil
+      return unless phdr_n = object_headers(addr, ld)
+      phdr, n = phdr_n
+      record_object(addr, phdr, n, addr == @@vdso)
     end
 
     private def self.object_headers(addr : UInt64, ld : UInt64) : {LibC::Elf_Phdr*, Int32}?
