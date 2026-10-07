@@ -31,6 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   On Windows those threads now sleep with `Sleep(INFINITE)`; other platforms
   are unchanged.
 
+- **`make thread-death-window` no longer polls the thread list with it held.**
+  While waiting for its victims to leave Crystal's list, the harness held the
+  list's mutex for a threads × victims compare and re-took it after a bare
+  `Thread.yield`. Every victim needs that mutex once to leave. `--concurrent`
+  timed out once on aarch64 CI ("threads did not leave Crystal's list within
+  30 s"). Starvation by the poller is the suspected cause. The ids are now
+  copied out under the mutex and compared outside it, the poll sleeps
+  100 µs, and the timeout reports how many victims are still listed.
+
 - **Unloading a shared library is no longer reported as a static-root
   collapse.** The collapse diagnostic compares each collection's scanned
   static bytes against the most any collection scanned, and a `dlclose`d

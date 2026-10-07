@@ -102,14 +102,27 @@ def churn_garbage : Nil
   end
 end
 
+# The masked ids of the threads on Crystal's list, copied out under the list's
+# mutex; compared against the victims outside it. The wait below polls this
+# with the fiber list held, and every victim needs the thread list's mutex once
+# to leave it: a poll that held it for the whole threads × victims compare and
+# took it again after a bare `Thread.yield` let the poller barge back in ahead
+# of the woken victims. `--concurrent` hung there once on aarch64 (CI,
+# 2026-10-06: "threads did not leave Crystal's list within 30 s").
+LISTED_CAP = 4096
+
 @[NoInline]
-def listed_victims(hidden : Pointer(UInt64), n : Int32) : Int32
-  listed = 0
+def listed_victims(hidden : Pointer(UInt64), n : Int32, scratch : Pointer(UInt64)) : Int32
+  count = 0
   Thread.each do |thread|
-    a = thread.object_id
+    scratch[count] = thread.object_id ^ KEY if count < LISTED_CAP
+    count += 1
+  end
+  listed = 0
+  Math.min(count, LISTED_CAP).times do |j|
     i = 0
     while i < n
-      listed += 1 if hidden[i] == (a ^ KEY)
+      listed += 1 if hidden[i] == scratch[j]
       i += 1
     end
   end
@@ -128,6 +141,9 @@ abort "#{n} threads would overflow the #{Gcry::ThreadBirthRoot::SLOTS}-slot birt
 heap = Gcry.default_heap
 hidden = Pointer(UInt64).malloc(n)
 handles = Pointer(UInt64).malloc(n)
+# Allocated now: nothing may allocate while this thread holds the fiber list,
+# or a collection would wait on the mutex its own thread holds.
+listed_scratch = Pointer(UInt64).malloc(LISTED_CAP)
 deaths_before = Gcry::ThreadBirthRoot.released
 
 puts "=== thread death window ==="
@@ -164,12 +180,13 @@ GC.collect
 Fiber.gcry_lock_list
 DeathWindow.go!
 deadline = Time.instant + 30.seconds
-until listed_victims(hidden, n) == 0
+until (left = listed_victims(hidden, n, listed_scratch)) == 0
   if Time.instant > deadline
     Fiber.gcry_unlock_list
-    abort "threads did not leave Crystal's list within 30 s"
+    abort "threads did not leave Crystal's list within 30 s: #{left} of #{n} still listed, " \
+          "#{heap.collections} collection(s) so far"
   end
-  Thread.yield
+  Thread.sleep(100.microseconds)
 end
 
 heap.fiber_list_unlocked = true
