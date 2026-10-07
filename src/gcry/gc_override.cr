@@ -1912,7 +1912,11 @@ module GC
     # Recording here does not cover the interval *inside* `pthread_create` —
     # doing that needs a trampoline on the new thread, which was tried and
     # crashed 8 runs in 10. The census reports what this placement leaves.
-    def self.pthread_create(thread : Gcry::OS::PthreadT*, attr : Gcry::OS::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
+    #
+    # *root* is the object rooted for the thread: *arg* itself, except from
+    # `GC_pthread_create`, whose *arg* is its trampoline's record in libc
+    # memory and *root* the caller's argument inside it (src/gcry/c_abi.cr).
+    def self.pthread_create(thread : Gcry::OS::PthreadT*, attr : Gcry::OS::PthreadAttrT*, start : Void* -> Void*, arg : Void*, root : Void* = arg)
       {% if flag?(:gc_none) %}
         # **Before** the call, not after. A second thread is about to exist, and
         # the allocation counters are plain get/set until told otherwise —
@@ -1948,7 +1952,7 @@ module GC
           # object whose only other holder is the new thread's unscanned stack
           # is right here. Root it until the thread publishes itself
           # (src/gcry/thread_birth_root.cr).
-          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), arg)
+          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), root)
         end
       {% end %}
       ret

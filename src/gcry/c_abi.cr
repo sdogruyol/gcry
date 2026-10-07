@@ -172,17 +172,32 @@ module Gcry
     @@on_collection_event : LibGC::OnCollectionEventProc? = nil
     @@on_thread_event : LibGC::OnThreadEventProc? = nil
     @@on_heap_resize : LibGC::OnHeapResizeProc? = nil
+    # Set under `@@ranges_lock`, once the hook that reads `@@ranges` is in.
     @@roots_hooked = false
 
-    # `GC_add_roots` ranges: an immutable `[count, lo0, hi0, lo1, hi1, ...]`
-    # array of words in libc memory, replaced whole on every add. A mutator
-    # stopped half-way through `add_roots` must not leave the collector reading
-    # a torn table, and a lock the stopped thread might hold cannot be taken
-    # inside the stop — so the collector reads whichever table was last
-    # published, complete. A replaced table is not freed: the hook may be
-    # reading it, and `add_roots` is a once-per-library call (Boehm caps the
-    # count at a few thousand).
+    # `GC_add_roots` ranges: `[count, capacity, lo0, hi0, lo1, hi1, ...]`,
+    # words in libc memory. Writers take `@@ranges_lock`. The collector takes
+    # no lock — a mutator stopped holding it would stall the stop — so a
+    # writer fills an entry before it publishes the count covering it, and
+    # moves an end with one word store. A full table is copied into one of
+    # twice the capacity and published whole. The table it replaces is not
+    # freed: the hook may be reading it (a C thread gcry does not stop can
+    # add mid-collection), and the tables left behind come to less than the
+    # live one.
+    #
+    # Boehm keeps one entry per range (`GC_add_roots_inner`): a range inside
+    # one already registered changes nothing, and one with the same start
+    # extends it. Until 2026-10-07 every call appended a copy one entry longer
+    # with no lock: duplicates piled up, each leaving the previous table
+    # behind, and threads adding at once each published a copy of the same
+    # old table — 16 at once kept 2 to 5 of their 16 ranges, and the
+    # collector stopped scanning the rest
+    # (`process_spec/regression/41_gc_add_roots_concurrent_spec.cr`).
     @@ranges = Atomic(UInt64*).new(Pointer(UInt64).null)
+    # Taken by atomic exchange, not `Crystal::SpinLock`: that compiles to
+    # nothing under `-Dwithout_mt` off Windows, and C threads add roots
+    # whatever Crystal's threading flags say.
+    @@ranges_lock = 0
 
     def self.unsupported(name : String, why : String) : NoReturn
       buf = uninitialized UInt8[RawOut::LIMIT]
@@ -242,17 +257,57 @@ module Gcry
 
     def self.add_roots(low : Void*, high : Void*) : Nil
       return unless low.address < high.address
-      old = @@ranges.get(:acquire)
-      count = old.null? ? 0_u64 : old[0]
-      fresh = LibC.malloc(LibC::SizeT.new((2 &* (count &+ 1) &+ 1) &* 8)).as(UInt64*)
-      unsupported("GC_add_roots", "out of memory for the root table") if fresh.null?
-      fresh[0] = count &+ 1
-      (old + 1).copy_to(fresh + 1, 2 &* count) unless old.null?
-      fresh[1 &+ 2 &* count] = low.address
-      fresh[2 &+ 2 &* count] = high.address
-      # Publish only a complete table (see `@@ranges`).
-      @@ranges.set(fresh, :release)
+      lo = low.address
+      hi = high.address
+      # The hook first, so a call that returns has its range scanned whichever
+      # way it returns.
       hook_roots
+      lock_ranges
+      begin
+        table = @@ranges.get(:acquire)
+        count = table.null? ? 0_u64 : table[0]
+        i = 0_u64
+        while i < count
+          entry = table + (2 &+ 2 &* i)
+          return if entry[0] <= lo && hi <= entry[1]
+          if entry[0] == lo
+            Atomic::Ops.store(entry + 1, hi, LLVM::AtomicOrdering::Release, false)
+            return
+          end
+          i &+= 1
+        end
+        if table.null? || count == table[1]
+          capacity = table.null? ? 8_u64 : table[1] &* 2
+          fresh = LibC.malloc(LibC::SizeT.new((2 &+ 2 &* capacity) &* 8)).as(UInt64*)
+          unsupported("GC_add_roots", "out of memory for the root table") if fresh.null?
+          fresh[0] = count
+          fresh[1] = capacity
+          (table + 2).copy_to(fresh + 2, 2 &* count) unless table.null?
+          @@ranges.set(fresh, :release)
+          table = fresh
+        end
+        table[2 &+ 2 &* count] = lo
+        table[3 &+ 2 &* count] = hi
+        Atomic::Ops.store(table, count &+ 1, LLVM::AtomicOrdering::Release, false)
+      ensure
+        unlock_ranges
+      end
+    end
+
+    # Ranges in the `GC_add_roots` table.
+    def self.root_range_count : Int32
+      table = @@ranges.get(:acquire)
+      table.null? ? 0 : Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false).to_i32
+    end
+
+    private def self.lock_ranges : Nil
+      until Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Xchg, pointerof(@@ranges_lock), 1, LLVM::AtomicOrdering::Acquire, false) == 0
+        Intrinsics.pause
+      end
+    end
+
+    private def self.unlock_ranges : Nil
+      Atomic::Ops.store(pointerof(@@ranges_lock), 0, LLVM::AtomicOrdering::Release, false)
     end
 
     def self.push_other_roots=(proc : Proc(Nil)) : Nil
@@ -390,6 +445,82 @@ module Gcry
       # so reading it runs no `__crystal_once` (which would make a `Thread`).
       @[ThreadLocal]
       @@adopted : UInt8 = 0_u8
+
+      # The key whose destructor takes a thread that exits still registered
+      # back off the lists — `pthread_exit` out of a `GC_pthread_create`
+      # routine passes over the trampoline's own unregister, and a C thread
+      # can end without its `GC_unregister_my_thread` — since a thread listed
+      # after it is gone is one every later stop signals and waits for. Its
+      # value is the adopted `Thread`, so the destructor needs no thread-local
+      # to find it: Darwin frees those in a key destructor of its own, which
+      # may run first. 0: not made, 1: being made, 2: made, 3: refused
+      # (registration goes on without one).
+      @@exit_key_state = 0
+      @@exit_key = uninitialized Gcry::OS::GcryPthreadKeyT
+
+      private def self.exit_key? : Bool
+        loop do
+          case Atomic::Ops.load(pointerof(@@exit_key_state), LLVM::AtomicOrdering::Acquire, false)
+          when 2 then return true
+          when 3 then return false
+          when 0
+            _, won = Atomic::Ops.cmpxchg(pointerof(@@exit_key_state), 0, 1,
+              LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
+            if won
+              made = Gcry::OS.pthread_key_create(pointerof(@@exit_key), ->(thread : Void*) { CAbi.drop_adopted(thread.as(::Thread)) }) == 0
+              Atomic::Ops.store(pointerof(@@exit_key_state), made ? 2 : 3, LLVM::AtomicOrdering::Release, false)
+            end
+          else
+            Intrinsics.pause
+          end
+        end
+      end
+
+      # Fiber first, then the thread, then the thread-locals: the reverse of
+      # `Thread#start`'s exit. From `unregister_my_thread`, and from the exit
+      # key's destructor on the dying thread, which can still be stopped.
+      def self.drop_adopted(thread : ::Thread) : Nil
+        if fiber = thread.@main_fiber
+          Fiber.inactive(fiber)
+        end
+        ::Thread.gcry_unlist(thread)
+        Crystal::System::Thread.gcry_clear_current_thread
+        @@adopted = 0_u8
+      end
+
+      # `GC_pthread_create`'s routine and argument, carried to the new thread
+      # in libc memory.
+      private record PthreadStart, start : Void* -> Void*, arg : Void*
+
+      # Boehm's `GC_pthread_create` registers the thread before the routine
+      # runs and unregisters it after (`GC_pthread_start`). Until 2026-10-07
+      # gcry's ran the routine directly: the thread was never on Crystal's
+      # list, so no stop suspended it or scanned its stack, and what it held
+      # there alone was swept under it
+      # (`process_spec/regression/40_gc_pthread_create_registers_spec.cr`).
+      # *arg* is rooted for the thread's life as before (`GC.pthread_create`),
+      # and held by this frame until it is.
+      def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*) : LibC::Int
+        data = LibC.malloc(sizeof(PthreadStart)).as(PthreadStart*)
+        return LibC::EAGAIN if data.null?
+        data.value = PthreadStart.new(start, arg)
+        ret = GC.pthread_create(thread, attr, ->(raw : Void*) { CAbi.pthread_start(raw) }, data.as(Void*), arg)
+        LibC.free(data.as(Void*)) unless ret == 0
+        ret
+      end
+
+      # On the new thread, its own pthread stack the base. A registration
+      # refused (no stop-the-world collector) runs the routine unregistered.
+      def self.pthread_start(raw : Void*) : Void*
+        data = raw.as(PthreadStart*)
+        start = data.value.start
+        arg = data.value.arg
+        LibC.free(raw)
+        registered = register_my_thread(Pointer(LibGC::StackBase).null) == GC_SUCCESS
+        result = start.call(arg)
+        unregister_my_thread if registered
+        result
+      end
     {% end %}
 
     def self.register_my_thread(sb : LibGC::StackBase*) : LibGC::Int
@@ -424,29 +555,25 @@ module Gcry
         thread = heap.registering_thread { ::Thread.new }
         Crystal::System::Thread.current_thread = thread
         @@adopted = flags
+        Gcry::OS.pthread_setspecific(@@exit_key, thread.as(Void*)) if exit_key?
         GC_SUCCESS
       {% else %}
         GC_UNIMPLEMENTED
       {% end %}
     end
 
-    # Fiber first, then the thread, then the thread-local: the reverse of
-    # `Thread#start`'s exit. While the thread is still listed it is stopped
-    # and scanned (its pthread stack, once its fiber is gone), and after the
-    # list lets go of it nothing reads the `Thread` again — so unlike a
-    # Crystal thread's exit there is no window to cover with a birth root.
+    # While the thread is still listed it is stopped and scanned (its pthread
+    # stack, once its fiber is gone), and after the list lets go of it nothing
+    # reads the `Thread` again — so unlike a Crystal thread's exit there is no
+    # window to cover with a birth root.
     def self.unregister_my_thread : LibGC::Int
       {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
         flags = @@adopted
         return GC_SUCCESS unless flags & 1_u8 != 0
         thread = ::Thread.current?
         return GC_SUCCESS unless thread
-        if fiber = thread.@main_fiber
-          Fiber.inactive(fiber)
-        end
-        ::Thread.gcry_unlist(thread)
-        Crystal::System::Thread.gcry_clear_current_thread
-        @@adopted = 0_u8
+        Gcry::OS.pthread_setspecific(@@exit_key, Pointer(Void).null) if exit_key?
+        drop_adopted(thread)
         {% if flag?(:linux) %}
           if flags & 2_u8 != 0
             mask = uninitialized LibC::SigsetT
@@ -490,21 +617,30 @@ module Gcry
 
     # One `before_collect` hook serves both root sources; it runs in the root
     # phase of every collection, world stopped, where `push_stack` is valid —
-    # which is where Boehm calls its push-other-roots procedure too.
+    # which is where Boehm calls its push-other-roots procedure too. Installed
+    # under `@@ranges_lock`, so it is installed once, and a second caller does
+    # not return before the first has finished installing it.
     private def self.hook_roots : Nil
-      return if @@roots_hooked
-      @@roots_hooked = true
-      GC.before_collect do
-        ranges = @@ranges.get(:acquire)
-        unless ranges.null?
-          i = 0_u64
-          n = ranges[0]
-          while i < n
-            Gcry.default_heap.push_stack(Pointer(Void).new(ranges[1 &+ 2 &* i]), Pointer(Void).new(ranges[2 &+ 2 &* i]))
-            i &+= 1
+      lock_ranges
+      begin
+        return if @@roots_hooked
+        GC.before_collect do
+          table = @@ranges.get(:acquire)
+          unless table.null?
+            i = 0_u64
+            n = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
+            while i < n
+              entry = table + (2 &+ 2 &* i)
+              hi = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
+              Gcry.default_heap.push_stack(Pointer(Void).new(entry[0]), Pointer(Void).new(hi))
+              i &+= 1
+            end
           end
+          @@push_other_roots.try &.call
         end
-        @@push_other_roots.try &.call
+        @@roots_hooked = true
+      ensure
+        unlock_ranges
       end
     end
   end
@@ -823,10 +959,17 @@ end
     Gcry::CAbi.unsupported("GC_beginthreadex", "gcry's thread start assumes the argument is a Crystal Thread")
   end
 {% elsif !flag?(:wasm32) %}
-  # The new thread is staged and its argument rooted until it publishes itself
+  # The new thread is staged and its argument rooted for its life
   # (`GC.pthread_create`); a non-`Thread` argument is rooted as a plain pointer.
+  # On Linux and Darwin the routine runs registered, as in Boehm
+  # (`Gcry::CAbi.pthread_create`); elsewhere gcry cannot register a C thread,
+  # and it runs unregistered.
   fun gcry_c_pthread_create = GC_pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*) : LibC::Int
-    GC.pthread_create(thread, attr, start, arg)
+    {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+      Gcry::CAbi.pthread_create(thread, attr, start, arg)
+    {% else %}
+      GC.pthread_create(thread, attr, start, arg)
+    {% end %}
   end
 
   # `GC.pthread_join`'s bookkeeping, keeping the thread's result, which
