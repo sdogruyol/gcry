@@ -1283,9 +1283,14 @@ module Gcry
     private def allocate(size : UInt64, atomic : Bool, clear : Bool, recycle : Bool = true) : Void*
       refresh_fast_path
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
-      # No mapping can hold it, and the rounding below would overflow: Boehm
-      # saturates such a request and fails it, as this does.
-      if size > UInt64::MAX - ChunkHeader.large_data_offset.to_u64 - Platform.host_page_size
+      # No mapping can hold it, and the rounding below (a word, the large
+      # header, a page) would overflow: Boehm saturates such a request and
+      # fails it, as this does. A literal bound: `Platform.host_page_size` is
+      # a lazily initialised constant on Linux, and reading it here put
+      # `__crystal_once` on the first allocation, made in `GC.init` before
+      # `Crystal.init_runtime` sets up `Crystal::Once`: every Linux process
+      # hung at start (CI, 2026-10-07).
+      if size > Int64::MAX.to_u64
         oom!("allocation too large:", size)
       end
 
