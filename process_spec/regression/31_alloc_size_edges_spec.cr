@@ -15,14 +15,17 @@ require "spec"
 # is `malloc(n)` in both.
 describe "allocation size edges" do
   it "fails a malloc_atomic whose slack would overflow, as malloc fails" do
-    expect_raises(Exception) { GC.malloc(LibC::SizeT::MAX) }
-    expect_raises(Exception) { GC.malloc_atomic(LibC::SizeT::MAX) }
+    # Out of memory, as Boehm's `GC_oom_fn` answers, and nothing else: an
+    # `OverflowError` from the size arithmetic leaves a C caller's `fun`
+    # through `GC_malloc` and kills the process (`39_c_abi_oversize_null`).
+    expect_raises(Gcry::OutOfMemoryError) { GC.malloc(LibC::SizeT::MAX) }
+    expect_raises(Gcry::OutOfMemoryError) { GC.malloc_atomic(LibC::SizeT::MAX) }
   end
 
   it "fails a realloc of an atomic block to SIZE_MAX instead of dropping its contents" do
     p = GC.malloc_atomic(LibC::SizeT.new(64)).as(UInt8*)
     64.times { |i| p[i] = i.to_u8 }
-    expect_raises(Exception) { GC.realloc(p.as(Void*), LibC::SizeT::MAX) }
+    expect_raises(Gcry::OutOfMemoryError) { GC.realloc(p.as(Void*), LibC::SizeT::MAX) }
     64.times { |i| p[i].should eq(i.to_u8) }
   end
 
