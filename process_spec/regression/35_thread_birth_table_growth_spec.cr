@@ -19,6 +19,8 @@ require "spec"
       GC.collect
       baseline = Gcry::ThreadBirthRoot.outstanding
       overflows = Gcry::ThreadBirthRoot.overflows
+      armed = Gcry::ThreadBirthRoot.armed
+      released = Gcry::ThreadBirthRoot.released
       ready = Atomic(Int32).new(0)
       go = Atomic(Int32).new(0)
       workers = [] of Thread
@@ -35,8 +37,14 @@ require "spec"
           Thread.yield
         end
         # All of them alive at once: this is the moment the old table ran out.
-        Gcry::ThreadBirthRoot.outstanding.should be >= baseline + threads
-        Gcry::ThreadBirthRoot.capacity.should be >= baseline + threads
+        # Every worker is rooted, and none of them released while alive. A
+        # collection during the 300 `Thread.new` can still release roots of
+        # threads from before the baseline (darwin CI: 302 outstanding against
+        # a baseline of 5), so only those may have gone.
+        (Gcry::ThreadBirthRoot.armed - armed).should be >= threads
+        (Gcry::ThreadBirthRoot.released - released).should be <= baseline
+        Gcry::ThreadBirthRoot.outstanding.should be >= threads
+        Gcry::ThreadBirthRoot.capacity.should be >= threads
       ensure
         go.set(1)
         workers.each(&.join)

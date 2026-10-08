@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page probed first), and retried next collection otherwise
   (`42_library_sync_during_dlopen_spec.cr`).
 
+- **Spec 35 no longer counts older threads' roots as the workers'.** With
+  300 workers alive it required `baseline + 300` roots outstanding, but a
+  collection during the 300 `Thread.new` can release roots of threads from
+  before the baseline: darwin CI read 302 against a baseline of 5. It now
+  checks that all 300 were armed and that no more than the baseline were
+  released meanwhile; the fixed 256-slot table still fails it (253 armed).
+
 - **Spec 35 no longer fails at random on Windows.** It joined 300 threads
   and then expected their birth roots back after exactly three collections.
   In Crystal 1.21, a thread that finishes before it is joined detaches
