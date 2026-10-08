@@ -176,11 +176,18 @@ module Gcry
     @@on_thread_event : LibGC::OnThreadEventProc? = nil
     @@on_heap_resize : LibGC::OnHeapResizeProc? = nil
 
-    # `GC_add_roots` ranges: `[count, capacity, lo0, hi0, lo1, hi1, ...]`,
-    # words in libc memory. Writers take `@@ranges_lock`. The collector takes
-    # no lock — a mutator stopped holding it would stall the stop — so a
-    # writer fills an entry before it publishes the count covering it, and
-    # moves an end with one word store. A full table is copied into one of
+    # Words per `GC_add_roots` entry: sequence, start, end.
+    ROOT_ENTRY_WORDS = 3_u64
+
+    # `GC_add_roots` ranges: `[count, capacity, seq0, lo0, hi0, seq1, lo1,
+    # hi1, ...]`, words in libc memory. Writers take `@@ranges_lock`. The
+    # collector takes no lock — a mutator stopped holding it would stall the
+    # stop — so a writer fills an entry before it publishes the count covering
+    # it, and moves an end with one word store. A removed entry's end is
+    # stored down to its start, and the next range added takes it over in
+    # place: the sequence word is odd while it does, and the hook takes an
+    # entry only when it read the same even sequence before and after its
+    # start and end (`install_roots_hook`). A full table is copied into one of
     # twice the capacity and published whole. The table it replaces is not
     # freed: the hook may be reading it (a C thread gcry does not stop can
     # add mid-collection), and the tables left behind come to less than the
@@ -280,15 +287,15 @@ module Gcry
         free_entry = Pointer(UInt64).null
         i = 0_u64
         while i < count
-          entry = table + (2 &+ 2 &* i)
+          entry = table + (2 &+ ROOT_ENTRY_WORDS &* i)
           # One with the same start extends it — a removed one too, which
           # takes its start back with the single store of its end.
-          if entry[0] == lo
-            Atomic::Ops.store(entry + 1, hi, LLVM::AtomicOrdering::Release, false) if entry[1] < hi
+          if entry[1] == lo
+            Atomic::Ops.store(entry + 2, hi, LLVM::AtomicOrdering::Release, false) if entry[2] < hi
             return
           end
-          if entry[0] < entry[1]
-            return if entry[0] <= lo && hi <= entry[1]
+          if entry[1] < entry[2]
+            return if entry[1] <= lo && hi <= entry[2]
           elsif free_entry.null?
             free_entry = entry
           end
@@ -299,28 +306,35 @@ module Gcry
           # the table instead of copying it: a copy cannot free the one it
           # replaces, and 2M add/remove pairs over distinct ranges left 45 MB
           # of such copies behind when a full table with removed entries was
-          # compacted into a new one. End to 0 first, then the start, then the
-          # end: the hook reads end, start, end and takes the range only when
-          # both ends agree, so it never pairs one range's start with
-          # another's end (`install_roots_hook`).
-          Atomic::Ops.store(free_entry + 1, 0_u64, LLVM::AtomicOrdering::Release, false)
-          Atomic::Ops.store(free_entry, lo, LLVM::AtomicOrdering::Release, false)
-          Atomic::Ops.store(free_entry + 1, hi, LLVM::AtomicOrdering::Release, false)
+          # compacted into a new one. The sequence word is odd while the start
+          # and end change, and the hook skips or rereads an entry whose
+          # sequence moved under it, so it never pairs one range's start with
+          # another's end, whatever the generations in between; a writer
+          # frozen here leaves it odd, and a range whose `add_roots` has not
+          # returned is not one the hook owes a scan.
+          seq = free_entry[0]
+          Atomic::Ops.store(free_entry, seq &+ 1, LLVM::AtomicOrdering::Monotonic, false)
+          Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
+          Atomic::Ops.store(free_entry + 1, lo, LLVM::AtomicOrdering::Monotonic, false)
+          Atomic::Ops.store(free_entry + 2, hi, LLVM::AtomicOrdering::Monotonic, false)
+          Atomic::Ops.store(free_entry, seq &+ 2, LLVM::AtomicOrdering::Release, false)
           return
         end
         if table.null? || count == table[1]
           capacity = table.null? ? 8_u64 : table[1] &* 2
-          fresh = LibC.malloc(LibC::SizeT.new((2 &+ 2 &* capacity) &* 8)).as(UInt64*)
+          fresh = LibC.malloc(LibC::SizeT.new((2 &+ ROOT_ENTRY_WORDS &* capacity) &* 8)).as(UInt64*)
           unsupported("GC_add_roots", "out of memory for the root table") if fresh.null?
           fresh[0] = count
           fresh[1] = capacity
-          (table + 2).copy_to(fresh + 2, 2 &* count) unless table.null?
+          (table + 2).copy_to(fresh + 2, ROOT_ENTRY_WORDS &* count) unless table.null?
           @@ranges.set(fresh, :release)
           @@root_table_copies += 1
           table = fresh
         end
-        Atomic::Ops.store(table + (2 &+ 2 &* count), lo, LLVM::AtomicOrdering::Release, false)
-        Atomic::Ops.store(table + (3 &+ 2 &* count), hi, LLVM::AtomicOrdering::Release, false)
+        entry = table + (2 &+ ROOT_ENTRY_WORDS &* count)
+        entry[0] = 0_u64
+        entry[1] = lo
+        entry[2] = hi
         Atomic::Ops.store(table, count &+ 1, LLVM::AtomicOrdering::Release, false)
       ensure
         unlock_ranges
@@ -345,9 +359,9 @@ module Gcry
         count = table[0]
         i = 0_u64
         while i < count
-          entry = table + (2 &+ 2 &* i)
-          if entry[0] < entry[1] && lo <= entry[0] && entry[1] <= hi
-            Atomic::Ops.store(entry + 1, entry[0], LLVM::AtomicOrdering::Release, false)
+          entry = table + (2 &+ ROOT_ENTRY_WORDS &* i)
+          if entry[1] < entry[2] && lo <= entry[1] && entry[2] <= hi
+            Atomic::Ops.store(entry + 2, entry[1], LLVM::AtomicOrdering::Release, false)
           end
           i &+= 1
         end
@@ -364,8 +378,8 @@ module Gcry
       live = 0
       i = 0_u64
       while i < count
-        entry = table + (2 &+ 2 &* i)
-        live += 1 if entry[0] < Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
+        entry = table + (2 &+ ROOT_ENTRY_WORDS &* i)
+        live += 1 if Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false) < Atomic::Ops.load(entry + 2, LLVM::AtomicOrdering::Acquire, false)
         i &+= 1
       end
       live
@@ -788,15 +802,23 @@ module Gcry
           i = 0_u64
           n = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
           while i < n
-            entry = table + (2 &+ 2 &* i)
-            # End, start, end: an entry `add_roots` is taking over in place
-            # (end 0, start, end) is skipped unless both ends agree, so a
-            # start is never paired with another range's end; a removed
-            # range reads as empty (`remove_roots`).
-            hi = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
-            lo = Atomic::Ops.load(entry, LLVM::AtomicOrdering::Acquire, false)
-            again = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
-            Gcry.default_heap.push_stack(Pointer(Void).new(lo), Pointer(Void).new(hi)) if hi == again && lo < hi
+            entry = table + (2 &+ ROOT_ENTRY_WORDS &* i)
+            # Sequence, start, end, sequence: an entry `add_roots` is taking
+            # over in place has an odd sequence, or one that moved by the
+            # second read, and is skipped or read again — so a start is never
+            # paired with another range's end. An end extended or removed in
+            # place is one store, so either value read is a whole range; a
+            # removed range reads as empty (`remove_roots`).
+            loop do
+              seq = Atomic::Ops.load(entry, LLVM::AtomicOrdering::Acquire, false)
+              break if seq.odd?
+              lo = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Monotonic, false)
+              hi = Atomic::Ops.load(entry + 2, LLVM::AtomicOrdering::Monotonic, false)
+              Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+              next unless Atomic::Ops.load(entry, LLVM::AtomicOrdering::Monotonic, false) == seq
+              Gcry.default_heap.push_stack(Pointer(Void).new(lo), Pointer(Void).new(hi)) if lo < hi
+              break
+            end
             i &+= 1
           end
         end
