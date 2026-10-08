@@ -82,13 +82,15 @@ describe "GC_add_roots" do
           p.as(UInt8*).fill(BLOCK_BYTES) { PATTERN }
           slot.value = p
           slots[i] = slot
-          hidden[i] = p.address ^ MASK
-          p = Pointer(Void).null
           ready.add(1)
           until go.get != 0
             Intrinsics.pause
           end
           LibGC.add_roots(slot.as(Void*), (slot + 1).as(Void*))
+          # `p` is used here, after the range holds the block: until then a
+          # collection in another worker's allocation could sweep it. The
+          # thread is gone before the collections below, and its stack with it.
+          hidden[i] = p.address ^ MASK
         end
       end
       until ready.get == threads

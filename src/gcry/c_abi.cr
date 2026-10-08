@@ -172,8 +172,13 @@ module Gcry
     @@on_collection_event : LibGC::OnCollectionEventProc? = nil
     @@on_thread_event : LibGC::OnThreadEventProc? = nil
     @@on_heap_resize : LibGC::OnHeapResizeProc? = nil
-    # Set under `@@ranges_lock`, once the hook that reads `@@ranges` is in.
-    @@roots_hooked = false
+    # `hook_roots` once-state: 0 not installed, 1 installing, 2 installed.
+    # Its own state rather than `@@ranges_lock`: installing allocates, which
+    # may collect and run a finalizer that calls `GC_add_roots` again on this
+    # thread, and that lock does not nest.
+    @@roots_hook_state = 0
+    # Thread installing the hook while the state is 1.
+    @@roots_hook_installer = 0_u64
 
     # `GC_add_roots` ranges: `[count, capacity, lo0, hi0, lo1, hi1, ...]`,
     # words in libc memory. Writers take `@@ranges_lock`. The collector takes
@@ -617,30 +622,44 @@ module Gcry
 
     # One `before_collect` hook serves both root sources; it runs in the root
     # phase of every collection, world stopped, where `push_stack` is valid —
-    # which is where Boehm calls its push-other-roots procedure too. Installed
-    # under `@@ranges_lock`, so it is installed once, and a second caller does
-    # not return before the first has finished installing it.
+    # which is where Boehm calls its push-other-roots procedure too. A second
+    # caller waits for the first to finish installing it; the installer's own
+    # re-entry (a finalizer run by the collection its allocation started)
+    # returns at once, and the outer call installs it before returning.
     private def self.hook_roots : Nil
-      lock_ranges
-      begin
-        return if @@roots_hooked
-        GC.before_collect do
-          table = @@ranges.get(:acquire)
-          unless table.null?
-            i = 0_u64
-            n = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
-            while i < n
-              entry = table + (2 &+ 2 &* i)
-              hi = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
-              Gcry.default_heap.push_stack(Pointer(Void).new(entry[0]), Pointer(Void).new(hi))
-              i &+= 1
-            end
+      loop do
+        case Atomic::Ops.load(pointerof(@@roots_hook_state), LLVM::AtomicOrdering::Acquire, false)
+        when 2 then return
+        when 0
+          _, won = Atomic::Ops.cmpxchg(pointerof(@@roots_hook_state), 0, 1,
+            LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
+          if won
+            @@roots_hook_installer = Platform.current_thread_id
+            install_roots_hook
+            Atomic::Ops.store(pointerof(@@roots_hook_state), 2, LLVM::AtomicOrdering::Release, false)
+            return
           end
-          @@push_other_roots.try &.call
+        else
+          return if @@roots_hook_installer == Platform.current_thread_id
+          Intrinsics.pause
         end
-        @@roots_hooked = true
-      ensure
-        unlock_ranges
+      end
+    end
+
+    private def self.install_roots_hook : Nil
+      GC.before_collect do
+        table = @@ranges.get(:acquire)
+        unless table.null?
+          i = 0_u64
+          n = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
+          while i < n
+            entry = table + (2 &+ 2 &* i)
+            hi = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
+            Gcry.default_heap.push_stack(Pointer(Void).new(entry[0]), Pointer(Void).new(hi))
+            i &+= 1
+          end
+        end
+        @@push_other_roots.try &.call
       end
     end
   end
