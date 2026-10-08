@@ -141,18 +141,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ThreadBirthRoot.arm` → `delete_root` spun for over 120 s; on Linux, next
   to 1, 3 or 6 such threads, a thread's 100 calls each waited through up to
   1 174, 4 727 and 1 383 collections. The section now goes to waiters in
-  arrival order, `@roots_lock` is a FIFO ticket lock (`Gcry::TicketLock`),
-  and `GC.collect` returns once a full collection that began after the call
-  has finished, whichever thread ran it — Boehm's guarantee for
-  `GC_gcollect` — so calls queued behind one collection share the next
+  arrival order, and `GC.collect` returns once a full collection that began
+  after the call has finished, whichever thread ran it — Boehm's guarantee
+  for `GC_gcollect` — so calls queued behind one collection share the next
   (`Heap#collect_satisfied_by_peer`). The same calls now wait through at
   most 2 collections (1.01–1.03 on average). A queued `GC.collect` no
   longer turns the cycle in flight into a releasing one either.
-  `thread_birth_fiber` collects back to back again, without the yield that
-  hid this, and `50_collector_lock_fairness_spec.cr` failed 20 of 20 runs
-  before (threads served one after another, single calls waiting through
-  100–301 collections) and passed 80 of 80 after, on one CPU and with 24
-  busy threads included.
+  `@roots_lock` (`Gcry::RootsLock`) lets the mutators already waiting when
+  a stop arrives have it first: the stop yields the CPU until that many
+  acquisitions have happened, for 50 ms at most, then competes. Mutators
+  keep a plain test-and-set among themselves. A FIFO ticket lock tried
+  first convoyed every slow `realloc` (its pin takes this lock twice) once
+  threads outnumbered CPUs — 16 threads growing arrays on 4 CPUs went from
+  1.1 s to 41 s — and this one runs that at master's pace (0.38–0.45 s
+  against 0.39–0.47). `thread_birth_fiber` collects back to back again,
+  without the yield that hid this, and
+  `50_collector_lock_fairness_spec.cr` failed 20 of 20 runs before
+  (threads served one after another, single calls waiting through 100–301
+  collections) and passes on one and two CPUs after; its roots-lock
+  example lets the stop back in first in 81–100 of 100 rounds on the old
+  spin lock.
 
 - **Specs.** `21_boehm_c_abi_spec`'s `GC_add_roots` example failed every
   standalone run on Linux x86_64, master included, on one conservatively

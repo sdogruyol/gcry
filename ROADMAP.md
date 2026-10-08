@@ -3883,9 +3883,12 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       **FIXED (2026-10-08, readiness-2)** in the product, both ways: the
       collection section hands over in arrival order, `GC.collect` returns
       once any full collection that began after the call has finished, and
-      `@roots_lock` is a FIFO ticket lock (`Gcry::TicketLock`). The harness
-      yield is gone; `process_spec/regression/50_collector_lock_fairness_spec.cr`
-      failed 20 of 20 before and passed 80 of 80 after.
+      `@roots_lock` (`Gcry::RootsLock`) lets the mutators waiting when a
+      stop arrives in first, yielding for 50 ms at most; a FIFO ticket lock
+      tried first convoyed `realloc` pins past the CPU count (16 threads on 4
+      CPUs: 1.1 s → 41 s). The harness yield is gone;
+      `process_spec/regression/50_collector_lock_fairness_spec.cr` failed 20
+      of 20 before and passes on one and two CPUs after.
 - [ ] **Attribute the residual per-rep spread** — open below. Until it closes it
       bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp
       on post-GC RSS, at 12 reps.
