@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A large object over 4 GiB is scanned, sized and reallocated at its
+  whole size.** The large block header kept the size in 32 bits and both
+  `alloc_large` paths stored `payload.to_u32!`, so a block of 4 GiB + 1 MiB
+  recorded 1 MiB: the mark scanned its first 1 MiB and swept what it held
+  beyond while live, `GC_size` answered 1 MiB (0 for a pointer past it), and
+  `realloc` to its own size moved it and copied 1 MiB. Bits 32–47 of the
+  size now ride in the header's unused flag bits 16–31 (`BlockHeader.large`
+  / `large_size`, `ChunkHeader.large_payload`), and every reader
+  (`block_payload`, `owned_size`, `find_object`, the parallel mark's split,
+  poisoning, the sweep's zero-header tripwire) reads all of it. A payload of
+  2^48 or more fails as out of memory. Small blocks are unchanged
+  (`process_spec/regression/43_large_object_over_4gib_spec.cr`: 2 of 2
+  failing before on Windows).
+
+- **A finalizer that suspends no longer stops other fibers draining the
+  queue.** The nested-drain guard was thread-local and set for as long as
+  the draining fiber was inside `run_pending`, suspended or not, so every
+  other fiber on that thread skipped the queue meanwhile; a fiber that
+  resumed on another thread cleared the first thread's flag through a stale
+  TLS address. The guard is now the fiber's own (`Fiber#gcry_draining?`),
+  with a thread-local fallback only where no fiber is current
+  (`44_finalizer_suspend_drain_spec.cr`: 0 of 200 ran before, ≥ 192 after).
+
+- **The first `GC_add_roots` no longer allocates under its lock.** Installing
+  the root hook (`GC.before_collect`) allocated while `@@ranges_lock` was
+  held; a collection there could run a finalizer that calls `GC_add_roots`
+  and spin on the same lock forever. The hook is installed once through its
+  own once-state, outside the lock, which now covers only the table update.
+  Spec 41 also keeps each block reachable until its range is added.
+
 - **A finalizer that calls `GC.collect` no longer runs the rest of the
   queue nested inside itself.** Since `run_pending` takes one node at a time
   (queued objects stay roots until they run), the collection a finalizer
