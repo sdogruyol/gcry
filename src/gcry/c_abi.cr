@@ -212,6 +212,17 @@ module Gcry
       LibC.abort
     end
 
+    # Boehm's `ABORT("Bad arg to ...")`: a call Boehm itself refuses, not one
+    # gcry cannot honour.
+    def self.bad_arg(name : String) : NoReturn
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: Bad arg to ")
+      len = RawOut.append(buf.to_unsafe, len, name)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+      LibC.abort
+    end
+
     # Boehm's `GC_base`: the start of the live block containing *pointer*, or
     # null. Interior pointers resolve, as in Boehm.
     def self.base(pointer : Void*) : Void*
@@ -879,9 +890,17 @@ fun gcry_c_general_register_disappearing_link = GC_general_register_disappearing
   Gcry.default_heap.register_disappearing_link(link, obj) ? 0 : 1
 end
 
-# Boehm's short form: the object is the one `*link` points into, `GC_base(*link)`.
+# Boehm's short form, for a link that is a field of a heap object: the link is
+# cleared when *that* object becomes unreachable, `GC_base(link)` — the
+# cycle-breaking idiom, a finalizable object's pointer to its partner nulled
+# before its finalizer runs. A link outside the heap is Boehm's "Bad arg"
+# abort (finalize.c). Until 2026-10-08 gcry took `*link`'s object instead,
+# Crystal's `GC.register_disappearing_link` rule, so such a field was never
+# cleared while its target lived.
 fun gcry_c_register_disappearing_link = GC_register_disappearing_link(link : Void**) : LibGC::Int
-  Gcry.default_heap.register_disappearing_link(link) ? 0 : 1
+  base = Gcry::CAbi.base(link.as(Void*))
+  Gcry::CAbi.bad_arg("GC_register_disappearing_link") if base.null?
+  Gcry.default_heap.register_disappearing_link(link, base) ? 0 : 1
 end
 
 # 1 when *link* was registered and is not any more, 0 when it was not
