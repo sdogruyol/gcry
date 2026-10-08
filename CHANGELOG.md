@@ -166,7 +166,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standalone run on Linux x86_64, master included, on one conservatively
   held control block; it now holds to eight blocks with one allowed.
   `31_alloc_size_edges_spec` expects `Gcry::OutOfMemoryError` for an
-  oversize request rather than any exception.
+  oversize request rather than any exception. `make
+  parallel-mark-termination` bounds each arm's child at 120 s: its red arm
+  corrupts the mark on purpose, and once on Windows CI it hung on that
+  until the 30-minute job timeout instead of failing.
 
 - **A large object over 4 GiB is scanned, sized and reallocated at its
   whole size.** The large block header kept the size in 32 bits and both
