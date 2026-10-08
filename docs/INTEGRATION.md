@@ -102,8 +102,8 @@ points, on gcry's heap: `crystal i` resolves its interpreted program's
 `LibGC` calls from the compiler binary, Crystal's `spec/std` calls
 `LibGC.size`, and C code linked into the program can call them. Where gcry
 has no equivalent the call prints what is missing and aborts
-(`GC_set_max_heap_size`; on Windows the signal
-queries). Behaviour that differs from a plain reading of the names, each
+(`GC_set_max_heap_size`). Behaviour that differs from a plain reading of
+the names, each
 pinned by a regression:
 
 | Call | gcry, as Boehm | Regression |
@@ -202,7 +202,7 @@ regressions named.
 | `realloc` shrink / move | — | Shrink keeps the block; on a move the old block is left to the sweep | Differs (`30_*`) |
 | `GC_invoke_finalizers` | Runs pending, returns count | Returns 0 (finalizers run by the collector) | Differs |
 | `GC_set_start_callback` | Full collections, after `GC_EVENT_START` | Every collection (incl. minor, idle), before `GC_EVENT_START` | Differs (`28_*`) |
-| `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Crystal's signals on Linux and Darwin; abort on Windows | Differs |
+| `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Crystal's signals on Linux and Darwin; -1 on Windows | Differs on Darwin (`21_*`) |
 | `GC_get_prof_stats` | Returns bytes filled | Returns nothing | Differs |
 | `unmapped_bytes` (stats, `GC_get_heap_usage_safe`) | Currently unmapped | Cumulative bytes returned to the OS | Differs |
 | `GC_set_max_heap_size` | Heap limit | Abort | Differs |
@@ -223,7 +223,7 @@ Process GC runs on Windows x86_64 (Crystal's MSVC distribution) and ARM64
 | Win32 thread suspend / resume STW | In gcry (`SuspendThread` + `GetThreadContext`, FP/SIMD included) |
 | Soft-dirty / mprotect barrier | Not available; full collections only |
 | Large-object recycler, `realloc` page move | Linux-only; `GCRY_LARGE_RECYCLE` / `GCRY_REALLOC_MOVE` have no effect |
-| Boehm C ABI | As on Linux and macOS, thread registration and `GC_beginthreadex` included; the signal getters abort (§ Boehm parity) |
+| Boehm C ABI | As on Linux and macOS, thread registration and `GC_beginthreadex` included; the signal getters answer -1, as Boehm's (§ Boehm parity) |
 | Windows CI | x86_64 and native ARM64: specs, samples, and the Linux gates that hold there; not Crystal's `spec/std` or `compiler_spec` |
 | Workload numbers | x86_64 on a 12-vCPU QEMU/KVM VM only; ARM64 unmeasured ([WINDOWS.md](WINDOWS.md)) |
 

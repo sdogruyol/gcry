@@ -80,9 +80,8 @@ scrubbing dead stack. Conservative root scans include that red zone.
 - Boehm C ABI (`c_abi.cr`): a C-created thread registers with
   `GC_register_my_thread` as on Linux and macOS, and one that exits still
   registered comes off the thread list through an FLS callback;
-  `GC_beginthreadex` starts a thread that is registered for its routine.
-  `GC_get_suspend_signal` and `GC_get_thr_restart_signal` print what is
-  missing and abort; Boehm's return -1 here. See
+  `GC_beginthreadex` starts a thread that is registered for its routine,
+  and the stop-signal getters answer -1, as Boehm's do here. See
   [INTEGRATION.md § Boehm parity](INTEGRATION.md#boehm-parity).
 - The large-object recycler and the `realloc` page move are Linux-only:
   `GCRY_LARGE_RECYCLE` and `GCRY_REALLOC_MOVE` have no effect on Windows
