@@ -492,11 +492,10 @@ module Gcry
     GC_UNIMPLEMENTED = 3
 
     # A thread C created is registered by putting it on Crystal's thread list,
-    # which is the set gcry stops and scans on every platform. Linux and
-    # Darwin only: Windows would need the duplicated handle closed again and
-    # is unbuilt, and OpenBSD/Android keep `Thread.current` in a pthread key
+    # which is the set gcry stops and scans on every platform. Linux, Darwin
+    # and Windows: OpenBSD/Android keep `Thread.current` in a pthread key
     # rather than the thread-local cleared below.
-    {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+    {% if (flag?(:linux) || flag?(:darwin) || flag?(:win32)) && !flag?(:android) %}
       # Bit 0: this thread was adopted by `register_my_thread`, so it is the
       # one to take off the list again — a Crystal thread leaves it in its own
       # `Thread#start`, and deleting a node twice corrupts the list. Bit 1: the
@@ -514,6 +513,14 @@ module Gcry
       # to find it: Darwin frees those in a key destructor of its own, which
       # may run first. 0: not made, 1: being made, 2: made, 3: refused
       # (registration goes on without one).
+      #
+      # On Windows the key is an FLS slot whose callback runs on the exiting
+      # thread, before its TLS goes (`Gcry::OS.pthread_key_create`). Without
+      # it a stop skips such a thread only if `SuspendThread` refuses it and
+      # `WaitForSingleObject` shows it gone (windows_stw.cr), and the list
+      # keeps its `Thread`, its main fiber over a freed stack, and its handle.
+      # A thread ended by `TerminateThread`, or by `ExitProcess` from another,
+      # runs no callback and is left to that skip.
       @@exit_key_state = 0
       @@exit_key = uninitialized Gcry::OS::GcryPthreadKeyT
 
@@ -543,47 +550,58 @@ module Gcry
           Fiber.inactive(fiber)
         end
         ::Thread.gcry_unlist(thread)
+        {% if flag?(:win32) %}
+          # The handle `Thread.new` duplicated, which only a stop read, and a
+          # stop walks the list under the lock `gcry_unlist` just took: as
+          # `Thread#start` ends with `system_close`, without the join no C
+          # caller would make.
+          LibC.CloseHandle(thread.to_unsafe)
+        {% end %}
         Crystal::System::Thread.gcry_clear_current_thread
         @@adopted = 0_u8
       end
 
-      # `GC_pthread_create`'s routine and argument, carried to the new thread
-      # in libc memory.
-      private record PthreadStart, start : Void* -> Void*, arg : Void*
+      # Windows has no `GC_pthread_create`; its `GC_beginthreadex` stays
+      # unsupported (below).
+      {% unless flag?(:win32) %}
+        # `GC_pthread_create`'s routine and argument, carried to the new thread
+        # in libc memory.
+        private record PthreadStart, start : Void* -> Void*, arg : Void*
 
-      # Boehm's `GC_pthread_create` registers the thread before the routine
-      # runs and unregisters it after (`GC_pthread_start`). Until 2026-10-07
-      # gcry's ran the routine directly: the thread was never on Crystal's
-      # list, so no stop suspended it or scanned its stack, and what it held
-      # there alone was swept under it
-      # (`process_spec/regression/40_gc_pthread_create_registers_spec.cr`).
-      # *arg* is rooted for the thread's life as before (`GC.pthread_create`),
-      # and held by this frame until it is.
-      def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*) : LibC::Int
-        data = LibC.malloc(sizeof(PthreadStart)).as(PthreadStart*)
-        return LibC::EAGAIN if data.null?
-        data.value = PthreadStart.new(start, arg)
-        ret = GC.pthread_create(thread, attr, ->(raw : Void*) { CAbi.pthread_start(raw) }, data.as(Void*), arg)
-        LibC.free(data.as(Void*)) unless ret == 0
-        ret
-      end
+        # Boehm's `GC_pthread_create` registers the thread before the routine
+        # runs and unregisters it after (`GC_pthread_start`). Until 2026-10-07
+        # gcry's ran the routine directly: the thread was never on Crystal's
+        # list, so no stop suspended it or scanned its stack, and what it held
+        # there alone was swept under it
+        # (`process_spec/regression/40_gc_pthread_create_registers_spec.cr`).
+        # *arg* is rooted for the thread's life as before (`GC.pthread_create`),
+        # and held by this frame until it is.
+        def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*) : LibC::Int
+          data = LibC.malloc(sizeof(PthreadStart)).as(PthreadStart*)
+          return LibC::EAGAIN if data.null?
+          data.value = PthreadStart.new(start, arg)
+          ret = GC.pthread_create(thread, attr, ->(raw : Void*) { CAbi.pthread_start(raw) }, data.as(Void*), arg)
+          LibC.free(data.as(Void*)) unless ret == 0
+          ret
+        end
 
-      # On the new thread, its own pthread stack the base. A registration
-      # refused (no stop-the-world collector) runs the routine unregistered.
-      def self.pthread_start(raw : Void*) : Void*
-        data = raw.as(PthreadStart*)
-        start = data.value.start
-        arg = data.value.arg
-        LibC.free(raw)
-        registered = register_my_thread(Pointer(LibGC::StackBase).null) == GC_SUCCESS
-        result = start.call(arg)
-        unregister_my_thread if registered
-        result
-      end
+        # On the new thread, its own pthread stack the base. A registration
+        # refused (no stop-the-world collector) runs the routine unregistered.
+        def self.pthread_start(raw : Void*) : Void*
+          data = raw.as(PthreadStart*)
+          start = data.value.start
+          arg = data.value.arg
+          LibC.free(raw)
+          registered = register_my_thread(Pointer(LibGC::StackBase).null) == GC_SUCCESS
+          result = start.call(arg)
+          unregister_my_thread if registered
+          result
+        end
+      {% end %}
     {% end %}
 
     def self.register_my_thread(sb : LibGC::StackBase*) : LibGC::Int
-      {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+      {% if (flag?(:linux) || flag?(:darwin) || flag?(:win32)) && !flag?(:android) %}
         heap = Gcry.default_heap?
         return GC_UNIMPLEMENTED unless heap && heap.stop_the_world
         return GC_DUPLICATE if ::Thread.current?
@@ -610,7 +628,9 @@ module Gcry
         # A second mutator from here on, as `GC.pthread_create` arranges.
         heap.heap_counters_atomic = true unless heap.heap_counters_atomic_pinned
         # Crystal's constructor for a thread that already exists: its `Thread`
-        # and main fiber over the pthread stack, pushed onto the lists.
+        # and main fiber over the thread's stack, pushed onto the lists. On
+        # Windows the `Thread` holds a duplicate of the thread's handle, which
+        # is what a stop suspends, and `drop_adopted` closes.
         thread = heap.registering_thread { ::Thread.new }
         Crystal::System::Thread.current_thread = thread
         @@adopted = flags
@@ -626,7 +646,7 @@ module Gcry
     # reads the `Thread` again — so unlike a Crystal thread's exit there is no
     # window to cover with a birth root.
     def self.unregister_my_thread : LibGC::Int
-      {% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+      {% if (flag?(:linux) || flag?(:darwin) || flag?(:win32)) && !flag?(:android) %}
         flags = @@adopted
         return GC_SUCCESS unless flags & 1_u8 != 0
         thread = ::Thread.current?
@@ -701,7 +721,7 @@ module Gcry
   end
 end
 
-{% if (flag?(:linux) || flag?(:darwin)) && !flag?(:android) %}
+{% if (flag?(:linux) || flag?(:darwin) || flag?(:win32)) && !flag?(:android) %}
   class Thread
     # :nodoc:
     # Takes a thread `GC_register_my_thread` adopted off the list again; the
@@ -716,7 +736,12 @@ end
     # `current_thread=` takes no nil. A thread that unregistered must not
     # keep naming a `Thread` the collector may since have swept.
     def self.gcry_clear_current_thread : Nil
-      @@current_thread = nil
+      {% if flag?(:win32) && flag?(:gnu) %}
+        # MinGW keeps it in a TLS slot rather than a thread-local.
+        LibC.TlsSetValue(@@current_key, Pointer(Void).null)
+      {% else %}
+        @@current_thread = nil
+      {% end %}
     end
   end
 {% end %}
@@ -955,9 +980,9 @@ end
 # and company), until 2026-10-06 absent. The thread goes on Crystal's thread
 # list, which is how gcry stops and scans every thread
 # (`Gcry::CAbi.register_my_thread`); it must unregister before it exits, as
-# Boehm requires, and must not touch the heap after. Linux and Darwin; the
-# others answer `GC_UNIMPLEMENTED` (3). Registration is always allowed, so
-# `GC_allow_register_threads` has nothing to do.
+# Boehm requires, and must not touch the heap after. Linux, Darwin and
+# Windows; the others answer `GC_UNIMPLEMENTED` (3). Registration is always
+# allowed, so `GC_allow_register_threads` has nothing to do.
 fun gcry_c_register_my_thread = GC_register_my_thread(sb : LibGC::StackBase*) : LibGC::Int
   Gcry::CAbi.register_my_thread(sb)
 end
