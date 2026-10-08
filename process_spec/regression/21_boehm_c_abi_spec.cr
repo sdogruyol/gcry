@@ -219,12 +219,15 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
       moved = LibGC::StackBase.new(mem_base: high - 64)
       LibGC.set_stackbottom(nil, pointerof(moved))
       LibGC.stackbottom.should eq(high - 64)
+      other = Pointer(Void).null
       Thread.new do
         LibGC.get_my_stackbottom(out own)
+        other = own.mem_base
         LibGC.set_stackbottom(nil, pointerof(own))
         {% unless flag?(:without_mt) %} GC.set_stackbottom(Thread.current, own.mem_base) {% end %}
       end.join
-      LibGC.stackbottom.should eq(high - 64)
+      LibGC.stackbottom.should eq(high - 64),
+        "GC_stackbottom #{LibGC.stackbottom}, set to #{high - 64} on the main thread (#{Gcry::Platform.current_thread_id}); the other thread's bottom was #{other}"
       {% unless flag?(:without_mt) %}
         GC.set_stackbottom(Thread.current, high)
         LibGC.stackbottom.should eq(high)
