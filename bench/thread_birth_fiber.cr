@@ -16,10 +16,11 @@
 # and never had the gap; this runs there too so it stays that way.
 #
 # One thread collects back to back while main starts threads one at a time.
-# Each new thread collects once itself — that walk marks every listed fiber,
-# so a freed one is reported as free rather than kept by it — and then asks
-# whether its own main fiber is still an allocated block whose stack is the
-# thread's own.
+# Each new thread calls `GC.collect` once itself — the collection that answers
+# it began after the call, on this thread or the collector, and walks every
+# listed fiber, so a freed one is reported as free rather than kept by it —
+# and then asks whether its own main fiber is still an allocated block whose
+# stack is the thread's own.
 #
 #   crystal build -Dgc_none bench/thread_birth_fiber.cr -o bin/thread_birth_fiber
 #   bin/thread_birth_fiber [births]    default 300
@@ -38,19 +39,18 @@ collections = Atomic(Int64).new(0_i64)
 lost = Atomic(Int32).new(0)
 foreign = Atomic(Int32).new(0)
 
-# A short gap after each collection. Each birth thread runs its own
-# `GC.collect`, which waits on the collection mutex, and a peer that re-takes
-# that mutex the instant it drops it can keep an unfair lock (SRWLock on
-# Windows) from a waiter indefinitely: 2 of 173 runs on one windows-latest
-# runner stalled that way, the birth thread asleep on the mutex and the
-# collector still collecting (2026-09-30). A yield after the unlock lets the
-# woken waiter take it; a sleep would have been simpler and cut the
-# collections a Linux run overlaps from ~5 000 to 63.
+# The collector collects with no gap, and each birth thread's own `GC.collect`
+# queues behind it. Until 2026-10-09 this loop yielded after each collection:
+# the collection mutex did not hand over, and a peer that re-took it the
+# instant it dropped it kept a birth thread asleep on it indefinitely — 2 of
+# 173 runs on one windows-latest runner, the collector still collecting
+# (2026-09-30). The section now goes to waiters in arrival order, and the
+# birth thread's call is answered by the next collection, so the loop is back
+# to the shape that stalled.
 collector = Thread.new(name: "collector") do
   until stop.get == 1
     GC.collect
     collections.add(1)
-    Thread.yield
   end
 end
 
