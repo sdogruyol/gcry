@@ -1054,4 +1054,14 @@ class Fiber
   def self.gcry_unlock_list : Nil
     @@fibers.@mutex.unlock
   end
+
+  # gcry: set while this fiber is in `Finalizers::Registry#run_pending`.
+  @gcry_draining = false
+
+  def gcry_draining? : Bool
+    @gcry_draining
+  end
+
+  def gcry_draining=(@gcry_draining : Bool) : Nil
+  end
 end

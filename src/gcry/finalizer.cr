@@ -489,15 +489,21 @@ module Gcry
         end
       end
 
-      # Set while this thread is in `run_pending`. A finalizer that collects
+      # Set while a fiber is in `run_pending`. A finalizer that collects
       # ends that collection in `run_pending` again, which took the next node
       # off the queue and ran it one frame deeper: nesting as deep as the
       # queue was long, a stack overflow at 5 000 (2026-10-07,
       # `process_spec/regression/37_nested_finalizer_collect_spec.cr`). The
       # outer loop drains what the inner collection queues. Boehm bounds the
       # same recursion per thread (`GC_check_finalizer_nested`).
+      #
+      # Per fiber, not per thread: a finalizer that suspends its fiber left a
+      # thread flag set, so every other fiber on that thread skipped the queue
+      # (`process_spec/regression/44_finalizer_suspend_drain_spec.cr`), and a
+      # fiber resumed on another Parallel thread cleared the first thread's
+      # TLS. The thread flag is only for threads with no current fiber.
       @[ThreadLocal]
-      @@draining : Bool = false
+      @@draining_no_fiber : Bool = false
 
       # One node at a time, each taken off the queue only when its finalizer
       # is about to run: until then it is still on `@pending`, which every
@@ -505,11 +511,15 @@ module Gcry
       # finalizer does — another thread's — therefore still keeps every object
       # queued behind it, and the one running is on this thread's stack.
       def run_pending : Nil
-        return if @@draining
-        # Cleared through the address taken here: a finalizer that blocks may
-        # resume on another thread of a parallel execution context.
-        draining = pointerof(@@draining)
-        draining.value = true
+        # `Thread.current?`: `Thread.current` allocates on a raw thread.
+        fiber = ::Thread.current?.try(&.@current_fiber)
+        if fiber
+          return if fiber.gcry_draining?
+          fiber.gcry_draining = true
+        else
+          return if @@draining_no_fiber
+          @@draining_no_fiber = true
+        end
         begin
           loop do
             @lock.lock
@@ -529,7 +539,11 @@ module Gcry
             Finalizers.invoke(object, callback, c_abi)
           end
         ensure
-          draining.value = false
+          if fiber
+            fiber.gcry_draining = false
+          else
+            @@draining_no_fiber = false
+          end
         end
       end
 
