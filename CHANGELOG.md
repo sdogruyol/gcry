@@ -50,7 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   object's rows, and each row remembers its slot: a registration is one
   probe, a removal — the collector's included — none, and nothing
   allocates with the world stopped. Replacing costs 23–43 ns from 10 k to
-  160 k. A re-registered disappearing link (`GC_DUPLICATE`) is one probe
+  160 k. A fresh `GC.add_finalizer` costs 70 ns against 64 on master (the
+  index's growth re-points rows in one sequential pass), and allocating 2 M
+  finalizable objects, collecting and finalizing them takes 286 ms against
+  321. A re-registered disappearing link (`GC_DUPLICATE`) is one probe
   into a location-to-row map, and `GC.free` scans the link table only for
   an object that has a link. A randomized spec checks every index against a
   brute-force model, with the index working and given up
