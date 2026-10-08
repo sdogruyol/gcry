@@ -103,8 +103,7 @@ points, on gcry's heap: `crystal i` resolves its interpreted program's
 `LibGC.size`, and C code linked into the program can call them. Where gcry
 has no equivalent the call prints what is missing and aborts
 (`GC_set_max_heap_size`). Behaviour that differs from a plain reading of
-the names, each
-pinned by a regression:
+the names, each pinned by a regression:
 
 | Call | gcry, as Boehm | Regression |
 |------|----------------|------------|
