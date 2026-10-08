@@ -32,12 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a thread-local fallback only where no fiber is current
   (`44_finalizer_suspend_drain_spec.cr`: 0 of 200 ran before, ≥ 192 after).
 
-- **The first `GC_add_roots` no longer allocates under its lock.** Installing
-  the root hook (`GC.before_collect`) allocated while `@@ranges_lock` was
-  held; a collection there could run a finalizer that calls `GC_add_roots`
-  and spin on the same lock forever. The hook is installed once through its
-  own once-state, outside the lock, which now covers only the table update.
-  Spec 41 also keeps each block reachable until its range is added.
+- **`GC_add_roots` no longer installs its root hook mid-call.** The first
+  call installed the hook (`GC.before_collect`, an allocation) while
+  `@@ranges_lock` was held, so a collection there could run a finalizer that
+  called `GC_add_roots` and spun on the same lock forever. A once-state
+  outside the lock still let such a re-entrant call add a range before the
+  hook existed, and stayed stuck if the install raised. `GC.init` now
+  installs the hook, before any user code, and `@@ranges_lock` covers only
+  the table update. Spec 41 also keeps each block reachable until its range
+  is added.
 
 - **A finalizer that calls `GC.collect` no longer runs the rest of the
   queue nested inside itself.** Since `run_pending` takes one node at a time

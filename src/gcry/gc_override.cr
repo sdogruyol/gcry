@@ -213,6 +213,9 @@ module GC
       {% if flag?(:unix) %} Gcry::SegvReport.install_if_requested {% end %}
       heap.set_stackbottom(Fiber.current.@stack.bottom)
     end
+    # Boehm's `GC_add_roots` ranges and push-other-roots procedure: their hook
+    # goes in now, after the one above, never from inside a `GC_*` call.
+    {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.install_roots_hook {% end %}
 
     # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
     # growth under gcry during GC.init SIGSEGVs — Fiber/runtime is not ready yet.

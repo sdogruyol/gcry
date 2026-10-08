@@ -172,13 +172,6 @@ module Gcry
     @@on_collection_event : LibGC::OnCollectionEventProc? = nil
     @@on_thread_event : LibGC::OnThreadEventProc? = nil
     @@on_heap_resize : LibGC::OnHeapResizeProc? = nil
-    # `hook_roots` once-state: 0 not installed, 1 installing, 2 installed.
-    # Its own state rather than `@@ranges_lock`: installing allocates, which
-    # may collect and run a finalizer that calls `GC_add_roots` again on this
-    # thread, and that lock does not nest.
-    @@roots_hook_state = 0
-    # Thread installing the hook while the state is 1.
-    @@roots_hook_installer = 0_u64
 
     # `GC_add_roots` ranges: `[count, capacity, lo0, hi0, lo1, hi1, ...]`,
     # words in libc memory. Writers take `@@ranges_lock`. The collector takes
@@ -264,9 +257,7 @@ module Gcry
       return unless low.address < high.address
       lo = low.address
       hi = high.address
-      # The hook first, so a call that returns has its range scanned whichever
-      # way it returns.
-      hook_roots
+      # The hook that scans these is in from `GC.init` (`install_roots_hook`).
       lock_ranges
       begin
         table = @@ranges.get(:acquire)
@@ -317,7 +308,6 @@ module Gcry
 
     def self.push_other_roots=(proc : Proc(Nil)) : Nil
       @@push_other_roots = proc.pointer.null? ? nil : proc
-      hook_roots
     end
 
     # Never a null procedure: stdlib's `GC.before_collect` chains to whatever
@@ -622,31 +612,12 @@ module Gcry
 
     # One `before_collect` hook serves both root sources; it runs in the root
     # phase of every collection, world stopped, where `push_stack` is valid —
-    # which is where Boehm calls its push-other-roots procedure too. A second
-    # caller waits for the first to finish installing it; the installer's own
-    # re-entry (a finalizer run by the collection its allocation started)
-    # returns at once, and the outer call installs it before returning.
-    private def self.hook_roots : Nil
-      loop do
-        case Atomic::Ops.load(pointerof(@@roots_hook_state), LLVM::AtomicOrdering::Acquire, false)
-        when 2 then return
-        when 0
-          _, won = Atomic::Ops.cmpxchg(pointerof(@@roots_hook_state), 0, 1,
-            LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
-          if won
-            @@roots_hook_installer = Platform.current_thread_id
-            install_roots_hook
-            Atomic::Ops.store(pointerof(@@roots_hook_state), 2, LLVM::AtomicOrdering::Release, false)
-            return
-          end
-        else
-          return if @@roots_hook_installer == Platform.current_thread_id
-          Intrinsics.pause
-        end
-      end
-    end
-
-    private def self.install_roots_hook : Nil
+    # which is where Boehm calls its push-other-roots procedure too. Installed
+    # once by `GC.init`, before any user code: installed by the first
+    # `GC_add_roots` instead, it allocated mid-call, and a collection that
+    # allocation started could run a finalizer that added a range before the
+    # hook existed, or left the install half done if it raised.
+    def self.install_roots_hook : Nil
       GC.before_collect do
         table = @@ranges.get(:acquire)
         unless table.null?
