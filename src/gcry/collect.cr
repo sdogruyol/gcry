@@ -2193,7 +2193,7 @@ module Gcry
             @inc_active = false
             @incremental_marking = false
             finished = true
-            arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            arm_page_barrier_after_major
           end
         ensure
           collection_event(CollectionEvent::PreStartWorld) if stw_reported
@@ -3046,7 +3046,7 @@ module Gcry
             # Next minor starts a fresh soft-dirty window after a major.
             @soft_dirty_skip_until_major = false
             unless @lazy_sweep_pending
-              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+              arm_page_barrier_after_major
             end
           else
             @nursery_alloc_bytes.set(0_u64)
@@ -3104,7 +3104,7 @@ module Gcry
               collection_event(CollectionEvent::ReclaimEnd)
               @lazy_sweep_pending = false
               if major
-                arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+                arm_page_barrier_after_major
               else
                 note_nursery_survival
                 arm_page_barrier_after_collect
