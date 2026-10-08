@@ -2081,6 +2081,21 @@ kept finding the rest.
       would red CI on the real event; three orders of magnitude under the
       pre-fix rate, so reopening it fails).
       `bench/log/linux/2026-09-13-chunk-list-drift/FINDINGS.md`
+      **CLOSED (2026-10-08, readiness-2).** The splice landed as
+      `Heap#publish_relinked_chunks`: under `@chunk_list_lock`, the store puts
+      the chunks prepended during the walk back in front of `kept`, once it
+      has checked that the walk's first chunk is still indexed (the check is
+      what makes the prefix walk safe against a concurrent unlink). The
+      2026-09-12 attempt "moved nothing" because the latch defect dominated
+      then. The gate is now cap 0, with a window arm that maps a chunk between
+      the walk and the store every collection (0 of 300 stranded, 299 of 300
+      without the splice) and a window-free arm: a `GC.free` trim in that
+      window detached a chunk the rebuild had kept, and the flush unmapped it
+      while listed (a fault in the first collection); the trim now declines
+      during the relink walk. Still open, inferred and not reproduced: a list
+      writer frozen inside its locked section by an *in-STW* sweep resumes
+      against the rebuilt list (0 of 37 334 mappings under
+      `GCRY_DISABLE_LAZY_SWEEP=1`).
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which

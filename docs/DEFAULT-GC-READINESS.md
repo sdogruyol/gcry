@@ -33,7 +33,8 @@ compiler PR").
 | m7 | **Mitigated**: one byte of slack on atomic blocks, as under Boehm; the argv patch stays | `heap.cr`; `process_spec/regression/24` |
 | m8 | **Fixed**: docs refreshed; `INTEGRATION.md` lists Windows as in scope only, and its Boehm parity table names what differs | `README.md`, `docs/*` |
 | m9 | **Fixed**: `rbp`/`x29` captured unmangled | `roots.cr`; `process_spec/regression/15` |
-| M5, M6, M7 | **Open**: open races, TSan/fuzzing, knob surface | below |
+| M5 | **Partly closed** (readiness-2): chunk index/list drift is closed (the relink store splices back what was mapped during the walk, and a `GC.free` trim no longer detaches during it; `make chunk-list-drift` cap 0); the Windows collector-lock livelock is fixed in the product (FIFO collection section and roots lock, `GC.collect` answered by any full collection that began after it; `process_spec/regression/50`). Still open: `dormant_flush` (unreproduced), the `@index_lock` holder in a stop (policy), Darwin Intel counter loss, O(n) single large unlink, in-place large `realloc` growth | `collect_sweep.cr`, `collect.cr`, `ticket_lock.cr`; `ROADMAP.md` |
+| M6, M7 | **Open**: TSan/fuzzing, knob surface | below |
 
 Two Crystal bugs turned up along the way, both outside gcry: `raises?` is not
 a fixpoint (§1, E3), and `String::Builder#to_s` writes one byte past its

@@ -131,6 +131,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first collection before, 300 of 300 trims declined and the list and
   index agreeing after.
 
+- **The collection section and the roots lock hand over to a waiter.** The
+  section `GC.collect` runs in was a plain mutex (an SRWLock on Windows),
+  and `@roots_lock`, which every stop and every `add_root`/`delete_root`
+  takes, an unfair spin lock: neither hands over, so a thread looping
+  `GC.collect` took either back before the waiter it had woken could run. A
+  birth thread's `GC.collect` slept through that in 2 of 173
+  `thread_birth_fiber` runs on one Windows runner, and a thread in
+  `ThreadBirthRoot.arm` → `delete_root` spun for over 120 s; on Linux, next
+  to 1, 3 or 6 such threads, a thread's 100 calls each waited through up to
+  1 174, 4 727 and 1 383 collections. The section now goes to waiters in
+  arrival order, `@roots_lock` is a FIFO ticket lock (`Gcry::TicketLock`),
+  and `GC.collect` returns once a full collection that began after the call
+  has finished, whichever thread ran it — Boehm's guarantee for
+  `GC_gcollect` — so calls queued behind one collection share the next
+  (`Heap#collect_satisfied_by_peer`). The same calls now wait through at
+  most 2 collections (1.01–1.03 on average). A queued `GC.collect` no
+  longer turns the cycle in flight into a releasing one either.
+  `thread_birth_fiber` collects back to back again, without the yield that
+  hid this, and `50_collector_lock_fairness_spec.cr` failed 20 of 20 runs
+  before (threads served one after another, single calls waiting through
+  100–301 collections) and passed 80 of 80 after, on one CPU and with 24
+  busy threads included.
+
 - **Specs.** `21_boehm_c_abi_spec`'s `GC_add_roots` example failed every
   standalone run on Linux x86_64, master included, on one conservatively
   held control block; it now holds to eight blocks with one allowed.
