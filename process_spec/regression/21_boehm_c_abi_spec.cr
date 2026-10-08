@@ -105,15 +105,24 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
     LibGC.is_disabled.should eq(0)
   end
 
+  # Eight of each: a stale word in the collect call chain can hold one block
+  # (spec 25 explains), which made the single control block of this example
+  # fail every standalone run of this file on Linux x86_64, master included
+  # (2026-10-08), while it passed inside the whole process_spec run.
   it "keeps a block alive from a GC_add_roots range, and only then" do
-    unrooted = libc_word
-    control = fresh_block { |p| unrooted.value = p }
-    rooted = libc_word
-    kept = fresh_block { |p| rooted.value = p }
-    LibGC.add_roots(rooted.as(Void*), (rooted + 1).as(Void*))
+    controls = Array(UInt64).new(8) do
+      unrooted = libc_word
+      fresh_block { |p| unrooted.value = p }
+    end
+    kept = Array(UInt64).new(8) do
+      rooted = libc_word
+      hidden = fresh_block { |p| rooted.value = p }
+      LibGC.add_roots(rooted.as(Void*), (rooted + 1).as(Void*))
+      hidden
+    end
     collect
-    live_and_intact?(control).should be_false
-    live_and_intact?(kept).should be_true
+    controls.count { |h| live_and_intact?(h) }.should be <= 1
+    kept.each { |h| live_and_intact?(h).should be_true }
   end
 
   it "keeps a block alive from GC_push_all_eager in a GC_set_push_other_roots callback" do
