@@ -1858,6 +1858,20 @@ module Gcry
       Trace.finalizer("register", object)
     end
 
+    # `GC.add_finalizer`: *object*'s one finalizer becomes *callback*,
+    # replacing any it had, as under Boehm (`Finalizers::Registry#replace`).
+    # `add_finalizer` above keeps every callback it is given; this is the
+    # process GC's entry.
+    def replace_finalizer(object : Void*, callback : Finalizers::Callback) : Nil
+      return if object.null?
+      @finalizers.replace(object, callback)
+      Trace.finalizer("register", object)
+    end
+
+    def replace_finalizer(object : Void*, &block : Finalizers::Callback) : Nil
+      replace_finalizer(object, block)
+    end
+
     # Boehm's `GC_register_finalizer*` (src/gcry/c_abi.cr): *object*'s one
     # finalizer becomes the C function *fn*, called `fn(object, data)`, or is
     # removed when *fn* is null. Returns the one it replaced as `{fn, cd}`.
@@ -1908,6 +1922,12 @@ module Gcry
         referent = user_of(chunk, header)
       end
       @finalizers.register_disappearing_link(link, referent)
+    end
+
+    # Boehm's `GC_unregister_disappearing_link`: drops *link*'s registration
+    # and leaves the word at *link* as it is. False when it had none.
+    def unregister_disappearing_link(link : Void**) : Bool
+      @finalizers.unregister_disappearing_link(link)
     end
 
     def live?(pointer : Void*) : Bool

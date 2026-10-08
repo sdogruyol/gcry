@@ -78,6 +78,8 @@ lib LibGC
   fun base = GC_base(displaced_pointer : Void*) : Void*
   fun is_heap_ptr = GC_is_heap_ptr(pointer : Void*) : Int
   fun general_register_disappearing_link = GC_general_register_disappearing_link(link : Void**, obj : Void*) : Int
+  fun register_disappearing_link = GC_register_disappearing_link(link : Void**) : Int
+  fun unregister_disappearing_link = GC_unregister_disappearing_link(link : Void**) : Int
 
   alias Finalizer = Void*, Void* ->
   fun register_finalizer = GC_register_finalizer(obj : Void*, fn : Finalizer, cd : Void*, ofn : Finalizer*, ocd : Void**)
@@ -838,6 +840,18 @@ end
 # Boehm (`GC_register_disappearing_link_inner`).
 fun gcry_c_general_register_disappearing_link = GC_general_register_disappearing_link(link : Void**, obj : Void*) : LibGC::Int
   Gcry.default_heap.register_disappearing_link(link, obj) ? 0 : 1
+end
+
+# Boehm's short form: the object is the one `*link` points into, `GC_base(*link)`.
+fun gcry_c_register_disappearing_link = GC_register_disappearing_link(link : Void**) : LibGC::Int
+  Gcry.default_heap.register_disappearing_link(link) ? 0 : 1
+end
+
+# 1 when *link* was registered and is not any more, 0 when it was not
+# (Boehm's `GC_unregister_disappearing_link`). The word at *link* is left as
+# it is.
+fun gcry_c_unregister_disappearing_link = GC_unregister_disappearing_link(link : Void**) : LibGC::Int
+  Gcry.default_heap.unregister_disappearing_link(link) ? 1 : 0
 end
 
 fun gcry_c_register_finalizer = GC_register_finalizer(obj : Void*, fn : LibGC::Finalizer, cd : Void*,

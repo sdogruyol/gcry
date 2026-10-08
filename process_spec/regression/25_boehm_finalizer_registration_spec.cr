@@ -281,4 +281,43 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     link.value.should eq(Pointer(Void).null)
     LibC.free(link.as(Void*))
   end
+
+  # `GC_register_disappearing_link` is the short form, the object being the
+  # one `*link` points into; `GC_unregister_disappearing_link` drops a
+  # registration and leaves the word alone, answering 1 if there was one
+  # (finalize.c). Until 2026-10-08 gcry defined neither.
+  it "registers a link by its target and unregisters one, leaving the word" do
+    kept = LibC.malloc(sizeof(Void*)).as(Void**)
+    dropped = LibC.malloc(sizeof(Void*)).as(Void**)
+    answers = [] of Int32
+    kept_word = 0_u64
+    abi_block(64, atomic: true) do |p|
+      # An interior pointer: the short form registers the block it is in.
+      kept.value = (p.as(UInt8*) + 16).as(Void*)
+      answers << LibGC.register_disappearing_link(kept)
+      answers << LibGC.register_disappearing_link(kept)
+    end
+    abi_block(64, atomic: true) do |p|
+      dropped.value = p
+      kept_word = abi_hide(p)
+      answers << LibGC.register_disappearing_link(dropped)
+      answers << LibGC.unregister_disappearing_link(dropped)
+      answers << LibGC.unregister_disappearing_link(dropped)
+    end
+    answers.should eq([0, 1, 0, 1, 0])
+
+    # Both blocks die. The registered link is cleared; the unregistered one
+    # still holds the dead block's address, which nothing reads through. A
+    # stale word can hold a block for a collection or two.
+    6.times do
+      break if kept.value.null?
+      LibGC.collect
+    end
+    kept.value.should eq(Pointer(Void).null)
+    same = false
+    abi_on_fiber { same = dropped.value.address == kept_word ^ ABI_MASK }
+    same.should be_true
+    LibC.free(kept.as(Void*))
+    LibC.free(dropped.as(Void*))
+  end
 end
