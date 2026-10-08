@@ -9,6 +9,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Roots marked before the cursor settle are no longer swept.** A
+  collection's root phase zeroes the mark bits of every chunk the previous
+  cycle pinned (a thread frozen mid-allocation), in
+  `bitmap_settle_cursor_sets`. The before-collect hook — `GC_add_roots`
+  ranges and `GC_set_push_other_roots` — and the explicit roots
+  (`GC.add_root`, the `realloc` pin) were marked ahead of it, so a root in
+  such a chunk lost its bit and was swept with its range still naming it:
+  with 16 threads registering ranges while another thread collected,
+  900–2 600 of 3 200 objects held only by registered ranges were freed and
+  reused, every run. The settle now runs first, in full and sliced cycles
+  alike (`process_spec/regression/49_roots_before_settle_spec.cr`).
+
+- **A stale resume signal no longer ends the next stop early (Linux).**
+  `start_world` resends a resume to a thread slow to acknowledge, so a thread
+  can be left one it never took. One that keeps `SIG_RESUME` blocked — a C
+  thread under `GC_register_my_thread`, from a pool that blocks every
+  signal — held it pending until the next stop's `sigsuspend` unblocked it,
+  and then ran through the stopped world: an 8-thread register/allocate loop
+  next to `GC.collect` wedged on a lock such a thread took. The suspend
+  handler now waits until its stop's epoch is closed, as Boehm's waits for
+  `GC_stop_count` to move (`47_stale_resume_signal_spec.cr`: the thread's
+  counter moved 3.3 M times inside a stop before, 0 after).
+
+- **`GC.add_finalizer` twice on one object runs `#finalize` once.** Under
+  Boehm it is `GC_register_finalizer_ignore_self`, which replaces the first
+  registration; gcry kept a row per call, so a type with `#finalize` whose
+  `initialize` also calls `GC.add_finalizer(self)` was finalized twice —
+  2 000 runs for 1 000 objects. `GC.add_finalizer` now replaces
+  (`Heap#replace_finalizer`); `Heap#add_finalizer`, the library heap's,
+  still keeps every callback (`48_add_finalizer_replaces_spec.cr`).
+
+- **`GC_register_finalizer*` and `GC.add_finalizer` no longer scan the
+  finalizer table.** Replacing or removing an object's finalizer used the
+  registration index only to answer yes or no, then walked every registered
+  finalizer to find the object's rows, under the lock `GC.free`/`realloc`,
+  `GC.add_finalizer` and the collector take: 2.6 µs per call at 10 k
+  registered finalizers, 44–50 µs at 160 k (Boehm about 15 ns at any
+  count). The index slot now also holds the head of a chain through the
+  object's rows, and each row remembers its slot: a registration is one
+  probe, a removal — the collector's included — none, and nothing
+  allocates with the world stopped. Replacing costs 23–43 ns from 10 k to
+  160 k. A re-registered disappearing link (`GC_DUPLICATE`) is one probe
+  into a location-to-row map, and `GC.free` scans the link table only for
+  an object that has a link. A randomized spec checks every index against a
+  brute-force model, with the index working and given up
+  (`spec/finalizer_index_spec.cr`).
+
+- **Parked mark helpers on macOS and Windows are woken.** Since idle
+  markers began parking inside a mark (2026-10-06) only Linux waited on the
+  `@mark_wake` word with a wake; on macOS and Windows the park was a
+  `nanosleep` of its 100 µs–1 ms timeout, rounded up on Windows to
+  `Sleep(1)`, about 15.6 ms. The master did not park there either, so it
+  kept the work and parallel mark, on by default, was serial plus a poller:
+  `make parallel-mark-process` stole 1–5 k per run on darwin x86_64 (380 k
+  before), 0.7–5.6 k on Windows x86_64 (330 k) and 0 on darwin arm64,
+  against 165–369 k on Linux. Both now wait on the same word with the same
+  protocol, through `__ulock_wait`/`__ulock_wake` and
+  `WaitOnAddress`/`WakeByAddress*` (`Synchronization.lib`), and the master
+  parks on every platform. The gate is back to two collections (8b3372c had
+  loosened it to "any steal in 20"), the new `parallel_mark_wakes` counts
+  waits a wake ended (`45_parked_markers_woken_spec.cr`: fails with the wake
+  disabled), and `33_idle_mark_helpers_park_spec` holds every platform to
+  1.6 cores. Linux is unchanged: 1.12 cores per second of collecting on a
+  3 M-node list, 26 ms pauses.
+
+- **A recycled large chunk clears only the pages the old block wrote.** A
+  block the program `GC.free`d stays cached, and an allocation of another
+  size takes its pages through the recycler, which reported every byte as
+  written: `GC.malloc` zeroed all of it and faulted in each page the old
+  block never touched. A loop freeing blocks of 16 sizes from 256 KiB to
+  1.7 MiB, writing one byte of each, took 629 ms and 878 000 minor faults
+  for 20 000 iterations (Boehm 227 ms). `mincore` now finds the last
+  resident page and `MADV_DONTNEED` drops the rest, which also zeroes
+  written pages that were swapped out: 106 ms, 4 700 faults. A loop that
+  writes every block through is within 2% of before (Boehm 578 ms against
+  1 027), and exact-size reuse — zlib's — is unchanged and clears its whole
+  payload, where asking the kernel cost 5% for nothing
+  (`46_large_recycle_untouched_pages_spec.cr`).
+
+- **Specs.** `21_boehm_c_abi_spec`'s `GC_add_roots` example failed every
+  standalone run on Linux x86_64, master included, on one conservatively
+  held control block; it now holds to eight blocks with one allowed.
+  `31_alloc_size_edges_spec` expects `Gcry::OutOfMemoryError` for an
+  oversize request rather than any exception.
+
 - **A large object over 4 GiB is scanned, sized and reallocated at its
   whole size.** The large block header kept the size in 32 bits and both
   `alloc_large` paths stored `payload.to_u32!`, so a block of 4 GiB + 1 MiB
@@ -866,6 +951,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GC_remove_roots`, `GC_register_disappearing_link` and
+  `GC_unregister_disappearing_link`** (`src/gcry/c_abi.cr`), as Boehm's.
+  `GC_remove_roots` drops every registered range wholly inside its bounds;
+  the hook sees a range whole or empty, and the next range added takes a
+  removed entry over in place, so add/remove churn copies no table
+  (`41_gc_add_roots_concurrent_spec.cr`). `GC_register_disappearing_link`'s
+  link is a field of a heap object, cleared when the object holding it —
+  `GC_base(link)` — dies, before its finalizer runs: Boehm's
+  cycle-breaking idiom; a link outside the heap aborts with "Bad arg", as
+  Boehm's. `GC_unregister_disappearing_link` leaves the word alone and
+  answers 1 if there was a registration (`25_*`).
+
+- **`GC_register_my_thread` on Windows.** A thread C created registers as
+  on Linux and macOS: it goes on Crystal's thread list, is suspended and
+  scanned, and comes off again on `GC_unregister_my_thread` or, if it exits
+  still registered, through an FLS callback. It answered `GC_UNIMPLEMENTED`
+  before (`29_boehm_foreign_thread_spec.cr`, now one scenario on every
+  platform, an exit without unregistering included).
+
 - **Loaded-DLL roots have a Windows regression**
   (`process_spec/regression/36_windows_dll_static_roots_spec.cr`). The
   roots shipped on 2026-10-05, but specs 16 and 34 are Linux-only, so
@@ -890,7 +994,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Every push builds stage 1 and has it compile and run gcry's samples and
   Crystal's `binary-trees`. Stage 1 then builds the compiler again, and an
   interpreter-enabled build runs `ci/compiler-interp/*.cr`. The whole
-  `compiler_spec` runs weekly and on dispatch.
+  `compiler_spec` runs on pull requests, weekly and on dispatch.
 
 - **gcry programs define Boehm's `GC_*` C ABI and `lib LibGC`**
   (`src/gcry/c_abi.cr`). `crystal i` resolves `LibGC` from the compiler
