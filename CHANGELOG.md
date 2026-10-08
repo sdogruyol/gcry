@@ -119,6 +119,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the shipped arms drops from 5 per 1 000 mappings to zero (0 over 472 274
   mappings and 6 215 in short processes).
 
+- **A `GC.free` during the sweep's relink no longer unmaps a chunk still on
+  the list.** When one mutator was latched, the after-world sweep rebuilds
+  `@chunks` from its walk; a large `GC.free` on another thread in that
+  window trimmed the cache and detached the chunk, which the rebuild had
+  already put back in `kept`, and the post-stop flush then unmapped it
+  while listed — the next walk faulted (`bitmap_pool_candidate?`), on the
+  tree before the splice too. The trim now declines while the relink walk
+  runs and is taken by the next one; `make chunk-list-drift`'s window-free
+  arm frees a 3 MB block in that window every collection: a fault in the
+  first collection before, 300 of 300 trims declined and the list and
+  index agreeing after.
+
 - **Specs.** `21_boehm_c_abi_spec`'s `GC_add_roots` example failed every
   standalone run on Linux x86_64, master included, on one conservatively
   held control block; it now holds to eight blocks with one allowed.
