@@ -579,9 +579,71 @@ module Gcry
         @@adopted = 0_u8
       end
 
-      # Windows has no `GC_pthread_create`; its `GC_beginthreadex` stays
-      # unsupported (below).
-      {% unless flag?(:win32) %}
+      {% if flag?(:win32) %}
+        # `GC_beginthreadex`'s routine and argument, carried to the new thread
+        # in libc memory.
+        private record ThreadStart, start : Void* -> LibC::UInt, arg : Void*
+
+        # Boehm's `GC_beginthreadex` registers the thread before the routine
+        # runs and unregisters it after (`GC_win32_start_inner`), as its
+        # `GC_pthread_create` does on POSIX. Until 2026-10-08 gcry's aborted:
+        # `GC.beginthreadex` writes the new handle into its argument as a
+        # Crystal `Thread`, which a C caller's argument is not.
+        #
+        # *arg* is rooted for the thread's life, as Crystal's own threads'
+        # `Thread` is (`GC.beginthreadex`): a birth root released once gcry's
+        # duplicate of the handle is signalled (`ThreadBirthRoot.release_exited`).
+        # The thread is created suspended so the root is in place before it can
+        # run, and resumed unless the caller asked for it suspended. Not staged
+        # (`Platform.stage_thread`): a stage is released when the staged handle
+        # turns up on Crystal's list, and the adopted `Thread` lists its own
+        # duplicate, so the record would sit until each stop's wait gave up on
+        # it. Nothing needs the wait: the trampoline holds nothing but *arg*
+        # before it registers, and registering excludes a stop.
+        def self.beginthreadex(security : Void*, stack_size : LibC::UInt, start : Void* -> LibC::UInt, arg : Void*, initflag : LibC::UInt, thrdaddr : LibC::UInt*) : Void*
+          data = LibC.malloc(sizeof(ThreadStart)).as(ThreadStart*)
+          if data.null?
+            LibC._set_errno(LibC::EAGAIN)
+            return Pointer(Void).null
+          end
+          data.value = ThreadStart.new(start, arg)
+          # A second mutator from here on, before it can allocate, as
+          # `GC.pthread_create` arranges.
+          if (heap = Gcry.default_heap?) && !heap.heap_counters_atomic_pinned
+            heap.heap_counters_atomic = true
+          end
+          handle = LibC._beginthreadex(security, stack_size, ->(raw : Void*) { CAbi.beginthreadex_start(raw) },
+            data.as(Void*), initflag | LibC::CREATE_SUSPENDED, thrdaddr)
+          if handle.null?
+            LibC.free(data.as(Void*))
+            return handle
+          end
+          # If the duplicate cannot be made the root is never released.
+          wait = Pointer(Void).null
+          process = LibC.GetCurrentProcess
+          LibC.DuplicateHandle(process, handle, process, pointerof(wait), LibC::SYNCHRONIZE.to_u32, 0, 0_u32)
+          ThreadBirthRoot.arm(handle.address, arg, wait.address)
+          if initflag & LibC::CREATE_SUSPENDED == 0
+            LibC.abort if LibC.ResumeThread(handle) == UInt32::MAX
+          end
+          handle
+        end
+
+        # On the new thread. A registration refused (no stop-the-world
+        # collector) runs the routine unregistered. An `_endthreadex` out of
+        # the routine passes over the unregister here, and the exit key's
+        # FLS callback takes the thread off instead.
+        def self.beginthreadex_start(raw : Void*) : LibC::UInt
+          data = raw.as(ThreadStart*)
+          start = data.value.start
+          arg = data.value.arg
+          LibC.free(raw)
+          registered = register_my_thread(Pointer(LibGC::StackBase).null) == GC_SUCCESS
+          result = start.call(arg)
+          unregister_my_thread if registered
+          result
+        end
+      {% else %}
         # `GC_pthread_create`'s routine and argument, carried to the new thread
         # in libc memory.
         private record PthreadStart, start : Void* -> Void*, arg : Void*
@@ -1079,11 +1141,12 @@ fun gcry_c_size = GC_size(addr : Void*) : LibC::SizeT
 end
 
 {% if flag?(:win32) %}
-  # `GC.beginthreadex` writes the new handle into *arglist* as a Crystal
-  # `Thread` — true of Crystal's own caller, not of a foreign one.
+  # The routine runs registered, as in Boehm, and *arglist* is rooted for the
+  # thread's life (`Gcry::CAbi.beginthreadex`). The handle is the CRT's, as
+  # `_beginthreadex` returns it: 0 with `errno` set on failure.
   fun gcry_c_beginthreadex = GC_beginthreadex(security : Void*, stack_size : LibC::UInt, start_address : Void* -> LibC::UInt,
                                               arglist : Void*, initflag : LibC::UInt, thrdaddr : LibC::UInt*) : Void*
-    Gcry::CAbi.unsupported("GC_beginthreadex", "gcry's thread start assumes the argument is a Crystal Thread")
+    Gcry::CAbi.beginthreadex(security, stack_size, start_address, arglist, initflag, thrdaddr)
   end
 {% elsif !flag?(:wasm32) %}
   # The new thread is staged and its argument rooted for its life

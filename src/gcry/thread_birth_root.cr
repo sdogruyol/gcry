@@ -298,10 +298,10 @@ module Gcry
       n < 0 ? 0 : n
     end
 
-    # From `GC.pthread_create` / `GC.beginthreadex`, immediately after it
-    # returns. *object* is the `arg` Crystal passed, which for a `Thread` is
-    # the object itself. *wait* is gcry's own handle on the thread on Windows,
-    # owned by this table from here on, and 0 elsewhere.
+    # From `GC.pthread_create` / `GC.beginthreadex` (and their C entry points),
+    # immediately after it returns. *object* is the `arg` Crystal passed, which
+    # for a `Thread` is the object itself. *wait* is gcry's own handle on the
+    # thread on Windows, owned by this table from here on, and 0 elsewhere.
     def self.arm(id : UInt64, object : Void*, wait : UInt64 = 0_u64) : Nil
       heap = Gcry.default_heap?
       unless heap && @@enabled && id != 0 && !object.null?
