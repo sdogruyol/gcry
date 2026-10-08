@@ -333,7 +333,7 @@ class FinalizerIndexModel
     table = Array.new(@registry.entry_count) do |i|
       {@registry.entry_object_at(i).address, @registry.entry_closure_data_at(i).address}
     end
-    table.sort.should eq(@rows.map { |r| {r.object.address, r.data.address} }.sort)
+    table.sort!.should eq(@rows.map { |r| {r.object.address, r.data.address} }.sort!)
     links = Array.new(@registry.link_count) do |i|
       {slot_of(@registry.link_location_at(i)), @registry.link_object_at(i)}
     end
