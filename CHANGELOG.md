@@ -91,6 +91,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payload, where asking the kernel cost 5% for nothing
   (`46_large_recycle_untouched_pages_spec.cr`).
 
+- **A page barrier no longer outlives the sliced majors or nursery that
+  armed it.** The barrier is armed after each collection for the next one
+  when a nursery or sliced majors (`incremental_auto`) will read it; a major
+  with both off never took it down. A heap that had sliced majors on and
+  then off kept the last one's barrier for good — on aarch64 mprotect over
+  every old chunk, with its write faults — and the large-object recycler,
+  which refuses while a barrier is armed, never ran again: on aarch64 CI
+  `46_large_recycle_untouched_pages_spec` made no recycle after
+  `27_boehm_collect_parity_spec`'s sliced example. A major now arms it or
+  takes it down (`Heap#arm_page_barrier_after_major`;
+  `27_boehm_collect_parity_spec`, "takes the page barrier down": mprotect
+  left armed before, none after).
+
+- **A chunk mapped during the after-world sweep stays on the chunk list.**
+  The lazy sweep reads the head of `@chunks` once, rebuilds the list behind
+  it, and stored the rebuild as `@chunks = kept`; a `map_chunk` in between —
+  from a thread born after the sweep latched its mutator count — was dropped
+  from the list and kept in the index, never swept again. The store, under
+  `@chunk_list_lock`, now puts the chunks prepended since the walk began
+  back in front of the rebuild, once it has checked under that lock that
+  the walk's first chunk is still indexed (otherwise a concurrent unlink
+  could make the prefix walk step into the rebuild, and it falls back to
+  the old store). `make chunk-list-drift` now maps a chunk between the walk
+  and the store in every collection (`post_stw_hook` `:before_relink_store`):
+  0 of 300 stranded with the splice, 299 of 300 without it, and its cap on
+  the shipped arms drops from 5 per 1 000 mappings to zero (0 over 472 274
+  mappings and 6 215 in short processes).
+
 - **Specs.** `21_boehm_c_abi_spec`'s `GC_add_roots` example failed every
   standalone run on Linux x86_64, master included, on one conservatively
   held control block; it now holds to eight blocks with one allowed.
@@ -966,12 +994,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Boehm's. `GC_unregister_disappearing_link` leaves the word alone and
   answers 1 if there was a registration (`25_*`).
 
-- **`GC_register_my_thread` on Windows.** A thread C created registers as
-  on Linux and macOS: it goes on Crystal's thread list, is suspended and
-  scanned, and comes off again on `GC_unregister_my_thread` or, if it exits
-  still registered, through an FLS callback. It answered `GC_UNIMPLEMENTED`
-  before (`29_boehm_foreign_thread_spec.cr`, now one scenario on every
-  platform, an exit without unregistering included).
+- **`GC_register_my_thread` and `GC_beginthreadex` on Windows.** A thread C
+  created registers as on Linux and macOS: it goes on Crystal's thread list,
+  is suspended and scanned, and comes off again on `GC_unregister_my_thread`
+  or, if it exits still registered, through an FLS callback. It answered
+  `GC_UNIMPLEMENTED` before (`29_boehm_foreign_thread_spec.cr`, now one
+  scenario on every platform, an exit without unregistering included).
+  `GC_beginthreadex`, which aborted, starts its thread suspended, roots the
+  argument for the thread's life (a birth root on a duplicate of the
+  handle), and the thread registers itself before the routine runs and
+  unregisters after, as Boehm's `GC_win32_start_inner`
+  (`40_gc_pthread_create_registers_spec.cr`, now with a Windows arm).
 
 - **Loaded-DLL roots have a Windows regression**
   (`process_spec/regression/36_windows_dll_static_roots_spec.cr`). The

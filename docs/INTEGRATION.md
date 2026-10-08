@@ -102,7 +102,7 @@ points, on gcry's heap: `crystal i` resolves its interpreted program's
 `LibGC` calls from the compiler binary, Crystal's `spec/std` calls
 `LibGC.size`, and C code linked into the program can call them. Where gcry
 has no equivalent the call prints what is missing and aborts
-(`GC_set_max_heap_size`; on Windows `GC_beginthreadex` and the signal
+(`GC_set_max_heap_size`; on Windows the signal
 queries). Behaviour that differs from a plain reading of the names, each
 pinned by a regression:
 
@@ -191,7 +191,7 @@ regressions named.
 | Queued finalizables | Stay roots until run | Same | Matches (`26_*`) |
 | Finalizer that calls `GC.collect` | Nested finalizers bounded per thread | No nesting on the same thread | Matches (`37_*`) |
 | Oversize `GC_malloc` / `GC_realloc` | NULL | NULL | Matches (`39_*`) |
-| `GC_pthread_create` | Registers the thread | Registers it (Linux, macOS) | Matches (`40_*`) |
+| `GC_pthread_create`, `GC_beginthreadex` | Registers the thread | Registers it (`GC_pthread_create` on Linux and macOS, `GC_beginthreadex` on Windows) | Matches (`40_*`) |
 | `GC_add_roots`, `GC_remove_roots` | Locked, deduplicated; ranges removable | Same | Matches (`41_*`) |
 | Roots marked in a collection's root phase | Kept | Kept: the cursor settle that zeroes pinned chunks' marks runs before any root is marked | Matches (`49_*`) |
 | Loaded libraries' data | Re-walked every collection | Followed through `r_debug`, also mid-`dlopen`/`dlclose` (Linux) | Matches (`16_*`, `42_*`) |
@@ -206,7 +206,7 @@ regressions named.
 | `GC_get_prof_stats` | Returns bytes filled | Returns nothing | Differs |
 | `unmapped_bytes` (stats, `GC_get_heap_usage_safe`) | Currently unmapped | Cumulative bytes returned to the OS | Differs |
 | `GC_set_max_heap_size` | Heap limit | Abort | Differs |
-| Foreign threads on Windows | `GC_register_my_thread`, `GC_beginthreadex` | Registration as on Linux and macOS; `GC_beginthreadex` aborts | Differs for `GC_beginthreadex` (`29_*`) |
+| Foreign threads on Windows | `GC_register_my_thread`, `GC_beginthreadex` | Same | Matches (`29_*`, `40_*`) |
 | Not exported | `GC_malloc_uncollectable`, `GC_move_disappearing_link`, long links, `_no_order` / `_unreachable` finalizers, `GC_exclude_static_roots`, `GC_clear_roots`, `GC_get_heap_size`, `GC_get_gc_no`, `GC_do_blocking`, `GC_call_with_alloc_lock`, `GC_set_finalize_on_demand`, `GC_strdup`, `GC_gc_no` | — | Missing; none used by stdlib or `crystal i` |
 | Collection trigger, marker count, mark-stack overflow | Boehm's policy | gcry's (`GCRY_*`, [POLICY.md](POLICY.md)) | Differs by design |
 
@@ -223,7 +223,7 @@ Process GC runs on Windows x86_64 (Crystal's MSVC distribution) and ARM64
 | Win32 thread suspend / resume STW | In gcry (`SuspendThread` + `GetThreadContext`, FP/SIMD included) |
 | Soft-dirty / mprotect barrier | Not available; full collections only |
 | Large-object recycler, `realloc` page move | Linux-only; `GCRY_LARGE_RECYCLE` / `GCRY_REALLOC_MOVE` have no effect |
-| Boehm C ABI | As on Linux and macOS, thread registration included; `GC_beginthreadex` and the signal getters abort (§ Boehm parity) |
+| Boehm C ABI | As on Linux and macOS, thread registration and `GC_beginthreadex` included; the signal getters abort (§ Boehm parity) |
 | Windows CI | x86_64 and native ARM64: specs, samples, and the Linux gates that hold there; not Crystal's `spec/std` or `compiler_spec` |
 | Workload numbers | x86_64 on a 12-vCPU QEMU/KVM VM only; ARM64 unmeasured ([WINDOWS.md](WINDOWS.md)) |
 
