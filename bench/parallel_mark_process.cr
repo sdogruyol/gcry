@@ -44,6 +44,24 @@ require "../src/gcry"
 LIVE   = 200_000
 CHAINS =     256
 
+# Why `stolen > 0` and not a minimum. The array's scan publishes the 256
+# heads as one flush of exactly `MARK_POP_BATCH` entries, which wakes nobody
+# (`flush_pushbuf`), and each later level of the 256 chains is again one flush
+# its marker pops back whole. So the mark is one wave held by one marker, and
+# `stolen` records who held it: about 200 k of the 200 k nodes when a helper
+# did, 0.5–5 k when the master did, with nothing in between, and roughly
+# even odds per collection. Two collections on Linux x86_64 stole 2.0 k–328 k
+# (12 runs, 2026-10-08), so any floor that a master-held pair passes also
+# passes the defect below. A real minimum needs a graph whose wakes decide
+# the count; that the wakes work is `parallel_mark_wakes`, asserted by
+# `process_spec/regression/45_parked_markers_woken_spec.cr` and printed here.
+#
+# From 2026-10-06 until 2026-10-08 a marker parked in a cycle off Linux
+# slept out its timeout with no wake, and the master never parked, so it
+# always held the wave: runs stole 0.7–5.6 k on darwin x86_64 and Windows
+# x86_64 and 0 on darwin arm64, and 8b3372c loosened this gate to collect up
+# to 20 times until any steal. It is two collections again.
+
 class Node
   property succ : Node?
   property tag : String
@@ -90,6 +108,7 @@ begin
 
   before_runs = h.parallel_mark_runs
   before_stolen = h.parallel_mark_stolen
+  before_wakes = h.parallel_mark_wakes
 
   per = LIVE // CHAINS
   heads = Array(Node).new(CHAINS) do |c|
@@ -103,17 +122,8 @@ begin
     head
   end
 
-  # Up to 20 collections until a worker has stolen, not a fixed two: off
-  # Linux an idle marker parks in a 100 µs–1 ms sleep with no futex to wake
-  # it, and on darwin arm64 two marks of this chain finished before any
-  # helper woke (CI, 2026-10-06). Still red if no collection ever steals.
-  collects = 0
-  loop do
-    GC.collect
-    collects += 1
-    break if collects >= 2 && (disabled || h.parallel_mark_stolen > before_stolen)
-    break if collects >= 20
-  end
+  GC.collect
+  GC.collect
 
   runs = h.parallel_mark_runs
   stolen = h.parallel_mark_stolen
@@ -160,7 +170,7 @@ begin
   end
 
   puts "arm: #{disabled ? "--disabled (workers pinned at 1, stolen must stay 0)" : "shipped (4 workers, stolen must rise)"}"
-  puts "workers=#{workers} runs #{before_runs}->#{runs} stolen #{before_stolen}->#{stolen} chain=#{walked}"
+  puts "workers=#{workers} runs #{before_runs}->#{runs} stolen #{before_stolen}->#{stolen} wakes #{before_wakes}->#{h.parallel_mark_wakes} chain=#{walked}"
   puts disabled ? "ok — serial mark kept the chain and stole nothing" : "parallel_mark_process ok"
 ensure
   if h

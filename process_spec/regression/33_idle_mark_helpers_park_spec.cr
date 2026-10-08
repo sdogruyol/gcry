@@ -7,8 +7,7 @@ require "spec"
 # whole mark anyway, a core each. Four workers on a 3 M-node list used 4.0
 # cores of CPU per second of back-to-back collections against 1.05 serial
 # (`bench/mark_list_heap.cr`). An idle helper now parks after a bounded spin,
-# and on Linux so does an idle master, until work is published or the mark
-# ends.
+# and so does an idle master, until work is published or the mark ends.
 class IdleMarkNode
   property next_node : IdleMarkNode?
   property payload = 0_i64
@@ -96,10 +95,11 @@ describe "parallel mark on a heap with nothing to divide" do
     runs.should eq(collections.to_u64)
     # The collecting thread is a core for the whole loop. Three helpers that
     # poll were three more; parked, they are a few spins per collection.
-    # Off Linux an idle master polls rather than parks (`mark_loop_drain`), so
-    # a helper that took the list leaves the master spending a second core.
+    # Until 2026-10-08 an idle master polled rather than parked off Linux,
+    # where a park was a sleep nothing woke, and the bound there was 2.5: a
+    # helper that took the list left the master spending a second core.
     ratio = cpu / wall
-    bound = {% if flag?(:linux) %} 1.6 {% else %} 2.5 {% end %}
+    bound = 1.6
     if ratio >= bound
       fail "process CPU #{cpu.round(3)} s over #{wall.round(3)} s of back-to-back collections " \
            "(#{collections}) of one list with 4 mark workers: ratio #{ratio.round(2)}, bound #{bound}"

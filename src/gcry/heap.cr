@@ -284,10 +284,13 @@ module Gcry
     @mark_slot_claim = Atomic(Int32).new(1)
     @mark_epoch = Atomic(UInt64).new(0_u64)
     @mark_shutdown = Atomic(Int32).new(0)
-    # Linux: the word idle mark helpers `futex`-wait on, bumped when a cycle
+    # The word idle mark helpers wait on (`mark_wait`), bumped when a cycle
     # starts, and how many are waiting (`wake_mark_helpers`).
     @mark_wake = Atomic(Int32).new(0)
     @mark_sleepers = Atomic(Int32).new(0)
+    # Waits on `@mark_wake` that a wake ended before their timeout
+    # (`parallel_mark_wakes`).
+    @parallel_mark_wakes = Atomic(UInt64).new(0_u64)
     # Markers polling an empty shared stack in a cycle, before they park
     # (`MarkDrought`).
     @mark_spinners = Atomic(Int32).new(0)
@@ -384,6 +387,7 @@ module Gcry
       @mark_shutdown = Atomic(Int32).new(0)
       @mark_wake = Atomic(Int32).new(0)
       @mark_sleepers = Atomic(Int32).new(0)
+      @parallel_mark_wakes = Atomic(UInt64).new(0_u64)
       @mark_spinners = Atomic(Int32).new(0)
       @mark_workers_busy = Atomic(Int32).new(0)
       @clear_stack_enabled = false
