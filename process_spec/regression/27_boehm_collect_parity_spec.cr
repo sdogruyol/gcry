@@ -97,23 +97,26 @@ describe "GC_collect_a_little (Boehm parity)" do
   # stayed armed for good — on aarch64 mprotect over every old chunk — and
   # the large-object recycler, which refuses while a barrier is armed, never
   # ran again (`46_large_recycle_untouched_pages_spec`, aarch64 CI). Asks for
-  # mprotect, so a host with soft-dirty arms a barrier the same way.
-  it "takes the page barrier down once sliced majors are off again" do
-    heap = Gcry.default_heap
-    saved = heap.incremental_auto
-    saved_prefer = heap.prefer_mprotect_barrier
-    heap.incremental_auto = true
-    heap.prefer_mprotect_barrier = true
-    begin
+  # mprotect, so a host with soft-dirty arms a barrier the same way. Linux
+  # only: macOS and Windows have no page barrier to arm.
+  {% if flag?(:linux) %}
+    it "takes the page barrier down once sliced majors are off again" do
+      heap = Gcry.default_heap
+      saved = heap.incremental_auto
+      saved_prefer = heap.prefer_mprotect_barrier
+      heap.incremental_auto = true
+      heap.prefer_mprotect_barrier = true
+      begin
+        GC.collect
+        heap.barrier_backend_name.should_not eq("none")
+      ensure
+        heap.incremental_auto = saved
+        heap.prefer_mprotect_barrier = saved_prefer
+      end
       GC.collect
-      heap.barrier_backend_name.should_not eq("none")
-    ensure
-      heap.incremental_auto = saved
-      heap.prefer_mprotect_barrier = saved_prefer
+      heap.barrier_backend_name.should eq("none")
     end
-    GC.collect
-    heap.barrier_backend_name.should eq("none")
-  end
+  {% end %}
 
   it "does nothing and returns 0 while collection is disabled" do
     heap = Gcry.default_heap
