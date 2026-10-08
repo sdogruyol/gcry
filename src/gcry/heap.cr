@@ -3023,7 +3023,32 @@ module Gcry
 
       # A method, not a closure: a closure's context is a heap allocation, and
       # `allocate` trims (`@large_recycle_budget`).
-      detached = with_alloc_lock { detach_large_cache(effective, walk_limit) }
+      #
+      # And nothing at all while the after-world sweep rebuilds `@chunks` from
+      # its walk (`@relink_walk`, raised under this lock before the walk reads
+      # the head and lowered once the rebuild is published). The rebuild puts
+      # every chunk the walk reaches into `kept` and cannot see an unlink, so a
+      # chunk detached here mid-walk went back on the list — out of the index,
+      # queued for release, and then unmapped by `flush_pending_large_release`
+      # while still listed: the next walker read its header and faulted, in
+      # `bitmap_pool_candidate?` at chunk+0x10, every time a `GC.free` landed
+      # in that window (`make chunk-list-drift`, its window-free arm). Queueing
+      # the unmap, below, is enough for the walks that only read; a rebuild
+      # needs the list to hold still. Postponed, not lost: the next free or
+      # allocation over budget trims, and so does the collector after its
+      # walks. Only a relinking sweep — a collection that latched one mutator —
+      # with a second thread freeing gets here.
+      declined = false
+      detached = with_alloc_lock do
+        if @relink_walk
+          @relink_trims_declined &+= 1
+          declined = true
+          Pointer(Void).null
+        else
+          detach_large_cache(effective, walk_limit)
+        end
+      end
+      return if declined
 
       # Off the list and out of the index, but for a mutator that is as far as
       # it goes. After `start_world` the collector walks `@chunks` in the three

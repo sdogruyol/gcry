@@ -7,6 +7,13 @@ module Gcry
     # walk (`publish_relinked_chunks`) — the code before 2026-10-09, and the
     # control arm of `make chunk-list-drift`.
     property chunk_list_splice : Bool = true
+    # True, under `@alloc_lock`, from before the after-world sweep reads the
+    # head it rebuilds from until it has published the rebuild. A mutator's
+    # trim does not detach then (`Heap#trim_large_cache`).
+    @relink_walk = false
+    # Trims that declined for it. `make chunk-list-drift` reads it to know its
+    # frees reached the window.
+    getter relink_trims_declined : UInt64 = 0_u64
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -79,6 +86,16 @@ module Gcry
       # that gate is the code this replaced and not half of it.
       relink_once = @sweep_mutator_latch
       relink = !after_world || relink_chunks_after_world?
+
+      # The rebuild puts every chunk its walk reaches into `kept`, so it cannot
+      # survive a chunk leaving the list while it runs: the unlinked chunk goes
+      # back on the list anyway, out of the index, and is released under it.
+      # Raised before the head is read, under the lock a trim's detach holds,
+      # so a detach either finished before the walk began or declines
+      # (`Heap#trim_large_cache`). The latch-off control decides per chunk,
+      # so any after-world sweep of its may relink.
+      relink_walk = after_world && (!relink_once || relink)
+      with_alloc_lock { @relink_walk = true } if relink_walk
 
       # Kept for the store at the end: whatever `map_chunk` prepends while this
       # walks lands in front of it (`publish_relinked_chunks`).
@@ -406,6 +423,7 @@ module Gcry
           @chunks = kept
         end
       end
+      with_alloc_lock { @relink_walk = false } if relink_walk
 
       # Queue for post-STW munmap (do not munmap while world stopped).
       if to_unmap
@@ -482,17 +500,15 @@ module Gcry
     # - Unlinking *walk_head* itself does: the link to it becomes its `next`,
     #   by then possibly the original second chunk, which the rebuild has
     #   pointed back at *walk_head* — so the walk would find *walk_head* from
-    #   inside *kept*. Both unlinkers take the chunk out of the index in the
-    #   same section as the list surgery, and nothing re-indexes its address
-    #   while it is mapped (a mutator's trim queues the unmap during a live
-    #   walk; `recycle_large_mapping` refuses one). So *walk_head* still
-    #   indexed, read under this lock, means it was never unlinked and the
-    #   shape holds; otherwise this falls back to the plain store, which loses
-    #   the prefix exactly as before. Only a large chunk is ever unlinked, and
-    #   mid-walk only by a `GC.free` trim on another thread (the post-stop
-    #   block stops allocation, not frees); the rebuild then still keeps that
-    #   chunk while it is queued for release, which this neither causes nor
-    #   cures.
+    #   inside *kept*. No shipped path unlinks during the walk any more —
+    #   `recycle_large_mapping` refuses while `@live_chunk_walk` is set, a trim
+    #   declines while `@relink_walk` is — but `GCRY_TRIM_UNLOCKED` still
+    #   does, so the shape is checked rather than assumed. Both unlinkers take
+    #   the chunk out of the index in the same section as the list surgery,
+    #   and nothing re-indexes its address while it is mapped, so *walk_head*
+    #   still indexed, read under this lock, means it was never unlinked and
+    #   the shape holds; otherwise this falls back to the plain store, which
+    #   loses the prefix exactly as before.
     #
     # Allocates nothing. Takes `@index_lock` under this one — list then index,
     # the order `map_chunk` and `unlink_chunk` already use.

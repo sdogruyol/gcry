@@ -15,10 +15,10 @@
 # open piece of the 2026-08-23 live-object release
 # (`bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`).
 #
-# Five arms. The natural event is rare on the shipped tree — about one run in
+# Six arms. The natural event is rare on the shipped tree — about one run in
 # fourteen of `make thread-churn-uaf`, then 0 in 12.1 million mappings — and a
-# zero over a natural rate cannot tell "closed" from "not reached", so two arms
-# put a prepend into the window on purpose:
+# zero over a natural rate cannot tell "closed" from "not reached", so three
+# arms act in the window on purpose:
 #
 #   shipped           the mutator count is latched, the churn workload
 #   fast              `sweep_mutator_latch = false`: same race, higher rate,
@@ -27,6 +27,8 @@
 #   window            a chunk mapped between the after-world sweep's walk and
 #                     its store, every collection (`:before_relink_store`)
 #   window control    the same with `chunk_list_splice = false`, the old store
+#   window-free       a large block `GC.free`d in that window instead: its
+#                     chunk must not leave the list under the rebuild
 #
 # The fast arm restores half of the pre-fix shape, which is why it runs in a
 # child process: that shape faulted 2 of 12 times on the churn reproducer, and a
@@ -92,6 +94,10 @@ WINDOW_BYTES  = 40_000
 # Prepends in the window the arm must make for its zero to say anything. The
 # hook reaches the window every collection, so this is well under what it gets.
 WINDOW_MIN_PREPENDS = 100_u64
+# The window-free arm frees a large block in that window instead — a chunk
+# leaving the list under the rebuild rather than joining it. Past
+# `LARGE_FREE_TRIM_SLACK` (2 MiB), with recycling off, so every free trims.
+WINDOW_FREE_BYTES = 3_000_000_u64
 # Below this the arm mapped too little to say anything. The first version of
 # this harness churned threads and nothing else, mapped 32 chunks in 1200
 # collections, and reported "nothing stranded in 90 000 collections" as if that
@@ -185,6 +191,50 @@ def run_window_child(self_path : String, splice : Bool) : {Array(Bucket), Bool, 
     prepends = f[2].to_u64
   end
   {parse_buckets(sink.to_s), status.success?, fired, prepends}
+end
+
+# The window-free arm's free: armed before each collection, held in class state
+# so it is live when the collection marks, and handed to `GC.free` between the
+# sweep's walk and its store — a second thread's free, as far as the rebuild
+# can tell.
+module WindowFree
+  @@victim = Pointer(Void).null
+  @@freed = 0_u64
+
+  def self.arm(victim : Void*) : Nil
+    @@victim = victim
+  end
+
+  def self.call(stage : Symbol) : Nil
+    return unless stage == :before_relink_store
+    victim = @@victim
+    return if victim.null?
+    @@victim = Pointer(Void).null
+    @@freed += 1
+    GC.free(victim)
+  end
+
+  def self.freed : UInt64
+    @@freed
+  end
+end
+
+record FreeReport, freed : UInt64, declined : UInt64, list_only : UInt64,
+  index_only : UInt64, cached : UInt64
+
+# The window-free child: whether it exited cleanly, and its last `free` line —
+# frees made in the window, trims that declined, chunks listed and not indexed
+# and the reverse (summed over the audits), and the large cache's bytes.
+def run_free_child(self_path : String) : {Bool, FreeReport?}
+  sink = IO::Memory.new
+  status = Process.run(self_path, ["--child", "--window-free"], output: sink, error: Process::Redirect::Close)
+  report = nil
+  sink.to_s.each_line do |line|
+    f = line.split
+    next unless f.size == 6 && f[0] == "free"
+    report = FreeReport.new(f[1].to_u64, f[2].to_u64, f[3].to_u64, f[4].to_u64, f[5].to_u64)
+  end
+  {status.success?, report}
 end
 
 def report(label : String, buckets : Array(Bucket), ok : Bool) : {Float64, UInt64}
@@ -297,6 +347,20 @@ unless ARGV.includes?("--child")
   puts "  no splice: hook ran #{control_fired} time(s), mapped #{control_prepends} chunk(s) in the window, stranded #{control_lost}#{control_ok ? "" : " — the child crashed"}"
   puts ""
 
+  # The rebuild's other edge: a chunk *leaving* the list during the walk. A
+  # trim's detach went back on the list in `kept` and was then released while
+  # still listed; a trim now declines while the rebuild runs. The tree before
+  # faults in the first collection.
+  puts "=== window-free — a large block freed between the after-world sweep's walk and its store, #{WINDOW_ROUNDS} collections ==="
+  free_ok, free_report = run_free_child(self_path)
+  if r = free_report
+    puts "  freed #{r.freed} in the window, #{r.declined} trim(s) declined; listed and not indexed #{r.list_only}, " \
+         "indexed and not listed #{r.index_only}; large cache #{r.cached} B at the end#{free_ok ? "" : " — the child crashed"}"
+  else
+    puts "  no report — the child crashed before its first"
+  end
+  puts ""
+
   shipped_lost = shipped.empty? ? 0_u64 : shipped.last.chunks
   failures = [] of String
   if shipped_mapped < MIN_MAPPINGS
@@ -330,12 +394,28 @@ unless ARGV.includes?("--child")
     failures << "the window control stranded nothing of #{control_prepends} chunk(s) mapped in the window: " +
                 "the window arm no longer reaches the race it exists to show closed"
   end
+  if !free_ok || free_report.nil?
+    failures << "the window-free arm crashed: a chunk freed during the sweep's walk was released while still on the list"
+  elsif r = free_report
+    if r.declined < WINDOW_MIN_PREPENDS
+      failures << "the window-free arm's trims declined #{r.declined} time(s) (want at least #{WINDOW_MIN_PREPENDS}): " +
+                  "its frees no longer reach the rebuild's window, so its clean exit means nothing"
+    end
+    if r.list_only > 0 || r.index_only > 0
+      failures << "the window-free arm left the list and the index disagreeing " +
+                  "(#{r.list_only} listed and not indexed, #{r.index_only} indexed and not listed)"
+    end
+    if r.cached >= WINDOW_FREE_BYTES
+      failures << "the window-free arm ended with #{r.cached} B in the large cache: a declined trim parked its chunk past the collection"
+    end
+  end
   unless failures.empty?
     failures.each { |f| puts "FAIL #{f}" }
     exit 1
   end
   puts "ok — shipped: 0 stranded over #{shipped_mapped} mappings and 0 over #{plain_mapped} in short processes (cap 0);"
   puts "     window: 0 of #{window_prepends} prepends in the window stranded, #{control_lost} of #{control_prepends} without the splice;"
+  puts "     window-free: #{free_report.try(&.freed)} large frees in the window, none released while still listed;"
   puts "     the pre-fix shape #{fast_rate.round(1)} per 1000 and #{(fast.last.bytes * 100.0 / fast.last.heap_bytes).round(1)}% of its heap stranded."
   exit 0
 end
@@ -373,6 +453,23 @@ if ARGV.includes?("--window")
     next unless (i + 1) % window_every == 0
     puts "bucket #{i + 1} #{heap.chunk_index_only_now} #{heap.chunk_index_only_now_bytes} #{heap.heap_size} #{heap.chunks_mapped}"
     puts "window #{WindowPrepend.fired} #{WindowPrepend.prepends}"
+    STDOUT.flush
+  end
+  exit 0
+end
+
+# `--window-free`: one thread again, and the hook frees the large block armed
+# before the collection in the same window. Recycling off, so every free past
+# `LARGE_FREE_TRIM_SLACK` trims rather than waiting on a budget.
+if ARGV.includes?("--window-free")
+  heap.large_recycle = false
+  heap.post_stw_hook = ->(stage : Symbol) { WindowFree.call(stage) }
+  free_every = WINDOW_ROUNDS // BUCKETS
+  WINDOW_ROUNDS.times do |i|
+    WindowFree.arm(GC.malloc_atomic(WINDOW_FREE_BYTES))
+    GC.collect
+    next unless (i + 1) % free_every == 0
+    puts "free #{WindowFree.freed} #{heap.relink_trims_declined} #{heap.chunk_list_only} #{heap.chunk_index_only} #{heap.large_free_bytes}"
     STDOUT.flush
   end
   exit 0
