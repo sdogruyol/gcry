@@ -1,0 +1,19 @@
+bench                    arm           wall med     min     max Δ vs p2off  cpu med  rss MiB
+Primes                   p2off           0.5960   0.567   0.633      +0.0%     0.74      618
+Primes                   p2on            0.6240   0.604   0.633      +4.7%     0.83      612
+JsonParsePure            p2off           0.3580   0.353   0.377      +0.0%     1.05      551
+JsonParsePure            p2on            0.3560   0.349   0.386      -0.6%     1.06      552
+JsonParseSerializable    p2off           0.2750   0.272   0.285      +0.0%     0.92      415
+JsonParseSerializable    p2on            0.2790   0.273   0.293      +1.5%     0.93      416
+JsonParsePull            p2off           0.2910   0.289   0.295      +0.0%     0.93      418
+JsonParsePull            p2on            0.2890   0.285   0.292      -0.7%     0.94      418
+JsonGenerate             p2off           0.5800   0.575   0.586      +0.0%     1.87      763
+JsonGenerate             p2on            0.5820   0.576   0.594      +0.3%     1.83      763
+Binarytrees              p2off           0.5420   0.538   0.559      +0.0%     0.54       38
+Binarytrees              p2on            0.5490   0.539   0.553      +1.3%     0.55       38
+RegexDna                 p2off           1.7120   1.685   1.754      +0.0%     2.36      272
+RegexDna                 p2on            1.7050   1.689   1.756      -0.4%     2.37      333
+Revcomp                  p2off           0.5670   0.556   0.572      +0.0%     2.03      527
+Revcomp                  p2on            0.5490   0.545   0.555      -3.2%     1.99      527
+Knuckeotide              p2off           0.6230   0.614   0.634      +0.0%     0.69       62
+Knuckeotide              p2on            0.6210   0.611   0.635      -0.3%     0.68       71

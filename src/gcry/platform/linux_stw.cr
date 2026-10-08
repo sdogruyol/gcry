@@ -9,6 +9,7 @@
 
 require "c/signal"
 require "c/pthread"
+require "./stw_signals"
 
 lib LibC
   fun pthread_equal(t1 : PthreadT, t2 : PthreadT) : Int
@@ -16,13 +17,9 @@ end
 
 module Gcry
   module Platform
-    # Must match Crystal::System::Thread SIG_* on this platform (linux-gnu).
-    STW_SIG_SUSPEND = LibC::SIGPWR
-    STW_SIG_RESUME  = {% if LibC.has_constant?(:SIGRTMIN) %}
-                        LibC::SIGRTMIN + 5
-                      {% else %}
-                        LibC::SIGXCPU
-                      {% end %}
+    # Crystal's own pair, not a copy of it (`stw_signals.cr`).
+    STW_SIG_SUSPEND = ::Crystal::System::Thread::GC_STW_SIG_SUSPEND
+    STW_SIG_RESUME  = ::Crystal::System::Thread::GC_STW_SIG_RESUME
 
     # Byte offset of the saved stack pointer inside glibc ucontext_t.
     # x86_64: uc_mcontext.gregs[REG_RSP] (see linux_stw history / samples).

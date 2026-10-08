@@ -6,8 +6,14 @@ require "spec"
 # than its ~10 ms period. The wait spun on `pause` for the whole stop, so every
 # collection's pause also burned a second core: a third of crystal-metric
 # Primes' CPU (user 4.1 s on 2.7 s wall, 2.55 s after the fix). The pause runs
-# one thread here (no parallel mark), so the process's CPU time across a run
-# of long collections is about their wall time, and was about twice that.
+# the collecting thread, so the process's CPU time across a run of long
+# collections is about the wall time, and a spinning Monitor adds one more
+# core on top.
+#
+# The mark is serial here. Parallel mark's idle helpers used to poll for the
+# whole pause too, and the bound was `workers + 0.4`; since they park
+# (`33_idle_mark_helpers_park_spec`) a parallel pause on this list costs
+# about one core, which left a spinning Monitor under that bound.
 class MonitorWaitNode
   property next_node : MonitorWaitNode?
   property payload = 0_i64
@@ -43,19 +49,28 @@ describe "the Monitor's wait for a stopped world" do
     holder = [] of MonitorWaitNode?
     monitor_wait_build(holder, 1_500_000)
 
-    GC.collect
-    cpu0 = Process.times
-    t0 = Time.instant
+    heap = Gcry.default_heap
+    saved_workers = heap.parallel_mark_workers
     collections = 0
-    # At least four pauses however slow the runner: a CI macOS or Windows
-    # runner managed two of this graph in 1.5 s.
-    while collections < 4 || (Time.instant - t0).total_milliseconds < 1_500
+    cpu = 0.0
+    wall = 0.0
+    begin
+      heap.parallel_mark_workers = 1
       GC.collect
-      collections += 1
+      cpu0 = Process.times
+      t0 = Time.instant
+      # At least four pauses however slow the runner: a CI macOS or Windows
+      # runner managed two of this graph in 1.5 s.
+      while collections < 4 || (Time.instant - t0).total_milliseconds < 1_500
+        GC.collect
+        collections += 1
+      end
+      wall = (Time.instant - t0).total_seconds
+      cpu1 = Process.times
+      cpu = (cpu1.utime - cpu0.utime) + (cpu1.stime - cpu0.stime)
+    ensure
+      heap.parallel_mark_workers = saved_workers
     end
-    wall = (Time.instant - t0).total_seconds
-    cpu1 = Process.times
-    cpu = (cpu1.utime - cpu0.utime) + (cpu1.stime - cpu0.stime)
 
     # The walk keeps the list live through the loop in a release build too,
     # where LLVM otherwise drops it and every pause is a few µs. Pauses shorter
@@ -68,9 +83,11 @@ describe "the Monitor's wait for a stopped world" do
     length.should eq(1_500_000)
     collections.should be > 3
     collections.should be < 100
+    # The marker is a core of CPU for the pause; a spinning Monitor is one
+    # more. 0.4 of a core is the margin the serial version of this check had.
     ratio = cpu / wall
     if ratio >= 1.4
-      fail "process CPU #{cpu.round(3)} s over #{wall.round(3)} s of back-to-back collections (#{collections}): ratio #{ratio.round(2)}"
+      fail "process CPU #{cpu.round(3)} s over #{wall.round(3)} s of back-to-back serial collections (#{collections}): ratio #{ratio.round(2)}"
     end
   end
 end

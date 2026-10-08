@@ -227,12 +227,12 @@ if ARGV.includes?("--child")
             Verdict.corrupt! if bytes[i] != FILL
             i += 64
           end
-          begin
-            GC.free(p)
-          rescue ArgumentError
-            # Counted and described rather than fatal. The worker carries on, so
-            # a child that hits this can hit it again, and the run still fails —
-            # `Verdict.refusals` is checked at the exit below.
+          # `heap.free_result` rather than `GC.free`: `GC.free` is zlib's and
+          # GMP's free hook and so never raises — it counts a refusal in
+          # `stale_frees` / `double_frees` and carries on — and this gate has to
+          # see *this* refusal, at the moment it happens. Counted and described
+          # rather than fatal; `Verdict.refusals` is checked at the exit below.
+          unless heap.free_result(p).freed?
             Verdict.refused!(p, heap.release_note(p.address))
           end
         end

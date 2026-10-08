@@ -1,0 +1,35 @@
+bench/mark_list_heap.cr, --release, taskset -c 8-11 (4 of 12 vCPUs, QEMU x86-64),
+3 000 000 nodes, 20 collections per run, 15 trials, arms shuffled per trial.
+"self" = this branch (helpers park, shard handed down the scan path),
+"base" = a4c0dbd (readiness). Default workers under this affinity = 2.
+pause/mark: median of per-run medians; min: smallest pause of any run;
+gc cpu/w: process CPU / wall over the 20 back-to-back collections.
+
+arm (workers/par.runs)   stolen    pause       min      mark  gc cpu/w proc cpu/w    wall s
+self 1 (1w/0p)                0   30.3ms    26.0ms    30.2ms      1.05       1.05     0.750
+self 2 (2w/20p)               6   31.9ms    25.7ms    31.8ms      1.07       1.06     0.780
+self 4 (4w/20p)              26   31.1ms    26.0ms    31.0ms      1.11       1.10     0.762
+base 1 (1w/0p)              nan   31.6ms    27.6ms    31.5ms      1.05       1.05     0.777
+base 2 (2w/20p)             nan   37.5ms    30.5ms    37.4ms      2.05       1.97     0.935
+base 4 (4w/20p)             nan   40.1ms    31.1ms    39.9ms      4.00       3.77     1.092
+
+Final build (the in-cycle spin bounded by time, not by poll count), 5 trials x 10
+collections, a quieter moment of the host:
+
+self 1 (1w/0p)                0   26.6ms    25.7ms    26.5ms      1.06       1.05     0.388
+self 2 (2w/10p)               8   27.2ms    26.2ms    27.1ms      1.08       1.07     0.394
+self 4 (4w/10p)              21   27.2ms    26.1ms    27.1ms      1.12       1.11     0.399
+
+Instructions (callgrind, 300 000 nodes, 7 collections, GCRY_PARALLEL_MARK_MIN_LIVE=0;
+valgrind serialises threads, so a spinning helper's polls barely show here):
+
+            serial        2 workers     4 workers
+base     691 035 991    817 310 145    819 257 147
+self     680 726 148    683 117 813    686 338 123
+
+base, 2 workers vs serial, per function: mark_worker (thread-local accessor)
++33.0 M, __memcpy_ssse3 +30.6 M, scan_edges_inline +37.7 M, scan_object
++28.3 M — 54 instructions per scanned node (2.36 M node scans).
+self, 2 workers vs serial: +2.4 M, about 1 per node. self serial is 1.5%
+below base serial: the serial copy of the scan path no longer inlines the
+parallel push (push_to_own_shard is out of line).

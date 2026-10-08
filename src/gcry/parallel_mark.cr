@@ -32,8 +32,26 @@ module Gcry
       @parallel_mark_workers
     end
 
+    # Serial under `-Dwithout_mt` off Windows: `Crystal::SpinLock` compiles to
+    # nothing there, so `@mark_lock` would not guard the shared mark stack.
     def parallel_mark_workers=(value : Int32) : Int32
-      @parallel_mark_workers = @force_serial_mark ? 1 : value.clamp(1, 16)
+      {% if flag?(:without_mt) && !flag?(:win32) %}
+        @parallel_mark_workers = 1
+      {% else %}
+        @parallel_mark_workers = @force_serial_mark ? 1 : value.clamp(1, 16)
+      {% end %}
+    end
+
+    # The process GC's default worker count for *cpus* CPUs (gc_override.cr
+    # has the measurements): two up to 7 CPUs, then one per four CPUs, at most
+    # `cpus − 1` and 8, at least 1.
+    def self.default_mark_workers(cpus : Int32) : Int32
+      small = cpus - 1 < 2 ? cpus - 1 : 2
+      wide = cpus // 4 + 1
+      wide = cpus - 1 if wide > cpus - 1
+      wide = 8 if wide > 8
+      n = small > wide ? small : wide
+      n < 1 ? 1 : n
     end
 
     # Below this many live bytes at the last major, mark serially even with
@@ -152,6 +170,7 @@ module Gcry
     protected def shutdown_mark_workers : Nil
       @mark_shutdown.set(1)
       @mark_epoch.add(1)
+      wake_mark_helpers
 
       if @mark_pthread_mode || @mark_pthread_count > 0
         @mark_pthread_count.times do |i|
@@ -179,6 +198,8 @@ module Gcry
       @mark_parallel = false
       @mark_shutdown.set(0)
       @mark_workers_busy.set(0)
+      @mark_sleepers.set(0)
+      @mark_spinners.set(0)
       @mark_lock = Crystal::SpinLock.new
       @mark_epoch = Atomic(UInt64).new(0_u64)
       # The forking thread keeps its slot (it becomes the sole thread), but the
@@ -204,7 +225,60 @@ module Gcry
     # Kemal that cost `/` 10–14 points of throughput even with every mark
     # serial (`GCRY_PARALLEL_MARK_MIN_LIVE` above the live set).
     MARK_IDLE_SLEEP_MAX_NS = 5_000_000
-    MARK_POP_BATCH         =       256
+    # In a cycle: how long a marker polls an empty shared stack before it
+    # parks (`park_idle_marker`), and the park's timeout, doubling from the
+    # first value to the second while nothing comes.
+    MARK_STEAL_SPIN_NS    =    50_000
+    MARK_STEAL_NAP_NS     =   100_000
+    MARK_STEAL_NAP_MAX_NS = 1_000_000
+
+    # How long a marker has found the shared stack empty in a row. Timed, not
+    # counted: one `Intrinsics.pause` poll is 20 ns on this x86-64 host, and
+    # on aarch64 the pause is a YIELD, a cycle or so, so a count that spins
+    # 40 µs here would spin a few there. The clock is read when the drought
+    # starts and every 128 polls after.
+    #
+    # While it spins the marker is counted in `spinners` (the heap's
+    # `@mark_spinners`): an awake marker that will take whatever is
+    # published next, so a publisher need not wake a parked one.
+    struct MarkDrought
+      def initialize(@spinners : Int32*)
+        @polls = 0
+        @from = 0_u64
+        @over = false
+      end
+
+      # Work came, or the cycle ended.
+      def reset : Nil
+        spinner(-1) if @polls > 0 && !@over
+        @polls = 0
+        @over = false
+      end
+
+      # One more empty poll. True once the stack has been empty for
+      # `MARK_STEAL_SPIN_NS`, and from then until `reset`.
+      def over? : Bool
+        return true if @over
+        @polls &+= 1
+        if @polls == 1
+          spinner(1)
+          @from = Clock.monotonic_ns
+        elsif @polls & 127 == 0 && Clock.monotonic_ns &- @from >= MARK_STEAL_SPIN_NS
+          # Uncounted before the park's check of the stack, which is under
+          # the lock a publisher pushes under before it reads the count.
+          spinner(-1)
+          @over = true
+        end
+        @over
+      end
+
+      # The count is the heap's `Atomic(Int32)`, changed in place.
+      private def spinner(by : Int32) : Nil
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, @spinners, by, LLVM::AtomicOrdering::SequentiallyConsistent, false)
+      end
+    end
+
+    MARK_POP_BATCH = 256
     # Entries are {header, chunk} pairs, so the flat buffer is twice the count.
     # Literal, not `MARK_POP_BATCH * 2`: a computed constant initializer runs
     # before Fiber is up during GC.init (see size_classes.cr).
@@ -223,61 +297,159 @@ module Gcry
       @@mark_worker = v
     end
 
-    # Lazily mmap a shard's push buffer. Called by a worker before it drains, and
-    # by the master; mmap during a collection is fine (it is what MarkStack#grow
-    # does), a managed allocation would not be.
-    # A slot's buffer address and count share its own 128-byte stride of
-    # `@mark_pushbuf_slots`, so no two workers' words ever share a cache line.
+    # Each worker's shard is its own 128-byte stride of `@mark_pushbuf_slots`:
+    # the push buffer, as base, top and limit addresses, and the bytes the
+    # worker scanned this cycle. No two workers' words share a cache line.
     # They were two `StaticArray`s indexed by slot — all sixteen counts in one
     # 64-byte line, written by every worker on every push. Sampled with four
     # workers on Primes, the count's read was 18.8% of all CPU and the
     # buffer's 18.5% (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
     MARK_PUSHBUF_STRIDE = 16
+    # Slot 0 the master, 1..15 the helpers (`mark_worker_loop` caps a claim).
+    MARK_SHARDS = 16
+    # Words of a shard. Base is 0 until the buffer is mapped, and top and
+    # limit with it, so an unmapped shard reads as full.
+    SHARD_BASE    = 0
+    SHARD_TOP     = 1
+    SHARD_LIMIT   = 2
+    SHARD_SCANNED = 3
 
-    @[AlwaysInline]
-    private def pushbuf_base(slot : Int32) : UInt64
-      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE]
+    # A batch scan hands its shard down the scan path (`scan_object` →
+    # `scan_payload` → `scan_edges_inline` → `mark_stack_push`); nil means
+    # the caller has none — the serial drains, the finalizer pass — and the
+    # push and the scanned-bytes count find it from `@@mark_worker`. Crystal
+    # compiles a method once per argument type, so the scan path exists twice,
+    # and the copy the serial drain runs reaches a shard only behind
+    # `@mark_parallel`, the push through an out-of-line `push_to_own_shard`.
+    #
+    # That lookup used to be the only way. A `@[ThreadLocal]` read is an
+    # out-of-line call — Crystal emits a `NoInline` accessor for every
+    # thread-local class variable — and the scan made two per object, one for
+    # the push and one for the byte count. On one long linked list, where a
+    # single worker marks every node, the parallel path took 54 instructions
+    # per object more than the serial drain: those two calls, a `memcpy` call
+    # in the local drain (`scan_batch_local_first`), and the push's index
+    # arithmetic. It takes 1 more now (callgrind, 300 000 nodes, two workers;
+    # `bench/mark_list_heap.cr`, `bench/log/linux/2026-10-06-mark-idle/`).
+    #
+    # A struct around the pointer rather than the pointer: a struct is never
+    # falsey, so a scan that was handed one tests nothing before it pushes or
+    # counts, where a pointer is tested for null each time.
+    struct MarkShard
+      def initialize(@words : UInt64*)
+      end
+
+      @[AlwaysInline]
+      def [](i : Int32) : UInt64
+        @words[i]
+      end
+
+      @[AlwaysInline]
+      def []=(i : Int32, value : UInt64) : UInt64
+        @words[i] = value
+      end
     end
 
     @[AlwaysInline]
-    private def pushbuf_n(slot : Int32) : Int32
-      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE + 1].to_i32!
+    protected def mark_shard(slot : Int32) : MarkShard
+      MarkShard.new(@mark_pushbuf_slots.to_unsafe + slot &* MARK_PUSHBUF_STRIDE)
     end
 
-    @[AlwaysInline]
-    private def set_pushbuf_n(slot : Int32, n : Int32) : Nil
-      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE + 1] = n.to_u64!
-    end
-
-    protected def ensure_pushbuf(slot : Int32) : Nil
-      return if pushbuf_base(slot) != 0_u64
+    # Lazily mmap a shard's push buffer. Called by a worker before it drains, and
+    # by the master; mmap during a collection is fine (it is what MarkStack#grow
+    # does), a managed allocation would not be.
+    protected def ensure_pushbuf(shard : MarkShard) : Nil
+      return if shard[SHARD_BASE] != 0_u64
       bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
-      ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+      ptr = Gcry.os_map(bytes)
       return if Gcry.mmap_failed?(ptr)
-      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE] = ptr.address
-      set_pushbuf_n(slot, 0)
+      shard[SHARD_BASE] = ptr.address
+      shard[SHARD_TOP] = ptr.address
+      shard[SHARD_LIMIT] = ptr.address &+ bytes
+    end
+
+    @[AlwaysInline]
+    private def pushbuf_n(shard : MarkShard) : Int32
+      ((shard[SHARD_TOP] &- shard[SHARD_BASE]) // sizeof(Void*).to_u64).to_i32!
     end
 
     # Publish one shard's accumulated children to the shared stack under one
     # lock. Single-writer per slot, so the buffer itself needs no lock.
-    protected def flush_pushbuf(slot : Int32) : Nil
-      n = pushbuf_n(slot)
+    #
+    # Parked markers (`park_idle_marker`) are woken only when the stack now
+    # holds more than one pop takes: up to `MARK_POP_BATCH` entries is what
+    # the publisher, awake and about to pop, takes back by itself, so a
+    # sleeper woken for it would find nothing and park again. One sleeper is
+    # woken per `MARK_POP_BATCH` held.
+    protected def flush_pushbuf(shard : MarkShard) : Nil
+      n = pushbuf_n(shard)
       return if n == 0
-      buf = Pointer(Void*).new(pushbuf_base(slot))
+      buf = Pointer(Void*).new(shard[SHARD_BASE])
       @mark_lock.lock
       i = 0
       while i < n
         @mark_stack.push(buf[i].as(BlockHeader*))
         i += 1
       end
+      depth = @mark_stack.size
       @mark_lock.unlock
-      set_pushbuf_n(slot, 0)
+      shard[SHARD_TOP] = shard[SHARD_BASE]
+      wake_parked_markers(depth // MARK_POP_BATCH) if depth > MARK_POP_BATCH
     end
 
-    # Scan a batch with the serial drain's prefetch: header line and first
-    # payload line of the object `MARK_PREFETCH_DEPTH` ahead, while this one
+    # One entry onto the shared stack, outside a shard buffer: the rest of a
+    # large payload being scanned in pieces, or a push with no buffer. A rest
+    # entry is up to the whole payload's work in one entry, so a parked
+    # marker is woken for it whatever the depth — unless one is awake and
+    # spinning (`MarkDrought`), which will take it. Waking one per 64 KiB
+    # piece regardless cost a syscall per piece: JsonGenerate +4.6% and
+    # Revcomp +7.8% wall against spinning helpers (`ab-cm-1.txt` in
+    # `bench/log/linux/2026-10-06-mark-idle/`).
+    protected def publish_mark_entry(entry : BlockHeader*) : Nil
+      @mark_lock.lock
+      @mark_stack.push(entry)
+      @mark_lock.unlock
+      wake_parked_markers(1) if @mark_spinners.get == 0
+    end
+
+    # A parallel-mark push into `shard`'s buffer, unlocked (single writer),
+    # flushed to the shared stack when full.
+    @[AlwaysInline]
+    protected def push_to_shard(header : BlockHeader*, shard : MarkShard) : Nil
+      top = shard[SHARD_TOP]
+      if top == shard[SHARD_LIMIT]
+        # Full, or never mapped (all three words still 0).
+        if shard[SHARD_BASE] == 0_u64
+          publish_mark_entry(header)
+          return
+        end
+        flush_pushbuf(shard)
+        top = shard[SHARD_TOP]
+      end
+      Pointer(Void*).new(top).value = header.as(Void*)
+      shard[SHARD_TOP] = top &+ sizeof(Void*).to_u64
+    end
+
+    # A parallel-mark push from a caller with no shard in hand: the thread's
+    # own, found from `@@mark_worker`. Out of line, so the scan loop that
+    # inlines `mark_stack_push` for the serial drain carries one call here
+    # rather than this body. Inlined, it cost that loop six instructions per
+    # object of register shuffling on a linked list, serial mark included
+    # (callgrind, `bench/log/linux/2026-10-06-mark-idle/`).
+    @[NoInline]
+    protected def push_to_own_shard(header : BlockHeader*) : Nil
+      slot = Heap.mark_worker
+      # A thread with no claimed slot (should not happen on a mark worker)
+      # falls back to the locked shared push rather than corrupting slot -1.
+      if slot < 0
+        publish_mark_entry(header)
+        return
+      end
+      push_to_shard(header, mark_shard(slot))
+    end
+
+    # Scan a batch with the serial drain's prefetch (`prefetch_mark_entry`)
+    # of the object `MARK_PREFETCH_DEPTH` ahead, while this one
     # scans. The batch scan had none, and mark is latency-bound — on 64-byte
     # objects the serial drain is **27.6% slower** without its ring
     # (`GCRY_PREFETCH=0`, t=+12.9), which is about the whole gap between two
@@ -285,11 +457,11 @@ module Gcry
     # (`bench/log/linux/2026-09-23-parallel-mark-scaling/`). `GCRY_PREFETCH=0`
     # turns this off too, so the A/B is one knob.
     @[AlwaysInline]
-    private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32) : Nil
+    private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32, shard : MarkShard) : Nil
       unless @mark_prefetch
         i = 0
         while i < m
-          scan_object(batch[i].as(BlockHeader*))
+          scan_object(batch[i].as(BlockHeader*), shard)
           i += 1
         end
         return
@@ -297,20 +469,16 @@ module Gcry
       ahead = m < MARK_PREFETCH_DEPTH ? m : MARK_PREFETCH_DEPTH
       j = 0
       while j < ahead
-        h = batch[j]
-        Kernels.prefetch_read(h)
-        Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+        prefetch_mark_entry(batch[j].as(BlockHeader*))
         j += 1
       end
       i = 0
       while i < m
         k = i + MARK_PREFETCH_DEPTH
         if k < m
-          h = batch[k]
-          Kernels.prefetch_read(h)
-          Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+          prefetch_mark_entry(batch[k].as(BlockHeader*))
         end
-        scan_object(batch[i].as(BlockHeader*))
+        scan_object(batch[i].as(BlockHeader*), shard)
         i += 1
       end
     end
@@ -341,19 +509,26 @@ module Gcry
     # since the pop that gave it the batch, and stays busy until the caller's
     # `add(-1)` after the final flush, so every object it holds, scanned or
     # not, is covered by that count.
-    private def scan_batch_local_first(batch : Pointer(Void*), m : Int32, slot : Int32) : Nil
-      scan_batch_prefetched(batch, m)
-      if pushbuf_base(slot) != 0_u64
-        buf = Pointer(Void*).new(pushbuf_base(slot))
+    private def scan_batch_local_first(batch : Pointer(Void*), m : Int32, shard : MarkShard) : Nil
+      scan_batch_prefetched(batch, m, shard)
+      base = shard[SHARD_BASE]
+      if base != 0_u64
+        buf = Pointer(Void*).new(base)
         loop do
-          n = pushbuf_n(slot)
+          n = pushbuf_n(shard)
           break if n == 0 || n > MARK_LOCAL_DRAIN_MAX
-          batch.copy_from(buf, n)
-          set_pushbuf_n(slot, 0)
-          scan_batch_prefetched(batch, n)
+          # At most `MARK_LOCAL_DRAIN_MAX` words: a loop, not `copy_from`,
+          # whose variable length is a `memcpy` call — per node on a list.
+          i = 0
+          while i < n
+            batch[i] = buf[i]
+            i += 1
+          end
+          shard[SHARD_TOP] = base
+          scan_batch_prefetched(batch, n, shard)
         end
       end
-      flush_pushbuf(slot)
+      flush_pushbuf(shard)
     end
 
     # Must not exceed `MARK_POP_BATCH`: the local drain reuses the pop buffer.
@@ -458,9 +633,9 @@ module Gcry
         slot = @mark_slot_claim.add(1)
         slot = 15 if slot > 15
         Heap.mark_worker = slot
-        ensure_pushbuf(slot)
+        ensure_pushbuf(mark_shard(slot))
       end
-      slot = Heap.mark_worker
+      shard = mark_shard(Heap.mark_worker)
 
       local_epoch = 0_u64
       batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
@@ -477,6 +652,13 @@ module Gcry
       # so lateness costs parallelism, never correctness. Polling rather than a
       # condition variable because there is no lost wake-up to reason about,
       # and Windows maps this layer's mutex to an SRWLOCK with no condvar.
+      #
+      # On Linux the sleep is a `futex` wait with the same timeout, which the
+      # master cuts short when a cycle starts (`wake_mark_helpers`). Between
+      # two collections of an allocation storm the helpers are asleep, and a
+      # sleep that only timed out joined each mark up to 5 ms late: with the
+      # helpers spinning instead, Σ mark fell 10–15% on JsonParsePure and
+      # Primes at four workers, and by 15–50% on JsonParseSerializable.
       idle = 0
       nap = MARK_IDLE_SLEEP_NS
       while @mark_shutdown.get == 0
@@ -486,11 +668,7 @@ module Gcry
             idle += 1
             Intrinsics.pause
           else
-            req = uninitialized Gcry::OS::Timespec
-            req.tv_sec = typeof(req.tv_sec).new(0)
-            req.tv_nsec = typeof(req.tv_nsec).new(nap)
-            rem = uninitialized Gcry::OS::Timespec
-            Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+            wait_for_mark_epoch(local_epoch, nap)
             nap = nap * 2 > MARK_IDLE_SLEEP_MAX_NS ? MARK_IDLE_SLEEP_MAX_NS : nap * 2
           end
           next
@@ -499,34 +677,186 @@ module Gcry
         nap = MARK_IDLE_SLEEP_NS
         local_epoch = epoch
         next if @mark_shutdown.get != 0
-        ensure_pushbuf(slot)
+        ensure_pushbuf(shard)
 
         # Stay in the cycle as long as the master says marking is live. A
         # transient empty is a pause, not an exit — the earlier bug was a worker
         # dropping out on the first empty and never re-entering while other
         # workers still had work. The master ends the cycle by clearing
         # `@mark_parallel`.
+        #
+        # A long empty is a park, though, not a spin (`park_idle_marker`).
+        # One long linked list gives the extra workers nothing to take — the
+        # worker holding it keeps each node's one child to itself — and they
+        # polled the empty stack for the whole mark: with four workers on a
+        # 3 M-node list, 4.0 cores of CPU per second of collecting against
+        # 1.05 serial, and a pause of 40.1 ms against 31.6; 1.11 cores and
+        # 31.1 ms now (`bench/mark_list_heap.cr`,
+        # `bench/log/linux/2026-10-06-mark-idle/`).
+        drought = MarkDrought.new(pointerof(@mark_spinners).as(Int32*))
+        nap = MARK_STEAL_NAP_NS
         while @mark_parallel && @mark_shutdown.get == 0
           m = pop_mark_batch(batch.to_unsafe, MARK_POP_BATCH)
           if m == 0
-            Intrinsics.pause
+            # The drought stays over until a pop succeeds: a wake that finds
+            # the stack already taken parks again without another spin.
+            if drought.over?
+              park_idle_marker(nap, master: false)
+              nap = nap * 2 > MARK_STEAL_NAP_MAX_NS ? MARK_STEAL_NAP_MAX_NS : nap * 2
+            else
+              Intrinsics.pause
+            end
             next
           end
+          drought.reset
+          nap = MARK_STEAL_NAP_NS
           # `pop_mark_batch` already counted this worker busy, under the lock
           # that took the batch. Busy therefore spans the batch AND its
           # unflushed children — a worker is never counted idle while it might
           # still push — which is the invariant the master's check rests on.
           begin
             @parallel_mark_stolen &+= m.to_u64
-            scan_batch_local_first(batch.to_unsafe, m, slot)
+            scan_batch_local_first(batch.to_unsafe, m, shard)
           ensure
-            @mark_workers_busy.add(-1)
+            end_helper_batch
           end
         end
+        drought.reset
       end
     end
 
+    {% if flag?(:linux) %}
+      FUTEX_WAIT_PRIVATE = 128
+      FUTEX_WAKE_PRIVATE = 129
+      SYS_FUTEX          = {{ flag?(:aarch64) ? 98 : 202 }}
+
+      # Every idle mark thread waits on `@mark_wake`: helpers between cycles
+      # (`wait_for_mark_epoch`) and any marker parked inside one
+      # (`park_idle_marker`). A waker bumps the word before the wake, so a
+      # waiter that read it before the bump returns at once.
+      private def mark_futex_wait(seq : Int32, req : Gcry::OS::Timespec*) : Nil
+        LibC.syscall(LibC::Long.new(SYS_FUTEX), pointerof(@mark_wake).as(Int32*), LibC::Long.new(FUTEX_WAIT_PRIVATE),
+          LibC::Long.new(seq), req, Pointer(Void).null, LibC::Long.new(0))
+      end
+    {% end %}
+
+    # One idle helper's sleep of at most `nap_ns`, cut short on Linux by the
+    # next cycle's `wake_mark_helpers`.
+    #
+    # The helper counts itself a sleeper before it reads the wake word and
+    # then the epoch; the master bumps the epoch before it reads the sleeper
+    # count. Both sides are sequentially consistent RMWs followed by loads, so
+    # either the helper sees the new epoch and does not sleep, or the master
+    # sees the sleeper and bumps the word, which makes the wait return at
+    # once or wakes it. The timeout stays as before, so a lost wake-up could
+    # only cost what the plain sleep always did.
+    private def wait_for_mark_epoch(local_epoch : UInt64, nap_ns : Int32) : Nil
+      req = uninitialized Gcry::OS::Timespec
+      req.tv_sec = typeof(req.tv_sec).new(0)
+      req.tv_nsec = typeof(req.tv_nsec).new(nap_ns)
+      {% if flag?(:linux) %}
+        @mark_sleepers.add(1)
+        seq = @mark_wake.get
+        if @mark_epoch.get == local_epoch && @mark_shutdown.get == 0
+          mark_futex_wait(seq, pointerof(req))
+        end
+        @mark_sleepers.add(-1)
+      {% else %}
+        rem = uninitialized Gcry::OS::Timespec
+        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+      {% end %}
+    end
+
+    # Inside a cycle, a marker that has found the shared stack empty for
+    # `MARK_STEAL_SPIN_NS` sleeps here for at most `nap_ns`.
+    #
+    # On Linux it is a futex wait, and it is entered only if, under
+    # `@mark_lock`, the cycle is live and the shared stack empty — for the
+    # master, also with a batch still held somewhere, since `busy == 0` there
+    # is the end of the mark. Everything that ends such a state announces
+    # itself, after the same lock where it has one, and reads the sleeper
+    # count after it:
+    #
+    # - work published to the shared stack (`flush_pushbuf`,
+    #   `publish_mark_entry`) wakes sleepers when it is worth a pop;
+    # - the end of the cycle (`@mark_parallel` cleared) wakes all;
+    # - the batch end that leaves nothing held and nothing shared
+    #   (`end_helper_batch`) wakes all, for the master.
+    #
+    # The marker counts itself a sleeper and reads the wake word before its
+    # check. For the first two that makes the lost wake-up impossible by the
+    # lock: a publisher whose push this check missed took the lock after it,
+    # so it sees the sleeper and bumps the word, and the wait returns at once
+    # or is woken. The third is not under the lock; it is a sequentially
+    # consistent RMW followed by a load against this one, as in
+    # `wait_for_mark_epoch`. The timeout bounds any wake-up this misses, and
+    # it is what finds work that was published without a wake.
+    #
+    # Elsewhere there is no wake to wait for and this is a plain sleep, so a
+    # parked helper takes work up to `nap_ns` late; the master does not park
+    # there (`mark_loop_drain`), because its lateness would be the pause's.
+    private def park_idle_marker(nap_ns : Int32, master : Bool) : Nil
+      req = uninitialized Gcry::OS::Timespec
+      req.tv_sec = typeof(req.tv_sec).new(0)
+      req.tv_nsec = typeof(req.tv_nsec).new(nap_ns)
+      {% if flag?(:linux) %}
+        @mark_sleepers.add(1)
+        seq = @mark_wake.get
+        @mark_lock.lock
+        idle = @mark_parallel && @mark_stack.empty? && (!master || @mark_workers_busy.get != 0)
+        @mark_lock.unlock
+        mark_futex_wait(seq, pointerof(req)) if idle && @mark_shutdown.get == 0
+        @mark_sleepers.add(-1)
+      {% else %}
+        rem = uninitialized Gcry::OS::Timespec
+        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+      {% end %}
+    end
+
+    # Wake up to `count` sleepers on `@mark_wake`. No syscall while none is.
+    @[AlwaysInline]
+    private def wake_parked_markers(count : Int32) : Nil
+      {% if flag?(:linux) %}
+        return if @mark_sleepers.get == 0
+        @mark_wake.add(1)
+        LibC.syscall(LibC::Long.new(SYS_FUTEX), pointerof(@mark_wake).as(Int32*), LibC::Long.new(FUTEX_WAKE_PRIVATE),
+          LibC::Long.new(count), Pointer(Void).null, Pointer(Void).null, LibC::Long.new(0))
+      {% end %}
+    end
+
+    # After an epoch bump or the end of a cycle: wake every helper that is in
+    # `wait_for_mark_epoch` or `park_idle_marker`.
+    private def wake_mark_helpers : Nil
+      wake_parked_markers(Int32::MAX)
+    end
+
+    # A helper's batch end, the `add(-1)` its pop owes. The decrement that
+    # leaves no batch held while the shared stack is empty is the end of the
+    # cycle's work, which a master parked in `park_idle_marker` waits for.
+    # That state is final — only a worker holding a batch publishes — so this
+    # wakes once per cycle. The master's own decrement wakes nobody: it is
+    # the one awake to see it.
+    @[AlwaysInline]
+    private def end_helper_batch : Nil
+      last = @mark_workers_busy.add(-1) == 1
+      wake_mark_helpers if last && @mark_stack.empty_unlocked?
+    end
+
+    # The drain, with `scan_edges_inline` allowed for its length. Set before
+    # the helpers are woken and cleared after the last of them has finished
+    # its batch, so every scan of this cycle sees one value; any other scan
+    # (the finalizer pass, a library heap's unstopped collect) takes the
+    # `mark_impl` path, which needs no precondition.
     private def mark_loop : Nil
+      @mark_edges_inline = mark_edges_inline_allowed?
+      begin
+        mark_loop_drain
+      ensure
+        @mark_edges_inline = false
+      end
+    end
+
+    private def mark_loop_drain : Nil
       # The live bytes the last major's sweep measured; this cycle's sweep has
       # not run yet.
       if @parallel_mark_workers <= 1 || live_bytes_after_sweep < @parallel_mark_min_live
@@ -544,24 +874,30 @@ module Gcry
       end
 
       Heap.mark_worker = 0
-      ensure_pushbuf(0)
+      shard = mark_shard(0)
+      ensure_pushbuf(shard)
       # Under the lock, which also publishes the master's unlocked pushes
       # above to a worker that sees `true` under it (see `pop_mark_batch`).
       @mark_lock.lock
       @mark_parallel = true
       @mark_lock.unlock
       @mark_epoch.add(1)
+      wake_mark_helpers
       batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
+      drought = MarkDrought.new(pointerof(@mark_spinners).as(Int32*))
+      nap = MARK_STEAL_NAP_NS
       begin
         loop do
           m = pop_mark_batch(batch.to_unsafe, MARK_POP_BATCH)
           if m > 0
+            drought.reset
+            nap = MARK_STEAL_NAP_NS
             # The master takes a batch through the same door, so it owes the
             # same decrement. It is never mid-batch at the termination check
             # below — that branch is only reached when the pop came back
             # empty and nothing was counted.
             begin
-              scan_batch_local_first(batch.to_unsafe, m, 0)
+              scan_batch_local_first(batch.to_unsafe, m, shard)
             ensure
               @mark_workers_busy.add(-1)
             end
@@ -572,16 +908,35 @@ module Gcry
           # a worker becomes busy only by popping under that lock, so with the
           # stack empty it cannot, and the pair is stable once observed.
           break if mark_drain_finished?
+          # A helper holds the rest of the mark — one long chain, say — and
+          # the master waits for it parked, as an idle helper does, rather
+          # than polling for the whole of it. Linux only: the batch end that
+          # finishes the work wakes it (`end_helper_batch`); a sleep that
+          # timed out would add up to `nap` to the pause.
+          {% if flag?(:linux) %}
+            if drought.over?
+              park_idle_marker(nap, master: true)
+              nap = nap * 2 > MARK_STEAL_NAP_MAX_NS ? MARK_STEAL_NAP_MAX_NS : nap * 2
+              next
+            end
+          {% end %}
           Intrinsics.pause
         end
       ensure
+        drought.reset
         @mark_lock.lock
         @mark_parallel = false
         @mark_lock.unlock
         @mark_epoch.add(1)
+        # Helpers parked in the cycle are told it is over under the same
+        # lock-then-count order they sleep by (`park_idle_marker`).
+        wake_mark_helpers
         until @mark_workers_busy.get == 0
           Intrinsics.pause
         end
+        # Every helper is past its last scan: no batch can be popped with
+        # `@mark_parallel` false, and busy counts the ones in flight.
+        @mark_scanned_bytes &+= take_parallel_scanned_bytes
       end
     end
   end

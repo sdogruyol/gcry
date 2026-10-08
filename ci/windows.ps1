@@ -1,3 +1,8 @@
+# PowerShell 7 (`pwsh`): `[IO.Path]::GetRelativePath` and `utf8NoBOM` below do
+# not exist in Windows PowerShell 5.1, which failed half-way through the first
+# spec step instead of saying so.
+#Requires -Version 7
+
 param(
     [ValidateSet('default', 'headers', 'freelist')]
     [string] $Variant = 'default',

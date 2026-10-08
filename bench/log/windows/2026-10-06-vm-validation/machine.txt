@@ -1,0 +1,37 @@
+
+Name                      : QEMU Virtual CPU version 2.5+
+NumberOfCores             : 12
+NumberOfLogicalProcessors : 12
+MaxClockSpeed             : 4300
+
+
+
+Manufacturer        : QEMU
+Model               : Standard PC (Q35 + ICH9, 2009)
+HypervisorPresent   : True
+TotalPhysicalMemory : 17109000192
+
+
+
+ProductName    : Windows 10 Pro
+DisplayVersion : 25H2
+CurrentBuild   : 26200
+UBR            : 9457
+EditionID      : Professional
+
+
+
+Manufacturer      : Proxmox distribution of EDK II
+SMBIOSBIOSVersion : 4.2025.05-2
+
+
+Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)
+Crystal 1.21.0 [57cf7da] (2026-07-16)
+
+LLVM: 20.1.7
+Default target: x86_64-pc-windows-msvc
+
+RealTimeProtectionEnabled : True
+AMRunningMode             : Normal
+
+

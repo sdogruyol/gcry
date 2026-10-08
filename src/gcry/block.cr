@@ -59,11 +59,13 @@ module Gcry
       ATOMIC = 2_u32
       # Legacy single-bit MARK (pre mark-gen). Cleared on set/clear; unused for
       # marked? after mark-gen.
-      MARK         =  4_u32
-      LARGE        =  8_u32
-      NURSERY      = 16_u32 # young generation (Phase 6)
-      FINALIZER    = 32_u32 # has at least one finalizer entry
-      DISAPPEARING = 64_u32 # has at least one disappearing link (WeakRef)
+      MARK    =  4_u32
+      LARGE   =  8_u32
+      NURSERY = 16_u32 # young generation (Phase 6)
+      # 32 and 64 were FINALIZER and DISAPPEARING. The finalizer registry's
+      # index replaced them (7.4); `GC_register_finalizer` kept reading the
+      # first, which under headerless is a bit of the object's own data.
+
       # Diagnostic, set alongside FREE by the sweep's freelist link and left
       # clear by an explicit `Heap#free`. A use-after-free report can then say
       # *which* path gave the block back — "the collector decided it was
@@ -76,6 +78,37 @@ module Gcry
       # BlockHeader.mark_gen. clear_all_marks bumps gen (O(1)) instead of walking.
       MARK_GEN_SHIFT =          8
       MARK_GEN_MASK  = 0xFF00_u32
+      # Bits 16–31 of a *large* block's header: bits 32–47 of its size
+      # (`BlockHeader.large_size`). The mark and FREE writes are
+      # read-modify-writes of this word and keep them.
+      SIZE_HI_SHIFT =              16
+      SIZE_HI_MASK  = 0xFFFF_0000_u32
+    end
+
+    # A large payload must be below this to be recorded: `size` holds its low
+    # 32 bits and `Flags::SIZE_HI_MASK` the next 16. No supported target maps
+    # that much (x86_64 and arm64 user space is 47–48 bits). A literal, so no
+    # lazy constant initializer lands on the allocation path.
+    LARGE_SIZE_LIMIT = 0x1_0000_0000_0000_u64
+
+    # A large block's header word for *size*. `size` alone truncated at
+    # 4 GiB, and a pointerful object past that was scanned only to its size
+    # mod 2^32, so what it held beyond was swept while live
+    # (`process_spec/regression/43_large_object_over_4gib_spec.cr`).
+    def self.large(size : UInt64, flags : UInt32, next_free : Void* = Pointer(Void).null) : BlockHeader
+      hi = (size >> 32).to_u32! << Flags::SIZE_HI_SHIFT
+      new(size.to_u32!, (flags & ~Flags::SIZE_HI_MASK) | hi, next_free)
+    end
+
+    # The size a large block's header records (`large`).
+    def self.large_size(header : BlockHeader*) : UInt64
+      h = header.value
+      h.size.to_u64 | ((h.flags & Flags::SIZE_HI_MASK).to_u64 << (32 - Flags::SIZE_HI_SHIFT))
+    end
+
+    # Its flags, without the size bits.
+    def self.large_flags(header : BlockHeader*) : UInt32
+      header.value.flags & ~Flags::SIZE_HI_MASK
     end
 
     # Process-wide current mark generation for in-header MARK (mirrors active Heap).
@@ -244,38 +277,6 @@ module Gcry
       clear_mark(from_user(user))
     end
 
-    def self.finalizer?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::FINALIZER) != 0
-    end
-
-    def self.disappearing?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::DISAPPEARING) != 0
-    end
-
-    def self.set_finalizer(header : BlockHeader*) : Nil
-      {% if !flag?(:gcry_block_headers) %}
-        # Nothing reads this flag since 7.4 replaced it with the finalizer
-        # registry's index, and under headerless a small block has no header —
-        # this write would land in the object's own first words.
-        return
-      {% end %}
-      h = header.value
-      h.flags |= Flags::FINALIZER
-      header.value = h
-    end
-
-    def self.set_disappearing(header : BlockHeader*) : Nil
-      {% if !flag?(:gcry_block_headers) %}
-        # Nothing reads this flag since 7.4 replaced it with the finalizer
-        # registry's index, and under headerless a small block has no header —
-        # this write would land in the object's own first words.
-        return
-      {% end %}
-      h = header.value
-      h.flags |= Flags::DISAPPEARING
-      header.value = h
-    end
-
     def self.promote(header : BlockHeader*) : Nil
       h = header.value
       h.flags &= ~Flags::NURSERY
@@ -299,9 +300,9 @@ module Gcry
     # so this always writes. `set_used` is a no-op under headerless because a
     # *small* block has nowhere to write; using it for a large block silently
     # dropped its size and LARGE flag.
-    def self.set_used_large(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
+    def self.set_used_large(header : BlockHeader*, size : UInt64, flags : UInt32) : Nil
       hl_check(header.address, "HL: set_used_large into guarded range\n")
-      header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
+      header.value = large(size, flags & ~Flags::FREE)
     end
 
     # Mark accessors for a block that still has a header — i.e. a large block,
@@ -458,6 +459,16 @@ module Gcry
       # chunk no allocator can reach any more, never cleared: the chunk is
       # unmapped, quarantined or queued for release next, never relinked.
       UNLINKING = 512_u32
+      # A large chunk whose data pages `Heap#move_large_contents` handed to a
+      # grown block: its data range reads zeroes and holds no resident page,
+      # so recycling it saves nothing (`Heap#take_large_recycle`).
+      MOVED = 1024_u32
+      # A large chunk cached by the program's own `GC.free` since the last
+      # major, under large-object recycling: the allocation of its exact size
+      # takes it where it stands, as the exact-size cache always did, and not
+      # through the recycler's fresh mapping (`Heap#take_large_free`).
+      # Cleared when taken.
+      FREED = 2048_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -552,6 +563,12 @@ module Gcry
       {% end %}
     end
 
+    # The size a large chunk's object was allocated with, in both builds and
+    # past 4 GiB (`BlockHeader.large_size`). The mapping only bounds it.
+    def self.large_payload(chunk : ChunkHeader*) : UInt64
+      BlockHeader.large_size(large_header(chunk))
+    end
+
     def self.nursery?(chunk : ChunkHeader*) : Bool
       (chunk.value.flags & Flags::NURSERY) != 0
     end
@@ -607,6 +624,22 @@ module Gcry
 
     def self.set_unlinking(chunk : ChunkHeader*) : Nil
       update_flag(chunk, Flags::UNLINKING, true)
+    end
+
+    def self.moved?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::MOVED) != 0
+    end
+
+    def self.set_moved(chunk : ChunkHeader*) : Nil
+      update_flag(chunk, Flags::MOVED, true)
+    end
+
+    def self.freed?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::FREED) != 0
+    end
+
+    def self.set_freed(chunk : ChunkHeader*, value : Bool) : Nil
+      update_flag(chunk, Flags::FREED, value)
     end
 
     def self.idle?(chunk : ChunkHeader*) : Bool

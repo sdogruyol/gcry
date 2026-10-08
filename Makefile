@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss parallel-dormant darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-death-window thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss parallel-dormant darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-death-window thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -206,7 +206,7 @@ parallel-mark-process: $(BIN)
 parallel-mark-stress: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_storm.cr -o $(BIN)/thread_storm --error-trace
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
-	  GCRY_PARALLEL_MARK=4 $(BIN)/thread_storm --iterations=1000 --workers=10 > $(BIN)/parallel_mark_stress.log 2>&1 || \
+	  GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=0 $(BIN)/thread_storm --iterations=1000 --workers=10 > $(BIN)/parallel_mark_stress.log 2>&1 || \
 	    { tail -20 $(BIN)/parallel_mark_stress.log; echo "FAIL: thread_storm with GCRY_PARALLEL_MARK=4 failed on run $$i"; exit 1; }; \
 	done; echo "ok — 10 of 10 thread_storm runs with four mark workers"
 
@@ -270,6 +270,20 @@ compiler-gc-contract: $(BIN)
 	! GCRY_DISABLE_LAYOUT=1 $(BIN)/compiler_gc_contract
 	$(CRYSTAL) tool hierarchy src/gcry.cr >/dev/null
 	$(CRYSTAL) tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
+
+# `-Dgcry_no_boehm_abi`: a gcry program that links libgc itself
+# (bench/boehm_abi_optout.cr). First arm, red: built without the flag, gcry's
+# `GC_*` exports and the static libgc's collide at link time, which is what
+# the PR #44 review hit. Second: with the flag it links, `GC_malloc` is
+# libgc's, and both collectors run. Third, red: with Boehm left on Crystal's
+# suspend signals, gcry's first multi-threaded stop faults.
+.PHONY: boehm-abi-optout
+boehm-abi-optout: $(BIN)
+	! $(CRYSTAL) build -Dgc_none bench/boehm_abi_optout.cr -o $(BIN)/boehm_abi_optout_collides 2>$(BIN)/boehm_abi_optout.link.log
+	grep -q "multiple definition of .GC_malloc" $(BIN)/boehm_abi_optout.link.log
+	$(CRYSTAL) build -Dgc_none -Dgcry_no_boehm_abi bench/boehm_abi_optout.cr -o $(BIN)/boehm_abi_optout --error-trace
+	$(BIN)/boehm_abi_optout
+	! BOEHM_SIGNALS=crystal timeout 60 $(BIN)/boehm_abi_optout
 
 kemal-e2e:
 	KEMAL_E2E_DURATION=$${KEMAL_E2E_DURATION:-60} ./bench/kemal_e2e.sh
@@ -673,11 +687,15 @@ interior-only-buffer: $(BIN)
 # The same for a byte buffer held only by a misaligned induction pointer:
 # the default arm must keep it, the alignment-filter arm must fault. Both red
 # arms get three tries: on Intel macOS the aligned-only arm kept the buffer
-# once in 20 CI runs (2026-10-03), a stale word holding it.
+# once in 20 CI runs (2026-10-03), a stale word holding it. The red arm runs
+# with the atomic slack off: the loop's last pointer, one past the buffer, is
+# aligned, and with the slack it lands inside the block and keeps it whatever
+# the alignment filter does — Boehm's reason for the byte. With the slack on
+# the arm kept the buffer 3 of 3 (2026-10-05, from `a57d0b6`).
 unaligned-only-buffer: $(BIN)
 	$(CRYSTAL) build -Dgc_none --release bench/unaligned_only_buffer.cr -o $(BIN)/unaligned_only_buffer --error-trace
 	$(BIN)/unaligned_only_buffer
-	@for i in 1 2 3; do GCRY_ALIGNED_CANDIDATES=1 $(BIN)/unaligned_only_buffer || exit 0; done; \
+	@for i in 1 2 3; do GCRY_ATOMIC_SLACK=0 GCRY_ALIGNED_CANDIDATES=1 $(BIN)/unaligned_only_buffer || exit 0; done; \
 	  echo "FAIL: the aligned-only arm kept the buffer in 3 of 3 runs"; exit 1
 
 poison-freed: $(BIN)
@@ -799,6 +817,8 @@ windows-typecheck: $(BIN)
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stw_sp_spec.cr -o $(BIN)/windows_typecheck_spec_stw >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stack_scrub_spec.cr -o $(BIN)/windows_typecheck_spec_scrub >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/cached_bitmap_pool_race_spec.cr -o $(BIN)/windows_typecheck_spec_pool >/dev/null
+	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stack_low_water_spec.cr -o $(BIN)/windows_typecheck_spec_lw_x86 >/dev/null
+	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc spec/stack_low_water_spec.cr -o $(BIN)/windows_typecheck_spec_lw_arm64 >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/segv_region_report.cr -o $(BIN)/windows_typecheck_srr >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o $(BIN)/windows_typecheck_proc_x86 >/dev/null
 	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o $(BIN)/windows_typecheck_proc_arm64 >/dev/null
@@ -924,12 +944,17 @@ ignored-knob-warnings: $(BIN)
 # no next cycle. Uncapped, a 200 MB burst idled at 78.7 MB RSS against 6.3 MB
 # after `GC.collect`; grace is capped at one threshold since 2026-09-23. The
 # shipped arm must fit the bound and `GCRY_UNMAP_GRACE_UNBOUNDED=1` must not,
-# in the same run, so the gate cannot rot into passing both. ~15 s.
+# in the same run, so the gate cannot rot into passing both. Each arm must
+# answer with its own exit code — 0 for the shipped arm, 1 for the red one —
+# and a run that exits 2 (the burst stayed live, see the bench) is run again,
+# up to three times; until 2026-10-07 the red arm's `!` took that 2 as its
+# failure and the green arm failed the job on it. ~15 s.
 .PHONY: idle-rss-after-burst
 idle-rss-after-burst: $(BIN)
 	@$(CRYSTAL) build -Dgc_none bench/idle_rss_after_burst.cr -o $(BIN)/idle_rss_after_burst --error-trace
-	@$(BIN)/idle_rss_after_burst
-	! GCRY_UNMAP_GRACE_UNBOUNDED=1 $(BIN)/idle_rss_after_burst
+	@for try in 1 2 3; do $(BIN)/idle_rss_after_burst; rc=$$?; [ $$rc -ne 2 ] && break; done; [ $$rc -eq 0 ]
+	@for try in 1 2 3; do GCRY_UNMAP_GRACE_UNBOUNDED=1 $(BIN)/idle_rss_after_burst; rc=$$?; [ $$rc -ne 2 ] && break; done; \
+	  if [ $$rc -ne 1 ]; then echo "FAIL: the uncapped red arm exited $$rc, not 1"; exit 1; fi
 	@echo "ok — the capped arm fits and the uncapped red arm does not"
 
 # `GCRY_IDLE_RELEASE_MS`: a `gc-idle` thread runs one releasing collection once
@@ -1060,6 +1085,26 @@ dormant-flush-race: $(BIN)
 oom-no-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/oom_no_hang.cr -o $(BIN)/oom_no_hang --error-trace
 	$(BIN)/oom_no_hang
+
+# Does a stop that lands inside a `realloc` page move still mark everything the
+# moved pages reach? Between the two `mremap` calls of `Platform.move_pages`
+# the contents are in no chunk, and the stop signal is blocked across them.
+# The move is opt-in (`GCRY_REALLOC_MOVE=1`) and both arms turn it on. The
+# control (`GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200`) unblocks the signal and
+# holds the window open, and has to fail or the moving arm proves nothing.
+.PHONY: realloc-move-stress
+realloc-move-stress: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/realloc_move_stress.cr -o $(BIN)/realloc_move_stress --error-trace
+	$(BIN)/realloc_move_stress
+
+# Is a large block freed with `GC.free` reused, rather than unmapped at once
+# and mapped fresh by the next allocation? zlib's stream state comes and goes
+# that way; under large-object recycling with nothing kept between majors a
+# gzip loop unmapped 5.4 GB in 20 000 iterations and ran 2.4× slower.
+.PHONY: gzip-free-reuse
+gzip-free-reuse: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/gzip_free_loop.cr -o $(BIN)/gzip_free_loop --error-trace
+	$(BIN)/gzip_free_loop 2000
 
 large-cache-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/large_cache_race.cr -o $(BIN)/large_cache_race --error-trace
@@ -1302,8 +1347,8 @@ thread-census-names: $(BIN)
 	GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names --control
 	GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names
 	GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname
-	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 $(BIN)/thread_census_names --mark
-	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --mark --noname
+	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=0 $(BIN)/thread_census_names --mark
+	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=0 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --mark --noname
 	# The aarch64 shape, reproduced on purpose. That job sets
 	# `GCRY_STW_WATCHDOG_MS` for its whole step, and the watchdog is a raw
 	# Both location arms run `--parked`, where the planted probe sleeps instead
@@ -1431,10 +1476,27 @@ thread-birth-root: $(BIN)
 	$(BIN)/thread_birth_root
 	GCRY_THREAD_BIRTH_NOROOT=1 $(BIN)/thread_birth_root --noroot
 	GCRY_THREAD_BIRTH_ROOT=0 $(BIN)/thread_birth_root --control
-	$(BIN)/thread_birth_root --burst
-	GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1 $(BIN)/thread_birth_root --burst-unrooted
+	GCRY_THREAD_BIRTH_NOGROW=1 $(BIN)/thread_birth_root --burst
+	GCRY_THREAD_BIRTH_NOGROW=1 GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1 $(BIN)/thread_birth_root --burst-unrooted
 	$(BIN)/thread_birth_root --churn
 	GCRY_THREAD_BIRTH_DEATHS=0 $(BIN)/thread_birth_root --churn-leaking
+
+# A dying thread's `Thread`, across collections it cannot be seen in.
+# `Thread#start` takes itself off Crystal's list and then still reads
+# `@detached` and `@system_handle`, and it waits in between on the fiber
+# list's mutex, which every stop holds — so a thread that leaves the list just
+# before a stop sits through the whole collection held only by its own
+# unscanned stack. The harness parks fire-and-forget threads exactly there and
+# collects; every `Thread` must survive. `--concurrent` has eight creators
+# race on the root table, which lost or crossed 12% of concurrent births until
+# 2026-10-05. The control turns the birth root off and requires the objects to
+# die, so the clean arms are the root's doing. No pre-stop wait in any arm:
+# correctness must not come from its spins.
+thread-death-window: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_death_window.cr -o $(BIN)/thread_death_window --error-trace
+	GCRY_STAGED_WAIT=0 $(BIN)/thread_death_window
+	GCRY_STAGED_WAIT=0 $(BIN)/thread_death_window --concurrent
+	GCRY_STAGED_WAIT=0 GCRY_THREAD_BIRTH_ROOT=0 $(BIN)/thread_death_window --control
 
 # The reproducer for the open "live large object released under load" item —
 # not a gate. `ROADMAP.md` has carried that defect since 2026-08-23 and lost
@@ -1587,7 +1649,7 @@ thread-uaf-sample: $(BIN)
 	  churn=""; \
 	  if [ -z "$$THREAD_UAF_BIN" ]; then \
 	    churn=$(SAMPLE_DIR)/run-$$i-churn.log; \
-	    GCRY_THREAD_UNSTAGE_ON_DEATH=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
 	      $(BIN)/thread_churn_uaf --child > $$churn 2>&1 || crashes=$$((crashes+1)); \
 	  fi; \
 	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log $$churn; do \
@@ -1608,7 +1670,7 @@ thread-uaf-sample: $(BIN)
 	  while [ "$$gaveup" -lt "$$want" ]; do \
 	    if [ "$$(date +%s)" -ge "$$deadline" ]; then stop="budget"; break; fi; \
 	    extra=$$((extra+1)); f=$(SAMPLE_DIR)/extra-$$extra-churn.log; \
-	    GCRY_THREAD_UNSTAGE_ON_DEATH=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
 	      $(BIN)/thread_churn_uaf --child > $$f 2>&1 || crashes=$$((crashes+1)); \
 	    d=$$(grep -c "is unmarked and about to be swept" $$f || true); \
 	    g=$$(grep -c "GAVE UP" $$f || true); \
@@ -2197,6 +2259,7 @@ samples: $(BIN)
 sound-profile-smoke: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/sound_profile.cr -o $(BIN)/sound_profile
 	$(BIN)/sound_profile
+	GCRY_STW_STACK_LAG=262144 $(BIN)/sound_profile
 	GCRY_SOUND=1 $(BIN)/sound_profile
 	GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 $(BIN)/sound_profile
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers samples/sound_profile.cr -o $(BIN)/sound_profile_hdr

@@ -1,0 +1,5 @@
+bench                    arm           wall med     min     max  Δ vs base  cpu med  rss MiB
+JsonParseSerializable    base            0.2990   0.295   0.302      +0.0%     1.14      438
+JsonParseSerializable    new             0.3050   0.301   0.308      +2.0%     1.22      437
+RegexDna                 base            1.7310   1.712   1.807      +0.0%     2.41      272
+RegexDna                 new             1.7440   1.723   1.767      +0.8%     2.45      272

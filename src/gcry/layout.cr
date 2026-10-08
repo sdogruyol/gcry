@@ -787,6 +787,9 @@ module Gcry
               {% skip = true %}
             {% end %}
           {% end %}
+          # Same check as register_all_from_reference_subclasses: skip a type
+          # this file cannot spell.
+          {% skip = parse_type(t.stringify).resolve? != t unless skip %}
           {% unless skip || t <= Hash %}
             bytes = instance_sizeof({{t}}).to_u64
             rounded, _ = SizeClasses.fit(bytes)
@@ -822,6 +825,13 @@ module Gcry
               {% skip = true %}
             {% end %}
           {% end %}
+          # The expansion below spells `t` from this file. A type that names
+          # something private to another file — `private alias R = Array(R)?`,
+          # `Array(Tuple(Int32, PrivateClass))`, a class inside a private
+          # module — does not resolve here, and emitting it fails the whole
+          # program's compile. Skip any type whose name does not resolve back
+          # to itself from this scope.
+          {% skip = parse_type(t.stringify).resolve? != t unless skip %}
           {% unless skip %}
             {% if t <= Hash %}
               {% if t.type_vars.size == 2 %}

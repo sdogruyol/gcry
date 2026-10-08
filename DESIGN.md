@@ -141,7 +141,7 @@ src/gcry/
   invariant.cr · mark_audit.cr · thread_block_audit.cr
   address_space_audit.cr · poison_holders.cr · ec_queue_audit.cr
   segv_report.cr · raw_out.cr · stw_watchdog.cr · monitor_gate.cr
-  clock.cr · crystal_process_compat.cr
+  clock.cr · crystal_process_compat.cr · crystal_string_builder_compat.cr
   platform/
     linux_stw.cr · linux_roots.cr · linux_stack.cr · linux_fork.cr
     linux_softdirty.cr · linux_mprotect.cr · linux_pagemap.cr

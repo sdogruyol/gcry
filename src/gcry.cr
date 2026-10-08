@@ -85,6 +85,12 @@ module Gcry
     default_heap.is_heap_ptr(pointer)
   end
 
+  # Boehm's `GC_size`: the usable size of the live block containing `pointer`
+  # (its base or an interior byte), at least what was requested. 0 otherwise.
+  def self.usable_size(pointer : Void*) : UInt64
+    default_heap.usable_size(pointer)
+  end
+
   def self.collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
     default_heap.collect(scan_stack: scan_stack, roots: roots)
   end
@@ -113,7 +119,8 @@ module Gcry
     default_heap.add_root(pointer)
   end
 
-  def self.enable : Nil
+  # Undoes one `disable` (they nest); false when collection was not disabled.
+  def self.enable : Bool
     default_heap.enable
   end
 
@@ -236,4 +243,14 @@ end
 {% if flag?(:gc_none) %}
   require "./gcry/gc_override"
   require "./gcry/crystal_process_compat"
+  require "./gcry/crystal_raises_compat"
+  require "./gcry/crystal_string_builder_compat"
+  # Boehm's `GC_*` entry points, which `crystal i` and code bound to
+  # `gc/boehm.cr`'s `LibGC` call. `-Dgcry_no_boehm_abi` leaves them out, for a
+  # program that also links libgc itself: Crystal's distribution ships
+  # `libgc.a`, and with it in the link every symbol defined here is a
+  # "multiple definition" error (`make boehm-abi-optout`).
+  {% unless flag?(:gcry_no_boehm_abi) %}
+    require "./gcry/c_abi"
+  {% end %}
 {% end %}

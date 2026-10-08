@@ -254,7 +254,7 @@ For each workload (same host, same job):
 
 **What could go wrong:**
 - **macOS CI is unreliable (6.1):** GitHub macOS runners are slower and less available than Linux. Mitigation: run only `spec/` on macOS CI, keep `process_spec/` for Linux-only. Add macOS process_spec as a separate nightly job.
-- **Crystal stdlib specs fail under gcry (6.3):** Not all stdlib specs may be compatible with `-Dgc_none`. Mitigation: start with a subset — test only the GC-related specs (`spec/std/gc_spec.cr`, `spec/std/hash_spec.cr`). Do not aim for 100% stdlib pass rate.
+- **Crystal stdlib specs fail under gcry (6.3):** The 2026-08 plan was to start with a GC-related subset and not aim for 100%. Superseded 2026-10-05: the whole of `spec/std` passes (18 054 examples, 0 failures, default, `GCRY_STRESS=1` and `GCRY_SOUND=1`), and CI holds it at 100% (`std-spec` job).
 - **Real-world app test is flaky (6.4):** Kemal + wrk in CI may time out. Mitigation: use a shorter duration (10 min), not 1 hour. Keep 1-hour runs for nightly/weekly cron.
 
 **Definition of Done:**
@@ -263,7 +263,7 @@ For each workload (same host, same job):
 - [x] Darwin platform stubs are tested (soft-dirty returns false, mprotect returns false) — `spec/platform_darwin_spec.cr`
 - [x] Mach STW test exists and passes on macOS — `process_spec/process_gc_spec.cr` (Darwin section)
 - [x] Windows ported — [WINDOWS.md](WINDOWS.md), [INTEGRATION.md](INTEGRATION.md#windows)
-- [x] Crystal stdlib GC spec subset runs green under `-Dgc_none` — `bench/compiler_gc_contract.cr` (mirrors `spec/std/gc_spec.cr` + type_id/malloc contract)
+- [x] Crystal's whole `spec/std` runs green under `-Dgc_none` + gcry — `ci/std-spec.sh`, CI job `std-spec` (pinned 1.21.0 with a `GCRY_STRESS=1` rerun, `latest`, and `nightly` allowed to fail). `bench/compiler_gc_contract.cr` keeps the type_id/malloc contract check
 - [x] `bench/kemal/` E2E — endpoint correctness + concurrent wrk (`bench/kemal_e2e.sh`); CI 60s; full 10-min via `KEMAL_E2E_DURATION=600 make kemal-e2e`
 
 **Success signal:** macOS CI exercises Darwin stubs + Mach STW. Compiler GC contract + crystal tools pass. Kemal E2E green. Windows dependency is tracked (gcry port + crystal#15173).

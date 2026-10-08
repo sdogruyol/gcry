@@ -102,6 +102,54 @@ describe "Gcry mprotect barrier" do
     end
   end
 
+  {% if flag?(:linux) %}
+    # The handler is the process's SIGSEGV handler while the barrier is armed,
+    # so whatever it claims is never reported. It used to claim every fault in
+    # its card range: a read of a chunk the GC had unmapped "unprotected" the
+    # page, the `mprotect` failed unseen, and the access faulted forever
+    # (`make nursery-tlab-smoke` hung). A `PROT_NONE` page in the range would
+    # have lost its protection the same way.
+    it "claims only the faults it caused" do
+      page_size = Gcry::Platform::PAGE
+      Gcry::Platform.install_mprotect_barrier.should be_true
+      begin
+        base = Gcry::OS.mmap(
+          Pointer(Void).null,
+          LibC::SizeT.new(page_size * 2),
+          Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+          Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
+          -1,
+          0,
+        )
+        Gcry.mmap_failed?(base).should be_false
+        begin
+          protected_page = base.address
+          open_page = protected_page + page_size
+          Gcry::Platform.mprotect_set_heap_range(protected_page, open_page + page_size)
+          Gcry::Platform.clear_mprotect_dirty_bits
+          Gcry::Platform.mprotect_protect_range(protected_page, open_page)
+
+          # In range, but the barrier never protected it.
+          Gcry::Platform.mprotect_fault(open_page, Gcry::Platform::SEGV_ACCERR).should be_false
+          # An unmapped-page fault (SEGV_MAPERR) at an address it did protect.
+          Gcry::Platform.mprotect_fault(protected_page, 1).should be_false
+          Gcry::Platform.count_mprotect_dirty_pages.should eq({0_u64, 2_u64})
+
+          Gcry::Platform.mprotect_fault(protected_page, Gcry::Platform::SEGV_ACCERR).should be_true
+          Pointer(UInt8).new(protected_page).value = 0xCD_u8 # writable again: no fault
+          # A second thread that faulted on the same page before the first
+          # unprotected it: claimed, because the page is now dirty.
+          Gcry::Platform.mprotect_fault(protected_page, Gcry::Platform::SEGV_ACCERR).should be_true
+          Gcry::Platform.count_mprotect_dirty_pages.should eq({1_u64, 2_u64})
+        ensure
+          Gcry::OS.munmap(base, LibC::SizeT.new(page_size * 2)) unless Gcry.mmap_failed?(base)
+        end
+      ensure
+        Gcry::Platform.disable_mprotect_barrier
+      end
+    end
+  {% end %}
+
   {% if flag?(:gcry_block_headers) %}
     # The mprotect barrier serves the nursery, which is off under headerless.
     it "can prefer mprotect on a process-like heap" do

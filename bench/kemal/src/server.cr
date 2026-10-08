@@ -1,6 +1,7 @@
 # Realistic Kemal app for process-GC load testing.
 #
 # Setup:  cd bench/kemal && shards install
+#         (Windows: shards needs symlinks — Developer Mode or an elevated shell)
 # gcry:   crystal build -Dgc_none --release src/server.cr -o ../../bin/kemal-gcry
 # boehm:  crystal build --release src/server.cr -o ../../bin/kemal-boehm
 # Run:    PORT=3001 ../../bin/kemal-gcry
@@ -46,20 +47,30 @@ end
 # app's cuts sat on it, at 2 or 3 threads from one rebuild to the next
 # (`bench/log/linux/2026-08-09-105503-root-phase/`). The read is retried on
 # EINTR, which the collector's suspend signal causes; a thread that exited
-# would drop the process back under the boundary unnoticed.
+# would drop the process back under the boundary unnoticed. Windows has no
+# `pipe`/`read` in `LibC` and suspends without signals, so there the threads
+# sleep forever instead.
 if (extra = ENV["EXTRA_THREADS"]?.try(&.to_i?)) && extra > 0
-  parked_fds = uninitialized Int32[2]
-  raise "pipe() failed" unless LibC.pipe(parked_fds) == 0
-  read_fd = parked_fds[0]
-  extra.times do |i|
-    Thread.new(name: "extra-#{i}") do
-      byte = uninitialized UInt8[1]
-      loop do
-        break if LibC.read(read_fd, byte.to_unsafe, 1) >= 0
-        break unless Errno.value == Errno::EINTR
+  {% if flag?(:win32) %}
+    extra.times do |i|
+      Thread.new(name: "extra-#{i}") do
+        loop { LibC.Sleep(LibC::INFINITE) }
       end
     end
-  end
+  {% else %}
+    parked_fds = uninitialized Int32[2]
+    raise "pipe() failed" unless LibC.pipe(parked_fds) == 0
+    read_fd = parked_fds[0]
+    extra.times do |i|
+      Thread.new(name: "extra-#{i}") do
+        byte = uninitialized UInt8[1]
+        loop do
+          break if LibC.read(read_fd, byte.to_unsafe, 1) >= 0
+          break unless Errno.value == Errno::EINTR
+        end
+      end
+    end
+  {% end %}
 end
 
 # Minimal handler — string literal, almost no alloc.

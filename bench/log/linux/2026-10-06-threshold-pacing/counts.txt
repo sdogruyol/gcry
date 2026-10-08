@@ -1,0 +1,19 @@
+Whole-process majors and summed STW pause (setup + run), one GCRY_TRACE=1 run
+each, taskset -c 8-11, binary p2 (= 4e1135e) with GCRY_THRESHOLD_PACE=100
+(pacing off) and default (pacing on). Boehm: GC_PRINT_STATS=1 "GC #" count.
+
+bench                   off: majors  pause ms    on: majors  pause ms   Boehm
+Primes                         13     430.3              8     124.0
+JsonParsePure                  24     406.5             13     227.3
+JsonParseSerializable          22     152.8             14      78.2
+JsonGenerate                   27     563.1             14     321.3
+Binarytrees                   259     120.5            236      60.1      85 (heap 43 MiB)
+RegexDna                       15       1.7             15       1.7
+Revcomp                        23       2.6             22       2.6
+
+Binarytrees keeps most of its count: ~200 of its majors run at < 1 MiB live
+(the trace reads 0 MiB size-class live through the shallow iterations;
+`long_lived_tree` is never read again, so nothing holds it), ~60 us each, and
+a cycle that cheap is under the 10% target, so they stay at the 8 MiB floor.
+What pacing removes is the late phase (1-5 MiB live, 0.8-2.4 ms per major),
+where the pace reaches 300%.

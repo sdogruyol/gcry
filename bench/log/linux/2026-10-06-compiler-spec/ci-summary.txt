@@ -1,0 +1,8 @@
+##[group]Finished installing package dependencies
+stage2_hello: build /home/runner/work/gcry/gcry/samples/hello.cr with crystal-gcry-stage2
+stage2_hello: run
+interp: 1_hello.cr
+interp: 2_alloc_heavy.cr
+interp: 3_finalizers_weakref.cr
+Finished in 15:20 minutes
+13640 examples, 0 failures, 0 errors, 18 pending

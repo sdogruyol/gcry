@@ -962,6 +962,17 @@ jobs:
         run: |
           make thread-birth-root
 
+      # The same root at the other end of the life. A dying thread leaves
+      # Crystal's list and then waits on the fiber list's mutex — held by
+      # every stop — before it reads its `Thread` for the last time, so the
+      # root is all that holds that object through the collection. The gate
+      # parks threads there, with and without eight creators racing on the
+      # root table, and its control requires the objects to die with the
+      # root off. No pre-stop wait in any arm.
+      - name: Thread death window
+        run: |
+          make thread-death-window
+
       # The other half of the birth window: the record the pre-stop wait uses.
       # A full staging table used to refuse the birth being handed in — the
       # newest one, i.e. the thread actually inside the window — so that thread
@@ -1020,6 +1031,15 @@ jobs:
           make chunk-search-race
           make large-cache-race
 
+      # `realloc` grows a large block by moving its pages, and between the two
+      # `mremap` calls the contents are in no chunk. The stop signal is blocked
+      # there; the control arm unblocks it and must lose boxes.
+      - name: Realloc page-move stress
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
+        run: |
+          make realloc-move-stress
+
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
       # plain-store path must be shown to lose some.
@@ -1048,6 +1068,13 @@ jobs:
         run: |
           make compiler-gc-contract
 
+      # `-Dgcry_no_boehm_abi`: without it a program linking libgc must fail to
+      # link (first arm), with it it links and runs both collectors, and the
+      # last arm must fault with Boehm left on Crystal's stop signals.
+      - name: Boehm C ABI opt-out (program linking libgc)
+        run: |
+          make boehm-abi-optout
+
       # Trace events and heap dump against the live set; the recipe's second
       # arm traces with sampling off and must fail on the missing alloc/free.
       - name: Trace + heap dump smoke
@@ -1066,6 +1093,97 @@ jobs:
       # and Windows.
       - name: GCRY_SOUND=1 profile and correctness suite
         run: ci/sound-suite.sh
+
+  # Crystal's own standard-library suite (spec/std, ~18 000 examples) with gcry
+  # as the process GC — what a default collector has to pass. The suite comes
+  # from the crystal-lang/crystal commit the installed compiler reports, so it
+  # matches the stdlib it tests (ci/std-spec.sh). Four chunks: the single
+  # binary is ~75 MB, and GNU ld 2.46 corrupts its symbol-version table.
+  #
+  # `latest` is back (see `test` above): the releases list answers again, and
+  # this is the gate that tells us a compiler release broke the collector.
+  # Nightly is allowed to fail: it also reports stdlib regressions that are
+  # not gcry's.
+  std-spec:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crystal: "1.21.0"
+          - crystal: latest
+          - crystal: nightly
+            experimental: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: ${{ matrix.experimental == true }}
+    name: std_spec (crystal ${{ matrix.crystal }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
+        continue-on-error: true
+        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ matrix.crystal }}
+
+      - name: Stdlib spec dependencies
+        run: sudo apt-get install -y -qq libxml2-dev libyaml-dev libgmp-dev libssl-dev zlib1g-dev libpcre2-dev
+
+      - name: spec/std under gcry
+        run: ci/std-spec.sh --chunks 4
+
+      # The same binaries with a collection every 256 allocations: the suite
+      # as a GC stress test. Pinned compiler only, to bound runner minutes.
+      # Examples slow down several-fold, so the per-example timeout is raised
+      # from 15 s. The allow list names the examples that assume no collection
+      # runs between two statements; anything else still fails the step.
+      - name: spec/std under gcry, GCRY_STRESS=1
+        if: matrix.crystal == '1.21.0'
+        env:
+          GCRY_STRESS: "1"
+          GCRY_STRESS_EVERY: "256"
+          STD_SPEC_TIMEOUT: "120"
+        run: ci/std-spec.sh --chunks 4 --no-build --allow-failures ci/std-spec-stress-allow.txt
+
+  # The Crystal compiler built with gcry as its own GC: the largest Crystal
+  # program there is, multi-module codegen across threads, gigabytes of heap.
+  # It found a stdlib buffer overrun Boehm's slack hides (String::Builder,
+  # bench/log/linux/2026-10-05-string-builder-terminator/). Every push builds
+  # it, compiles and runs programs with it, has it build itself again
+  # (stage 2), and runs `crystal i` in an interpreter-enabled build, since the
+  # interpreter binds Boehm's C ABI from the compiler binary. The whole
+  # compiler_spec suite (13 640 examples), built by the host compiler with
+  # gcry linked in, runs on pull requests, weekly and on dispatch: it is a
+  # long release build.
+  compiler-gcry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    name: compiler built with gcry
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
+        continue-on-error: true
+        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Compiler build dependencies
+        run: sudo apt-get install -y -qq llvm-dev libffi-dev libpcre2-dev libgc-dev libyaml-dev libxml2-dev libssl-dev zlib1g-dev libgmp-dev
+
+      - name: Build the compiler with gcry, use it, self-host
+        run: ci/compiler-spec.sh compiler smoke stage2
+
+      - name: crystal i in a gcry-built compiler
+        run: ci/compiler-spec.sh interpreter interp
+
+      - name: Crystal's compiler_spec under gcry
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+        run: ci/compiler-spec.sh spec
 
   # Gates that cost minutes because they **sample**: each drives a rare window
   # many times over, so the cost is the sample size and not the assertion. They
@@ -1806,6 +1924,7 @@ jobs:
           t timeout 300 make ec-queue-audit
           t timeout 300 make thread-block-audit
           t timeout 300 make thread-birth-root
+          t timeout 300 make thread-death-window
           t timeout 300 make dead-stack-root
           # The GCRY_SOUND=1 profile and suite: x86_64 runs it, and this is
           # the arch where register roots were first found missing.
@@ -1987,10 +2106,11 @@ jobs:
 
   # Linux gates that also hold on Windows. A coverage probe on 2026-10-01 ran
   # each through Git Bash and mingw make on windows-latest. These passed with
-  # their controls; the two buffer gates' red arms are run here directly
-  # because mingw make does not hand `! cmd` to a shell. Not here:
-  # idle-release (unsupported on Windows), the SegvReport gates (POSIX
-  # handler) and nested-spawn-uaf (its control survives on Windows).
+  # their controls; the buffer and idle gates' red arms are run here directly
+  # because mingw make does not hand `! cmd` to a shell. Not here: the
+  # SegvReport gates (POSIX handler) and nested-spawn-uaf (its control
+  # survives on Windows). The idle collector runs at the end of the job: it
+  # has been on by default here since 2026-10-03.
   # ~15 min.
   test-windows-gates:
     runs-on: windows-latest
@@ -2017,12 +2137,19 @@ jobs:
           # controls included. Both are use-after-free gates whose red arms
           # fault on this platform.
           make index-grow-race thread-churn-uaf
+          # Windows released a birth root once a stop saw its thread on
+          # Crystal's list, so a dying thread's `Thread` was swept under it;
+          # the root now ends when gcry's own handle on the thread signals.
+          make thread-death-window
           crystal build -Dgc_none --release bench/interior_only_buffer.cr -o bin/interior_only_buffer --error-trace
           bin/interior_only_buffer
           if GCRY_DISABLE_INTERIOR=1 bin/interior_only_buffer; then echo "FAIL: the base-only arm kept the buffer"; exit 1; fi
           crystal build -Dgc_none --release bench/unaligned_only_buffer.cr -o bin/unaligned_only_buffer --error-trace
           bin/unaligned_only_buffer
-          if GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
+          # Slack off: the loop's final pointer, one past the buffer, is
+          # aligned and lands on the atomic slack byte, which keeps the buffer
+          # whatever the alignment filter does (see `make unaligned-only-buffer`).
+          if GCRY_ATOMIC_SLACK=0 GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
           ci/sound-suite.sh
           # The idle collector, on by default here since 2026-10-03. Its red
           # arms run directly: mingw make does not hand `! cmd` to a shell.
@@ -2114,6 +2241,7 @@ jobs:
           make CRYSTAL="$cc" poison-freed finalizer-complex mark-audit explicit-collect-barrier
           make CRYSTAL="$cc" parallel-mark-process parallel-mark-termination parallel-mark-stress monitor-gate-deadlock
           make CRYSTAL="$cc" bitmap-marks-freelist stw-slot-precision heap-counters counter-loss
+          make CRYSTAL="$cc" thread-death-window
           # Not stw-mt-sample (see the x86_64 job), and not find-block-race:
           # its `live` control crashed 0 of 40 here, so the gate cannot be
           # credited on this platform.
@@ -2122,7 +2250,7 @@ jobs:
           if GCRY_DISABLE_INTERIOR=1 bin/interior_only_buffer; then echo "FAIL: the base-only arm kept the buffer"; exit 1; fi
           "$cc" build -Dgc_none --release bench/unaligned_only_buffer.cr -o bin/unaligned_only_buffer --error-trace
           bin/unaligned_only_buffer
-          if GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
+          if GCRY_ATOMIC_SLACK=0 GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
           CRYSTAL="$cc" ci/sound-suite.sh
           "$cc" build -Dgc_none bench/idle_release.cr -o bin/idle_release --error-trace
           GCRY_IDLE_RELEASE_MS=50 bin/idle_release
@@ -2350,7 +2478,7 @@ jobs:
           mkdir -p bin
           make poison-freed poison-holders finalizer-complex holders-find
           make parallel-mark-process parallel-mark-termination parallel-mark-stress monitor-gate-deadlock
-          make thread-birth-root thread-staging nursery-tlab-smoke trace-smoke ignored-knob-warnings
+          make thread-birth-root thread-death-window thread-staging nursery-tlab-smoke trace-smoke ignored-knob-warnings
           make bitmap-marks-freelist mark-audit released-range-report segv-region-report kept-release-report
           make index-grow-race large-cache-race nested-spawn-uaf explicit-collect-barrier
           # Not counter-loss: its plain arm lost an increment on Intel

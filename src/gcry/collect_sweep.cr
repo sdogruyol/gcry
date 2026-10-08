@@ -450,7 +450,8 @@ module Gcry
       # freelist and headed for munmap.
       #
       # Size zero is the tell, and it is not otherwise reachable: a real large
-      # allocation has a payload.
+      # allocation has a payload. All of it, not the low word, which is zero
+      # for every multiple of 4 GiB.
       #
       # A tripwire, not a fix: it has **measured zero** — 334 collections of
       # acikturkiye under `wrk -t4 -c64` for 260 s, while the crash this was
@@ -458,7 +459,7 @@ module Gcry
       # narrower than the argument above, or it is closed by something this
       # file does not name. The counter stays because the next time that
       # argument is made, it should have to answer this number.
-      if header.value.size == 0
+      if BlockHeader.large_size(header) == 0
         @sweep_large_uninitialised &+= 1
         return
       end
@@ -748,7 +749,7 @@ module Gcry
         unless guard_release(run_base, run_total, GUARD_KIND_EMPTY_CHUNK) ||
                refuse_live_release(run_base, run_total, GUARD_KIND_EMPTY_CHUNK) ||
                quarantine_release(run_base, run_total)
-          Gcry::OS.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
+          Gcry.os_unmap(Pointer(Void).new(run_base), run_total)
         end
         chunk = nxt
       end
@@ -1385,7 +1386,6 @@ module Gcry
       @sweep_occ_audit_words &+= words.to_u64 if @sweep_occ_audit
       data_start = ChunkHeader.data_start(chunk).address
       block_bytes = @block_bytes[class_index]
-      pay = payload.to_u32!
       i = 0
       while i < words
         o = occ[i]
@@ -1401,7 +1401,7 @@ module Gcry
           dead &= dead &- 1
           ordinal = (i.to_u64 << 6) &+ bit.to_u64
           user = data_start &+ ordinal &* block_bytes &+ BlockHeader::SIZE
-          poison_payload(Pointer(Void).new(user), pay)
+          poison_payload(Pointer(Void).new(user), payload)
         end
         i += 1
       end
@@ -1924,7 +1924,7 @@ module Gcry
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.large_header(chunk)
-          total += header.value.size.to_u64 if BlockHeader.free?(header)
+          total += BlockHeader.large_size(header) if BlockHeader.free?(header)
         else
           each_block(chunk) do |header|
             total += header.value.size.to_u64 if BlockHeader.free?(header)
@@ -1982,8 +1982,9 @@ module Gcry
         report_thread_list_sweep(header)
       end
       user = BlockHeader.user_from(header)
-      was_nursery = BlockHeader.nursery?(header)
-      push_size_class_free(class_index, was_nursery, header, user, payload, swept: true)
+      # The chunk's list, as `Heap#free` explains: rebuilds file it there.
+      nursery = ChunkHeader.nursery?(chunk)
+      push_size_class_free(class_index, nursery, header, user, payload, swept: true)
     end
 
     private def each_block(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil

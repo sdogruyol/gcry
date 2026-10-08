@@ -1,0 +1,17 @@
+bench                    arm           wall med     min     max   Δ vs new  cpu med  rss MiB
+JsonParseSerializable    new             0.3380   0.301   0.360      +0.0%     1.13      491
+JsonParseSerializable    move            0.3210   0.291   0.361      -5.0%     1.03      416
+JsonParseSerializable    base            0.3120   0.292   0.339      -7.7%     1.05      425
+JsonParseSerializable    boehm           0.3140   0.295   0.353      -7.1%     1.29      536
+JsonGenerate             new             0.7150   0.675   0.748      +0.0%     2.24      856
+JsonGenerate             move            0.6320   0.621   0.671     -11.6%     2.03      763
+JsonGenerate             base            0.6440   0.588   0.678      -9.9%     2.08      763
+JsonGenerate             boehm           0.8050   0.732   0.855     +12.6%     2.39     1305
+Revcomp                  new             0.6560   0.609   0.678      +0.0%     2.31      562
+Revcomp                  move            0.6130   0.585   0.648      -6.6%     2.25      515
+Revcomp                  base            0.6210   0.570   0.672      -5.3%     2.28      515
+Revcomp                  boehm           0.5810   0.551   0.663     -11.4%     2.27      878
+RegexDna                 new             1.9920   1.893   2.138      +0.0%     2.77      272
+RegexDna                 move            1.9810   1.883   2.102      -0.6%     2.74      272
+RegexDna                 base            1.9870   1.907   2.061      -0.3%     2.73      272
+RegexDna                 boehm           1.9950   1.929   2.098      +0.2%     2.78      454

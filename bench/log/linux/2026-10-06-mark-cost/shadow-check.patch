@@ -1,0 +1,254 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index b65f948..a4205fb 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -420,11 +420,7 @@ module Gcry
+       loop do
+         while count < MARK_PREFETCH_DEPTH && !stack.empty?
+           h = stack.pop
+-          # Header line and the payload's first line — the type_id gate and the
+-          # first scanned word both live there.
+-          a = mark_entry_header(h)
+-          Kernels.prefetch_read(a.as(Void*))
+-          Kernels.prefetch_read((a.as(UInt8*) + BlockHeader::SIZE).as(Void*))
++          prefetch_mark_entry(h)
+           ring[(head + count) % MARK_PREFETCH_DEPTH] = h
+           count += 1
+         end
+@@ -436,6 +432,44 @@ module Gcry
+       end
+     end
+ 
++    # Bytes of a small payload `prefetch_mark_entry` asks for, at most.
++    MARK_PREFETCH_MAX_BYTES = 256_u64
++
++    # Prefetch what `scan_object` will read of one entry: every line of a
++    # tagged (small) block up to `MARK_PREFETCH_MAX_BYTES`, as its class gives
++    # the length; the first line, and the payload's, of anything else.
++    #
++    # It used to be the first line only. Once the candidates were resolved in
++    # place (`scan_edges_inline`), the scan's own word loads were the largest
++    # stall left in the serial mark — 38% of `scan_edges_inline`'s samples on
++    # Primes waited on a payload word — since a small object starts
++    # anywhere in a line, and the scanned ones average 53 bytes on Primes and
++    # 100 on JsonParsePure. Whole payloads: serial Σ mark Primes 596 → 505 ms,
++    # JsonParsePure 514 → 414 ms. Capped at 64 bytes JsonParsePure kept little
++    # of that (488 ms), at 128 bytes two thirds (457 ms); 512 bytes and 1 KiB
++    # were no better than 256, past which the hardware prefetcher has the
++    # stream (`bench/log/linux/2026-10-06-mark-cost/`). Lines are taken as 64
++    # bytes: on a 128-byte-line core every second prefetch names a line
++    # already requested.
++    @[AlwaysInline]
++    private def prefetch_mark_entry(entry : BlockHeader*) : Nil
++      a = mark_entry_header(entry).address
++      Kernels.prefetch_read(Pointer(Void).new(a))
++      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
++      if tag == 0 || tag == MARK_ENTRY_TAG_REST
++        Kernels.prefetch_read(Pointer(Void).new(a &+ BlockHeader::SIZE))
++        return
++      end
++      bytes = @block_bytes.unsafe_fetch(tag.to_i32 &- 1)
++      bytes = MARK_PREFETCH_MAX_BYTES if bytes > MARK_PREFETCH_MAX_BYTES
++      line = (a | 63_u64) &+ 1
++      finish = a &+ bytes
++      while line < finish
++        Kernels.prefetch_read(Pointer(Void).new(line))
++        line &+= 64
++      end
++    end
++
+     private def mark_loop_budget(work_units : Int32) : Nil
+       units = 0
+       while units < work_units && !@mark_stack.empty?
+@@ -578,6 +612,10 @@ module Gcry
+         words -= 1
+       end
+       cursor = user.as(UInt64*)
++      if @mark_edges_inline && skip_lo == skip_hi
++        scan_edges_inline(cursor, words, base_only)
++        return
++      end
+       # Most words of a scanned body are not heap addresses: nulls, small
+       # integers, hashes, floats. `mark_impl_unlocked` rejects them on its
+       # first range test, but only after a call it does not get inlined into,
+@@ -594,6 +632,159 @@ module Gcry
+       end
+     end
+ 
++    # Whether `scan_payload` may resolve heap edges itself, for the length of
++    # one `mark_loop` (set and cleared there).
++    @mark_edges_inline : Bool = false
++
++    # The configurations in which `scan_edges_inline` gives exactly
++    # `mark_impl_unlocked`'s answer for a word that lands in a small bitmap
++    # chunk. Each term names a branch of that method the inline path leaves
++    # out: the radix hit taken without `@index_lock` (only under the stop, and
++    # not while the index audit counts lock skips); `occ` as the allocation
++    # answer and the bitmap as the only mark (`bitmap_alloc`, which also
++    # retires the header-mark union); the minor's nursery filter; first-mark
++    # attribution; the misaligned-candidate filter; the thread-list tripwire;
++    # and the double-push catcher.
++    private def mark_edges_inline_allowed? : Bool
++      {% if flag?(:gcry_hl_assert) %}
++        return false
++      {% end %}
++      return false if Gcry::OS.getenv("GCRY_TMP_NO_INLINE")
++      @world_stopped && !@index_audit && !@radix_l1.null? && @bitmap_alloc && @bitmap_marks &&
++        !@minor_only && !@live_attr_roots && @scan_unaligned_candidates && !ThreadListWatch.armed?
++    end
++
++    # `scan_payload`'s loop with the candidate resolved in place rather than
++    # through a `mark_impl_unlocked` call per word that passes the heap span.
++    #
++    # That call was most of the mark's instructions. Its frame carries a
++    # 500-byte buffer (`report_thread_list_offer` inlines into it), so every
++    # candidate saved and restored six registers; the radix shift went out of
++    # line; and every `self` field was reloaded after each store, so the block
++    # ordinal — a load of the size class and data offset, a checked multiply,
++    # a bounds-checked table read — was derived three times, once each for
++    # `block_allocated?`, `block_marked_in?` and `set_block_mark_in`. Here it
++    # is derived once, with the table, the span and the radix fields in
++    # registers. Serial Σ mark, interleaved runs, before the payload prefetch
++    # below: Primes 879 → 660 ms, JsonParsePure 852 → 581 ms
++    # (`bench/log/linux/2026-10-06-mark-cost/`).
++    #
++    # The mark bit is read before `occ`: a candidate that is already marked is
++    # rejected either way, and on JsonParsePure 36% of them are, so their
++    # `occ` line is never touched. Every candidate this does not handle in
++    # full — not in the table, outside the chunk's blocks, a large or nursery
++    # chunk — goes to `mark_impl`, which stays the authority.
++    private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool) : Nil
++      lo = @heap_min
++      hi = @heap_max
++      l1 = @radix_l1
++      shift = @radix_granule_shift
++      l2_mask = @radix_l2_mask
++      hits = 0_u64
++      p = cursor
++      finish = cursor + words
++      {% if flag?(:gcry_inline_shadow) %}
++        pend_w = 0_u64
++        pend_accept = false
++        pend_pre_marked = false
++        pend_stack = 0
++        pend_header = Pointer(BlockHeader).null
++        pend_chunk = Pointer(ChunkHeader).null
++      {% end %}
++      while p < finish
++        {% if flag?(:gcry_inline_shadow) %}
++          shadow_verify(pend_w, pend_accept, pend_pre_marked, pend_stack, pend_header, pend_chunk) if pend_w != 0
++          pend_w = 0_u64
++        {% end %}
++        w = p.value
++        p += 1
++        next if w < lo || w >= hi
++        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
++        if chunk.null?
++          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++          next
++        end
++        cls = chunk.value.size_class
++        bitmap_words = chunk.value.bitmap_words.to_u64
++        data_start = chunk.address &+ chunk.value.data_offset
++        chunk_end = chunk.address &+ chunk.value.mapped_bytes
++        # `size_class` past the table covers large chunks (`UInt32::MAX`).
++        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
++           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
++          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++          next
++        end
++        hits &+= 1
++        {% if flag?(:gcry_inline_shadow) %}
++          pend_w = w
++          pend_stack = @mark_stack.shadow_size
++          if (sf = find_block_with_chunk(Pointer(Void).new(w)))
++            pend_header, pend_chunk = sf
++            pend_accept = block_allocated?(pend_chunk, pend_header) &&
++                          (!base_only || w == user_of(pend_chunk, pend_header).address)
++            pend_pre_marked = block_marked_in?(pend_chunk, pend_header)
++          else
++            pend_header = Pointer(BlockHeader).null
++            pend_chunk = Pointer(ChunkHeader).null
++            pend_accept = false
++            pend_pre_marked = false
++          end
++        {% end %}
++        index = cls.to_i32
++        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
++        block_bytes = @block_bytes.unsafe_fetch(index)
++        header_addr = data_start &+ ordinal &* block_bytes
++        # The chunk's tail past its last whole block.
++        next if header_addr &+ block_bytes > chunk_end
++        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
++        bit = 1_u64 << (ordinal & 63)
++        mark = occ + bitmap_words
++        next if (mark.value & bit) != 0
++        next if (occ.value & bit) == 0
++        header = Pointer(BlockHeader).new(header_addr)
++        next if base_only && w != BlockHeader.user_from(header).address
++        # `chunk_set_mark` with its relaxed pre-check already done above.
++        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
++        mark_stack_push(mark_entry(chunk, header))
++      end
++      {% if flag?(:gcry_inline_shadow) %}
++        shadow_verify(pend_w, pend_accept, pend_pre_marked, pend_stack, pend_header, pend_chunk) if pend_w != 0
++      {% end %}
++      # `radix_note_fast_hit`, once per payload.
++      @radix_fast_hits &+= hits unless @mark_parallel
++    end
++
++    {% if flag?(:gcry_inline_shadow) %}
++      getter shadow_checks = 0_u64
++      getter shadow_bad = 0_u64
++
++      private def shadow_verify(w : UInt64, accept : Bool, pre_marked : Bool, pre_stack : Int32, header : BlockHeader*, chunk : ChunkHeader*) : Nil
++        @shadow_checks &+= 1
++        post_stack = @mark_stack.shadow_size
++        ok = true
++        if header.null?
++          ok = post_stack == pre_stack
++        else
++          post_marked = block_marked_in?(chunk, header)
++          if accept
++            newly = !pre_marked
++            pushed = newly && !atomic_of(chunk, header)
++            ok = post_marked && (@mark_parallel || post_stack == pre_stack + (pushed ? 1 : 0))
++            if ok && pushed && !@mark_parallel
++              ok = @mark_stack.shadow_top == mark_entry(chunk, header).address
++            end
++          else
++            ok = post_marked == pre_marked && (@mark_parallel || post_stack == pre_stack)
++          end
++        end
++        return if ok
++        @shadow_bad &+= 1
++        LibC.printf("SHADOW MISMATCH w=%llx accept=%d pre_marked=%d pre_stack=%d post_stack=%d header=%p\n",
++          w, accept ? 1 : 0, pre_marked ? 1 : 0, pre_stack, post_stack, header.as(Void*))
++      end
++    {% end %}
++
+     # Scan length for one object, derived from its **chunk** (Phase 7.6).
+     #
+     # This used to read `header.value.size` and clamp it against the chunk, then
+diff --git a/src/gcry/mark.cr b/src/gcry/mark.cr
+index 54f7334..d526d83 100644
+--- a/src/gcry/mark.cr
++++ b/src/gcry/mark.cr
+@@ -67,6 +67,16 @@ module Gcry
+       entries[@size].as(BlockHeader*)
+     end
+ 
++    {% if flag?(:gcry_inline_shadow) %}
++      def shadow_size : Int32
++        @size
++      end
++
++      def shadow_top : UInt64
++        @size == 0 ? 0_u64 : entries[@size - 1].address
++      end
++    {% end %}
++
+     private def entries : Void**
+       @base.as(Void**)
+     end

@@ -1,0 +1,29 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 19cfadb..b722c47 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -200,6 +200,24 @@ module Gcry
+       found = find_block_with_chunk(pointer)
+       return unless found
+       header, chunk = found
++      if @trace_large && ChunkHeader.large?(chunk) && source != RootSource::Heap
++        dbuf = uninitialized UInt8[RawOut::LIMIT]
++        dp = dbuf.to_unsafe
++        dl = RawOut.append(dp, 0, "DBG root src=")
++        dl = RawOut.append_u64(dp, dl, source.value.to_u64)
++        dl = RawOut.append(dp, dl, " val=")
++        dl = RawOut.append_hex(dp, dl, addr)
++        dl = RawOut.append(dp, dl, " chunk=")
++        dl = RawOut.append_hex(dp, dl, chunk.address)
++        dl = RawOut.append(dp, dl, " mapped=")
++        dl = RawOut.append_u64(dp, dl, chunk.value.mapped_bytes)
++        dl = RawOut.append(dp, dl, " alloc=")
++        dl = RawOut.append_u64(dp, dl, block_allocated?(chunk, header) ? 1_u64 : 0_u64)
++        dl = RawOut.append(dp, dl, " coll=")
++        dl = RawOut.append_u64(dp, dl, @collections)
++        dl = RawOut.append(dp, dl, "\n")
++        RawOut.flush(dp, dl)
++      end
+ 
+       # A candidate that names a block nobody holds is a stale word, not a root.
+       #

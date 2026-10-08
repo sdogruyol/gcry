@@ -1,5 +1,7 @@
 # Reopens Crystal's `GC` module under `-Dgc_none`, forwarding to Gcry.
 
+require "./platform/stw_signals"
+
 {% if flag?(:linux) && flag?(:gnu) %}
   lib LibC
     $__libc_stack_end : Void*
@@ -8,7 +10,12 @@
 
 module GC
   @@gcry_ready = false
-  @@gcry_enabled = true
+  # Bytes `GC.malloc`/`GC.realloc` handed out from libc before the heap was
+  # ready (`bootstrap_malloc`), still live. Nothing ever sweeps them, so they
+  # are `GC.prof_stats.non_gc_bytes` — Boehm's "bytes not considered candidates
+  # for collection". Counted in libc's usable size, the unit the frees below
+  # can recover. A literal, so it is statically initialised before `GC.init`.
+  @@non_gc_bytes = 0_u64
   # Set when fork child cannot reinit (GCRY_DISABLE_ATFORK=1 or install failed).
   @@after_fork_child = false
   @@handle_fork = true
@@ -123,6 +130,9 @@ module GC
       # Large-object freelist: no retain (was 4 MiB floor, adaptive → 32 MiB).
       # Escape: GCRY_LARGE_CACHE=<bytes> (adaptive may grow from a non-zero floor).
       heap.large_cache_retain = 0_u64
+      {% if flag?(:linux) %}
+        heap.large_recycle = true
+      {% end %}
     {% end %}
     # No type_id gate on any ambient root, static ones included.
     #
@@ -167,6 +177,10 @@ module GC
     # Escape for measurement: GCRY_ALIGNED_CANDIDATES=1.
     heap.scan_unaligned_candidates = true
     heap.layout_precise = true
+    # One byte past every atomic block, as Boehm gives every block: stdlib
+    # byte buffers write there (`Heap#atomic_slack`). Escape for measurement:
+    # GCRY_ATOMIC_SLACK=0.
+    heap.atomic_slack = env_flag_zero?("GCRY_ATOMIC_SLACK") ? 0_u64 : 1_u64
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -177,6 +191,8 @@ module GC
         heap.set_stackbottom(bounds[1])
       end
     {% end %}
+    # Boehm's `GC_stackbottom`, for code compiled against Boehm (`crystal i`).
+    {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.init_stackbottom(heap.stack_bottom) {% end %}
     # Suspended fiber stacks are scanned once inside Heap#scan_all_fiber_roots
     # (with guard clamp). Do not also call push_gc_roots here — that doubled
     # stack word walks under HTTP (many fibers) and dominated STW pauses.
@@ -197,6 +213,9 @@ module GC
       {% if flag?(:unix) %} Gcry::SegvReport.install_if_requested {% end %}
       heap.set_stackbottom(Fiber.current.@stack.bottom)
     end
+    # Boehm's `GC_add_roots` ranges and push-other-roots procedure: their hook
+    # goes in now, after the one above, never from inside a `GC_*` call.
+    {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.install_roots_hook {% end %}
 
     # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
     # growth under gcry during GC.init SIGSEGVs — Fiber/runtime is not ready yet.
@@ -307,9 +326,10 @@ module GC
   # profile turns the whole class off at once so a measurement can answer one
   # question honestly: what does gcry cost when it is not allowed to guess?
   #
-  # (First cut says: less than expected. Kemal /json is ~1pp of throughput and
-  # no RSS movement — see docs/SOUND-DEFAULTS.md. Whether that makes sound the
-  # right *default* is a separate call, and needs more than one host.)
+  # (First cut said: less than expected. Kemal /json is ~1pp of throughput and
+  # no RSS movement — see docs/SOUND-DEFAULTS.md. Since 2026-10-05 the process
+  # defaults are this profile: the last two knobs it moved, the STW stack lags,
+  # default to 0. The profile stays as the switch that forces it whole.)
   #
   #   allow_interior_pointers  LLVM may keep only an interior pointer live in a
   #                            register / spill slot while the base is dead
@@ -370,6 +390,32 @@ module GC
   # `GCRY_EMPTY_CHUNK_RETAIN` was given: one Parallel major threshold.
   PARALLEL_DORMANT_DEFAULT_RETAIN = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
 
+  # Live bytes below which the default parallel mark stays serial: a small
+  # heap gives helpers nothing to divide and still pays their wake-up
+  # (`Heap#parallel_mark_min_live`).
+  PARALLEL_MARK_DEFAULT_MIN_LIVE = 32_u64 * 1024 * 1024
+
+  # `max(min(2, CPUs − 1), min(CPUs / 4 + 1, CPUs − 1, 8))`, at least 1:
+  # two up to 7 CPUs, then one more per four CPUs, up to eight. CPUs are
+  # counted as `Fiber::ExecutionContext.default_workers_count` does (affinity
+  # first, then the machine) minus its `CRYSTAL_WORKERS` read: `ENV` is
+  # unavailable this early in `GC.init`. Both calls are syscalls into stack
+  # buffers.
+  #
+  # Up to 7 CPUs this is the `min(2, CPUs − 1)` measured on 3- and 4-CPU CI
+  # runners, where four workers were no better than two except on arm64
+  # (`bench/log/linux/2026-10-05-parallel-mark-default/`). On a 12-CPU host,
+  # once a large payload's scan is split and idle helpers are woken
+  # (2026-10-05), four workers take Primes from 64% to 76% of Boehm's speed
+  # and JsonParsePure from 66% to 74%, for 12% more CPU; six gain two more
+  # points each for 14% more again; eight were no faster than six before
+  # those two changes (`bench/log/linux/2026-10-05-alloc-storm-mark/`).
+  private def self.default_parallel_mark_workers : Int32
+    cpus = Crystal::System.effective_cpu_count.to_i32
+    cpus = System.cpu_count.to_i32 if cpus <= 0
+    Gcry::Heap.default_mark_workers(cpus)
+  end
+
   # Use Gcry::OS.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
   private def self.apply_env_config(heap : Gcry::Heap) : Nil
     heap.root_phase_timing = env_flag_one?("GCRY_ROOT_PHASE_TIMING")
@@ -405,6 +451,13 @@ module GC
       # none of the relief.
       heap.gc_threshold = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
       heap.adaptive_threshold = true
+      # Pacing (`Heap::THRESHOLD_PACE_MAX_PCT`): the adaptive threshold grows
+      # up to this percentage of live × factor while collections cost more
+      # than a tenth of the mutator time. 100 turns it off.
+      heap.threshold_pace_max_pct = Gcry::Heap::THRESHOLD_PACE_MAX_PCT
+      if pace = env_u64("GCRY_THRESHOLD_PACE")
+        heap.threshold_pace_max_pct = pace.clamp(100_u64, 1000_u64)
+      end
       # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
       if (ec = env_u64("EC_PARALLELISM")) && ec > 1
@@ -712,10 +765,28 @@ module GC
     end
 
     # Free large-object bytes to retain after post-collect trim
-    # (Linux process 4 MiB / Darwin 1 MiB; override via GCRY_LARGE_CACHE).
+    # (Linux process 0 / Darwin 1 MiB; override via GCRY_LARGE_CACHE). A
+    # retain asks for the exact-size cache, which recycling replaces.
     if cache = env_u64("GCRY_LARGE_CACHE")
       heap.large_cache_retain = cache
+      heap.large_recycle = false
     end
+
+    # `realloc` of a large block moves its pages instead of copying them
+    # (Linux; `Heap#move_large_contents`). Opt-in: the old block reads zeroes
+    # afterwards, and Crystal's stdlib reads it (`IO::Memory#write` of its
+    # own `to_slice`; `process_spec/regression/30_realloc_old_block_readable_spec.cr`).
+    heap.realloc_move = true if env_flag_one?("GCRY_REALLOC_MOVE")
+    {% if flag?(:linux) %}
+      if us = env_u64("GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US")
+        Gcry::Platform.move_test_unblocked_us = us
+      end
+    {% end %}
+
+    # Large blocks reuse the resident pages of large blocks the last major
+    # freed (Linux; `Heap#recycle_large_mapping`). Off: a large block maps
+    # fresh unless a cached chunk has its exact size.
+    heap.large_recycle = false if env_flag_zero?("GCRY_LARGE_RECYCLE")
 
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
@@ -795,12 +866,36 @@ module GC
         heap.alloc_batch = ab.to_i32
       end
     end
+    # Parallel mark is on by default since 2026-10-05, serial below 32 MiB
+    # live: `min(2, CPUs − 1)` workers up to 7 CPUs, one per four CPUs above
+    # (at most 8; `default_parallel_mark_workers`). Measured on CI runners,
+    # crystal-metric --release, 5 interleaved reps: two workers gained 8–16
+    # points of Boehm's speed on every GC-heavy row on x86-64, arm64 and macOS
+    # for 2–42% more CPU, and four were no better than two except on arm64 at
+    # up to twice the CPU; rows below the floor moved ±3 points
+    # (`bench/log/linux/2026-10-05-parallel-mark-default/`). Leaving one CPU to
+    # the mutator keeps a 2-CPU box serial. `GCRY_PARALLEL_MARK=1` is serial.
+    heap.parallel_mark_min_live = PARALLEL_MARK_DEFAULT_MIN_LIVE
     if min_live = env_u64("GCRY_PARALLEL_MARK_MIN_LIVE")
       heap.parallel_mark_min_live = min_live
     end
-    if pm = env_u64("GCRY_PARALLEL_MARK")
-      heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
-    end
+    # Serial under `-Dwithout_mt` off Windows (`Heap#parallel_mark_workers=`):
+    # `Crystal::SpinLock` compiles to nothing there and the shared mark stack
+    # would go unguarded.
+    pm_env = env_u64("GCRY_PARALLEL_MARK")
+    {% if flag?(:without_mt) && !flag?(:win32) %}
+      if pm_env && pm_env > 1
+        warn_unsupported_env("gcry: GCRY_PARALLEL_MARK is ignored under -Dwithout_mt: " \
+                             "the mark stack lock compiles to nothing there\n")
+      end
+      heap.parallel_mark_workers = 1
+    {% else %}
+      if pm = pm_env
+        heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
+      else
+        heap.parallel_mark_workers = default_parallel_mark_workers
+      end
+    {% end %}
     # Research only: pin mark workers at 1 even if a later assignment asks
     # for more. `make parallel-mark-process --disabled` is the red arm —
     # stolen stays 0. Dropping the skip reddens it.
@@ -816,8 +911,8 @@ module GC
     # Research only: the pre-2026-09-04 pop/busy protocol, which lets the
     # master end a mark cycle while a worker still holds a batch.
     heap.mark_busy_unlocked = true if env_flag_one?("GCRY_MARK_BUSY_UNLOCKED")
-    # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default
-    # 256 KiB (was 512); 0 = full guard→bottom (thr regresses).
+    # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default 0,
+    # the whole touched stack; a non-zero lag trades completeness for pause.
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
     end
@@ -828,9 +923,9 @@ module GC
     if env_flag_zero?("GCRY_STACK_LOW_WATER")
       heap.stack_low_water_scan = false
     end
-    # A parked fiber is scanned from its saved `stack_top` when every thread
-    # that can run a fiber has a recorded SP. `0` keeps the lag window for all
-    # of them (A/B, and the escape hatch).
+    # With a non-zero `GCRY_STW_STACK_LAG`, a parked fiber is scanned from its
+    # saved `stack_top` when every thread that can run a fiber has a recorded
+    # SP. `0` keeps the lag window for all of them (A/B, and the escape hatch).
     heap.parked_fiber_sp = false if env_flag_zero?("GCRY_PARKED_FIBER_SP")
     # `GC.collect`, idle and emergency collections make a multi-mutator heap's
     # empty chunks dormant; `0` keeps them mapped (A/B, escape hatch).
@@ -846,7 +941,8 @@ module GC
       Gcry::Platform.reusable_release = false if env_flag_zero?("GCRY_DARWIN_REUSABLE")
     {% end %}
     # Multi-mutator pthread map when SP is off the OS stack (on a pool fiber).
-    # Default 256 KiB from stack high; 0 = full pthread mapping.
+    # Default 0, the full mapping; a non-zero lag scans that many bytes from
+    # stack high.
     if plag = env_u64("GCRY_STW_PTHREAD_LAG")
       heap.stw_multi_pthread_lag = plag
     end
@@ -1038,9 +1134,10 @@ module GC
     # The twin: count the gap and do not name it, which is what the census did
     # until 2026-09-19. `make thread-census-names` runs both directions.
     heap.thread_census_names = false if env_flag_zero?("GCRY_THREAD_CENSUS_NAMES")
-    # Root the `Thread` object from `pthread_create` until the thread publishes
-    # itself (src/gcry/thread_birth_root.cr). **On** by default: it closes a
-    # use-after-free, and it is one `add_root` per thread created.
+    # Root the `Thread` object from `pthread_create` until its thread is done
+    # with it (src/gcry/thread_birth_root.cr). **On** by default: it closes a
+    # use-after-free at each end of a thread's life, and it is one `add_root`
+    # per thread created.
     Gcry::ThreadBirthRoot.enabled = false if env_flag_zero?("GCRY_THREAD_BIRTH_ROOT")
     # The twin: record every birth and root nothing, so a run that survives is
     # not credited to the bookkeeping.
@@ -1048,9 +1145,13 @@ module GC
     # Research only: a birth that finds no slot goes unrooted, which is what the
     # table used to do to every birth past the 64th between two collections.
     Gcry::ThreadBirthRoot.overflow_unrooted = true if env_flag_one?("GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED")
-    # Research only: never release a birth root on a thread's death, so a
-    # root ends only where it used to — when `stop_world` finds the thread on
-    # Crystal's list. The control arm for `make thread-birth-root --churn`.
+    # Research only: hold the birth table at its first 256 slots instead of
+    # growing it, so a birth can reach the overflow path at all
+    # (`make thread-birth-root --burst`).
+    Gcry::ThreadBirthRoot.nogrow = true if env_flag_one?("GCRY_THREAD_BIRTH_NOGROW")
+    # Research only: never release a birth root on a thread's death or a
+    # recycled handle, so every root is held for the life of the process.
+    # The control arm for `make thread-birth-root --churn`.
     Gcry::ThreadBirthRoot.track_deaths = false if env_flag_zero?("GCRY_THREAD_BIRTH_DEATHS")
     # Research only: keep the pthread stack-bounds snapshot at its initial size
     # instead of growing it, which is what a thread list longer than 64 used to
@@ -1117,12 +1218,6 @@ module GC
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).
     Gcry::Platform.staged_no_evict = true if env_flag_one?("GCRY_STAGED_NO_EVICT")
-    # Research only, and a **reproducer for an open defect**: drop a thread's
-    # staging record when it dies. Right on its face, and it crashes — the
-    # pre-stop wait's spin budget is what has been giving a dying thread time
-    # to leave the window where it is off Crystal's list and still using
-    # itself (src/gcry/platform/thread_staging.cr).
-    Gcry::Platform.unstage_on_death = true if env_flag_one?("GCRY_THREAD_UNSTAGE_ON_DEATH")
     # Research only: let the dying-type audit walk every block on a minor
     # collection, where unmarked does not mean dying
     # (src/gcry/thread_block_audit.cr).
@@ -1487,27 +1582,45 @@ module GC
 
   # :nodoc:
   def self.malloc(size : LibC::SizeT) : Void*
-    check_fork_poison!
-    if @@gcry_ready
-      Gcry.default_heap.malloc(size)
-    else
-      bootstrap_malloc(size, clear: true)
+    Crystal.trace :gc, "malloc", size: size do
+      check_fork_poison!
+      if @@gcry_ready
+        Gcry.default_heap.malloc(size)
+      else
+        bootstrap_malloc(size, clear: true)
+      end
     end
   end
 
   # :nodoc:
   def self.malloc_atomic(size : LibC::SizeT) : Void*
-    check_fork_poison!
-    if @@gcry_ready
-      Gcry.default_heap.malloc_atomic(size)
-    else
-      bootstrap_malloc(size, clear: false)
+    Crystal.trace :gc, "malloc", size: size, atomic: 1 do
+      check_fork_poison!
+      if @@gcry_ready
+        Gcry.default_heap.malloc_atomic(size)
+      else
+        bootstrap_malloc(size, clear: false)
+      end
     end
   end
 
   # :nodoc:
   def self.realloc(pointer : Void*, size : LibC::SizeT) : Void*
+    Crystal.trace :gc, "realloc", size: size do
+      realloc_impl(pointer, size)
+    end
+  end
+
+  private def self.realloc_impl(pointer : Void*, size : LibC::SizeT) : Void*
     check_fork_poison!
+    # Boehm's `GC_realloc(p, 0)` frees `p` and answers NULL (`mallocx.c`), as
+    # glibc's `realloc` does. Through `GC.free`, which never raises (GMP calls
+    # this as its C realloc hook) and hands a bootstrap-era pointer to LibC.
+    # `realloc(NULL, n)` is `malloc(n)`, below.
+    if size == 0 && !pointer.null?
+      free(pointer)
+      return Pointer(Void).null
+    end
     if @@gcry_ready
       # One lookup for the whole call: the heap answers null for a pointer it
       # does not own, which is the LibC bootstrap era's.
@@ -1516,9 +1629,17 @@ module GC
       # Emptied chunks are index-removed then munmapped post-STW. A mark miss
       # (or racing flush) makes the pointer unowned while the address is still
       # in the historic heap span — LibC.realloc aborts "invalid pointer".
+      # Abort here too, with the address, rather than raise: GMP calls this as
+      # its C realloc hook (`big/lib_gmp.cr`), and an exception cannot unwind
+      # through its frames. The contents are gone either way, so there is
+      # nothing a caller could recover. Allocation-free, like `GC.free`'s.
       if Gcry.default_heap.in_heap_span?(pointer)
-        raise ArgumentError.new("GC.realloc: not a live gcry allocation" +
-                                Gcry.default_heap.release_note(pointer.address))
+        buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
+        len = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: GC.realloc on 0x")
+        len = Gcry::RawOut.append_hex(buf.to_unsafe, len, pointer.address)
+        len = Gcry::RawOut.append(buf.to_unsafe, len, ", which is in the heap but not a live allocation; aborting\n")
+        Gcry::RawOut.flush(buf.to_unsafe, len)
+        LibC.abort
       end
       bootstrap_realloc(pointer, size)
     else
@@ -1526,10 +1647,22 @@ module GC
     end
   end
 
+  # Refused while collection is disabled, as Boehm's `GC_gcollect` returns at
+  # `GC_dont_gc` (`GC_try_to_collect_inner`). Until 2026-10-06 this collected
+  # anyway, so a `GC.disable` window — a library's critical section, a
+  # measurement — was broken by any explicit collection inside it
+  # (`process_spec/regression/27_boehm_collect_parity_spec.cr`). The
+  # collector's own collections do not come through here: the emergency retry
+  # before an `OutOfMemoryError` already declines while disabled, like Boehm's
+  # `GC_collect_or_expand`, and the idle collector re-checks under its lock.
   def self.collect
-    return unless @@gcry_ready
-    check_fork_poison!
-    Gcry.default_heap.collect(release_warm: true)
+    Crystal.trace :gc, "collect" do
+      return unless @@gcry_ready
+      check_fork_poison!
+      heap = Gcry.default_heap
+      return unless heap.enabled?
+      heap.collect(release_warm: true)
+    end
   end
 
   # Boehm-compatible: clear unused stack near SP (also GCRY_CLEAR_STACK on alloc).
@@ -1538,33 +1671,87 @@ module GC
     Gcry.clear_stack
   end
 
+  # Boehm's `GC_collect_a_little`: "do a little work if appropriate", then 1
+  # while an incremental collection is still in progress and 0 once there is
+  # nothing left to do — so `while (GC_collect_a_little()) {}` drains a cycle
+  # and stops. Appropriate means what an allocation would do at this point
+  # (Boehm's `GC_collect_a_little_inner` → `GC_maybe_gc`): another slice of a
+  # cycle in progress, or, once the allocation debt has reached the
+  # threshold, the collection that debt is owed — a sliced one under
+  # `GCRY_INCREMENTAL=1`, a full one otherwise. Below the threshold it does
+  # nothing. Disabled, it does nothing and returns 0 — even with a sliced
+  # cycle left open, where Boehm would keep answering 1 and a caller looping
+  # on it would spin until someone called `GC_enable`.
+  #
+  # It used to start a new incremental cycle on every call and return 1 when
+  # one *finished*: the inverse of Boehm's answer, so the loop above either
+  # stopped at once or collected forever, and it ran with collection
+  # disabled (`process_spec/regression/27_boehm_collect_parity_spec.cr`).
+  # `Gcry.collect_a_little` keeps the slice-on-demand meaning for gcry's
+  # own harnesses.
   def self.collect_a_little : Int
     return 0 unless @@gcry_ready
-    Gcry.default_heap.collect_a_little ? 1 : 0
+    heap = Gcry.default_heap
+    return 0 unless heap.enabled?
+    if heap.incremental_in_progress?
+      heap.collect_a_little(heap.incremental_work)
+    elsif heap.bytes_since_gc >= heap.gc_threshold
+      before = heap.collections
+      heap.collect_a_little(heap.incremental_work) if heap.incremental_auto
+      # No barrier, no slice (`begin_incremental`): the full collection the
+      # allocation path falls back to in that case too.
+      heap.collect(coalesce: true) if heap.collections == before && !heap.incremental_in_progress?
+    end
+    heap.incremental_in_progress? ? 1 : 0
   end
 
+  # Nests like Boehm's `GC_disable`/`GC_enable` (a counter): collection resumes
+  # when every `disable` is matched (`Heap#enable`). `enable` without an open
+  # `disable` raises the message stdlib's `spec/std/gc_spec.cr` expects.
   def self.enable
-    raise "GC is not disabled" unless !@@gcry_enabled
-    @@gcry_enabled = true
-    Gcry.default_heap.enable if @@gcry_ready
+    raise "GC is not disabled" unless @@gcry_ready && Gcry.default_heap.enable
   end
 
   def self.disable
-    @@gcry_enabled = false
     Gcry.default_heap.disable if @@gcry_ready
   end
 
+  # Never raises. zlib (`Compress::Deflate`) and GMP (`BigInt`) install this
+  # as their C allocator's free callback, so an exception here would unwind
+  # through C frames. A pointer the heap will not free is ignored and counted
+  # (`Heap#note_refused_free`); a pointer outside the heap's span is libc's —
+  # the bootstrap era's, or a foreign one — and goes to `LibC.free`, which is
+  # what `gc/none` does with every pointer. Anything else that escapes the
+  # free path is a collector fault, and Boehm `ABORT`s on those too.
   def self.free(pointer : Void*) : Nil
-    return if pointer.null?
-    if @@gcry_ready && Gcry.default_heap.free_owned?(pointer)
-      # Freed, through one lookup.
-    elsif @@gcry_ready && Gcry.default_heap.in_heap_span?(pointer)
-      # Same class as realloc: emptied+munmapped gcry block is not a LibC ptr.
-      raise ArgumentError.new("GC.free: not a live gcry allocation" +
-                              Gcry.default_heap.release_note(pointer.address))
-    else
-      LibC.free(pointer)
+    Crystal.trace :gc, "free" do
+      free_impl(pointer)
+    rescue
+      # No `ex.message`: a virtual call over every exception class, typed in
+      # Crystal's ivar-initializer pass because this is reachable from the
+      # allocator, broke building the compiler with gcry
+      # (`process_spec/regression/19_ivar_initializer_typing_spec.cr`).
+      buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
+      len = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: an exception escaped the GC.free path, which cannot raise into its C callers (zlib, GMP); aborting\n")
+      Gcry::RawOut.flush(buf.to_unsafe, len)
+      LibC.abort
     end
+  end
+
+  private def self.free_impl(pointer : Void*) : Nil
+    return if pointer.null?
+    if @@gcry_ready
+      heap = Gcry.default_heap
+      result = heap.free_result(pointer)
+      return if result.freed?
+      unless result.unowned? && !heap.in_heap_span?(pointer)
+        # Same class as realloc: an emptied+munmapped gcry block is not a libc
+        # pointer, and glibc aborts on it.
+        heap.note_refused_free(pointer, result)
+        return
+      end
+    end
+    bootstrap_free(pointer)
   end
 
   def self.is_heap_ptr(pointer : Void*) : Bool
@@ -1622,6 +1809,36 @@ module GC
     end
   end
 
+  # Each field against Boehm's `GC_prof_stats_s` (bdwgc `gc.h`), which
+  # `gc/boehm.cr` copies through verbatim:
+  #
+  # - `heap_size` / `free_bytes`: Boehm's `heapsize_full` / `free_bytes_full`
+  #   include memory it unmapped but still holds reserved inside its heap.
+  #   gcry keeps no such reservation — a released chunk is `munmap`ped and
+  #   leaves the heap — so its mapped heap and free bytes are the whole answer.
+  # - `unmapped_bytes`: **not** Boehm's quantity. Boehm's is the amount
+  #   currently unmapped inside its reservation; gcry has none, and reports
+  #   the cumulative bytes it has returned to the OS (`Heap#unmapped_bytes`,
+  #   the same number `GC.stats` gives), which is what Crystal's
+  #   `GC::Stats#unmapped_bytes` describes ("returned to the OS when shrinking").
+  # - `bytes_since_gc`, `bytes_before_gc`, `bytes_reclaimed_since_gc`,
+  #   `reclaimed_bytes_before_gc`, `expl_freed_bytes_since_gc`: the heap's
+  #   counters of the same names, kept with Boehm's meanings.
+  # - `non_gc_bytes`: Boehm's "bytes not considered candidates for
+  #   collection" (its uncollectable allocations). gcry has no uncollectable
+  #   allocation API; what it hands out and never collects is the libc memory
+  #   `GC.malloc` returns before the heap is ready (`@@non_gc_bytes`).
+  # - `gc_no`: completed collections (`Heap#collections`).
+  # - `markers_m1`: Boehm's "marker threads, excluding the initiating one".
+  #   gcry's collecting thread marks too, and `parallel_mark_workers - 1`
+  #   helpers join it (`ensure_mark_worker_pool`), so `GCRY_PARALLEL_MARK=N`
+  #   reports N - 1 and serial marking 0.
+  # - `obtained_from_os_bytes`: everything gcry currently has mapped from the
+  #   OS — heap chunks, the out-of-memory reserve, and the collector's own
+  #   mapped metadata — exactly (`Gcry.os_mapped_bytes`, `src/gcry/os_memory.cr`).
+  #   It is a current level, so it falls when chunks are released; Boehm's
+  #   (`GC_our_mem_bytes`) only grows, because its unmapping keeps the address
+  #   range reserved. Always `>= heap_size`.
   def self.prof_stats
     if @@gcry_ready
       h = Gcry.default_heap
@@ -1631,13 +1848,13 @@ module GC
         unmapped_bytes: h.unmapped_bytes,
         bytes_since_gc: h.bytes_since_gc,
         bytes_before_gc: h.bytes_before_gc,
-        non_gc_bytes: 0_u64,
+        non_gc_bytes: non_gc_bytes,
         gc_no: h.collections,
-        markers_m1: 0_u64,
+        markers_m1: (h.parallel_mark_workers - 1).to_u64,
         bytes_reclaimed_since_gc: h.bytes_reclaimed_since_gc,
         reclaimed_bytes_before_gc: h.reclaimed_bytes_before_gc,
         expl_freed_bytes_since_gc: h.expl_freed_bytes_since_gc,
-        obtained_from_os_bytes: h.heap_size + h.unmapped_bytes,
+        obtained_from_os_bytes: Gcry.os_mapped_bytes,
       )
     else
       ProfStats.new(
@@ -1646,13 +1863,13 @@ module GC
         unmapped_bytes: 0_u64,
         bytes_since_gc: 0_u64,
         bytes_before_gc: 0_u64,
-        non_gc_bytes: 0_u64,
+        non_gc_bytes: non_gc_bytes,
         gc_no: 0_u64,
         markers_m1: 0_u64,
         bytes_reclaimed_since_gc: 0_u64,
         reclaimed_bytes_before_gc: 0_u64,
         expl_freed_bytes_since_gc: 0_u64,
-        obtained_from_os_bytes: 0_u64,
+        obtained_from_os_bytes: Gcry.os_mapped_bytes,
       )
     end
   end
@@ -1667,7 +1884,14 @@ module GC
       ret = LibC._beginthreadex(security, stack_size, start_address, arglist, initflag | 4_u32, thrdaddr)
       raise RuntimeError.from_errno("_beginthreadex") if ret.null?
       Gcry::Platform.stage_thread(ret.address)
-      Gcry::ThreadBirthRoot.arm(ret.address, arglist)
+      # gcry's own handle on the thread, so the birth root can end when the
+      # thread has terminated: Crystal closes its copy itself, without calling
+      # into the GC (src/gcry/thread_birth_root.cr, `release_exited`). If the
+      # duplicate cannot be made the root is simply never released.
+      wait = Pointer(Void).null
+      process = LibC.GetCurrentProcess
+      LibC.DuplicateHandle(process, ret, process, pointerof(wait), LibC::SYNCHRONIZE.to_u32, 0, 0_u32)
+      Gcry::ThreadBirthRoot.arm(ret.address, arglist, wait.address)
       # Crystal stores the handle with `@system_handle = GC.beginthreadex(...)`,
       # i.e. after this returns, and the thread publishes itself on the thread
       # list from its own `Thread#start` as soon as it runs. Resumed first, it
@@ -1691,7 +1915,11 @@ module GC
     # Recording here does not cover the interval *inside* `pthread_create` —
     # doing that needs a trampoline on the new thread, which was tried and
     # crashed 8 runs in 10. The census reports what this placement leaves.
-    def self.pthread_create(thread : Gcry::OS::PthreadT*, attr : Gcry::OS::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
+    #
+    # *root* is the object rooted for the thread: *arg* itself, except from
+    # `GC_pthread_create`, whose *arg* is its trampoline's record in libc
+    # memory and *root* the caller's argument inside it (src/gcry/c_abi.cr).
+    def self.pthread_create(thread : Gcry::OS::PthreadT*, attr : Gcry::OS::PthreadAttrT*, start : Void* -> Void*, arg : Void*, root : Void* = arg)
       {% if flag?(:gc_none) %}
         # **Before** the call, not after. A second thread is about to exist, and
         # the allocation counters are plain get/set until told otherwise —
@@ -1727,7 +1955,7 @@ module GC
           # object whose only other holder is the new thread's unscanned stack
           # is right here. Root it until the thread publishes itself
           # (src/gcry/thread_birth_root.cr).
-          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), arg)
+          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), root)
         end
       {% end %}
       ret
@@ -1742,28 +1970,32 @@ module GC
     # kept its root for the life of the process
     # (src/gcry/thread_birth_root.cr).
     #
-    # The mark happens **before** the real call, so it is written while the
-    # handle is still unambiguously this thread's: after `pthread_detach` the
-    # handle is reusable, and a mark landing then could hit a slot `arm` had
-    # already given to a new birth.
+    # A join is stamped once the real call has returned — the thread is gone
+    # — and a detach before it, while the handle is still unambiguously this
+    # thread's: after `pthread_detach` the handle is reusable, and a mark
+    # landing then could hit a slot `arm` had already given to a new birth.
     #
-    # What is deliberately **not** here: dropping the thread's staging
-    # record. It belongs here logically — a dead thread is not a thread being
-    # born, and leaving the record makes every later stop spin its whole
-    # budget waiting for it — and shipping it crashes. See
-    # `GCRY_THREAD_UNSTAGE_ON_DEATH`.
+    # The staging record goes too: a dead thread is not a thread being born,
+    # and a record left behind makes every later stop spend the pre-stop
+    # wait's whole budget on it. This was held back from 2026-09-12 to
+    # 2026-10-05 as the retired unstage-on-death knob, "a reproducer", on the
+    # belief that the wait's spins were what kept a dying thread's `Thread`
+    # alive. They were not: the birth root is, for the whole life, and
+    # `make thread-death-window` holds dying threads in that window across
+    # collections with no wait at all (src/gcry/platform/thread_staging.cr).
     def self.pthread_join(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.unstage_on_death(thread.unsafe_as(UInt64))
-        Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
+        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
+        Gcry::ThreadBirthRoot.joining(thread.unsafe_as(UInt64)) { Gcry::OS.pthread_join(thread, nil) }
+      {% else %}
+        Gcry::OS.pthread_join(thread, nil)
       {% end %}
-      Gcry::OS.pthread_join(thread, nil)
     end
 
     # :nodoc:
     def self.pthread_detach(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.unstage_on_death(thread.unsafe_as(UInt64))
+        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
         Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
       {% end %}
       Gcry::OS.pthread_detach(thread)
@@ -1780,26 +2012,76 @@ module GC
   end
 
   # :nodoc:
-  # Crystal 1.21+: default is ExecutionContext (`!without_mt`). Only the legacy
-  # `-Dwithout_mt` scheduler uses the single-argument form. ExecutionContext
-  # itself does not call this on fiber swap — see `before_collect` above.
+  # What gcry does with a stack bottom it is told about, and why it needs no
+  # per-thread table: every collection re-derives every thread's bottom from
+  # the fiber that thread is running at the stop, and never trusts a stored one.
+  #   - The collecting thread: `Heap#scan_mutator_stack` scans up to
+  #     `Fiber.current.@stack.bottom` (`collect_scan.cr`), and the
+  #     `before_collect` hook in `GC.init` refreshes `Heap#stack_bottom` from
+  #     the same place before any scan.
+  #   - Every other thread: `Heap#scan_other_thread_stacks` reads
+  #     `thread.@current_fiber.@stack.bottom`, and the stack-bounds snapshot
+  #     taken in `stop_world` for frames below the fiber (`collect_scan.cr`).
+  # So a bottom stored for another thread would never be read. What a stored
+  # value is still read for is the calling thread's own — the
+  # `current_thread_stack_bottom` fallback when the OS will not report
+  # bounds, and crash diagnostics — so only a bottom for `Thread.current` is
+  # kept, and one for another thread no longer overwrites it (until
+  # 2026-10-05 it did, unconditionally). `process_spec` covers the scan half.
+  #
+  # Crystal 1.21's ExecutionContext never calls this; the legacy `-Dwithout_mt`
+  # scheduler calls the one-argument form on every swap, always for the
+  # running thread, which is the one thing it can mean there.
   {% if !flag?(:without_mt) %}
     def self.set_stackbottom(thread : Thread, stack_bottom : Void*)
-      Gcry.default_heap.set_stackbottom(stack_bottom) if @@gcry_ready
+      return unless @@gcry_ready
+      return unless thread.same?(Thread.current?)
+      Gcry.default_heap.set_stackbottom(stack_bottom)
+      {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.note_stackbottom(stack_bottom) {% end %}
     end
   {% else %}
     def self.set_stackbottom(stack_bottom : Void*)
-      Gcry.default_heap.set_stackbottom(stack_bottom) if @@gcry_ready
+      return unless @@gcry_ready
+      Gcry.default_heap.set_stackbottom(stack_bottom)
+      {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.note_stackbottom(stack_bottom) {% end %}
     end
   {% end %}
+
+  {% unless flag?(:win32) %}
+    # :nodoc:
+    # The signals the stop-the-world uses, answered from the same constants
+    # the handlers are installed with (`platform/stw_signals.cr`).
+    # `Crystal::System::Thread.sig_suspend` / `sig_resume` defer to these when
+    # `GC` defines them, and `Process` spawn unblocks exactly these in the child.
+    # On Darwin gcry stops threads through Mach and installs no handler of its
+    # own; the pair is then the one Crystal's `init_suspend_resume` installed.
+    def self.sig_suspend : Signal
+      Signal.new(Crystal::System::Thread::GC_STW_SIG_SUSPEND)
+    end
+
+    # :nodoc:
+    def self.sig_resume : Signal
+      Signal.new(Crystal::System::Thread::GC_STW_SIG_RESUME)
+    end
+  {% end %}
+
   # :nodoc:
+  # Not under `-Dwithout_mt`, as in `gc/boehm.cr`. There `Fiber#run` still
+  # calls `unlock_read` once per new fiber while the legacy scheduler never
+  # calls `lock_read`, so forwarding the pair drove the heap's reader count
+  # negative and the next `GC.collect` spun in `write_lock` forever — the first
+  # `spawn` made every later collection hang (2026-10-05, also at HEAD).
   def self.lock_read
-    Gcry.default_heap.lock_read if @@gcry_ready
+    {% unless flag?(:without_mt) %}
+      Gcry.default_heap.lock_read if @@gcry_ready
+    {% end %}
   end
 
   # :nodoc:
   def self.unlock_read
-    Gcry.default_heap.unlock_read if @@gcry_ready
+    {% unless flag?(:without_mt) %}
+      Gcry.default_heap.unlock_read if @@gcry_ready
+    {% end %}
   end
 
   # :nodoc:
@@ -1838,14 +2120,69 @@ module GC
     ptr = LibC.malloc(size)
     raise Gcry::OutOfMemoryError.new("bootstrap malloc failed") if ptr.null?
     ptr.as(UInt8*).clear(size) if clear
+    non_gc_add(libc_usable_size(ptr))
     ptr
   end
 
   private def self.bootstrap_realloc(pointer : Void*, size : LibC::SizeT) : Void*
+    old = pointer.null? ? 0_u64 : libc_usable_size(pointer)
     ptr = LibC.realloc(pointer, size)
     raise Gcry::OutOfMemoryError.new("bootstrap realloc failed") if ptr.null? && size != 0
+    # A failed realloc raised above with *pointer* untouched; past here the old
+    # block is gone (moved, resized, or freed by a zero-size realloc).
+    non_gc_sub(old)
+    non_gc_add(libc_usable_size(ptr)) unless ptr.null?
     ptr
   end
+
+  # Every pointer `free` sends to libc. Outside the heap's span it is the
+  # bootstrap era's — or a foreign libc pointer handed to `GC.free` by mistake,
+  # which `non_gc_sub` saturates against rather than wrapping.
+  private def self.bootstrap_free(pointer : Void*) : Nil
+    non_gc_sub(libc_usable_size(pointer))
+    LibC.free(pointer)
+  end
+
+  private def self.non_gc_bytes : UInt64
+    Atomic::Ops.load(pointerof(@@non_gc_bytes), LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  private def self.non_gc_add(bytes : UInt64) : Nil
+    Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@non_gc_bytes), bytes,
+      LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  private def self.non_gc_sub(bytes : UInt64) : Nil
+    loop do
+      cur = non_gc_bytes
+      nxt = cur > bytes ? cur - bytes : 0_u64
+      _, ok = Atomic::Ops.cmpxchg(pointerof(@@non_gc_bytes), cur, nxt,
+        LLVM::AtomicOrdering::Monotonic, LLVM::AtomicOrdering::Monotonic)
+      return if ok
+    end
+  end
+
+  private def self.libc_usable_size(pointer : Void*) : UInt64
+    {% if flag?(:darwin) %}
+      LibGcryUsableSize.malloc_size(pointer).to_u64
+    {% elsif flag?(:win32) %}
+      LibGcryUsableSize._msize(pointer).to_u64
+    {% else %}
+      LibGcryUsableSize.malloc_usable_size(pointer).to_u64
+    {% end %}
+  end
+end
+
+# How big libc made a block, so `GC.prof_stats.non_gc_bytes` can take back on
+# free exactly what it counted on malloc. One name per supported libc.
+lib LibGcryUsableSize
+  {% if flag?(:darwin) %}
+    fun malloc_size(ptr : Void*) : LibC::SizeT
+  {% elsif flag?(:win32) %}
+    fun _msize(ptr : Void*) : LibC::SizeT
+  {% else %}
+    fun malloc_usable_size(ptr : Void*) : LibC::SizeT
+  {% end %}
 end
 
 {% if flag?(:win32) %}

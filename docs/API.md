@@ -27,6 +27,7 @@ Under `-Dgc_none`, `require "gcry"` reopens Crystal’s `GC` module. Everyday co
 | `Gcry::VERSION` | Shard version string |
 | `Gcry.default_heap` | Process / default `Heap` |
 | `Gcry.malloc` / `malloc_atomic` / `realloc` / `free` | Library-heap helpers (tests) |
+| `Gcry.usable_size(ptr)` | Usable size of the live block containing `ptr` (base or interior), at least the requested size (Boehm `GC_size`); 0 when no live gcry block contains it |
 | `Gcry.collect` / `minor_collect` / `collect_a_little` | Manual collection |
 | `Gcry.pause_stats` | STW pause ring (`last` / `p50` / `p99` / `max` / `count`) |
 | `Gcry.metrics` | Extended counters (collections, RSS-ish bytes, blacklist, layout, …) |

@@ -1,0 +1,19 @@
+00 rc=0   25s make poison-freed finalizer-complex mark-audit explicit-collect-barrier | ok — 20 consecutive explicit collects each completed a collection with 4 threads allocating, the pre-fix guard demonstrably loses that, and the same 20 calls land on an idle process too.
+01 rc=0   85s make parallel-mark-process parallel-mark-termination parallel-mark-stress monitor-gate-deadlock | ok — gate closed before @roots_lock the stop completes; closed after, it wedges
+02 rc=0  140s make bitmap-marks-freelist stw-slot-precision heap-counters counter-loss | ok — the dropped increment was caught, at 884952 of 983249 comparisons:
+03 rc=0  129s make find-block-race | ok — a mutator inside `find_block` survives 200 collections, and the old read does not
+04 rc=0  400s make index-grow-race thread-churn-uaf | ok — with the pre-fix shape restored the defect still reproduces, so the
+05 rc=0    5s make thread-death-window | ok — with the birth root off, 160 of 160 dying threads lost their `Thread`
+06 rc=0   30s crystal build -Dgc_none --release bench/interior_only_buffer.cr -o bin/interior_only_buffer --error-trace | 
+07 rc=0    1s bin/interior_only_buffer | 
+08 rc=0    0s if GCRY_DISABLE_INTERIOR=1 bin/interior_only_buffer; then echo "FAIL: the base-only arm kept the buffer"; else echo "ok (red arm faulted as required)"; fi | ok (red arm faulted as required)
+09 rc=0   28s crystal build -Dgc_none --release bench/unaligned_only_buffer.cr -o bin/unaligned_only_buffer --error-trace | 
+10 rc=0    0s bin/unaligned_only_buffer | 
+11 rc=0    1s if GCRY_ATOMIC_SLACK=0 GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; else echo "ok (red arm faulted as required)"; fi | ok (red arm faulted as required)
+12 rc=0   45s ci/sound-suite.sh | ok (nursery demotes the label)
+13 rc=0    3s crystal build -Dgc_none bench/idle_release.cr -o bin/idle_release --error-trace | 
+14 rc=0    5s GCRY_IDLE_RELEASE_MS=50 bin/idle_release | 
+15 rc=0    4s if GCRY_IDLE_RELEASE_MS=0 bin/idle_release; then echo "FAIL: no idle collector and still released"; else echo "ok (red arm)"; fi | ok (red arm)
+16 rc=0    3s crystal build -Dgc_none bench/idle_thread_roots.cr -o bin/idle_thread_roots --error-trace | 
+17 rc=0    1s GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 bin/idle_thread_roots | 
+18 rc=0    0s if GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 GCRY_IDLE_SCAN_SKIP=1 bin/idle_thread_roots; then echo "FAIL: skipping the idle stack lost nothing"; else echo "ok (red arm)"; fi | ok (red arm)

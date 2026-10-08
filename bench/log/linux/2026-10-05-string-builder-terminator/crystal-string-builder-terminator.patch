@@ -1,0 +1,12 @@
+--- a/src/string/builder.cr
++++ b/src/string/builder.cr
+@@ -123,7 +123,8 @@
+   private def increase_capacity_by(count)
+     raise IO::EOFError.new if count >= Int32::MAX - real_bytesize
+ 
+-    new_bytesize = real_bytesize + count
++    # One more byte for the terminator `to_s` writes after the content.
++    new_bytesize = real_bytesize + count + 1
+     return if new_bytesize <= @capacity
+ 
+     new_capacity = calculate_new_capacity(new_bytesize)

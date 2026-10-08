@@ -1,0 +1,5 @@
+bench                    arm           wall med     min     max    Δ vs on  cpu med  rss MiB
+Primes                   on              0.6170   0.598   0.667      +0.0%     0.82      611
+Primes                   off             0.6220   0.565   0.657      +0.8%     0.84      614
+Primes                   on_nopace       0.7140   0.703   0.739     +15.7%     1.13      595
+Primes                   off_nopace      0.7190   0.696   0.761     +16.5%     1.13      595

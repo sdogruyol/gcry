@@ -355,7 +355,7 @@ module Gcry
       while i < POOL_SLOTS
         pool = @bitmap_pool_indexes.to_unsafe + i
         unless pool.value.addresses.null?
-          Gcry::OS.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(pool.value.capacity.to_u64 * 8))
+          Gcry.os_unmap(pool.value.addresses.as(Void*), pool.value.capacity.to_u64 * 8)
           pool.value.addresses = Pointer(UInt64).null
           pool.value.capacity = 0
           pool.value.valid = false
@@ -955,11 +955,10 @@ module Gcry
       end
       return true if capacity == pool.value.capacity
       bytes = capacity.to_u64 * 8
-      memory = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE, Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+      memory = Gcry.os_map(bytes)
       return false if Gcry.mmap_failed?(memory)
       unless pool.value.addresses.null?
-        Gcry::OS.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(pool.value.capacity.to_u64 * 8))
+        Gcry.os_unmap(pool.value.addresses.as(Void*), pool.value.capacity.to_u64 * 8)
       end
       pool.value.addresses = memory.as(UInt64*)
       pool.value.capacity = capacity

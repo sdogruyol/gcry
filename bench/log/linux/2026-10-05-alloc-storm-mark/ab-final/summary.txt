@@ -1,0 +1,25 @@
+bench                    arm           wall med     min     max Δ vs boehm  cpu med  rss MiB
+Primes                   boehm           0.6060   0.590   0.623      +0.0%     1.14      659
+Primes                   base            1.0030   0.985   1.013     +65.5%     1.47      593
+Primes                   new             0.7840   0.782   0.802     +29.4%     1.50      595
+Primes                   new_pm2         0.9270   0.913   0.945     +53.0%     1.35      595
+JsonParsePure            boehm           0.3460   0.335   0.351      +0.0%     1.61      690
+JsonParsePure            base            0.5560   0.544   0.567     +60.7%     1.58      548
+JsonParsePure            new             0.4370   0.432   0.447     +26.3%     1.62      543
+JsonParsePure            new_pm2         0.4950   0.486   0.560     +43.1%     1.45      543
+JsonParseSerializable    boehm           0.2670   0.258   0.270      +0.0%     1.24      572
+JsonParseSerializable    base            0.3010   0.292   0.308     +12.7%     1.13      438
+JsonParseSerializable    new             0.3050   0.300   0.306     +14.2%     1.21      437
+JsonParseSerializable    new_pm2         0.3080   0.299   0.312     +15.4%     1.12      437
+Binarytrees              boehm           0.5120   0.505   0.525      +0.0%     0.59       51
+Binarytrees              base            0.6270   0.621   0.643     +22.5%     0.62       22
+Binarytrees              new             0.6110   0.608   0.623     +19.3%     0.61       22
+Binarytrees              new_pm2         0.6150   0.608   0.622     +20.1%     0.61       22
+JsonGenerate             boehm           0.6340   0.626   0.642      +0.0%     2.28     1166
+JsonGenerate             base            0.5970   0.590   0.609      -5.8%     2.51      859
+JsonGenerate             new             0.5840   0.583   0.609      -7.9%     2.72      856
+JsonGenerate             new_pm2         0.5870   0.581   0.593      -7.4%     2.43      856
+RegexDna                 boehm           1.7130   1.695   1.753      +0.0%     2.36      513
+RegexDna                 base            1.7250   1.709   1.760      +0.7%     2.41      272
+RegexDna                 new             1.7400   1.726   1.786      +1.6%     2.45      272
+RegexDna                 new_pm2         1.7520   1.726   1.787      +2.3%     2.43      272

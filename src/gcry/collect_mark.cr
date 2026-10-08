@@ -58,7 +58,7 @@ module Gcry
             w0 = u.as(UInt64*).value
             w1 = (u.as(UInt64*) + 1).value
             slot = Roots.hl_slot
-            LibC.printf("STACKSEED cand=%p user=%p base=%d size=%u w0=%llx w1=%llx slot=%p off_entry=%lld off_bottom=%lld\n",
+            LibC.printf("STACKSEED cand=%p user=%p base=%d size=%llu w0=%llx w1=%llx slot=%p off_entry=%lld off_bottom=%lld\n",
               pointer, u, pointer.address == u.address ? 1 : 0, block_payload(c, h), w0, w1,
               Pointer(Void).new(slot), slot.to_i64 - @collect_entry_sp.to_i64, @stack_bottom.address.to_i64 - slot.to_i64)
           end
@@ -137,8 +137,9 @@ module Gcry
         @hl_pushed_base.clear(@hl_pushed_words.to_i) unless @hl_pushed_base.null?
       end
 
-      private def hl_note_push(header : BlockHeader*) : Nil
+      private def hl_note_push(entry : BlockHeader*) : Nil
         return if @hl_pushed_base.null?
+        header = mark_entry_header(entry)
         return if header.address < @hl_pushed_lo
         idx = (header.address - @hl_pushed_lo) >> 4
         w = idx >> 6
@@ -158,29 +159,20 @@ module Gcry
       end
     {% end %}
 
-    private def mark_stack_push(header : BlockHeader*) : Nil
+    # `shard` is the pushing thread's parallel-mark shard when the caller has
+    # it; nil otherwise, and under parallel mark it is then looked up out of
+    # line (`push_to_own_shard`, see `Heap#mark_shard`).
+    private def mark_stack_push(header : BlockHeader*, shard : MarkShard? = nil) : Nil
       {% if flag?(:gcry_hl_assert) %} hl_note_push(header) {% end %}
       unless @mark_parallel
         @mark_stack.push(header)
         return
       end
-      slot = Heap.mark_worker
-      # A thread with no claimed slot (should not happen on a mark worker) falls
-      # back to the locked shared push rather than corrupting slot -1.
-      base = slot < 0 ? 0_u64 : pushbuf_base(slot)
-      if base == 0_u64
-        @mark_lock.lock
-        @mark_stack.push(header)
-        @mark_lock.unlock
-        return
+      if shard
+        push_to_shard(header, shard)
+      else
+        push_to_own_shard(header)
       end
-      n = pushbuf_n(slot)
-      if n >= MARK_PUSHBUF_CAP
-        flush_pushbuf(slot)
-        n = 0
-      end
-      Pointer(Void*).new(base)[n] = header.as(Void*)
-      set_pushbuf_n(slot, n + 1)
     end
 
     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
@@ -247,7 +239,49 @@ module Gcry
       # Atomic payloads have no edges. The chunk is already resolved here;
       # preserve its mark and attribution without a queue round trip.
       return if atomic_of(chunk, header)
-      mark_stack_push(header)
+      mark_stack_push(mark_entry(chunk, header))
+    end
+
+    # A mark-stack entry is a block header pointer, and the trace's own pushes
+    # carry the block's size class in its top byte (class + 1; 0 = untagged).
+    # `scan_object` then has everything it needs — the payload starts at the
+    # header and its length is the class's — without resolving the chunk a
+    # second time: a radix walk, the chunk header's line and its checks, per
+    # scanned object, for a chunk `mark_impl_unlocked` had in hand at the push.
+    #
+    # The width is what matters on this stack: carrying the chunk as a second
+    # word was +13.4% mark (see `MarkStack#push`). The byte costs nothing —
+    # user-space addresses stop at bit 47 (bit 56 under five-level paging) on
+    # the x86_64 and aarch64 targets gcry is limited to (platform/os.cr).
+    # Large blocks and every other push site (the barrier's re-scan; the
+    # parallel flush copies entries verbatim) stay untagged and take the
+    # resolving path.
+    #
+    # One tag is not a class: `MARK_ENTRY_TAG_REST` names the unscanned rest
+    # of a large payload by the address it resumes at (`scan_large_from`).
+    MARK_ENTRY_TAG_SHIFT =                        56
+    MARK_ENTRY_ADDR_MASK = 0x00FF_FFFF_FFFF_FFFF_u64
+    MARK_ENTRY_TAG_REST  =                  0xFF_u64
+
+    # Under parallel mark a large payload is scanned this many bytes at a
+    # time, the rest pushed where any worker can take it, as Boehm splits a
+    # long range for its markers. Whole, one worker walked JsonGenerate's
+    # 70+ MB `Array(Coordinate)` buffer — every element's candidates resolved
+    # in series — while the others spun on an empty stack: with four workers
+    # its Σ mark was 471 ms whole and 359 ms split.
+    MARK_SPLIT_BYTES = 65536_u64
+
+    @[AlwaysInline]
+    private def mark_entry(chunk : ChunkHeader*, header : BlockHeader*) : BlockHeader*
+      return header if ChunkHeader.large?(chunk)
+      tag = chunk.value.size_class.to_u64 &+ 1
+      Pointer(BlockHeader).new(header.address | (tag << MARK_ENTRY_TAG_SHIFT))
+    end
+
+    # The header an entry names, tag stripped.
+    @[AlwaysInline]
+    private def mark_entry_header(entry : BlockHeader*) : BlockHeader*
+      Pointer(BlockHeader).new(entry.address & MARK_ENTRY_ADDR_MASK)
     end
 
     # First-mark source attribution (GCRY_LIVE_ATTR=1). Counts objects/bytes by
@@ -257,7 +291,7 @@ module Gcry
     private def note_first_mark(chunk : ChunkHeader*, header : BlockHeader*, source : RootSource) : Nil
       # Size and kind come from the chunk: the header alone has neither for a
       # small block on the headerless layout.
-      bytes = block_payload(chunk, header).to_u64
+      bytes = block_payload(chunk, header)
       atomic = atomic_of(chunk, header)
       case source
       when RootSource::Stack
@@ -318,10 +352,17 @@ module Gcry
       # returns the object's own first word — its type_id — so the gate compared
       # the type_id against itself and rejected live objects, which were then
       # swept and their memory handed out twice.
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return true if size < 4
 
-      tid = user_of(chunk, header).as(Int32*).value
+      type_id_word_plausible?(user_of(chunk, header).as(UInt8*))
+    end
+
+    # The payload's first Int32 read as a type id, for a non-atomic payload of
+    # at least four bytes.
+    @[AlwaysInline]
+    private def type_id_word_plausible?(user : UInt8*) : Bool
+      tid = user.as(Int32*).value
       # Crystal type ids are dense positive integers (0 is not a real instance id;
       # a leading zero word is typical of Pointer(T) buffers / empty slots).
       return false if tid <= 0
@@ -370,10 +411,7 @@ module Gcry
       loop do
         while count < MARK_PREFETCH_DEPTH && !stack.empty?
           h = stack.pop
-          # Header line and the payload's first line — the type_id gate and the
-          # first scanned word both live there.
-          Kernels.prefetch_read(h.as(Void*))
-          Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+          prefetch_mark_entry(h)
           ring[(head + count) % MARK_PREFETCH_DEPTH] = h
           count += 1
         end
@@ -385,6 +423,47 @@ module Gcry
       end
     end
 
+    # Bytes of a small payload `prefetch_mark_entry` asks for, at most.
+    MARK_PREFETCH_MAX_BYTES = 256_u64
+
+    # Prefetch what `scan_object` will read of one entry: every line of a
+    # tagged (small) block up to `MARK_PREFETCH_MAX_BYTES`, as its class gives
+    # the length; the first line, and the payload's, of anything else.
+    #
+    # It used to be the first line only. Once the candidates were resolved in
+    # place (`scan_edges_inline`), the scan's own word loads were the largest
+    # stall left in the serial mark — 38% of `scan_edges_inline`'s samples on
+    # Primes waited on a payload word — since a small object starts anywhere
+    # in a line, and the scanned ones average 53 bytes on Primes and 100 on
+    # JsonParsePure. Whole payloads, serial Σ mark over 7 interleaved runs:
+    # Primes 592 → 493 ms, JsonParsePure 498 → 392 ms; Binarytrees,
+    # JsonGenerate and JsonParseSerializable +1 to +7%, at the edge of their
+    # run-to-run spread, wall time unchanged. Against 403 ms at this cap,
+    # JsonParsePure took 488 ms capped at 64 bytes and 457 ms at 128; 512
+    # bytes and 1 KiB were no faster. Fixed prefetches in place of the loop —
+    # first and last line (514 ms), or three lines (436 ms) — lost most or
+    # part of it (`bench/log/linux/2026-10-06-mark-cost/`). Lines are taken as
+    # 64 bytes: on a 128-byte-line core every second prefetch names a line
+    # already requested.
+    @[AlwaysInline]
+    private def prefetch_mark_entry(entry : BlockHeader*) : Nil
+      a = mark_entry_header(entry).address
+      Kernels.prefetch_read(Pointer(Void).new(a))
+      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+      if tag == 0 || tag == MARK_ENTRY_TAG_REST
+        Kernels.prefetch_read(Pointer(Void).new(a &+ BlockHeader::SIZE))
+        return
+      end
+      bytes = @block_bytes.unsafe_fetch(tag.to_i32 &- 1)
+      bytes = MARK_PREFETCH_MAX_BYTES if bytes > MARK_PREFETCH_MAX_BYTES
+      line = (a | 63_u64) &+ 1
+      finish = a &+ bytes
+      while line < finish
+        Kernels.prefetch_read(Pointer(Void).new(line))
+        line &+= 64
+      end
+    end
+
     private def mark_loop_budget(work_units : Int32) : Nil
       units = 0
       while units < work_units && !@mark_stack.empty?
@@ -393,7 +472,29 @@ module Gcry
       end
     end
 
-    private def scan_object(header : BlockHeader*) : Nil
+    private def scan_object(entry : BlockHeader*, shard : MarkShard? = nil) : Nil
+      # A tagged entry is a small, non-atomic block of a known class (see
+      # `mark_entry`): its payload and length need no chunk. The rest tag is
+      # the unscanned tail of a large payload.
+      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+      if tag != 0
+        if tag == MARK_ENTRY_TAG_REST
+          from = mark_entry_header(entry).address
+          chunk = chunk_containing(from)
+          return unless chunk && ChunkHeader.large?(chunk)
+          scan_large_from(chunk, ChunkHeader.large_header(chunk), from, shard)
+          return
+        end
+        user = BlockHeader.user_from(mark_entry_header(entry)).as(UInt8*)
+        size = @block_bytes[tag.to_i32 &- 1] &- BlockHeader::SIZE
+        # `type_id_plausible?` for such a block, which is never atomic and
+        # never shorter than four bytes.
+        base_only = !@allow_interior_pointers && !type_id_word_plausible?(user)
+        scan_payload(user, size, base_only, 0_u64, 0_u64, shard)
+        return
+      end
+      header = entry
+
       # The header's ATOMIC flag first, because it can end the call.
       #
       # It is a load off a line the mark stack pop already pulled in;
@@ -417,15 +518,62 @@ module Gcry
       # it once and reusing it beats three separate derivations.
       chunk = chunk_containing(header.address)
       return unless chunk
+      if ChunkHeader.large?(chunk)
+        scan_large_from(chunk, header, user_of(chunk, header).address, shard)
+        return
+      end
+      scan_block(chunk, header, 0_u64, 0_u64, shard)
+    end
+
+    # A large payload from byte address `from` on. Under parallel mark at most
+    # `MARK_SPLIT_BYTES` of it, after the rest has gone onto the shared stack
+    # as one `MARK_ENTRY_TAG_REST` entry, so an idle worker takes it while
+    # this one scans. The planted miss of `make mark-audit` drops a payload's
+    # last word, so a payload it applies to is not split.
+    private def scan_large_from(chunk : ChunkHeader*, header : BlockHeader*, from : UInt64,
+                                shard : MarkShard? = nil) : Nil
+      return if atomic_of(chunk, header)
+      user = user_of(chunk, header).as(UInt8*)
+      size = block_payload(chunk, header)
+      finish = user.address &+ size
+      return if from >= finish
+      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
+      if @mark_parallel && @mark_test_short_tid == 0 && finish &- from > MARK_SPLIT_BYTES
+        rest = from &+ MARK_SPLIT_BYTES
+        publish_mark_entry(Pointer(BlockHeader).new(rest | (MARK_ENTRY_TAG_REST << MARK_ENTRY_TAG_SHIFT)))
+        scan_payload(Pointer(UInt8).new(from), MARK_SPLIT_BYTES, base_only, 0_u64, 0_u64, shard)
+        return
+      end
+      scan_payload(Pointer(UInt8).new(from), finish &- from, base_only, 0_u64, 0_u64, shard)
+    end
+
+    # `scan_object`'s body, chunk resolved. Words in `[skip_lo, skip_hi)` are
+    # not followed: `mark_from_children` passes the object's own block there,
+    # every other caller an empty range, which the inline folds away.
+    @[AlwaysInline]
+    private def scan_block(chunk : ChunkHeader*, header : BlockHeader*, skip_lo : UInt64, skip_hi : UInt64,
+                           shard : MarkShard? = nil) : Nil
       return if atomic_of(chunk, header)
 
       user = user_of(chunk, header).as(UInt8*)
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return if size == 0
-      # Serial mark only. Four helpers adding to one field per object is the
-      # shared-line write that already costs parallel mark its scaling; a
-      # parallel cycle leaves the count short, and the cap stays at its floor.
-      @mark_scanned_bytes &+= size unless @mark_parallel
+      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
+      scan_payload(user, size, base_only, skip_lo, skip_hi, shard)
+    end
+
+    # The words of one payload, `size` bytes at `user`.
+    @[AlwaysInline]
+    private def scan_payload(user : UInt8*, size : UInt64, base_only : Bool, skip_lo : UInt64, skip_hi : UInt64,
+                             shard : MarkShard? = nil) : Nil
+      # A shared counter written per object by every helper is the line
+      # parallel mark's scaling already paid for once; helpers count into
+      # their own line and the master folds them in after the cycle.
+      if @mark_parallel
+        count_parallel_scanned_bytes(size, shard)
+      else
+        @mark_scanned_bytes &+= size
+      end
 
       # No type map narrows this scan. `Gcry::Layout` keyed one off the
       # payload's first Int32, and a raw buffer of a mixed union starts with
@@ -450,8 +598,8 @@ module Gcry
       # so with @type_id_gate off, the type_id heuristic still steered marking
       # from here. @allow_interior_pointers (on by default; GCRY_DISABLE_INTERIOR) now
       # switches both off together, which is what makes `root_soundness=sound`
-      # a true statement. See docs/SOUND-DEFAULTS.md.
-      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
+      # a true statement. See docs/SOUND-DEFAULTS.md. The callers take that
+      # decision and pass it in as `base_only`.
       word = sizeof(Void*).to_u64
       words = size // word
       # The planted miss of `make mark-audit` (`mark_test_short_tid`).
@@ -459,6 +607,10 @@ module Gcry
         words -= 1
       end
       cursor = user.as(UInt64*)
+      if @mark_edges_inline && skip_lo == skip_hi
+        scan_edges_inline(cursor, words, base_only, shard)
+        return
+      end
       # Most words of a scanned body are not heap addresses: nulls, small
       # integers, hashes, floats. `mark_impl_unlocked` rejects them on its
       # first range test, but only after a call it does not get inlined into,
@@ -470,8 +622,101 @@ module Gcry
       words.times do |i|
         w = cursor[i]
         next if w < lo || w >= hi
+        next if w >= skip_lo && w < skip_hi
         mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
       end
+    end
+
+    # Whether `scan_payload` may resolve heap edges itself, for the length of
+    # one `mark_loop` (set and cleared there).
+    @mark_edges_inline : Bool = false
+
+    # The configurations in which `scan_edges_inline` gives exactly
+    # `mark_impl_unlocked`'s answer for a word that lands in a small bitmap
+    # chunk. Each term names a branch of that method the inline path leaves
+    # out: the radix hit taken without `@index_lock` (only under the stop, and
+    # not while the index audit counts lock skips); `occ` as the allocation
+    # answer and the bitmap as the only mark (`bitmap_alloc`, which also
+    # retires the header-mark union); the minor's nursery filter; first-mark
+    # attribution; the misaligned-candidate filter; the thread-list tripwire;
+    # and the double-push catcher.
+    private def mark_edges_inline_allowed? : Bool
+      {% if flag?(:gcry_hl_assert) %}
+        return false
+      {% end %}
+      @world_stopped && !@index_audit && !@radix_l1.null? && @bitmap_alloc && @bitmap_marks &&
+        !@minor_only && !@live_attr_roots && @scan_unaligned_candidates && !ThreadListWatch.armed?
+    end
+
+    # `scan_payload`'s loop with the candidate resolved in place rather than
+    # through a `mark_impl_unlocked` call per word that passes the heap span.
+    #
+    # That call was most of the mark's instructions. Its frame carries a
+    # 500-byte buffer (`report_thread_list_offer` inlines into it), so every
+    # candidate saved and restored six registers; the radix shift went out of
+    # line; and every `self` field was reloaded after each store, so the block
+    # ordinal — a load of the size class and data offset, a checked multiply,
+    # a bounds-checked table read — was derived three times, once each for
+    # `block_allocated?`, `block_marked_in?` and `set_block_mark_in`. Here it
+    # is derived once, with the table, the span and the radix fields in
+    # registers. Serial Σ mark over 7 interleaved runs: Primes 774 → 592 ms,
+    # JsonParsePure 744 → 498, JsonGenerate 812 → 540, JsonParseSerializable
+    # 214 → 141, Binarytrees 104 → 70 (`bench/log/linux/2026-10-06-mark-cost/`).
+    #
+    # The mark bit is read before `occ`: a candidate that is already marked is
+    # rejected either way, and on JsonParsePure 36% of them are, so their
+    # `occ` line is never touched. Every candidate this does not handle in
+    # full — not in the table, outside the chunk's blocks, a large or nursery
+    # chunk — goes to `mark_impl`, which stays the authority.
+    private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
+      lo = @heap_min
+      hi = @heap_max
+      l1 = @radix_l1
+      shift = @radix_granule_shift
+      l2_mask = @radix_l2_mask
+      hits = 0_u64
+      p = cursor
+      finish = cursor + words
+      while p < finish
+        w = p.value
+        p += 1
+        next if w < lo || w >= hi
+        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+        if chunk.null?
+          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+          next
+        end
+        cls = chunk.value.size_class
+        bitmap_words = chunk.value.bitmap_words.to_u64
+        data_start = chunk.address &+ chunk.value.data_offset
+        chunk_end = chunk.address &+ chunk.value.mapped_bytes
+        # `size_class` past the table covers large chunks (`UInt32::MAX`).
+        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
+           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
+          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+          next
+        end
+        hits &+= 1
+        index = cls.to_i32
+        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
+        block_bytes = @block_bytes.unsafe_fetch(index)
+        header_addr = data_start &+ ordinal &* block_bytes
+        # The chunk's tail past its last whole block.
+        next if header_addr &+ block_bytes > chunk_end
+        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+        bit = 1_u64 << (ordinal & 63)
+        mark = occ + bitmap_words
+        next if (mark.value & bit) != 0
+        next if (occ.value & bit) == 0
+        header = Pointer(BlockHeader).new(header_addr)
+        next if base_only && w != BlockHeader.user_from(header).address
+        # `chunk_set_mark` with its relaxed pre-check already done above.
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+        mark_stack_push(mark_entry(chunk, header), shard)
+      end
+      # `radix_note_fast_hit`, once per payload.
+      @radix_fast_hits &+= hits unless @mark_parallel
     end
 
     # Scan length for one object, derived from its **chunk** (Phase 7.6).
@@ -520,14 +765,7 @@ module Gcry
     # Confirm the kernel sets soft-dirty after a store (broken on some WSL builds).
     # Uses a dedicated anonymous page — never touch the managed heap.
     protected def soft_dirty_tracks_writes? : Bool
-      page = Gcry::OS.mmap(
-        Pointer(Void).null,
-        LibC::SizeT.new(Platform::PAGE_SIZE),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
-        -1,
-        0,
-      )
+      page = Gcry.os_map(Platform::PAGE_SIZE.to_u64)
       return false if Gcry.mmap_failed?(page)
 
       begin
@@ -539,7 +777,7 @@ module Gcry
         end
         ok && dirty
       ensure
-        Gcry::OS.munmap(page, LibC::SizeT.new(Platform::PAGE_SIZE))
+        Gcry.os_unmap(page, Platform::PAGE_SIZE.to_u64)
       end
     end
 
@@ -548,7 +786,7 @@ module Gcry
       chunk = chunk_containing(header.address)
       return unless chunk
       user = user_of(chunk, header).as(UInt8*)
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return if size == 0
 
       # Old Hash objects store keys/values in a separate @entries blob. When the
@@ -583,7 +821,7 @@ module Gcry
       chunk = chunk_containing(header.address)
       return unless chunk
       user = user_of(chunk, header).as(UInt8*)
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return if size == 0
 
       word = sizeof(Void*).to_u64
@@ -767,16 +1005,51 @@ module Gcry
       end
     end
 
+    # Finalizable objects found on a cycle by `enqueue_unreachable_finalizers`,
+    # cumulative: each one is reachable from its own fields, so it is never
+    # finalized and never reclaimed. Boehm warns per object per collection;
+    # this counts every sighting and prints at 1, 2, 4, 8, ...
+    getter finalization_cycles : UInt64 = 0_u64
+
     # After mark, before sweep. Allocation-free (no Crystal Proc/closure).
     # World stopped; registry quiesced at stop_world (no concurrent mutate).
+    # The mark stack is empty on entry: both callers have just drained it.
     #
-    # Boehm rule: enqueue finalizers for unmarked objects, then *resurrect*
-    # them (mark + rematerialize) so sweep does not reclaim before
-    # run_pending. Otherwise Socket/Digest#finalize runs on freed memory
-    # (acik wrk SEGV). Weak links clear while still unmarked. Next collect
-    # reclaims if nothing else holds the object.
+    # Boehm's `GC_finalize`, for both orderings it is asked for
+    # (`Finalizers::Order`): `GC_register_finalizer_ignore_self`, which is how
+    # Crystal's stdlib registers every finalizer (`gc/boehm.cr`), and plain
+    # `GC_register_finalizer` through the C ABI:
+    #
+    # 1. Disappearing links whose target is unmarked are cleared first, while
+    #    the targets still look dead: a `WeakRef` to an object that only a
+    #    dying finalizable reaches reads nil from here on, though the object
+    #    is kept for that finalizer (Boehm's short links do the same).
+    # 2. Ordering. For every unreachable finalizable, mark from its fields —
+    #    not from the object itself, and under `IgnoreSelf` not through a
+    #    pointer into its own block. A finalizable reached that way is not
+    #    ready: one that will be
+    #    finalized now still holds it, so it waits for a later collection and
+    #    the holder's finalizer can still use it. A chain of n finalizes over n
+    #    collections, holder first. One that its own fields reach is on a
+    #    cycle and is never ready, as in Boehm — under `Normal`, a pointer to
+    #    itself is such a way back.
+    # 3. What is still unmarked is queued and *resurrected* (marked) so the
+    #    sweep does not reclaim it before `run_pending`; otherwise
+    #    Socket/Digest#finalize runs on freed memory (acik wrk SEGV). Its
+    #    fields were marked in 2. Until its finalizer has run, every later
+    #    collection marks it as a root (`mark_pending_finalizers`); the first
+    #    one after that reclaims it if nothing else holds it.
+    # 4. A link whose *location* is in a block that is still unmarked — a
+    #    `WeakRef` that died itself — is dropped, without a write: its block
+    #    is about to be reclaimed. Only now, so a `WeakRef` that a dying
+    #    finalizable holds stays registered (Boehm's
+    #    `GC_remove_dangling_disappearing_links`, also after the marking).
+    #
+    # Until 2026-10-05 step 2 was missing: every unreachable finalizable was
+    # queued in one pass and they ran in table order, so a holder's finalizer
+    # could find what it holds already finalized
+    # (`process_spec/regression/17_ordered_finalization_spec.cr`).
     private def enqueue_unreachable_finalizers : Nil
-      # Disappearing links first — targets still look dead for WeakRef.
       i = 0
       while i < @finalizers.link_count
         if unmarked_live_object?(@finalizers.link_object_at(i))
@@ -786,48 +1059,163 @@ module Gcry
         end
       end
 
+      # Drained per object, serially, as Boehm's `GC_mark_fo` does: the cycle
+      # check needs the closure of this object alone, and `mark_loop` would
+      # start and stop the parallel pool once per finalizable. Marks only grow
+      # across the loop, so which objects end up ready does not depend on the
+      # table's order.
+      n = @finalizers.entry_count
+      i = 0
+      while i < n
+        obj = @finalizers.entry_object_at(i)
+        if found = unmarked_live_block(obj)
+          header, chunk = found
+          mark_from_children(chunk, header, @finalizers.entry_order_at(i))
+          serial_mark_drain
+          note_finalization_cycle(obj) if block_marked_in?(chunk, header)
+        end
+        i += 1
+      end
+
       i = 0
       while i < @finalizers.entry_count
         obj = @finalizers.entry_object_at(i)
-        if unmarked_live_object?(obj)
+        if found = unmarked_live_block(obj)
+          header, chunk = found
+          count_type_id_false_negative(obj, chunk, header)
           @finalizers.queue_and_remove_entry_at(i)
+          # Its fields were marked above; only its own mark is missing, so
+          # set it rather than push the object to be scanned a second time.
+          #
           # Research only (`finalizer_resurrect = false`,
-          # `GCRY_FINALIZER_NO_RESURRECT=1`): skip the resurrection, so the
-          # sweep reclaims the block and the callback runs on freed memory —
-          # the pre-Boehm-rule behaviour. `make finalizer-complex --broken`
-          # requires the callback to find its object gone.
-          mark_candidate(obj) if @finalizer_resurrect && !obj.null?
+          # `GCRY_FINALIZER_NO_RESURRECT=1`): skip the object's own
+          # resurrection, so the sweep reclaims its block and the callback
+          # runs on freed memory — the pre-Boehm-rule behaviour.
+          # `make finalizer-complex --broken` requires the callback to find
+          # its object gone.
+          if @finalizer_resurrect
+            set_block_mark_in(chunk, header)
+            note_first_mark(chunk, header, RootSource::Heap) if @live_attr_roots
+          end
         else
           i += 1
         end
       end
 
-      mark_loop unless @mark_stack.empty?
+      # Until 2026-10-05 this step was missing: the row outlived its
+      # `WeakRef`, and when the target died later the null of step 1 went
+      # into whatever had reused the `WeakRef`'s block — all 2000 dead
+      # `WeakRef`s of `process_spec/regression/20_dangling_weak_link_spec.cr`
+      # zeroed a word of a reused block.
+      i = 0
+      while i < @finalizers.link_count
+        if dead_link_location?(@finalizers.link_location_at(i))
+          @finalizers.remove_link_at(i)
+        else
+          i += 1
+        end
+      end
+    end
+
+    # The block holding a link location is dead: unmarked now, or already
+    # freed (`GC.free` on the holder, which `notice_reclaim` does not catch —
+    # it matches link *targets*). A location outside the heap (a C slot, a
+    # static) resolves to no block and stays registered.
+    private def dead_link_location?(location : Void*) : Bool
+      found = find_block_with_chunk(location)
+      return false unless found
+      header, chunk = found
+      return true unless block_allocated?(chunk, header)
+      # During a minor an old holder is unmarked and alive.
+      return false if @minor_only && !BlockHeader.nursery?(header)
+      !block_marked_in?(chunk, header)
+    end
+
+    # Push what *header*'s object points at, leaving the object itself
+    # unmarked. Under `IgnoreSelf` (Boehm's `GC_ignore_self_finalize_mark_proc`)
+    # a word that resolves into the object's own block is skipped —
+    # `XML::Document` holds `@document = self`, and following that would make
+    # every document a cycle. A longer way back (A -> X -> A) is still
+    # followed, and is a cycle. The range is the one `find_block_with_chunk`
+    # resolves to this block. Under `Normal` (`GC_normal_finalize_mark_proc`)
+    # every word is followed, and a pointer to itself marks the object.
+    private def mark_from_children(chunk : ChunkHeader*, header : BlockHeader*, order : Finalizers::Order) : Nil
+      if order.normal?
+        scan_block(chunk, header, 0_u64, 0_u64)
+        return
+      end
+      lo = header.address
+      hi = if ChunkHeader.large?(chunk)
+             user_of(chunk, header).address &+ ChunkHeader.large_payload(chunk)
+           else
+             lo &+ @block_bytes[chunk.value.size_class.to_i32]
+           end
+      scan_block(chunk, header, lo, hi)
+    end
+
+    # Root phase: every object queued for finalization and its callback's
+    # closure data, until its finalizer has run (`Registry#each_pending`).
+    # Until 2026-10-06 a queued object was kept only by the collection that
+    # queued it; a second one before `run_pending` — an idle collection, or
+    # another thread's — swept it and queued what it held ahead of it
+    # (`process_spec/regression/26_pending_finalizer_root_spec.cr`).
+    private def mark_pending_finalizers : Nil
+      @finalizers.each_pending do |object, data|
+        mark_candidate(object)
+        mark_candidate(data) unless data.null?
+      end
+    end
+
+    private def note_finalization_cycle(obj : Void*) : Nil
+      @finalization_cycles &+= 1
+      count = @finalization_cycles
+      return unless count & (count &- 1) == 0
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: finalization cycle involving 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, obj.address)
+      len = RawOut.append(buf.to_unsafe, len,
+        " — an object with a finalizer reaches itself through its own fields, so neither its " \
+        "finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as " \
+        "Boehm's). Sightings so far: ")
+      len = RawOut.append_u64(buf.to_unsafe, len, count)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # *obj*'s block and chunk when it is allocated, eligible this collection,
+    # and unmarked; nil otherwise.
+    private def unmarked_live_block(obj : Void*) : {BlockHeader*, ChunkHeader*}?
+      return nil if obj.null?
+      found = find_object_with_chunk(obj)
+      return nil unless found
+      header, chunk = found
+      return nil if BlockHeader.free?(header)
+      # During generational minor, old objects are intentionally unmarked.
+      # Only nursery deaths may enqueue finalizers / clear WeakRef links.
+      return nil if @minor_only && !BlockHeader.nursery?(header)
+      # The heap-local mark check, not the static `BlockHeader.marked?`: under
+      # `GCRY_BITMAP=1` the header generation is not where the marks are, and
+      # the static reader would answer for the wrong representation.
+      return nil if block_marked_in?(chunk, header)
+      found
     end
 
     private def unmarked_live_object?(obj : Void*) : Bool
-      return false if obj.null?
-      header = find_object(obj)
-      return false unless header
-      return false if BlockHeader.free?(header)
-      # During generational minor, old objects are intentionally unmarked.
-      # Only nursery deaths may enqueue finalizers / clear WeakRef links.
-      return false if @minor_only && !BlockHeader.nursery?(header)
-      # Use the heap-local mark check, not the static `BlockHeader.marked?`:
-      # under `GCRY_BITMAP=1` the header generation is not where the marks are,
-      # and the static reader would answer for the wrong representation.
-      if heap_marked?(header)
-        return false
-      end
-      # False-negative counter: gate rejected the ambient pointer that pointed
-      # here, but a different root still walked this object. If the page is
-      # also blacklisted (we previously declared similar addresses false), this
-      # is exactly the UAF vector the gate is supposed to prevent — record it
-      # so a production heap can alert on a non-zero rate.
-      if @blacklist_enabled && blacklisted_page?(obj.address) && type_id_plausible?(header)
+      found = unmarked_live_block(obj)
+      return false unless found
+      count_type_id_false_negative(obj, found[1], found[0])
+      true
+    end
+
+    # False-negative counter: gate rejected the ambient pointer that pointed
+    # here, but a different root still walked this object. If the page is
+    # also blacklisted (we previously declared similar addresses false), this
+    # is exactly the UAF vector the gate is supposed to prevent — record it
+    # so a production heap can alert on a non-zero rate.
+    private def count_type_id_false_negative(obj : Void*, chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      if @blacklist_enabled && blacklisted_page?(obj.address) && type_id_plausible?(chunk, header)
         @type_id_root_false_negatives += 1
       end
-      true
     end
   end
 end

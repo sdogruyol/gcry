@@ -1,0 +1,6 @@
+bench                    arm           wall med     min     max  Δ vs base  cpu med  rss MiB
+JsonGenerate             base            0.6170   0.600   0.709      +0.0%     2.64      859
+JsonGenerate             fx              0.6410   0.626   0.770      +3.9%     2.71      855
+JsonGenerate             p1              0.6340   0.619   0.753      +2.8%     2.64      856
+JsonGenerate             p2              0.6200   0.605   0.723      +0.5%     2.62      856
+JsonGenerate             tag             0.6320   0.605   0.690      +2.4%     2.56      858

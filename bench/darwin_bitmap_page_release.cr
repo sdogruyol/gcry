@@ -66,8 +66,12 @@ require "../src/gcry"
 {% end %}
 
 # Payload that spans several pages worth of blocks per chunk, so a chunk has
-# both live and dead blocks and the free-page mask has something to say.
-PAYLOAD  =                       192
+# both live and dead blocks and the free-page mask has something to say. 184
+# bytes, not 192: the process GC adds a byte of slack to atomic requests
+# (`Heap#atomic_slack`), and 193 would move the buffer to the 224-byte class,
+# whose chunk has no page-sized tail for the walk arm to release. 184 + 1
+# stays in the 192-byte class the arm was measured on.
+PAYLOAD  =                       184
 KEEP     =                     6_000
 CHURN    =                    60_000
 ROUNDS   =                        12
@@ -320,11 +324,17 @@ when "headers"
   end
 when "walk"
   # What the stand-down is standing down from. The walk must actually engage
-  # here, or the arm is measuring the stand-down twice.
-  if d_bytes == 0
-    failures << "walk: GCRY_PAGE_RELEASE_BITMAP_WALK=1 released no bytes from a " \
-                "bitmap chunk, so it is not reaching the walk and the default arm " \
-                "is being compared against itself"
+  # here, or the arm is measuring the stand-down twice. Either counter proves
+  # it did: both are written only inside `release_free_pages_in_chunk` (see
+  # the default arm). Bytes alone are not required — the only pages the walk
+  # can free on a bitmap chunk are a chunk's tail below its last whole block,
+  # and whether a whole page is left there depends on the size class and the
+  # chunk's bitmap header, which moved when atomic blocks gained a byte of
+  # slack (2026-10-05).
+  if d_bytes == 0 && d_skip == 0
+    failures << "walk: GCRY_PAGE_RELEASE_BITMAP_WALK=1 neither released nor examined " \
+                "a run in a bitmap chunk, so it is not reaching the walk and the " \
+                "default arm is being compared against itself"
   end
   # The measured shape of the staleness, and the reason the stand-down is a
   # cost decision rather than a soundness one: on a bitmap chunk

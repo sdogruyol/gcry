@@ -1,10 +1,11 @@
 # Non-allocating static root discovery for Darwin (dyld image walk).
 #
-# The static roots are the executable's writable data: every section of a
-# `__DATA*` segment whose `initprot` carries `VM_PROT_WRITE`, minus the
+# The static roots are every loaded image's writable data: every section of
+# a `__DATA*` segment whose `initprot` carries `VM_PROT_WRITE`, minus the
 # segments dyld makes read-only once it has applied the fixups (`SG_READ_ONLY`),
-# minus thread-local storage. System dylibs are skipped, the same policy as
-# Linux skipping `.so`.
+# minus thread-local storage. The executable is resolved here, with its TLS
+# block; every other image — system dylibs included, as Boehm scans them — is
+# reported by dyld's add/remove-image callbacks (see `dyld_image_added`).
 #
 # That set is **derived**, not named, and the difference is the record of what
 # the previous version got wrong. It was a name allow-list — `__data`, `__bss`,
@@ -82,6 +83,8 @@ module Gcry
         fun _dyld_image_count : UInt32
         fun _dyld_get_image_header(image_index : UInt32) : MachHeader64*
         fun _dyld_get_image_vmaddr_slide(image_index : UInt32) : Int64
+        fun _dyld_register_func_for_add_image(func : MachHeader64*, Int64 -> Void)
+        fun _dyld_register_func_for_remove_image(func : MachHeader64*, Int64 -> Void)
       end
 
       # One-region query for the mapping that contains a thread-local. The full
@@ -238,6 +241,7 @@ module Gcry
           yield Pointer(Void).new(r.low), Pointer(Void).new(r.high)
           i += 1
         end
+        scan_image_roots { |low, high| yield low, high }
       end
 
       # Counters `/gc-stats` reports on both platforms; the Linux side reads
@@ -292,6 +296,7 @@ module Gcry
           push_range(low.address, high.address)
         end
         take_main_thread_tls
+        register_image_callbacks
 
         # Latch only on success, the same way Linux does: a resolution that
         # came back with nothing must be retried rather than remembered, or
@@ -331,6 +336,7 @@ module Gcry
         mh = LibDyld._dyld_get_image_header(0_u32)
         return if mh.null?
         return unless mh.value.magic == MH_MAGIC_64
+        @@exe_mh = mh.address
 
         slide = LibDyld._dyld_get_image_vmaddr_slide(0_u32).to_u64!
         @@exe_bias = slide
@@ -550,6 +556,233 @@ module Gcry
         return nil unless address <= addr && addr < address &+ size
         return nil unless (info[0] & VM_PROT_WRITE) != 0
         {address, address &+ size}
+      end
+
+      # ----------------------------------------------------------------------
+      # Every other image.
+      #
+      # A dylib's writable data is a root, as it is under Boehm
+      # (`GC_dyld_image_add`): a C library or Crystal code in a dylib that
+      # keeps a GC pointer in a global must keep the object alive. Found the
+      # way Boehm finds it — dyld's add/remove-image callbacks — and not by
+      # walking `_dyld_get_image_header` per collection: in dyld4 that call
+      # takes the loaders lock, which a thread stopped mid-`dlopen` holds.
+      # The callbacks run with that lock held, on whichever thread loads, so
+      # they never run concurrently with each other; the collector reads their
+      # table only in a stopped world, without a lock, so every record is
+      # published by a single store after it is complete:
+      #
+      # * add: the record is filled while its `live` word is 0 (a reused slot)
+      #   or while it is past `@@image_count` (a new one), then `live` is set,
+      #   then the count. dyld notifies before it runs the image's
+      #   initialisers, so a thread stopped before the publish has run no code
+      #   of that image and nothing in it can be lost.
+      # * remove: `live` is cleared. dyld notifies before it unmaps, so an
+      #   image whose remover is stopped before the store is still mapped.
+      #
+      # Same section rule as the executable (`segment_holds_roots?`, minus
+      # TLS), with the sections of one segment merged into a run — what lies
+      # between two sections of a mapped segment is mapped padding.
+      IMAGE_RANGES = 8
+      MAX_IMAGES   = 4096
+
+      struct DyldImage
+        property mh : UInt64
+        property live : UInt32
+        getter count : Int32
+
+        def initialize(@mh : UInt64)
+          @live = 0_u32
+          @count = 0
+          @ranges = uninitialized StaticArray(RootRange, IMAGE_RANGES)
+        end
+
+        def range(j : Int32) : RootRange
+          @ranges[j]
+        end
+
+        def add(lo : UInt64, hi : UInt64) : Bool
+          return true if hi <= lo
+          return false if @count >= IMAGE_RANGES
+          @ranges[@count] = RootRange.new(lo, hi)
+          @count += 1
+          true
+        end
+      end
+
+      # Literal initialisers only — see the once-guard note at the top. The
+      # callbacks can also run on a thread Crystal does not know.
+      @@exe_mh = 0_u64
+      @@images_addr = 0_u64
+      @@image_count = 0
+      @@images_registered = false
+      @@shared_lib_roots = true
+
+      # Library ranges on (the default). `false` scans the executable alone,
+      # which is what every build did until 2026-10-05.
+      def self.shared_lib_roots=(value : Bool) : Bool
+        @@shared_lib_roots = value
+      end
+
+      def self.shared_lib_roots? : Bool
+        @@shared_lib_roots
+      end
+
+      def self.static_root_libraries : Int32
+        n = 0
+        each_live_image { |img| n += 1 if img.count > 0 }
+        n
+      end
+
+      def self.static_root_library_bytes : UInt64
+        total = 0_u64
+        each_live_image do |img|
+          j = 0
+          while j < img.count
+            total += img.range(j).high - img.range(j).low
+            j += 1
+          end
+        end
+        total
+      end
+
+      # dyld hands over a mapped header, so nothing is ever unresolved here.
+      def self.static_root_unresolved : UInt64
+        0_u64
+      end
+
+      private def self.image_at(i : Int32) : DyldImage*
+        Pointer(DyldImage).new(@@images_addr) + i
+      end
+
+      private def self.each_live_image(& : DyldImage ->) : Nil
+        return if @@images_addr == 0
+        n = @@image_count
+        Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+        i = 0
+        while i < n
+          img = image_at(i).value
+          yield img if img.live == 1
+          i += 1
+        end
+      end
+
+      private def self.scan_image_roots(& : Void*, Void* ->) : Nil
+        return unless @@shared_lib_roots
+        each_live_image do |img|
+          j = 0
+          while j < img.count
+            r = img.range(j)
+            yield Pointer(Void).new(r.low), Pointer(Void).new(r.high)
+            j += 1
+          end
+        end
+      end
+
+      # Once, from the init-time resolve, after the executable's header is
+      # known so the add callback can tell it apart. dyld calls the add
+      # callback for every image already loaded before this returns.
+      private def self.register_image_callbacks : Nil
+        return if @@images_registered
+        return if @@exe_mh == 0
+        bytes = MAX_IMAGES.to_u64 * sizeof(DyldImage)
+        ptr = Gcry.os_map(bytes)
+        if Gcry.mmap_failed?(ptr)
+          @@overflow &+= 1
+          return
+        end
+        @@images_addr = ptr.address
+        @@images_registered = true
+        LibDyld._dyld_register_func_for_add_image(->(mh : LibDyld::MachHeader64*, slide : Int64) {
+          Platform.dyld_image_added(mh, slide)
+        })
+        LibDyld._dyld_register_func_for_remove_image(->(mh : LibDyld::MachHeader64*, slide : Int64) {
+          Platform.dyld_image_removed(mh)
+        })
+      end
+
+      # :nodoc:
+      def self.dyld_image_added(mh : LibDyld::MachHeader64*, slide : Int64) : Nil
+        return if mh.null? || mh.address == @@exe_mh
+        return unless mh.value.magic == MH_MAGIC_64
+        img = image_ranges(mh, slide.to_u64!)
+
+        n = @@image_count
+        i = 0
+        while i < n
+          break if image_at(i).value.live == 0
+          i += 1
+        end
+        if i == n && n >= MAX_IMAGES
+          @@overflow &+= 1
+          return
+        end
+        slot = image_at(i)
+        slot.value = img
+        Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
+        (slot.as(UInt8*) + offsetof(DyldImage, @live)).as(UInt32*).value = 1_u32
+        if i == n
+          Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
+          @@image_count = n + 1
+        end
+      end
+
+      # :nodoc:
+      def self.dyld_image_removed(mh : LibDyld::MachHeader64*) : Nil
+        n = @@image_count
+        i = 0
+        while i < n
+          slot = image_at(i)
+          img = slot.value
+          if img.live == 1 && img.mh == mh.address
+            (slot.as(UInt8*) + offsetof(DyldImage, @live)).as(UInt32*).value = 0_u32
+            return
+          end
+          i += 1
+        end
+      end
+
+      private def self.image_ranges(mh : LibDyld::MachHeader64*, slide : UInt64) : DyldImage
+        img = DyldImage.new(mh.address)
+        p = Pointer(UInt8).new(mh.address + sizeof(LibDyld::MachHeader64))
+        cmd_i = 0_u32
+        while cmd_i < mh.value.ncmds
+          lc = p.as(LibDyld::LoadCommand*)
+          if lc.value.cmd == LC_SEGMENT_64
+            seg = p.as(LibDyld::SegmentCommand64*)
+            if segment_holds_roots?(seg)
+              sect = Pointer(LibDyld::Section64).new(p.address + sizeof(LibDyld::SegmentCommand64))
+              run_lo = 0_u64
+              run_hi = 0_u64
+              j = 0_u32
+              while j < seg.value.nsects
+                s = (sect + j).value
+                typ = s.flags & SECTION_TYPE_MASK
+                lo = s.addr &+ slide
+                hi = lo &+ s.size
+                tls = typ == S_THREAD_LOCAL_REGULAR || typ == S_THREAD_LOCAL_ZEROFILL ||
+                      typ == S_THREAD_LOCAL_VARIABLES || typ == S_THREAD_LOCAL_VARIABLE_POINTERS ||
+                      typ == S_THREAD_LOCAL_INIT_FUNCTION_POINTERS
+                if tls || lo < run_hi
+                  # A TLS template breaks the run; so does a section out of
+                  # address order, which no linker emits but costs nothing.
+                  @@overflow &+= 1 unless img.add(run_lo, run_hi)
+                  run_lo = 0_u64
+                  run_hi = 0_u64
+                end
+                if !tls && s.size > 0
+                  run_lo = lo if run_hi == 0
+                  run_hi = hi
+                end
+                j += 1
+              end
+              @@overflow &+= 1 unless img.add(run_lo, run_hi)
+            end
+          end
+          p += lc.value.cmdsize
+          cmd_i += 1
+        end
+        img
       end
     {% end %}
   end

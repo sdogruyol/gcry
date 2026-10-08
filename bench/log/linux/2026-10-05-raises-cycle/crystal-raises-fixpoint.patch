@@ -1,0 +1,102 @@
+diff --git a/spec/compiler/codegen/exception_spec.cr b/spec/compiler/codegen/exception_spec.cr
+index 9e72571..089c414 100644
+--- a/spec/compiler/codegen/exception_spec.cr
++++ b/spec/compiler/codegen/exception_spec.cr
+@@ -1479,4 +1479,37 @@ describe "Code gen: exception" do
+       x
+       CRYSTAL
+   end
++
++  it "rescues from a method that only raises through a call cycle (#raises? fixpoint)" do
++    run(<<-CRYSTAL).to_i.should eq(2)
++      require "prelude"
++
++      def s3(n)
++        helper(n)
++        raise "boom" if n == 0
++        n
++      end
++
++      def helper(n)
++        s2(n + 1) if n > 100
++      end
++
++      def s2(n)
++        s3(n)
++      end
++
++      # Transforms s3 first: helper and s2 are reached while s3 is still
++      # being transformed and does not yet raise.
++      s3(1)
++
++      x = 0
++      begin
++        s2(0)
++        x = 1
++      rescue
++        x = 2
++      end
++      x
++      CRYSTAL
++  end
+ end
+diff --git a/src/compiler/crystal/semantic/cleanup_transformer.cr b/src/compiler/crystal/semantic/cleanup_transformer.cr
+index fcf2b65..c8b68cd 100644
+--- a/src/compiler/crystal/semantic/cleanup_transformer.cr
++++ b/src/compiler/crystal/semantic/cleanup_transformer.cr
+@@ -26,6 +26,8 @@ module Crystal
+       self.class_var_initializers.each do |initializer|
+         initializer.node = initializer.node.transform(transformer)
+       end
++
++      transformer.propagate_raises
+     end
+ 
+     def cleanup_type(type, transformer)
+@@ -77,6 +79,27 @@ module Crystal
+       @last_is_falsey = false
+     end
+ 
++    # Callee → callers whose `raises?` was decided while the callee's was
++    # still false. See `propagate_raises`.
++    @raises_callers = Hash(Def, Array(Def)).new.compare_by_identity
++
++    # Propagates `raises?` along every call edge recorded by `transform(Call)`
++    # until nothing changes. `transform(Call)` copies the flag from callee to
++    # caller once, when it reaches the call; a callee whose body is still being
++    # transformed (a call cycle) can only learn later that it raises, and its
++    # callers would otherwise stay marked as not raising, so calls to them get
++    # no landing pad and a surrounding `rescue` never runs.
++    def propagate_raises : Nil
++      pending = @raises_callers.keys.select(&.raises?)
++      while callee = pending.pop?
++        @raises_callers.delete(callee).try &.each do |caller|
++          next if caller.raises?
++          caller.raises = true
++          pending << caller
++        end
++      end
++    end
++
+     def inside_def!
+       @def_nest_count += 1
+     end
+@@ -605,8 +628,16 @@ module Crystal
+           end
+ 
+           # If the current call targets a method that raises, the method
+-          # where the call happens also raises.
+-          current_def.raises = true if current_def && target_def.raises?
++          # where the call happens also raises. The target may still learn
++          # that it raises (it can be in the middle of being transformed,
++          # reached again through a call cycle), so remember the edge.
++          if current_def
++            if target_def.raises?
++              current_def.raises = true
++            else
++              (@raises_callers[target_def] ||= [] of Def) << current_def
++            end
++          end
+         end
+ 
+         if node.target_defs.not_nil!.empty?

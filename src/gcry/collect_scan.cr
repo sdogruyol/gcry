@@ -172,7 +172,7 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, @ec_sched_obj_size.to_u64)
       len = RawOut.append(buf.to_unsafe, len, "-byte object")
       if hdr = find_block(Pointer(Void).new(arr))
-        pay = block_payload(hdr).to_u64
+        pay = block_payload(hdr)
         len = RawOut.append(buf.to_unsafe, len, ", in a block of payload ")
         len = RawOut.append_u64(buf.to_unsafe, len, pay)
         len = RawOut.append(buf.to_unsafe, len,
@@ -1045,37 +1045,32 @@ module Gcry
       !sweep_multi_mutator? || @parallel_empty_chunk_munmap
     end
 
-    # How far below parked stack_top to scan under multi-mutator STW.
-    # Full guard→bottom × N fibers faults/scans historical high-water and
-    # dominated EC4 phase_roots (~100ms+/collect). Mid-swap frames with SP on
-    # the stack are covered by fiber_stack_sp_scan_low / scan_other_thread_stacks;
-    # this lag catches stack_top that lags without a visible SP. Override via
-    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 256 KiB
-    # (2026-08-01 A/B: soft 0/40; quiet thr ≥ 512 KiB default).
-    property stw_multi_stack_lag : UInt64 = 256_u64 * 1024
+    # How far below a parked fiber's `stack_top` to scan under multi-mutator
+    # STW when no recorded thread SP proves where its frames end. 0 — the
+    # default since 2026-10-05 — scans the whole touched stack (from the
+    # low-water mark), so no live pointer is ever declined. A non-zero lag
+    # (`GCRY_STW_STACK_LAG`, bytes) bounds the scan and with it the pause, at
+    # the price of never seeing a pointer deeper than the lag
+    # (docs/SOUND-DEFAULTS.md). Measured cost of 0 on CI runners, 2026-09-26:
+    # Linux EC4 pause 3.07 → 4.55 ms, req/s unchanged; EC1 unchanged.
+    property stw_multi_stack_lag : UInt64 = 0_u64
 
     # Skip the never-written head of a parked fiber stack — on *both* the lag-0
     # and the lag>0 default path (GCRY_STACK_LOW_WATER=0 to disable).
     # Semantics-preserving: pages with neither the present nor the swapped bit
     # set have never been faulted, so they are zero and cannot hold a pointer.
-    # Linux (`/proc/self/pagemap`) and Darwin (`mach_vm_page_range_query`,
-    # `darwin_low_water.cr`); both fall back to the unskipped range whenever the
-    # kernel cannot answer, so a failure only ever widens the scan.
+    # Linux (`/proc/self/pagemap`), Darwin (`mach_vm_page_range_query`,
+    # `darwin_low_water.cr`) and Windows (`VirtualQuery`,
+    # `windows_low_water.cr`); all fall back to the unskipped range whenever
+    # the kernel cannot answer, so a failure only ever widens the scan.
     property stack_low_water_scan : Bool = true
 
-    # When suspend SP sits on a pool fiber, Parallel still scans the OS pthread
-    # mapping for leftover scheduler frames. Full map (often ~8 MiB × N) dominates
-    # phase_stacks after fiber-scan dedupe. Scan only the top *lag* bytes from
-    # stack high (grows down). Override via GCRY_STW_PTHREAD_LAG; 0 = full map.
-    # Default 256 KiB (2026-08-01: soft 0/40; stacks ~7→~0.4 ms; thr ≥ 71.5% cut).
-    property stw_multi_pthread_lag : UInt64 = 256_u64 * 1024
-
-    # One-shot stderr warning the first time a collect actually lands in the
-    # shape where lag 0 is expensive. Boot is the wrong place to warn: `GCRY_SOUND=1`
-    # sets lag 0 unconditionally, but the knob is *inert* until STW runs with more
-    # than two mutator threads, and at EC1 the whole profile is throughput-neutral.
-    # Warning at boot would cry wolf on the configuration that is fine.
-    @warned_stw_lag_zero = false
+    # When a suspended thread's SP sits on a pool fiber, its OS pthread mapping
+    # can still hold scheduler frames. 0 — the default since 2026-10-05 —
+    # scans the whole mapping (from the low-water mark); a non-zero
+    # `GCRY_STW_PTHREAD_LAG` scans only the top *lag* bytes from stack high
+    # and can miss a deeper pointer.
+    property stw_multi_pthread_lag : UInt64 = 0_u64
 
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     # `GCRY_FULL_SUSPENDED_STACK=1`: decline the SP clamp so a running fiber's
@@ -1167,24 +1162,23 @@ module Gcry
     end
 
     # Where a whole-stack scan of *fiber* has to start: its low-water mark when
-    # pagemap can say, else `guard`. Everything below the mark is a page that
-    # was never faulted, i.e. zero, so starting there sees every word a scan
-    # from `guard` would. Falls back to `guard` whenever the probe cannot
+    # the platform probe can say, else `guard`. Everything below the mark is a
+    # page that was never faulted, i.e. zero (on Windows: a region the safe scan
+    # would not read either), so starting there sees every word a scan from
+    # `guard` would. Falls back to `guard` whenever the probe cannot
     # answer, so a failure can only ever widen the scan.
     private def low_water_or_guard(fiber : Fiber, guard : UInt64) : UInt64
-      {% if flag?(:linux) || flag?(:darwin) %}
-        if @stack_low_water_scan
-          bottom = fiber.@stack.bottom.address
-          if bottom > guard
-            lw = Platform.stack_low_water(guard, bottom)
-            if lw > guard
-              @low_water_skips += 1
-              @low_water_skipped_bytes += lw - guard
-              return lw
-            end
+      if @stack_low_water_scan
+        bottom = fiber.@stack.bottom.address
+        if bottom > guard
+          lw = Platform.stack_low_water(guard, bottom)
+          if lw > guard
+            @low_water_skips += 1
+            @low_water_skipped_bytes += lw - guard
+            return lw
           end
         end
-      {% end %}
+      end
       guard
     end
 
@@ -1242,16 +1236,15 @@ module Gcry
       # window was 1.0 of a 1.95 ms pause p50 (8 of 8 rounds); at EC4, 0.97
       # of ~6.4 ms. `GCRY_PARKED_FIBER_SP=0` restores the lag here.
       #
-      # Not at lag 0: that is `GCRY_SOUND=1` or an explicit
-      # `GCRY_STW_STACK_LAG=0`, a request to scan every parked fiber whole, and
-      # it keeps meaning that.
+      # Not at lag 0, the default: every parked fiber is scanned whole, which
+      # needs no invariant of the runtime's swap order to be complete.
       lag = @stw_multi_stack_lag
       if @parked_fiber_sp && @fiber_sp_all_known && lag != 0
         @fiber_scan_parked_sp &+= 1
         return t
       end
 
-      # 0 ⇒ classic full parked-fiber scan (correctness A/B; thr regresses).
+      # 0 ⇒ full parked-fiber scan, the default.
       #
       # "Full" only has to mean every word that can hold a pointer. A fiber
       # stack is 8 MiB of reserved address space and ~0.05% of it is ever
@@ -1287,35 +1280,33 @@ module Gcry
       # here in a way it is not at lag 0 — the live frames begin within `lag`
       # bytes of `lagged`, so the walk stops after ~lag/PAGE_SIZE entries (64
       # for the 256 KiB default), one pread.
-      {% if flag?(:linux) || flag?(:darwin) %}
-        if @stack_low_water_scan
-          bottom = fiber.@stack.bottom.address
-          # The last precondition, counted because the skip firing once per
-          # fiber and never again had to be explained by one of three things and
-          # the other two are already ruled out (`low_water_misses` is 0 and the
-          # knob is on). `lagged >= bottom` means the saved `stack_top` sits at
-          # least a lag window above the stack's high end — i.e. it does not
-          # describe this stack — so the probe is skipped and the whole window
-          # is scanned.
-          @low_water_unprobed &+= 1 unless bottom > lagged
-          if bottom > lagged
-            lw = Platform.stack_low_water(lagged, bottom)
-            if lw > lagged
-              @low_water_skips += 1
-              @low_water_skipped_bytes += lw - lagged
-              lagged = lw
-            else
-              # The probe ran and found a faulted page at or below the lag
-              # floor, so there is nothing to skip. Counted separately from
-              # "the probe never ran", because the skip firing exactly once per
-              # parked fiber and never again — measured 2026-09-13, 266 skips
-              # whether the run does 1 collection or 20 — has to be one or the
-              # other, and the two have different fixes.
-              @low_water_misses += 1
-            end
+      if @stack_low_water_scan
+        bottom = fiber.@stack.bottom.address
+        # The last precondition, counted because the skip firing once per
+        # fiber and never again had to be explained by one of three things and
+        # the other two are already ruled out (`low_water_misses` is 0 and the
+        # knob is on). `lagged >= bottom` means the saved `stack_top` sits at
+        # least a lag window above the stack's high end — i.e. it does not
+        # describe this stack — so the probe is skipped and the whole window
+        # is scanned.
+        @low_water_unprobed &+= 1 unless bottom > lagged
+        if bottom > lagged
+          lw = Platform.stack_low_water(lagged, bottom)
+          if lw > lagged
+            @low_water_skips += 1
+            @low_water_skipped_bytes += lw - lagged
+            lagged = lw
+          else
+            # The probe ran and found a faulted page at or below the lag
+            # floor, so there is nothing to skip. Counted separately from
+            # "the probe never ran", because the skip firing exactly once per
+            # parked fiber and never again — measured 2026-09-13, 266 skips
+            # whether the run does 1 collection or 20 — has to be one or the
+            # other, and the two have different fixes.
+            @low_water_misses += 1
           end
         end
-      {% end %}
+      end
 
       # What is left to decide the proposal with: of the window this scan still
       # reads after the skip has taken what it can, how much belongs to a fiber
@@ -1332,26 +1323,6 @@ module Gcry
       lagged
     end
 
-    # lag=0 used to mean scanning every parked fiber guard→bottom, ~8 MiB each:
-    # 19× pause at Kemal EC4, 14.5× on a fat app past ~60 MiB (2026-08-06). The
-    # low-water skip removed that — 13.9× → 1.03× on bench/stw_lag_pause.cr —
-    # so the warning now fires only when the skip is not in play, which is the
-    # only case still carrying the old cost.
-    #
-    # Gcry::OS.write, not STDERR: this runs inside STW and must not allocate.
-    private def warn_stw_lag_zero_once : Nil
-      return if @warned_stw_lag_zero
-      {% if flag?(:linux) || flag?(:darwin) %}
-        return if @stack_low_water_scan && Platform.pagemap_available?
-      {% end %}
-      @warned_stw_lag_zero = true
-      msg = "gcry: WARNING: stw_multi_stack_lag=0 under multi-mutator STW without the " \
-            "low-water skip — every parked fiber stack is scanned in full (measured 19× " \
-            "pause at Parallel EC4, 14.5× on a large heap). Re-enable GCRY_STACK_LOW_WATER, " \
-            "or set GCRY_STW_STACK_LAG. See docs/SOUND-DEFAULTS.md\n"
-      Gcry::OS.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
-    end
-
     # Which window each running fiber's stack scan started from.
     getter fiber_scan_from_sp : UInt64 = 0_u64
     getter fiber_scan_from_guard : UInt64 = 0_u64
@@ -1362,7 +1333,6 @@ module Gcry
       # Parallel / multi-thread STW: extend parked stack_top by LAG (and SP when
       # present). Single-mutator: cheap stack_top clamp (Kemal thr path).
       stw_multi = @world_stopped && multi_mutator_threads?
-      warn_stw_lag_zero_once if stw_multi && @stw_multi_stack_lag == 0
       Fiber.unsafe_each do |fiber|
         fiber_walk_test_delay if @fiber_walk_test_delay_us > 0
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
@@ -1775,16 +1745,14 @@ module Gcry
       # ~8 MiB pthread mapping, nearly all of which was never written. Skipping
       # the untouched head sees identical words — a page with neither the
       # present nor the swapped bit has never been faulted, so it is zero.
-      {% if flag?(:linux) || flag?(:darwin) %}
-        if @stack_low_water_scan && low < high
-          lw = Platform.stack_low_water(low, high)
-          if lw > low && lw < high
-            @low_water_skips += 1
-            @low_water_skipped_bytes += lw - low
-            low = lw
-          end
+      if @stack_low_water_scan && low < high
+        lw = Platform.stack_low_water(low, high)
+        if lw > low && lw < high
+          @low_water_skips += 1
+          @low_water_skipped_bytes += lw - low
+          low = lw
         end
-      {% end %}
+      end
 
       Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)
@@ -1793,7 +1761,8 @@ module Gcry
 
     private def mark_metadata_roots : Nil
       # Finalizer/link tables are LibC storage (not GC roots for Entry.object).
-      # Only mark callback closure_data so Proc captures stay alive. Marking the
+      # Only mark callback closure_data so Proc captures stay alive, and the
+      # objects queued for finalization (`mark_pending_finalizers`). Marking the
       # old Crystal Array buffer kept every finalizable object forever (acik
       # TCPSocket/Digest + 32 KiB IO buffers; finalizers never ran).
       # World stopped; registry quiesced at stop_world.
@@ -1804,6 +1773,37 @@ module Gcry
         mark_candidate(data) unless data.null?
         i += 1
       end
+      mark_pending_finalizers
+    end
+
+    # Every static range, minus the heap's own chunks, word by word into the
+    # mark. Returns the bytes handed over.
+    #
+    # Words outside `[heap_min, heap_max)` are dropped here, before the call,
+    # as `scan_payload` does for heap bodies: `mark_root_candidate` rejects
+    # them on its first range test, but only after a call `mark_impl_unlocked`
+    # is not inlined into. A shared library's `.bss` is mostly zeros, and a
+    # 64 MiB one cost 16.0 ms of static phase per collection that way; 3.5 ms
+    # with the test here, against 2.1 ms that Boehm adds with one marker
+    # (`--release`, 40 collections, 2026-10-06). The watched thread-list object
+    # `mark_impl_unlocked` notes before its own range test is a heap object, so
+    # nothing it could be offered is dropped. The bounds are read once: no chunk
+    # is mapped or unmapped while the world is stopped.
+    private def scan_static_ranges : UInt64
+      scanned = 0_u64
+      heap_lo = @heap_min
+      heap_hi = @heap_max
+      Platform.scan_static_roots do |low, high|
+        each_static_range_excluding_heap(low, high) do |a, b|
+          scanned += b.address - a.address
+          Roots.scan_range_chunked(a, b, safe: true) do |candidate|
+            w = candidate.address
+            next if w < heap_lo || w >= heap_hi
+            mark_root_candidate(candidate, source: RootSource::Static)
+          end
+        end
+      end
+      scanned
     end
 
     # Emit [low, high) minus each mapped heap chunk via sorted chunk index merge.

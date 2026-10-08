@@ -20,7 +20,7 @@ module Gcry
 
     def destroy : Nil
       return if @base.null?
-      Gcry::OS.munmap(@base, LibC::SizeT.new(@mapped_bytes))
+      Gcry.os_unmap(@base, @mapped_bytes.to_u64)
       @base = Pointer(Void).null
       @capacity = 0
       @size = 0
@@ -33,6 +33,11 @@ module Gcry
 
     def empty? : Bool
       @size == 0
+    end
+
+    # Entries held. Read under the lock that guards the stack.
+    def size : Int32
+      @size
     end
 
     # `empty?` for a reader that does not hold the lock guarding the stack:
@@ -49,9 +54,10 @@ module Gcry
     # decision 5, so `scan_object` would not have to re-resolve it. Measured, that
     # was **+13.4% on phase_mark** (t=62.9) purely from doubling this stack —
     # more than the per-object `chunk_containing` it was meant to avoid. The
-    # stack is hot and its width matters more than the lookup does. So
-    # `scan_object` does resolve the chunk, once, behind the header's ATOMIC
-    # early-out.
+    # stack is hot and its width matters more than the lookup does. So the
+    # trace's own pushes carry the block's size class in the entry's top byte
+    # instead, and `scan_object` resolves the chunk only for an untagged entry
+    # (`Heap::MARK_ENTRY_TAG_SHIFT`, collect_mark.cr). Entries are opaque here.
     def push(header : BlockHeader*) : Nil
       if @size >= @capacity
         grow(@mapped_bytes * 2)
@@ -71,20 +77,13 @@ module Gcry
     end
 
     private def grow(bytes : UInt64) : Nil
-      ptr = Gcry::OS.mmap(
-        Pointer(Void).null,
-        LibC::SizeT.new(bytes),
-        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
-        -1,
-        0
-      )
+      ptr = Gcry.os_map(bytes)
       raise OutOfMemoryError.new("mark stack mmap failed") if Gcry.mmap_failed?(ptr)
 
       new_capacity = (bytes // sizeof(Void*)).to_i32
       unless @base.null?
         @base.as(Void**).copy_to(ptr.as(Void**), @size)
-        Gcry::OS.munmap(@base, LibC::SizeT.new(@mapped_bytes))
+        Gcry.os_unmap(@base, @mapped_bytes.to_u64)
       end
 
       @base = ptr

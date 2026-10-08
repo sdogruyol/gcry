@@ -176,9 +176,7 @@ module Gcry
         return true if current.ss_size.to_u64 >= REPORT_STACK_BYTES.to_u64
       end
       if @@alt_stack.null?
-        memory = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(REPORT_STACK_BYTES),
-          Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
-          Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+        memory = Gcry.os_map(REPORT_STACK_BYTES.to_u64)
         return false if Gcry.mmap_failed?(memory)
         @@alt_stack = memory.as(UInt8*)
       end

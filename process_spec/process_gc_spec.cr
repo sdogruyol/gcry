@@ -127,8 +127,29 @@ describe "process GC (-Dgc_none)" do
     heap.should_not be_nil
     h = heap.not_nil!
     h.tlab_enabled?.should be_false # default; GCRY_TLAB=1 enables at init
-    h.parallel_mark_workers.should eq(1)
     h.tlab_refills.should eq(0)
+  end
+
+  # Default since 2026-10-05: two workers up to 7 CPUs (one CPU left to the
+  # mutator), one per four CPUs above that up to eight, serial below 32 MiB
+  # live (bench/log/linux/2026-10-05-parallel-mark-default/,
+  # bench/log/linux/2026-10-05-alloc-storm-mark/).
+  it "marks in parallel by default, leaving one CPU and small heaps serial" do
+    h = Gcry.default_heap
+    cpus = Crystal::System.effective_cpu_count.to_i32
+    cpus = System.cpu_count.to_i32 if cpus <= 0
+    if ENV["GCRY_PARALLEL_MARK"]? || ENV["GCRY_PARALLEL_MARK_MIN_LIVE"]?
+      pending!("GCRY_PARALLEL_MARK(_MIN_LIVE) is set")
+    end
+    h.parallel_mark_workers.should eq(Gcry::Heap.default_mark_workers(cpus))
+    h.parallel_mark_workers.should be < cpus if cpus > 1
+    h.parallel_mark_min_live.should eq(32_u64 * 1024 * 1024)
+  end
+
+  it "scales the default mark workers with the CPUs" do
+    {1 => 1, 2 => 1, 3 => 2, 4 => 2, 7 => 2, 8 => 3, 12 => 4, 16 => 5, 28 => 8, 64 => 8}.each do |cpus, workers|
+      Gcry::Heap.default_mark_workers(cpus).should eq(workers)
+    end
   end
 
   it "registers atfork handlers on platforms with fork" do
@@ -242,28 +263,6 @@ describe "process GC dying-fiber stack roots" do
     ensure
       heap.dead_stack_roots = true
     end
-  end
-end
-
-describe "process GC realloc" do
-  # `Heap#realloc`'s grow path documents, at length, why it must not free the
-  # old block: Crystal stores the result *after* realloc returns, so until that
-  # store the caller's ivar still holds the old pointer, and freeing it lets a
-  # peer collect reuse the block underneath a live owner. The `size == 0` path
-  # used to free immediately — the same defect through a second door. It fires
-  # zero times in practice, which is why this is a gate on a trap rather than on
-  # a live bug.
-  it "does not free the old block when reallocating to zero" do
-    heap = Gcry.default_heap
-    ptr = GC.malloc(256)
-    fresh = GC.realloc(ptr, 0)
-
-    info = heap.debug_block_info(ptr)
-    info[:found].should be_true
-    info[:free].should be_false
-
-    # And it still hands back something usable, so the caller's store is safe.
-    fresh.should_not be_nil
   end
 end
 

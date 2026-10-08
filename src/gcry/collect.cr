@@ -56,7 +56,8 @@ module Gcry
     # atomic, small or large, counted by `scan_object` as it reads it. It is
     # the mark's own measure of its work, so it needs no notion of which
     # chunks hold what — the freelist allocator mixes kinds in one chunk.
-    # Counted by a serial mark only (`GCRY_PARALLEL_MARK` leaves it short).
+    # Parallel helpers count into their own lines and are folded in after the
+    # cycle (`take_parallel_scanned_bytes`).
     getter mark_scanned_bytes : UInt64 = 0_u64
 
     # The cap grows with the bytes the mark has to *read*, a third of them
@@ -93,12 +94,82 @@ module Gcry
     @release_warm_this_collect = false
     getter warm_released_collects : UInt64 = 0_u64
 
-    private def adapt_after_sweep : Nil
+    # Pacing: when collections cost more than a tenth of the mutator time
+    # between them, the threshold grows past live × factor, up to
+    # `THRESHOLD_PACE_MAX_PCT` of it (`GCRY_THRESHOLD_PACE`). Live × factor
+    # sizes the heap by what is kept and never asks how fast the program
+    # allocates: Binarytrees, under 5 MiB live, collected every 8 MiB — 259
+    # majors to Boehm's 85 — and Primes' growing heap every third of its
+    # scanned bytes, however much of the run that took. Boehm's schedule is
+    # wider: its heap keeps its high-water size and a collection waits until
+    # that is full. Measured on crystal-metric (4 CPUs, 7 trials,
+    # `bench/log/linux/2026-10-06-threshold-pacing/`): Primes −25% wall,
+    # JsonParsePure −22%, Binarytrees −9%, the RSS for it (Binarytrees 22 →
+    # 39 MiB) still under Boehm's on every row. A program whose collections
+    # are cheap next to its allocation rate keeps live × factor exactly:
+    # Kemal `/json` has the same req/s and peak RSS. A 200% maximum gave
+    # JsonParsePure half the gain; a 20% target gave back a quarter of
+    # Primes'.
+    #
+    # The pace is a threshold that would hold this cycle's cost to the
+    # target — allocation rate × cycle time ÷ target — over the unpaced one.
+    # The allocated bytes and the mutator time both grow with the threshold,
+    # so the rate does not move when the pace does and the pace does not
+    # oscillate. It scales the cap as well as live × factor: a growing
+    # pointer-dense heap (Primes) sits on the cap.
+    THRESHOLD_PACE_MAX_PCT = 300_u64
+    # Collection time as a percentage of the mutator time between collections.
+    THRESHOLD_PACE_TARGET_PCT = 10.0
+    # 100 disables pacing: the library heap and a fixed `GCRY_THRESHOLD`.
+    property threshold_pace_max_pct : UInt64 = 100_u64
+    getter threshold_pace_pct : UInt64 = 100_u64
+    @last_major_end_ns = 0_u64
+
+    # The pace (percent, 100..max_pct) that holds a cycle costing `cycle_ns`
+    # after `mutator_ns` of allocating `allocated` bytes to the target, for a
+    # live-sized threshold `base`.
+    def self.threshold_pace_pct(allocated : UInt64, mutator_ns : UInt64, cycle_ns : UInt64,
+                                base : UInt64, max_pct : UInt64) : UInt64
+      return 100_u64 if mutator_ns == 0_u64 || base == 0_u64
+      paced = allocated.to_f64 * cycle_ns.to_f64 * 100.0 / (mutator_ns.to_f64 * THRESHOLD_PACE_TARGET_PCT)
+      pct = paced * 100.0 / base.to_f64
+      return max_pct if pct >= max_pct.to_f64
+      pct <= 100.0 ? 100_u64 : pct.to_u64
+    end
+
+    private def update_threshold_pace(base : UInt64, cycle_started_ns : UInt64) : UInt64
+      now = monotonic_ns
+      last = @last_major_end_ns
+      @last_major_end_ns = now
+      # A releasing collection (`GC.collect`, the idle collector, the one
+      # before an `OutOfMemoryError`) asks for the footprint back, as it does
+      # of the warm budget. Keeping the pace across it carried a setup phase's
+      # 3× into JsonParseSerializable's timed run, which then went 0.3 s
+      # without collecting what the setup left: peak RSS +26%, wall unchanged.
+      # The next automatic cycle measures the pace afresh.
+      return @threshold_pace_pct = 100_u64 if @release_warm_this_collect
+      # Unmeasurable: the first major, an incremental cycle (its start is the
+      # last slice's), a clock step, or a cycle that did not follow a
+      # threshold's worth of allocation, whose rate says little.
+      return @threshold_pace_pct if cycle_started_ns == 0_u64 || last == 0_u64
+      return @threshold_pace_pct unless last < cycle_started_ns && cycle_started_ns < now
+      return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
+      @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
+        now - cycle_started_ns, base, @threshold_pace_max_pct)
+    end
+
+    # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
+    private def adapt_after_sweep(cycle_started_ns : UInt64 = 0_u64) : Nil
       return unless @adaptive_threshold || @warm_retain_follows_live
       want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
       if @adaptive_threshold
         cap = adaptive_threshold_cap
+        if @threshold_pace_max_pct > 100_u64
+          pace = update_threshold_pace(want < cap ? want : cap, cycle_started_ns)
+          want = want &* pace // 100_u64
+          cap = cap &* pace // 100_u64
+        end
         @gc_threshold = want < cap ? want : cap
       end
       if @warm_retain_follows_live
@@ -308,6 +379,36 @@ module Gcry
       sum = 0_u64
       base = LAYOUT_SCAN_SLOTS &* LAYOUT_SCAN_STRIDE
       LAYOUT_SCAN_SLOTS.times { |s| sum &+= @layout_scan_counts[base &+ s &* LAYOUT_SCAN_STRIDE] }
+      sum
+    end
+
+    # Bytes a parallel mark scanned, per worker, in its shard
+    # (`Heap#mark_shard`): a line that worker already owns, so counting adds
+    # no shared write. Folded into `@mark_scanned_bytes` once the cycle's
+    # helpers are idle (`take_parallel_scanned_bytes`). Before 2026-10-05 a
+    # parallel cycle counted nothing, which left the adaptive threshold's
+    # scan-based cap at its floor whenever parallel mark ran — and it runs by
+    # default now on exactly the heaps that cap is for.
+    #
+    # `shard` is the scanning thread's when its caller has it, which saves a
+    # thread-local read per object; nil otherwise. A thread with no claimed
+    # slot counts into the master's, as it did into slot 0 of the layout lines.
+    @[AlwaysInline]
+    private def count_parallel_scanned_bytes(size : UInt64, shard : MarkShard?) : Nil
+      unless shard
+        w = Heap.mark_worker
+        shard = mark_shard(w < 0 ? 0 : w)
+      end
+      shard[SHARD_SCANNED] &+= size
+    end
+
+    private def take_parallel_scanned_bytes : UInt64
+      sum = 0_u64
+      MARK_SHARDS.times do |s|
+        shard = mark_shard(s)
+        sum &+= shard[SHARD_SCANNED]
+        shard[SHARD_SCANNED] = 0_u64
+      end
       sum
     end
 
@@ -1150,7 +1251,7 @@ module Gcry
         # counted, because a quarantine that is always full is not a
         # quarantine and its zero would not mean anything.
         i = @q_head
-        Gcry::OS.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        Gcry.os_unmap(Pointer(Void).new(@q_base[i]), @q_len[i].to_u64)
         @q_head = (i + 1) % QUARANTINE_SLOTS
         @q_count -= 1
         @quarantine_forced_drains &+= 1
@@ -1174,7 +1275,7 @@ module Gcry
       while @q_count > 0
         i = @q_head
         break if @collections - @q_gen[i] < @release_quarantine
-        Gcry::OS.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        Gcry.os_unmap(Pointer(Void).new(@q_base[i]), @q_len[i].to_u64)
         @q_head = (i + 1) % QUARANTINE_SLOTS
         @q_count -= 1
       end
@@ -1238,9 +1339,24 @@ module Gcry
     getter static_scanned_min : UInt64 = UInt64::MAX
     getter static_scanned_max : UInt64 = 0_u64
 
+    # Library range bytes at the previous collection, for the baseline below.
+    @static_library_last = 0_u64
+
     protected def note_static_scanned(bytes : UInt64) : Nil
       @static_scanned_last = bytes
       @static_scanned_min = bytes if bytes < @static_scanned_min
+      # A library `dlclose`d since the last collection takes its ranges with
+      # it, which is the loader's doing and not a collapse. Lower the baseline
+      # by what the library table lost, so only bytes that vanished while their
+      # object stayed loaded count. Until 2026-10-06 they all did: unloading a
+      # library with a 64 MiB `.bss` printed "static roots collapsed" and
+      # counted a drop (`process_spec/regression/34_dlclose_static_roots_spec.cr`).
+      library_bytes = Platform.static_root_library_bytes
+      if library_bytes < @static_library_last
+        gone = @static_library_last - library_bytes
+        @static_scanned_max = @static_scanned_max > gone ? @static_scanned_max - gone : 0_u64
+      end
+      @static_library_last = library_bytes
       # Report a collapse where it happens. A child that dies of a missed root
       # never reaches the line that prints these counters, so a counter read at
       # exit is a counter read only on the runs that had nothing to say.
@@ -1593,6 +1709,9 @@ module Gcry
     @block_other_heap = false
     # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
     @gc_lock : Crystal::RWLock = Crystal::RWLock.new
+    # Foreign-thread registration against the stop (`lock_write`,
+    # `registering_thread`).
+    @thread_register_gate : Crystal::RWLock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
     # Monotonic span of every address ever mapped — never shrinks on munmap.
@@ -1647,12 +1766,41 @@ module Gcry
     # After a high-dirty fallback, skip soft-dirty until the next major.
     @soft_dirty_skip_until_major = false
 
-    def enable : Nil
-      @enabled = true
+    # `disable` nests: Boehm's `GC_disable` is a counter (`GC_dont_gc++`), and
+    # collection resumes only when every `disable` has been matched by an
+    # `enable`. A plain flag let an inner `disable … enable` pair — a library
+    # protecting its own critical section — re-enable collection inside the
+    # caller's still-open one.
+    #
+    # The depth and the flag move together under one lock: with an atomic depth
+    # alone, an `enable` taking it to 0 and a `disable` taking it back to 1 can
+    # store their flags in the other order and leave collection on at depth 1.
+    # The readers (`maybe_collect`, the allocator's tight-grow and emergency
+    # paths, `idle_collect`) keep reading the plain `@enabled`.
+    @disable_depth = 0
+    @disable_lock = Crystal::SpinLock.new
+
+    # Undoes one `disable`. Returns false, changing nothing, when collection is
+    # not disabled — `GC.enable` turns that into Boehm's "GC is not disabled".
+    def enable : Bool
+      @disable_lock.sync do
+        return false if @disable_depth == 0
+        @disable_depth -= 1
+        @enabled = true if @disable_depth == 0
+        true
+      end
     end
 
     def disable : Nil
-      @enabled = false
+      @disable_lock.sync do
+        @disable_depth += 1
+        @enabled = false
+      end
+    end
+
+    # How many `disable` calls are still unmatched.
+    def disable_depth : Int32
+      @disable_depth
     end
 
     def add_root(pointer : Void*) : Nil
@@ -1706,10 +1854,18 @@ module Gcry
 
     def add_finalizer(object : Void*, callback : Finalizers::Callback) : Nil
       return if object.null?
-      header = BlockHeader.from_user(object)
-      BlockHeader.set_finalizer(header)
       @finalizers.add(object, callback)
       Trace.finalizer("register", object)
+    end
+
+    # Boehm's `GC_register_finalizer*` (src/gcry/c_abi.cr): *object*'s one
+    # finalizer becomes the C function *fn*, called `fn(object, data)`, or is
+    # removed when *fn* is null. Returns the one it replaced as `{fn, cd}`.
+    # *object* is the start of a live block; the caller checks.
+    def replace_c_finalizer(object : Void*, fn : Void*, data : Void*, order : Finalizers::Order) : {Void*, Void*}
+      previous = @finalizers.replace_c(object, fn, data, order)
+      Trace.finalizer(fn.null? ? "unregister" : "register", object)
+      previous
     end
 
     def add_finalizer(object : Void*, &block : Finalizers::Callback) : Nil
@@ -1736,19 +1892,20 @@ module Gcry
       @finalizers.index_cap
     end
 
-    def register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Nil
+    # False when *link* was registered already: its row now names *object*
+    # (Boehm's `GC_DUPLICATE`). See `Finalizers::Registry#register_disappearing_link`.
+    def register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Bool
       referent = object
       if referent.null?
         referent = link.value
       end
-      return if referent.null?
+      return true if referent.null?
 
       if (found = find_object_with_chunk(referent))
         header, chunk = found
         # The chunk-aware user pointer: `user_from` is identity under headerless
         # and would hand back a large object's header slot as its referent.
         referent = user_of(chunk, header)
-        BlockHeader.set_disappearing(header)
       end
       @finalizers.register_disappearing_link(link, referent)
     end
@@ -1793,6 +1950,60 @@ module Gcry
     # direction depended on the host.
     def collecting? : Bool
       @collecting
+    end
+
+    # Has a sliced (incremental) cycle begun and not yet finished? Boehm's
+    # `GC_collection_in_progress`, which `GC_collect_a_little` answers with.
+    def incremental_in_progress? : Bool
+      @inc_active
+    end
+
+    # The points of a collection Boehm reports through
+    # `GC_set_on_collection_event` and `GC_set_on_thread_event`, in the order
+    # of Boehm's `GC_EventType` so the C ABI passes the value straight through.
+    enum CollectionEvent
+      Start
+      MarkStart
+      MarkEnd
+      ReclaimStart
+      ReclaimEnd
+      End
+      PreStopWorld
+      PostStopWorld
+      PreStartWorld
+      PostStartWorld
+      ThreadSuspended
+      ThreadUnsuspended
+    end
+
+    # Called on the collecting thread at each `CollectionEvent` of every
+    # collection on this heap, `ThreadSuspended`/`ThreadUnsuspended` aside.
+    # Between `PostStopWorld` and `PreStartWorld` every other thread is
+    # suspended, wherever it was — possibly holding the allocator's or libc's
+    # locks — so the hook must not allocate, or take a lock a mutator might
+    # hold: nothing would ever release it. The same rule Boehm states for its
+    # event callbacks.
+    property collection_event_hook : Proc(CollectionEvent, Nil)? = nil
+
+    # Called by `stop_world` once per thread it suspended (`ThreadSuspended`)
+    # and by `start_world` once per thread it resumes (`ThreadUnsuspended`),
+    # with the thread's system handle — a `pthread_t` on Unix. Every stop
+    # reports, as Boehm's `GC_suspend_all`/`GC_restart_all` do, including
+    # `GC.stop_world` from outside a collection. `Thread.lock` is held and the
+    # world is stopped: the same rules as `collection_event_hook`.
+    property thread_event_hook : Proc(CollectionEvent, Void*, Nil)? = nil
+
+    # Called with the new heap size each time the heap maps a chunk, on the
+    # allocating thread — Boehm's `GC_set_on_heap_resize`, which reports its
+    # heap growing (`GC_add_to_heap`). Allocation locks may be held, so the
+    # same no-allocation rule applies.
+    property heap_resize_hook : Proc(UInt64, Nil)? = nil
+
+    @[AlwaysInline]
+    private def collection_event(event : CollectionEvent) : Nil
+      if hook = @collection_event_hook
+        hook.call(event)
+      end
     end
 
     # Explicit collects that returned without running a cycle because the
@@ -1917,9 +2128,17 @@ module Gcry
         Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
         @collecting = true
         @incremental_marking = true
+        stw_reported = false
         begin
           lock_write
+          # Every slice is a stop of its own, as each of Boehm's incremental
+          # steps is; the cycle's `Start` and `MarkStart` were reported by
+          # `begin_incremental`, and the slice that finishes it reports the
+          # rest.
+          collection_event(CollectionEvent::PreStopWorld)
           stop_world_quiescing_roots
+          stw_reported = true
+          collection_event(CollectionEvent::PostStopWorld)
           # This slice is the third place a bitmap chunk gets swept — the
           # `sweep(major: true)` below runs inside this same stopped world —
           # so the two in-flight roots have to be offered here as well, or a
@@ -1936,8 +2155,11 @@ module Gcry
             end
           end
           if @mark_stack.empty?
+            collection_event(CollectionEvent::MarkEnd)
             enqueue_unreachable_finalizers
+            collection_event(CollectionEvent::ReclaimStart)
             sweep(major: true)
+            collection_event(CollectionEvent::ReclaimEnd)
             adapt_after_sweep
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
@@ -1954,7 +2176,9 @@ module Gcry
             arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
           end
         ensure
+          collection_event(CollectionEvent::PreStartWorld) if stw_reported
           start_world
+          collection_event(CollectionEvent::PostStartWorld) if stw_reported
           unlock_write
           unless @inc_active
             @mark_stack.clear
@@ -1974,6 +2198,7 @@ module Gcry
             @suppress_collect.sub(1)
           end
         end
+        collection_event(CollectionEvent::End) if finished
         @collecting = false
       ensure
         # Ensure flag clears even if flush raised.
@@ -2034,6 +2259,54 @@ module Gcry
       @expl_freed_bytes_since_gc += payload
     end
 
+    # `GC.free` calls that freed nothing. `GC.free` is the free hook zlib and
+    # GMP are given, so it must not raise (an exception unwinding through C
+    # frames is undefined behaviour) and it must not hand an address in the
+    # heap's span to libc either (glibc aborts on it). It counts the refusal
+    # here and reports the first of each kind on stderr instead. Boehm's
+    # `GC_free` validates nothing in release builds — a stale or double free
+    # corrupts its free lists silently — so ignoring and counting is strictly
+    # safer than the reference, and aborting would turn a free of a block the
+    # sweep already took into the death of a process Boehm would keep running.
+    #
+    # `double_frees`: the block is in a live chunk and already free — a double
+    #   free, or a stale pointer to a block the sweep reclaimed.
+    # `stale_frees`: in the heap's span but not a block it hands out — an
+    #   interior pointer, or a block whose chunk has been released — and the
+    #   corrupted-chunk case (`FreeResult::BadSizeClass`).
+    @double_frees = Atomic(UInt64).new(0_u64)
+    @stale_frees = Atomic(UInt64).new(0_u64)
+
+    def double_frees : UInt64
+      @double_frees.get
+    end
+
+    def stale_frees : UInt64
+      @stale_frees.get
+    end
+
+    # Counts a free `free_result` declined and, the first time per kind, says
+    # so. Allocates nothing: the caller may be zlib or GMP mid-operation.
+    def note_refused_free(pointer : Void*, result : FreeResult) : Nil
+      first = if result.not_allocated?
+                @double_frees.add(1_u64) == 0_u64
+              else
+                @stale_frees.add(1_u64) == 0_u64
+              end
+      return unless first
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: GC.free ignored 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, pointer.address)
+      why = case result
+            when .not_allocated?  then ": the block is already free (double free, or a stale pointer the sweep reclaimed)"
+            when .bad_size_class? then ": its chunk names no size class (corrupted collector metadata)"
+            else                       ": not a live gcry allocation (interior pointer, or its chunk was released)"
+            end
+      len = RawOut.append(buf.to_unsafe, len, why)
+      len = RawOut.append(buf.to_unsafe, len, "; counted in double_frees / stale_frees, reported once per kind\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     # Block header for an address in a managed chunk, including FREE blocks.
     # Prefer find_object for mutator-facing queries (rejects FREE).
     # What this heap knows about an arbitrary address, for a crash handler. Reads
@@ -2069,13 +2342,28 @@ module Gcry
       addr = pointer.address
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
-      chunk = chunk_containing(addr)
-      return nil unless chunk
+      # The radix hit inline, under the stop: this runs once per candidate the
+      # mark accepts, and `chunk_containing` is a call. Anything else — the
+      # lock, the audit, a miss — takes `chunk_containing`, which re-asks the
+      # table and stays the authority.
+      chunk = Pointer(ChunkHeader).null
+      if @world_stopped && !@index_audit
+        hit = radix_lookup(addr)
+        if !hit.null? && ChunkHeader.contains?(hit, addr)
+          radix_note_fast_hit
+          chunk = hit
+        end
+      end
+      if chunk.null?
+        found = chunk_containing(addr)
+        return nil unless found
+        chunk = found
+      end
 
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.large_header(chunk)
         user = ChunkHeader.large_user(chunk).address
-        finish = user + header.value.size
+        finish = user + ChunkHeader.large_payload(chunk)
         # Accept the header slot too: interior scans and `find_object` hand back
         # the header, and under headerless it sits outside [user, finish).
         return {header, chunk} if addr >= header.address && addr < finish
@@ -2461,6 +2749,7 @@ module Gcry
     private def run_collection_body(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool,
                                     idle : Bool) : Nil
       cols_before = @collections
+      trace_collect = 0_u64
       # Hold post-STW mutex through flush so Parallel EC cannot stop_world
       # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
       return unless acquire_post_stw(coalesce, cols_before, major)
@@ -2484,6 +2773,7 @@ module Gcry
 
         # Pause timer starts after mutex wait so p50/p99 reflect STW work only.
         started = monotonic_ns
+        trace_collect = CrystalTrace.start(self)
         # Owner first, then the flag, with a release fence between them: the
         # re-entrancy guard in `collect` reads the pair as "a cycle is running
         # and it is mine". Set the other way round there is a window in which
@@ -2497,6 +2787,11 @@ module Gcry
         @collector_pthread = Gcry::Platform.current_thread_id
         Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
         @collecting = true
+        # Boehm's order (`GC_try_to_collect_inner`, `GC_stopped_mark`): start,
+        # then the stop, then the mark. With `@collecting` up, so a hook that
+        # allocates against the rule cannot start a collection inside this one.
+        collection_event(CollectionEvent::Start)
+        stw_reported = false
         # Generational mark skips old objects; old→young edges come from
         # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
         # old walk). Finalizers/WeakRef must not treat unmarked old as dead
@@ -2511,7 +2806,10 @@ module Gcry
           # stop_world_quiescing_roots: no mutator frozen mid-add/delete_root.
           lock_write
           t0 = monotonic_ns
+          collection_event(CollectionEvent::PreStopWorld)
           stop_world_quiescing_roots
+          stw_reported = true
+          collection_event(CollectionEvent::PostStopWorld)
           @last_phase_stw_stop_ns = monotonic_ns - t0
           @thread_list_last_major = major
           ThreadListWatch.new_cycle
@@ -2530,6 +2828,8 @@ module Gcry
           StwWatchdog.enter(StwWatchdog::PHASE_CLEAR)
           @mark_stack.clear
 
+          collection_event(CollectionEvent::MarkStart)
+          trace_mark = CrystalTrace.start(self)
           t0 = monotonic_ns
           if major
             # Before the marks are cleared, because the audit is about which
@@ -2594,14 +2894,7 @@ module Gcry
 
           t0 = monotonic_ns
           if @scan_static_roots
-            scanned = 0_u64
-            Platform.scan_static_roots do |low, high|
-              each_static_range_excluding_heap(low, high) do |a, b|
-                scanned += b.address - a.address
-                Roots.scan_range_chunked(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
-              end
-            end
-            note_static_scanned(scanned)
+            note_static_scanned(scan_static_ranges)
           end
           @last_phase_static_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_STACKS)
@@ -2636,6 +2929,8 @@ module Gcry
             mark_loop
           end
           @last_phase_mark_ns = monotonic_ns - t0
+          CrystalTrace.finish("collect:mark", trace_mark)
+          collection_event(CollectionEvent::MarkEnd)
           probe_thread_list_header("the mark", expect_marked: true)
           StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
@@ -2702,9 +2997,13 @@ module Gcry
           @lazy_sweep_pending = sweep_after_world?
           StwWatchdog.enter(StwWatchdog::PHASE_SWEEP)
           unless @lazy_sweep_pending
+            collection_event(CollectionEvent::ReclaimStart)
+            trace_sweep = CrystalTrace.start(self)
             t0 = monotonic_ns
             sweep(major: major, after_world: false)
             @last_phase_sweep_ns = monotonic_ns - t0
+            CrystalTrace.finish("collect:sweep", trace_sweep)
+            collection_event(CollectionEvent::ReclaimEnd)
           end
 
           if major
@@ -2733,7 +3032,9 @@ module Gcry
         ensure
           t0 = monotonic_ns
           StwWatchdog.enter(StwWatchdog::PHASE_RESUME)
+          collection_event(CollectionEvent::PreStartWorld) if stw_reported
           start_world
+          collection_event(CollectionEvent::PostStartWorld) if stw_reported
           @last_phase_stw_start_ns = monotonic_ns - t0
           unlock_write
           @minor_only = false
@@ -2757,13 +3058,21 @@ module Gcry
             if hook = @post_stw_hook
               hook.call(:after_start_world)
             end
+            # Recycling keeps one major's large frees until the next major
+            # (`Heap#recycle_large_mapping`): what the previous one left and
+            # nothing reused goes back now, before this one's frees join it.
+            trim_large_cache(0_u64, defer: false) if @large_recycle && major
             if @lazy_sweep_pending
+              collection_event(CollectionEvent::ReclaimStart)
+              trace_sweep = CrystalTrace.start(self)
               t0 = monotonic_ns
               # The lazy sweep walks `@chunks` with the mutators running, same
               # as the flush passes below — and it was the one that kept
               # `make dormant-flush-race` red after those were fixed.
               during_live_chunk_walk { sweep(major: major, after_world: true) }
               @last_phase_sweep_ns = monotonic_ns - t0
+              CrystalTrace.finish("collect:sweep", trace_sweep)
+              collection_event(CollectionEvent::ReclaimEnd)
               @lazy_sweep_pending = false
               if major
                 arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
@@ -2795,9 +3104,31 @@ module Gcry
             end
             # Anything a mutator queued while the walks were running.
             flush_pending_large_release
-            # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
-            release_large_freelist_pages
-            trim_large_cache(defer: false)
+            if @large_recycle && !@release_warm_this_collect
+              # This cycle's frees stay for `Heap#recycle_large_mapping`, as
+              # they are: an `MADV_FREE` now would cost a page walk here and
+              # a dirtying write per page on reuse. The budget is what they
+              # hold, and every fresh mapping spends it.
+              release_moved_large
+              if major
+                # No more than the large bytes allocated since the last
+                # major: a program that stopped allocating large blocks will
+                # not take them, and the rest goes back here, as without
+                # recycling. Kept, Primes' dead 40 MB sieve was unmapped by
+                # the budget on the mutator instead; the pace, which times
+                # the cycle, then read collections as cheaper and fitted one
+                # more major into the run (`bench/log/linux/2026-10-06-large-recycle/`).
+                keep = @large_alloc_since_major
+                trim_large_cache(keep, defer: false, cap: UInt64::MAX) if @large_free_bytes > keep
+              end
+              @large_recycle_budget = @large_free_bytes
+            else
+              # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
+              release_large_freelist_pages
+              trim_large_cache(defer: false)
+              @large_recycle_budget = 0_u64
+            end
+            @large_alloc_since_major = 0_u64 if major
             @last_phase_flush_ns = monotonic_ns - t_flush
           ensure
             if ec1_lazy
@@ -2829,11 +3160,14 @@ module Gcry
             # a peer collection can begin and overwrite `@size_class_live_bytes`
             # and `@gc_threshold` before this thread's late write, which then
             # sizes the next threshold and warm budget from two cycles' numbers.
-            adapt_after_sweep
+            adapt_after_sweep(started)
           end
         ensure
           @suppress_collect.sub(1)
         end
+        # Still holding the post-STW lock, so the next collection's `Start`
+        # cannot be reported before this one's `End`.
+        collection_event(CollectionEvent::End)
       ensure
         @collecting = false
         # Outside a collection the live count is the right answer again; the
@@ -2841,6 +3175,7 @@ module Gcry
         clear_sweep_mutator_latch
         unlock_post_stw
       end
+      CrystalTrace.finish("collect", trace_collect)
 
       # The idle thread's collections leave finalizers queued: it has no
       # scheduler or event loop, and a `finalize` such as an
@@ -3064,9 +3399,15 @@ module Gcry
       @incremental_marking = true
       @inc_active = true
       @minor_only = false
+      collection_event(CollectionEvent::Start)
+      stw_reported = false
       begin
         lock_write
+        collection_event(CollectionEvent::PreStopWorld)
         stop_world_quiescing_roots
+        stw_reported = true
+        collection_event(CollectionEvent::PostStopWorld)
+        collection_event(CollectionEvent::MarkStart)
         note_collection_begin
         @mark_stack.clear
         clear_all_marks
@@ -3082,11 +3423,7 @@ module Gcry
         scan_all_fiber_roots if scan_stack
         scan_thread_roots if scan_stack && @stop_the_world
         if @scan_static_roots
-          Platform.scan_static_roots do |low, high|
-            each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range_chunked(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
-            end
-          end
+          scan_static_ranges
         end
         if scan_stack
           scan_mutator_stack
@@ -3095,7 +3432,9 @@ module Gcry
         # Arm page-dirty barrier for mutator writes between incremental slices.
         arm_page_barrier_after_collect
       ensure
+        collection_event(CollectionEvent::PreStartWorld) if stw_reported
         start_world
+        collection_event(CollectionEvent::PostStartWorld) if stw_reported
         unlock_write
         @collecting = false
       end

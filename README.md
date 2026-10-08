@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry beats Boehm on throughput — ~113% on Kemal <code>/json</code> — at ~1.07× its peak RSS (Linux, headerless default).</b>
+  <b>gcry runs Kemal <code>/json</code> at ~102% of Boehm's throughput, at 1.43× its peak RSS and 0.88× after <code>GC.collect</code> (Linux, headerless default, 2026-10-06).</b>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Boehm-parity throughput: ~105% [99, 111] on Kemal `/json` at ~1.3× peak RSS (Linux, 0.24.0); ~102% at ~2.0× peak on macOS.**
+**Kemal `/json`: ~102% of Boehm's throughput at 1.43× peak RSS, 0.88× after `GC.collect` (Linux, 2026-10-06); ~102% at 1.50× peak footprint on macOS (2026-09-06). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
 
 ---
 
@@ -52,6 +52,26 @@ to swap Boehm out, one line to swap it back.
 
 Crystal >= 1.21. Linux (x86_64 + aarch64), macOS (arm64 + x86_64), and
 [Windows x86_64 + ARM64](docs/WINDOWS.md).
+
+Crystal's own standard-library suite passes under gcry on Linux x86_64: all
+18 054 examples of `spec/std` (Crystal 1.21.0), held in CI by the `std-spec`
+job ([`ci/std-spec.sh`](ci/std-spec.sh)). macOS and Windows run gcry's own
+gates, not Crystal's suites.
+
+The Crystal compiler, built with gcry, also builds itself, and `compiler_spec`
+built with gcry as its GC passes: 13 640 examples, 0 failures, 18 pending
+([CI run 37437660646](https://github.com/sdogruyol/gcry/actions/runs/37437660646)).
+`crystal i` runs in the gcry-built compiler too, because gcry exports the part
+of Boehm's `GC_*` C ABI Crystal uses
+([differences](docs/INTEGRATION.md#boehm-parity)). CI holds both on Linux
+x86_64 in the `compiler-gcry` job ([`ci/compiler-spec.sh`](ci/compiler-spec.sh)). A
+program that links libgc as well builds with `-Dgcry_no_boehm_abi`, which
+leaves those exports out
+([docs/INTEGRATION.md § Boehm's C ABI](docs/INTEGRATION.md#boehms-c-abi)).
+
+On any other target — another OS, Android, or a 32-bit CPU — `-Dgc_none` +
+`require "gcry"` stops the build with a compile-time error instead of
+producing a binary ([`src/gcry/platform/os.cr`](src/gcry/platform/os.cr)).
 
 ---
 
@@ -185,14 +205,31 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **112.6%** [106.6, 118.6] *(header layout `-Dgcry_block_headers`: 105.3%; its freelist `GCRY_BITMAP_ALLOC=0`: 74.9%)* |
-| Kemal `/json` peak RSS | **1.07×** *(header layout: 1.30×; 0.95× at 105.1% with `GCRY_THRESHOLD_FACTOR=50` there)* |
-| Kemal `/json` post-`/gc-collect` RSS | **~1.07×** *(31.2 vs 29.3 MB, peak = post-GC; header layout ~1.2× on the CI runner, 15.2 vs 12.9 MB)* |
-| Kemal `/` throughput | **~82%** *(carry v0.16; not re-measured since)* |
+| Kemal `/json` throughput | **101.8%** *(this tree, 2026-10-06; 0.34.0: 103.4% in the same session)* |
+| Kemal `/json` peak RSS | **1.43×** *(22.2 vs 15.6 MiB)* |
+| Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB)* |
+| Kemal `/` throughput | **90.9%** *(0.34.0: 100.6% in the same session; not GC-bound — the GC is 0.3% of the run, and the same code moved by NOP padding alone reads 91–98% of 0.34.0)* |
 | Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
 | Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
 
+\*Kemal rows: `bench/log/linux/2026-10-06-pr-benchmarks/` (QEMU x86-64, 12 vCPUs, 11 interleaved trials, server on 3 CPUs, `wrk -c50`). The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
+
 \*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
+
+Allocation storms, crystal-metric (process-fresh, 11 interleaved trials, 12 CPUs, Crystal 1.21.0, 2026-10-06 — `bench/log/linux/2026-10-06-pr-benchmarks/after-review/`; 0.34.0 in parentheses):
+
+| Bench | gcry speed vs Boehm | peak RSS × Boehm |
+|-------|--------------------:|-----------------:|
+| Primes | **100%** (42%) | 0.94× |
+| JsonParsePure | **91%** (42%) | 0.83× |
+| Binarytrees | **94%** (81%) | 0.76× |
+| JsonGenerate | **105%** (105%) | 0.70× |
+| JsonParseSerializable | 88% (89%) | 0.92× |
+| JsonParsePull | 91% (93%) | 0.92× |
+| Revcomp | 84% (82%) | 0.64× |
+| RegexDna | 99% (100%) | 0.53× |
+
+The `realloc` page move (`GCRY_REALLOC_MOVE=1`, opt-in, unsafe for programs that read a buffer after growing it — the stdlib does) gives JsonGenerate 112%, and part of JsonParseSerializable and Revcomp back.
 
 ### macOS (Apple Silicon)
 
@@ -200,7 +237,7 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 |----------|------------------------------------:|
 | Kemal `/json` throughput | **101.9%** [100.9, 103.0] *(header layout: 101.8%; its freelist: 85.5%)* |
 | Kemal `/json` peak footprint | **1.50×** *(post-GC resident 0.99×; header layout 1.97× / 1.20×; freelist 1.78× / 1.07×)* |
-| Kemal `/` throughput | **~91%** *(carry 2026-08-04; not re-measured on 0.24.0)* |
+| Kemal `/` throughput | **110.3%** [100.0–136.4] *(CI perf smoke, v0.34.0 window, 32 runs — [leaderboard](bench/leaderboard.md); hosted-runner wrk, not a paired A/B)* |
 | Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
 | Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
@@ -212,17 +249,23 @@ Freelist-era history (pre-0.24.0, `GCRY_BITMAP_ALLOC=0`; `GCRY_TIGHT_GROW` is fr
 
 ### What the default heuristics cost
 
-Every number above is measured with gcry's **root-completeness heuristics
-armed** — the 256 KiB STW stack lags and, until
-2026-09-29, the static-root `type_id` gate, which was then found to sweep a
-class variable's raw buffer of references and taken out of the default. Each
-can decline to mark a pointer that is genuinely live, so those numbers price
-a collector that is allowed to guess.
-`GCRY_SOUND=1` turns the whole class off:
+**Since 2026-10-05 the process defaults are root-complete** — the sound
+column below. The last two default knobs that could decline a live pointer,
+the 256 KiB multi-mutator STW stack and pthread lags, now default to 0 (the
+whole touched stack; `src/gcry/collect_scan.cr`,
+`process_spec/regression/14_sound_defaults_spec.cr`); the static-root
+`type_id` gate went on 2026-09-29, after it was found to sweep a class
+variable's raw buffer of references. The macOS Kemal rows and the fat-app
+numbers above were measured before that, with the lags armed; the Linux Kemal
+rows (2026-10-06) were not. The tables below are what the change costs. To
+restore the bounded scan:
 
 ```sh
-GCRY_SOUND=1 ./your-app
+GCRY_STW_STACK_LAG=262144 GCRY_STW_PTHREAD_LAG=262144 ./your-app
 ```
+
+`GCRY_SOUND=1` still forces the whole sound profile, ahead of any individual
+knob. In the tables, "tuned" is the old lagged default and "sound" is today's.
 
 Re-cut on the 0.24.x bitmap default, `bench/log/linux/2026-09-08-heuristics-ab/`
 (Ryzen AI 9 465, 20 rotated rounds × 15 s, identical-binary null control at
@@ -230,8 +273,8 @@ Re-cut on the 0.24.x bitmap default, `bench/log/linux/2026-09-08-heuristics-ab/`
 
 | Kemal `/json`, EC1 | % of Boehm [95% CI] | % of tuned | peak RSS × | pause p50 / p99 |
 |--------------------|--------------------:|-----------:|-----------:|----------------:|
-| tuned (process defaults) | 110.5% [105.5, 115.6] | 100% | 1.29× | 0.78 / 1.58 ms |
-| **sound roots** (`GCRY_SOUND=1`) | **117.0%** [111.3, 122.6] | 106.5% [100.6, 112.5] | **1.29×** | **0.76 / 1.20 ms** |
+| tuned (process defaults until 2026-10-05) | 110.5% [105.5, 115.6] | 100% | 1.29× | 0.78 / 1.58 ms |
+| **sound roots** (`GCRY_SOUND=1`; the default's root profile since 2026-10-05) | **117.0%** [111.3, 122.6] | 106.5% [100.6, 112.5] | **1.29×** | **0.76 / 1.20 ms** |
 | sound + fully conservative bodies | 112.8% [108.0, 117.6] | 102.7% [97.4, 108.0] | 1.28× | 0.76 / 1.29 ms |
 
 **On one mutator thread, sound roots are free.** RSS is identical across the
@@ -274,7 +317,7 @@ since (`GCRY_SCRUB_FIBERS=1`); the per-collection trace showed it moving
 
 ### Pause distribution (Kemal `/json`, Linux)
 
-Tuned defaults, EC1, medians of 20 trials' `/gc-stats` from the session above
+Tuned (pre-2026-10-05) defaults, EC1, medians of 20 trials' `/gc-stats` from the session above
 (`pause_p50_ns` / `pause_p99_ns` / `pause_max_ns`; 589 collections per 15 s):
 
 ```
@@ -297,7 +340,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Conservative bodies** | Every non-atomic block is word-scanned; no type map narrows a scan since 2026-10-04 (a union buffer's first tag reads as a type id — `docs/SOUND-DEFAULTS.md`) |
-| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` ~**113%** of Boehm at **1.07×** its peak RSS (Linux). `-Dgcry_block_headers` restores the header layout |
+| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **101.8%** of Boehm at **1.43×** its peak RSS, 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
 | **Bitmap allocator** | Process default since 0.24.0 and forced on by the headerless layout — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors. `GCRY_BITMAP_ALLOC=0` is the freelist escape, on `-Dgcry_block_headers` only |
 | **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR`; an explicit `GC.collect`, the idle collector and the collection before an `OutOfMemoryError` release them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal). Multi-threaded programs too since 0.30.0: Kemal at 4 workers reads 20 MB after `GC.collect`, 85 MB before |
 | **macOS reclaim** | `MADV_FREE_REUSABLE` at host page size (16 KiB on Apple Silicon), with `MADV_FREE_REUSE` before reuse, so released pages leave `phys_footprint` at once |
@@ -310,11 +353,11 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 
 gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
 Windows x86_64 + ARM64 have native unit, process-GC, and release-sample CI coverage, plus the Linux race and root gates that hold there.
-Windows workload performance has not been benchmarked; see [support details](docs/WINDOWS.md).
+Windows x86_64 workloads have been measured once, on a 12-vCPU QEMU/KVM VM rather than physical hardware: crystal-metric at 87–114% of Boehm's speed, Kemal `/json` at 106.5% (`bench/log/windows/2026-10-06-vm-validation/`). Windows ARM64 workloads are unmeasured (CI only). See [support details](docs/WINDOWS.md).
 
 | Today | Later / elsewhere |
 |-------|-------------------|
-| **Linux + macOS + Windows x86_64 + ARM64** process GC (Crystal >= 1.21) | Windows workload benchmarks |
+| **Linux + macOS + Windows x86_64 + ARM64** process GC (Crystal >= 1.21) | Windows benchmarks on physical hardware; Windows ARM64 workloads |
 | Default ExecutionContext, **parallelism 1** (PERF headline) | Parallel **supported opt-in:** EC>1 + TLAB off + lazy (~79% `/json`); TLAB-on still experimental |
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |
@@ -350,14 +393,16 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_SOUND=1` | Turn off every root-completeness heuristic. Free on one mutator thread (RSS, pause and throughput at parity, 2026-09-08). With more than one thread it keeps scanning every parked fiber whole: 3.9–5.5× the default's pause (Kemal EC4 4.72 against 1.21 ms on Linux CI, 2026-09-29), throughput within noise |
+| `GCRY_SOUND=1` | Force the whole root-complete profile ahead of any individual knob. The defaults have been that profile since 2026-10-05 ([SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md)) |
+| `GCRY_STW_STACK_LAG` / `GCRY_STW_PTHREAD_LAG` | Bytes; default 0 (whole touched stack). A non-zero lag bounds the multi-mutator stack scan and its pause, and can miss a live pointer deeper than the lag. At 0, Linux CI EC4 pause is 4.55 against 3.07 ms at 256 KiB, req/s unchanged (2026-09-26) |
 | `GCRY_BITMAP_ALLOC=0` | Freelist allocator, the pre-0.24.0 default (Kemal `/json` ~75% of Boehm at 1.87× peak RSS on Linux; ~85% on macOS). Needs `-Dgcry_block_headers`; on the headerless default it warns and is ignored. Not the RSS escape it used to be — the default layout is the lowest-RSS of the three |
 | `GCRY_THRESHOLD_FACTOR` | Warm-chunk budget and adaptive threshold, % of live (default 100). 50 → Kemal 0.95× peak RSS at unchanged throughput, but −12 pp on the fat app |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks (freelist-era knob: ~95% `/json` thr, ~3x RSS on the freelist) |
-| `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), floored at 8 MiB, capped at 64 MiB (`GCRY_THRESHOLD_MAX`) or a third of the bytes the mark scanned |
+| `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), floored at 8 MiB, capped at 64 MiB (`GCRY_THRESHOLD_MAX`) or a third of the bytes the mark scanned, and paced up to 3× while collections take more than a tenth of the mutator time (`GCRY_THRESHOLD_PACE`) |
+| `GCRY_THRESHOLD_PACE` | Most the adaptive threshold is paced up, % (default 300; 100 = off). Collection-bound phases get fewer majors (crystal-metric Primes −25%, JsonParsePure −22%, Binarytrees −9% wall, RSS under Boehm's); Kemal `/json` is not collection-bound and is unchanged |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program layout registration; no effect on the mark since 2026-10-04 |
 | `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
-| `GCRY_PARALLEL_MARK=N` | Experimental parallel mark workers (default 1) |
+| `GCRY_PARALLEL_MARK=N` | Mark workers (default `max(min(2, CPUs − 1), min(CPUs / 4 + 1, CPUs − 1, 8))` — two up to 7 CPUs, four at 12 — serial below 32 MiB live; `1` = serial) |
 | `GCRY_STRESS=1` | Collect every N allocs (debug) |
 
 Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
@@ -374,8 +419,9 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 | [docs/PERF-macos.md](docs/PERF-macos.md) | macOS performance numbers |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm head-to-head |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
+| [docs/RFC-GC-BACKEND.md](docs/RFC-GC-BACKEND.md) | Upstream proposal: `-Dgc_gcry` backend + runtime hooks |
 | [docs/HARDENING.md](docs/HARDENING.md) | All env knobs |
-| [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) | `GCRY_SOUND=1` — what gcry costs with no root heuristics |
+| [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) | Root-complete defaults (2026-10-05) and what the heuristics they replaced cost |
 | [docs/STACK_MAPS.md](docs/STACK_MAPS.md) | Compiler stack maps (research; default off) |
 | [docs/API.md](docs/API.md) | Public API + `/metrics` |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |

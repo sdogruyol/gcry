@@ -69,7 +69,11 @@ if disabled && !h.force_serial_mark?
 end
 
 old = h.parallel_mark_workers
+old_min_live = h.parallel_mark_min_live
 begin
+  # The process default keeps heaps under 32 MiB live serial; this chain is
+  # far smaller, and the gate is about the parallel path.
+  h.parallel_mark_min_live = 0_u64
   h.parallel_mark_workers = 4
   workers = h.parallel_mark_workers
   if disabled
@@ -99,8 +103,17 @@ begin
     head
   end
 
-  GC.collect
-  GC.collect
+  # Up to 20 collections until a worker has stolen, not a fixed two: off
+  # Linux an idle marker parks in a 100 µs–1 ms sleep with no futex to wake
+  # it, and on darwin arm64 two marks of this chain finished before any
+  # helper woke (CI, 2026-10-06). Still red if no collection ever steals.
+  collects = 0
+  loop do
+    GC.collect
+    collects += 1
+    break if collects >= 2 && (disabled || h.parallel_mark_stolen > before_stolen)
+    break if collects >= 20
+  end
 
   runs = h.parallel_mark_runs
   stolen = h.parallel_mark_stolen
@@ -150,6 +163,9 @@ begin
   puts "workers=#{workers} runs #{before_runs}->#{runs} stolen #{before_stolen}->#{stolen} chain=#{walked}"
   puts disabled ? "ok — serial mark kept the chain and stole nothing" : "parallel_mark_process ok"
 ensure
-  h.parallel_mark_workers = old if h
+  if h
+    h.parallel_mark_workers = old
+    h.parallel_mark_min_live = old_min_live
+  end
 end
 exit 0

@@ -24,10 +24,10 @@
 #             requires the counters to stay at zero, so the other arms' numbers
 #             are attributable to the knob.
 #
-# And what the table does when it runs out of slots, which is not the rare event
-# the size suggests: a slot is freed by `release`, which runs inside
-# `stop_world`, so the table holds one entry per birth **since the last
-# collection** — 65 `Thread.new`s with no collection between them are enough.
+# And what the table does when it runs out of slots. Since 2026-10-06 it grows
+# instead (`Gcry::ThreadBirthRoot`, "The table grows"), so the burst arms hold
+# it at its first segment with `GCRY_THREAD_BIRTH_NOGROW=1`; the overflow path
+# they exercise is still what a birth takes when no segment can be mapped.
 #
 #   --burst           fill the table with births that can never be released,
 #                     then arm the victim's. Its birth overflows, and it must
@@ -40,7 +40,7 @@
 #   crystal build -Dgc_none bench/thread_birth_root.cr -o bin/thread_birth_root
 #   bin/thread_birth_root
 #   bin/thread_birth_root --control
-#   bin/thread_birth_root --burst
+#   GCRY_THREAD_BIRTH_NOGROW=1 bin/thread_birth_root --burst
 
 require "../src/gcry"
 
@@ -301,6 +301,10 @@ puts "births armed=#{armed} released=#{released} outstanding=#{outstanding} over
 failures = [] of String
 
 if burst
+  if Gcry::ThreadBirthRoot.capacity > Gcry::ThreadBirthRoot::SLOTS
+    failures << "the birth table grew to #{Gcry::ThreadBirthRoot.capacity} slots, so it was never full; " \
+                "the burst arms need GCRY_THREAD_BIRTH_NOGROW=1"
+  end
   failures << "no birth overflowed, so the full table was never under test" if overflows == 0
   if burst_unrooted
     failures << "the table was full, nothing was rooted, and the block survived anyway — " \

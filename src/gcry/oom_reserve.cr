@@ -79,7 +79,7 @@ module Gcry
       return if Gcry.mmap_failed?(ptr)
       set = alloc_cursor_set
       if set.null?
-        Gcry::OS.munmap(ptr, LibC::SizeT.new(bytes))
+        Gcry.os_unmap(ptr, bytes)
         return
       end
       # Never the hit path, and pinned rather than retired at a stop-the-world,
