@@ -2850,6 +2850,22 @@ module Gcry
           @last_roots_fibers_ns = 0_u64
           @last_roots_threads_ns = 0_u64
           root_part = @root_phase_timing ? monotonic_ns : 0_u64
+          # First, before any root is marked: the settle zeroes the mark bits
+          # of every chunk the last cycle pinned, and a root marked ahead of it
+          # in such a chunk lost its bit and was swept with the range or
+          # `add_root` that named it still holding it. That is how `GC_add_roots`
+          # ranges and `GC_set_push_other_roots` (both from the before-collect
+          # hook), `GC.add_root` and the realloc pin (`@roots`) lost objects as
+          # soon as threads allocated while another collected: 900–2600 of
+          # 3200 objects held only by registered ranges freed and reused, every
+          # run (`process_spec/regression/49_roots_before_settle_spec.cr`).
+          bitmap_settle_cursor_sets
+          mark_bitmap_alloc_in_flight
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_cursors_ns = now - root_part
+            root_part = now
+          end
           @before_collect_callbacks.each(&.call)
           # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
           # realloc pin / add_root); still respect allow_interior_pointers.
@@ -2859,13 +2875,6 @@ module Gcry
           if @root_phase_timing
             now = monotonic_ns
             @last_roots_explicit_ns = now - root_part
-            root_part = now
-          end
-          bitmap_settle_cursor_sets
-          mark_bitmap_alloc_in_flight
-          if @root_phase_timing
-            now = monotonic_ns
-            @last_roots_cursors_ns = now - root_part
             root_part = now
           end
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
@@ -3412,11 +3421,13 @@ module Gcry
         @mark_stack.clear
         clear_all_marks
         @mark_scanned_bytes = 0_u64
+        # Settle first, as in `run_collection_body`: it zeroes pinned chunks'
+        # marks, and a root marked before it there would be swept.
+        bitmap_settle_cursor_sets
+        mark_bitmap_alloc_in_flight
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
         mark_large_alloc_in_flight
-        bitmap_settle_cursor_sets
-        mark_bitmap_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         scrub_parked_fiber_stacks if scan_stack
