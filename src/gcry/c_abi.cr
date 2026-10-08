@@ -1205,11 +1205,13 @@ end
     Crystal::System::Thread.sig_resume.value
   end
 {% else %}
+  # Boehm answers -1 where threads are stopped without signals, Windows
+  # among them (`GC_get_suspend_signal`, gc.h). Until 2026-10-08 gcry aborted.
   fun gcry_c_get_suspend_signal = GC_get_suspend_signal : LibGC::Int
-    Gcry::CAbi.unsupported("GC_get_suspend_signal", "this platform stops threads without signals")
+    -1
   end
 
   fun gcry_c_get_thr_restart_signal = GC_get_thr_restart_signal : LibGC::Int
-    Gcry::CAbi.unsupported("GC_get_thr_restart_signal", "this platform stops threads without signals")
+    -1
   end
 {% end %}

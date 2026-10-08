@@ -238,4 +238,17 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
       LibGC.stackbottom.should eq(high)
     end
   {% end %}
+
+  # Boehm's suspend and restart signals: the ones it stops threads with, -1
+  # where it uses none (Windows). gcry answers Crystal's pair on Unix, the
+  # one its own stop uses; until 2026-10-08 it aborted on Windows.
+  it "answers the stop signals where there are some, and -1 on Windows" do
+    {% if flag?(:win32) %}
+      LibGC.get_suspend_signal.should eq(-1)
+      LibGC.get_thr_restart_signal.should eq(-1)
+    {% else %}
+      LibGC.get_suspend_signal.should eq(GC.sig_suspend.value)
+      LibGC.get_thr_restart_signal.should eq(GC.sig_resume.value)
+    {% end %}
+  end
 end
