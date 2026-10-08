@@ -812,7 +812,11 @@ module Gcry
     # chunks queued, off `@chunks`, index entries still alive, no lock held;
     # a cursor exhausted here refills from that pool through the index. That
     # is the whole window, deterministically, which is what makes
-    # `make occupied-release` a gate rather than a sighting.
+    # `make occupied-release` a gate rather than a sighting. And
+    # `:before_relink_store` — the after-world sweep has walked `@chunks` and
+    # not yet published its rebuild, no lock held; a chunk mapped here is a
+    # prepend inside that window (`make chunk-list-drift`, on a process heap,
+    # so the hook must not capture: its closure would be unrooted).
     property post_stw_hook : Proc(Symbol, Nil)? = nil
     # Research only, and it restores a defect: an unreachable object with a
     # finalizer is queued and *not* marked, so the sweep reclaims it and the

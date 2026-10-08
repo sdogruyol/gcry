@@ -1218,11 +1218,14 @@ jobs:
       # And what that divergence costs, since its marks are now cleared anyway:
       # a stranded chunk is never swept and can never rejoin the list, so the
       # leak is permanent but rides mappings rather than uptime. The shipped
-      # tree must strand under 5 per 1000 chunks mapped; restoring the pre-fix
-      # mutator-count reads must exceed it, which is also how this measured
-      # that the latch fix closed a near-total leak (97-99% of the heap) and
-      # not only the rare use-after-free it was landed for.
-      - name: Chunk-list divergence stays rare
+      # tree must strand nothing: the after-world sweep's store splices back
+      # what was prepended during its walk, and two window arms map a chunk in
+      # that window every collection — none may strand with the splice, and
+      # some must without it. Restoring the pre-fix mutator-count reads must
+      # still strand over 5 per 1000, which is also how this measured that the
+      # latch fix closed a near-total leak (97-99% of the heap) and not only
+      # the rare use-after-free it was landed for.
+      - name: No chunk leaves the chunk list
         run: |
           make chunk-list-drift
 

@@ -2,6 +2,12 @@
 
 module Gcry
   class Heap
+    # Research only: publish the after-world rebuild as a plain
+    # `@chunks = kept`, dropping whatever `map_chunk` prepended during the
+    # walk (`publish_relinked_chunks`) — the code before 2026-10-09, and the
+    # control arm of `make chunk-list-drift`.
+    property chunk_list_splice : Bool = true
+
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
       # unlink + dirty the chunk index per object; every following reclaim_small
@@ -74,7 +80,10 @@ module Gcry
       relink_once = @sweep_mutator_latch
       relink = !after_world || relink_chunks_after_world?
 
-      chunk = @chunks
+      # Kept for the store at the end: whatever `map_chunk` prepends while this
+      # walks lands in front of it (`publish_relinked_chunks`).
+      walk_head = @chunks
+      chunk = walk_head
       while chunk
         nxt = chunk.value.next
         drop = false
@@ -376,12 +385,23 @@ module Gcry
         # what the gate exists to catch — the same 40 children crash 5 times on
         # the page-release corruption once they are allowed to finish.
         #
-        # In the stopped world the store needs no lock: the mutators that could
-        # race it are the ones that are suspended. The lock is for the
-        # `after_world` path, where they are running and a prepend racing this
-        # store would be lost, which puts a live chunk on no list at all.
+        # In the stopped world the store needs no lock and has nothing to
+        # splice: the threads that write `@chunks` are suspended, so the head
+        # is still `walk_head`. (A writer frozen *inside* its locked section is
+        # covered by neither path: it finishes its surgery after `start_world`,
+        # against the list stored here.) The lock is for the `after_world`
+        # path, where they are running, and a prepend that lands during the
+        # walk is in front of `walk_head` — which a plain `@chunks = kept`
+        # took off the list for good.
         if after_world
-          @chunk_list_lock.sync { @chunks = kept }
+          # Research only (`Heap#post_stw_hook`): a mutator on the collector's
+          # own thread, between the walk and the store — the window a prepend
+          # from a thread the latched count missed lands in, every collection
+          # rather than one in millions of mappings. `make chunk-list-drift`.
+          if hook = @post_stw_hook
+            hook.call(:before_relink_store)
+          end
+          @chunk_list_lock.sync { publish_relinked_chunks(walk_head, kept) }
         else
           @chunks = kept
         end
@@ -435,6 +455,73 @@ module Gcry
           update_heap_bounds_after_unmap
         end
       end
+    end
+
+    # Publish the after-world rebuild without losing what was prepended while
+    # the sweep walked. Caller holds `@chunk_list_lock`; the world is running.
+    #
+    # The walk read the head once (*walk_head*) and rebuilt everything behind
+    # it into *kept*. A `map_chunk` landing in between — from a thread born
+    # after `latch_sweep_mutator_count`, which the post-stop count then sees
+    # and so leaves unblocked, or one already past `@block_other_heap` — puts
+    # its chunk in front of *walk_head*. `@chunks = kept` took that prefix off
+    # the list and left it in the index: never swept again, its memory held
+    # for the life of the process. Here the prefix goes in front of *kept*.
+    #
+    # The walk below must cover the prefix and nothing the sweep rebuilt: a
+    # step onto *kept* splices *kept* onto itself. Why it cannot:
+    #
+    # - Every link into or within the prefix is written under this lock —
+    #   `map_chunk` (new.next = head; head = new), `unlink_chunk` and
+    #   `unlink_detached_large` (pred.next = target.next). The sweep's own
+    #   unlocked rewrites touch only chunks it reached from *walk_head*, and
+    #   none of those links into the prefix.
+    # - Unlinking a prefix chunk relinks its predecessor to the next prefix
+    #   chunk or to *walk_head*. Unlinking a chunk behind *walk_head* finds
+    #   its predecessor behind *walk_head* as well. Neither changes the shape.
+    # - Unlinking *walk_head* itself does: the link to it becomes its `next`,
+    #   by then possibly the original second chunk, which the rebuild has
+    #   pointed back at *walk_head* — so the walk would find *walk_head* from
+    #   inside *kept*. Both unlinkers take the chunk out of the index in the
+    #   same section as the list surgery, and nothing re-indexes its address
+    #   while it is mapped (a mutator's trim queues the unmap during a live
+    #   walk; `recycle_large_mapping` refuses one). So *walk_head* still
+    #   indexed, read under this lock, means it was never unlinked and the
+    #   shape holds; otherwise this falls back to the plain store, which loses
+    #   the prefix exactly as before. Only a large chunk is ever unlinked, and
+    #   mid-walk only by a `GC.free` trim on another thread (the post-stop
+    #   block stops allocation, not frees); the rebuild then still keeps that
+    #   chunk while it is queued for release, which this neither causes nor
+    #   cures.
+    #
+    # Allocates nothing. Takes `@index_lock` under this one — list then index,
+    # the order `map_chunk` and `unlink_chunk` already use.
+    private def publish_relinked_chunks(walk_head : ChunkHeader*, kept : ChunkHeader*) : Nil
+      head = @chunks
+      if head != walk_head && @chunk_list_splice
+        # The list was empty when the walk began: everything on it now was
+        # prepended since, and the rebuild is empty.
+        return if walk_head.null?
+        if chunk_containing(ChunkHeader.data_start(walk_head).address) == walk_head
+          # Bounded like `unlink_chunk`'s walk, though the argument above says
+          # it ends at *walk_head* within the prefix.
+          limit = @chunk_index_count.to_u64 &* 2 &+ 64
+          tail = head
+          steps = 0_u64
+          while tail && steps <= limit
+            nxt = tail.value.next
+            if nxt == walk_head
+              # Release, as `map_chunk` publishes: walkers that do not take
+              # this lock follow the link into *kept*'s rewritten `next`s.
+              Atomic::Ops.store(pointerof(tail.value.@next), kept, :release, true)
+              return
+            end
+            tail = nxt
+            steps &+= 1
+          end
+        end
+      end
+      Atomic::Ops.store(pointerof(@chunks), kept, :release, true)
     end
 
     private def sweep_large_one(chunk : ChunkHeader*, major : Bool, after_world : Bool) : Nil
