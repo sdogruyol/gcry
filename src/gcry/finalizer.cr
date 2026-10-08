@@ -55,8 +55,8 @@ module Gcry
     # `prev_row`/`next_row` chain every row naming the same object, newest
     # first, from the row its object-index slot names: the rows of one object
     # are found without a scan of the table. -1 ends the chain. *slot* is that
-    # object-index slot (-1 with no index), so a removal reaches it without a
-    # probe; `PointerIndex#claim` reports every slot a `grow` moves.
+    # object-index slot (-1: none was had), so a removal reaches it without a
+    # probe; it is meaningless once the index has given up.
     struct Entry
       property object : Void*
       property callback : Callback
@@ -93,10 +93,10 @@ module Gcry
     # caller holds the registry's lock.
     #
     # A slot keeps its index until the next `grow`, so a caller may hold on to
-    # one (`Entry#slot`); `claim` reports every slot the grow moved. Only
-    # `claim` allocates. `find`, `[]=` and `release` never do, which is what
-    # lets the collector drop rows with the world stopped: a thread frozen
-    # inside `malloc` holds its lock.
+    # one (`Entry#slot`); `claim` hands over the old -> new map of a grow.
+    # Only `claim` allocates. `find`, `[]=` and `release` never do, which is
+    # what lets the collector drop rows with the world stopped: a thread
+    # frozen inside `malloc` holds its lock.
     struct PointerIndex
       # Deleted marker. Address 1 is never an object or a link location.
       TOMBSTONE = Pointer(Void).new(1_u64)
@@ -129,6 +129,13 @@ module Gcry
       # table gave up; the caller then scans its rows.
       def available? : Bool
         @cap > 0
+      end
+
+      # Whether the table gave up for good (`@disabled`). Unlike
+      # `available?`, false before the first key: an empty table that has
+      # not given up answers "absent" correctly.
+      def disabled? : Bool
+        @disabled
       end
 
       def clear : Nil
@@ -172,15 +179,16 @@ module Gcry
 
       # The slot holding *key*, inserted as `{count: 0, row: -1}` when it was
       # absent; -1 when there is no table (null key, or the table gave up).
-      # A `grow` on the way yields `{row, new slot}` for every key it moved
-      # whose row is set, before the slot is returned.
-      def claim(key : Void*, & : Int32, Int32 ->) : Int32
+      # A `grow` on the way that moved keys yields, once and before the slot
+      # is returned, the map from every old slot to its new one (-1 for an
+      # old slot that held none): valid during the block only.
+      def claim(key : Void*, & : Int32* ->) : Int32
         return -1 if key.null?
         return -1 if @disabled
         # Grow at 1/2 load. Tombstones count toward `@used`, so a table churned
         # by insert/release rehashes rather than degrading into a full probe.
         if @cap == 0 || (@used + 1) * 2 >= @cap
-          grow { |row, slot| yield row, slot }
+          grow { |remap| yield remap }
         end
         # The grow can have given up (out of C memory), in which case there is
         # no table to probe: `mask` would be `UInt64::MAX` and `@slots[i]` a
@@ -205,6 +213,11 @@ module Gcry
         end
       end
 
+      # `claim` for a table nobody holds slots of.
+      def claim(key : Void*) : Int32
+        claim(key) { }
+      end
+
       # Keys present. A walk of the whole table — specs only.
       def live_count : Int32
         n = 0
@@ -223,7 +236,7 @@ module Gcry
         (key.address >> 4) &* 0x9E3779B97F4A7C15_u64
       end
 
-      private def grow(& : Int32, Int32 ->) : Nil
+      private def grow(& : Int32* ->) : Nil
         old_table = @slots
         old_cap = @cap
         new_cap = old_cap == 0 ? 64 : old_cap * 2
@@ -246,23 +259,36 @@ module Gcry
         @slots = fresh
         @cap = new_cap
         @used = 0
+        return if old_table.null?
         # Reinsert live keys only, which is what drops accumulated tombstones.
+        #
+        # The old table becomes the old -> new slot map as it is read, in
+        # place: entry *j* of the map is the Int32 at byte 4j, inside old slot
+        # j/4, which the walk has already copied out (slot 0 is copied before
+        # its own write). One dense map lets the caller re-point what holds
+        # slots (`Entry#slot`) in a single sequential pass rather than a
+        # random walk per moved key, and asks for no memory a failure could
+        # refuse.
+        remap = old_table.as(Int32*)
         mask = (new_cap - 1).to_u64
         j = 0
         while j < old_cap
           slot = old_table[j]
-          unless slot.object.null? || slot.object == TOMBSTONE
+          if slot.object.null? || slot.object == TOMBSTONE
+            remap[j] = -1
+          else
             k = hash(slot.object) & mask
             while !@slots[k].object.null?
               k = (k &+ 1) & mask
             end
             @slots[k] = slot
             @used += 1
-            yield slot.row, k.to_i32 if slot.row >= 0
+            remap[j] = k.to_i32
           end
           j += 1
         end
-        LibC.free(old_table.as(Void*)) unless old_table.null?
+        yield remap
+        LibC.free(old_table.as(Void*))
       end
     end
 
@@ -297,11 +323,20 @@ module Gcry
       #
       # One table, not a counter and a head map side by side: a second table
       # made 2M `GC.add_finalizer` + collect 37% slower (357 -> 490 ms), every
-      # registration and removal paying a miss in each. Now a registration is
-      # one probe, as with the counter alone, and a removal none: each row
-      # carries its slot (`Entry#slot`), so it writes the removed row's slot
-      # and, when the row moved into its place heads a chain, that one's. The
-      # same benchmark: 303-340 ms, against 317-385 ms with the counter alone.
+      # registration and removal paying a miss in each. A registration is one
+      # probe, as with the counter alone. A removal is none: each row carries
+      # its slot (`Entry#slot`), and writes it, and the slot of the row moved
+      # into its place when that row heads its chain.
+      #
+      # Why carry the slot when a probe would find it in the same cache line:
+      # probing instead made the same 2M benchmark 321 ms against 290 (medians
+      # of 7) — most likely because the probe's key compare is a branch on the
+      # missing load, so the collector's removals stop overlapping misses.
+      # The price is at growth, when every row's slot moves: `claim_object`
+      # re-points them in one sequential pass through the grow's old -> new
+      # map. Walking each moved key's chain instead (rows in hash order, a miss
+      # apiece) made fresh registration 78 ns against the counter's 64; the
+      # pass makes it ~70.
       #
       # Kept exact through every mutation: `append_entry` links a row in,
       # `swap_remove_entry` unlinks it and re-points the row moved into its
@@ -315,9 +350,6 @@ module Gcry
       # row per location — `register_disappearing_link` keeps it so — which is
       # what lets a location map to a single row.
       @link_index = PointerIndex.new
-      # Set once `@index` has given up and every `Entry#slot` has been reset
-      # to -1: from then on rows are found by scanning.
-      @index_off = false
 
       @entries : Entry* = Pointer(Entry).null
       @entries_size = 0
@@ -381,7 +413,7 @@ module Gcry
         begin
           if fn.null?
             # A removal inserts nothing, so it only looks.
-            previous = drop_rows(object, find_object(object), keep: false)
+            previous = drop_rows(object, @index.find(object), keep: false)
           else
             slot = claim_object(object)
             previous = drop_rows(object, slot, keep: true)
@@ -447,7 +479,7 @@ module Gcry
             held = @index[slot]
             @index[slot] = IndexSlot.new(object, held.count - 1, held.row)
           end
-        elsif @index_off
+        elsif @index.disabled?
           # The index gave up its C allocation: scan, slower, never wrong.
           found = false
           i = 0
@@ -486,7 +518,7 @@ module Gcry
           row = @links_size
           @links[row] = Link.new(link, object)
           @links_size += 1
-          slot = @link_index.claim(link.as(Void*)) { }
+          slot = @link_index.claim(link.as(Void*))
           @link_index[slot] = IndexSlot.new(link.as(Void*), 0, row) if slot >= 0
           count_link(object)
           true
@@ -578,7 +610,7 @@ module Gcry
           # links are scanned for only when it still has a count once those
           # are gone. An index that gave up its C allocation answers nothing,
           # so fall through to the scan — slower, never wrong.
-          unless @index_off
+          unless @index.disabled?
             slot = @index.find(object)
             return if slot < 0
             # A released slot is a tombstone, whose row is -1.
@@ -590,7 +622,7 @@ module Gcry
             return unless @index[slot].object == object
           end
 
-          if @index_off
+          if @index.disabled?
             i = 0
             while i < @entries_size
               if @entries[i].object == object
@@ -713,7 +745,6 @@ module Gcry
         begin
           @index.give_up
           @link_index.give_up
-          index_off
         ensure
           @lock.unlock
         end
@@ -732,14 +763,14 @@ module Gcry
           chained = 0
           @entries_size.times do |r|
             e = @entries[r]
-            unless @index_off
+            unless @index.disabled?
               slot = @index.find(e.object)
               return "row #{r} carries slot #{e.slot}, its object is in #{slot}" if e.slot != slot
+              if e.prev_row < 0 && @index[slot].row != r
+                return "row #{r} heads its chain, @index says #{@index[slot].row}"
+              end
             end
             next unless e.prev_row < 0
-            if !@index_off && @index[e.slot].row != r
-              return "row #{r} heads its chain, @index says #{@index[e.slot].row}"
-            end
             row = r
             prev = -1
             while row >= 0
@@ -760,7 +791,7 @@ module Gcry
             end
             return "@link_index has #{@link_index.live_count} keys, #{@links_size} links" if @link_index.live_count != @links_size
           end
-          unless @index_off
+          unless @index.disabled?
             return "#{chained} chained of #{@entries_size} rows" if chained != @entries_size
             distinct = 0
             (@entries_size + @links_size).times do |k|
@@ -791,38 +822,19 @@ module Gcry
         end
       end
 
-      # *object*'s `@index` slot, inserted when absent; -1 once the index is
-      # off. A growth moves slots: `claim` yields each moved key's head row,
-      # and every row of that chain is given the slot's new index.
+      # *object*'s `@index` slot, inserted when absent; -1 once the index gave
+      # up. A growth moves slots: `claim` yields the old -> new slot map, and
+      # one sequential pass gives every row its slot's new index.
       private def claim_object(object : Void*) : Int32
-        return -1 if @index_off
-        slot = @index.claim(object) do |head, moved_to|
-          row = head
-          while row >= 0
-            entry = @entries[row]
-            entry.slot = moved_to
-            @entries[row] = entry
-            row = entry.next_row
+        @index.claim(object) do |remap|
+          r = 0
+          while r < @entries_size
+            entry = @entries[r]
+            # While the index is on, every row's slot holds its object.
+            entry.slot = remap[entry.slot]
+            @entries[r] = entry
+            r += 1
           end
-        end
-        index_off if slot < 0
-        slot
-      end
-
-      # *object*'s `@index` slot, or -1: absent, or the index is off.
-      private def find_object(object : Void*) : Int32
-        @index_off ? -1 : @index.find(object)
-      end
-
-      # The index gave up: forget every row's slot, which named the freed
-      # table, and scan from now on (`PointerIndex@disabled` is sticky).
-      private def index_off : Nil
-        return if @index_off
-        @index_off = true
-        @entries_size.times do |r|
-          entry = @entries[r]
-          entry.slot = -1
-          @entries[r] = entry
         end
       end
 
@@ -836,7 +848,7 @@ module Gcry
 
       # A link row no longer names *object*. Allocates nothing.
       private def uncount_link(object : Void*) : Nil
-        slot = find_object(object)
+        slot = @index.find(object)
         return if slot < 0
         uncount(slot, @index[slot])
       end
@@ -852,7 +864,7 @@ module Gcry
       end
 
       # A new row heads its object's chain, whose `@index` slot is *slot*
-      # (-1: the index is off): it is found first, and linking it in touches
+      # (-1: the index gave up): it is found first, and linking it in touches
       # no other row's position.
       private def append_entry(entry : Entry, slot : Int32) : Nil
         ensure_entries_cap(@entries_size + 1)
@@ -920,16 +932,17 @@ module Gcry
       # Every entry removal comes here, so this is where `@index` and the
       # chains are kept exact: unlink row *i*, then move the last row into its
       # place and re-point whatever pointed at the last row. Each row carries
-      # its slot, so this probes nothing; it touches the removed row's slot,
+      # its slot, so this probes nothing; it writes the removed row's slot,
       # and the moved row's only when that row heads its chain. Allocates
-      # nothing — the collector calls it with the world stopped.
+      # nothing — the collector calls it with the world stopped. A given-up
+      # index has no slots: rows' are stale then, and go unread.
       private def swap_remove_entry(i : Int32) : Nil
         removed = @entries[i]
         prev = removed.prev_row
         nxt = removed.next_row
         set_next_row(prev, nxt) if prev >= 0
         set_prev_row(nxt, prev) if nxt >= 0
-        if (slot = removed.slot) >= 0
+        if (slot = removed.slot) >= 0 && !@index.disabled?
           held = @index[slot]
           uncount(slot, IndexSlot.new(held.object, held.count, prev < 0 ? nxt : held.row))
         end
@@ -940,7 +953,7 @@ module Gcry
           @entries[i] = moved
           if moved.prev_row >= 0
             set_next_row(moved.prev_row, i)
-          elsif (slot = moved.slot) >= 0
+          elsif (slot = moved.slot) >= 0 && !@index.disabled?
             held = @index[slot]
             @index[slot] = IndexSlot.new(held.object, held.count, i)
           end

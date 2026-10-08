@@ -139,7 +139,7 @@ describe "finalizer registration index" do
   # else's death. This drives every mutation in random interleaving against a
   # brute-force model, and has the registry check each map against its tables.
   {false, true}.each do |gave_up|
-    it "keeps its row maps exact through every mutation#{gave_up ? " (after the maps gave up)" : ""}" do
+    it "keeps its row maps exact through every mutation#{gave_up ? " (the maps giving up halfway)" : ""}" do
       FinalizerIndexModel.new(seed: gave_up ? 7_u64 : 1_u64, gave_up: gave_up).run(6000)
     end
   end
@@ -168,15 +168,17 @@ class FinalizerIndexModel
   @links = {} of Int32 => Void*
   @serial = 0_u64
 
+  # *gave_up*: the maps give up halfway through `run`, so the rows from
+  # before still name slots of the table that went, and must not be read.
   def initialize(seed : UInt64, @gave_up : Bool, @objects : Int32 = 48, @link_slots : Int32 = 40)
     @random = Random.new(seed)
     @registry = Registry.new
     @slots = Pointer(Void*).malloc(@link_slots)
-    @registry.debug_index_give_up if @gave_up
   end
 
   def run(ops : Int32, check_every : Int32 = 1) : Nil
     ops.times do |step|
+      @registry.debug_index_give_up if @gave_up && step == ops // 2
       op = @random.rand(100)
       case op
       when 0...15  then add
