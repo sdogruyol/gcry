@@ -199,6 +199,7 @@ module Gcry
     # nothing under `-Dwithout_mt` off Windows, and C threads add roots
     # whatever Crystal's threading flags say.
     @@ranges_lock = 0
+    @@root_table_copies = 0
 
     def self.unsupported(name : String, why : String) : NoReturn
       buf = uninitialized UInt8[RawOut::LIMIT]
@@ -265,6 +266,7 @@ module Gcry
       begin
         table = @@ranges.get(:acquire)
         count = table.null? ? 0_u64 : table[0]
+        free_entry = Pointer(UInt64).null
         i = 0_u64
         while i < count
           entry = table + (2 &+ 2 &* i)
@@ -274,42 +276,40 @@ module Gcry
             Atomic::Ops.store(entry + 1, hi, LLVM::AtomicOrdering::Release, false) if entry[1] < hi
             return
           end
-          return if entry[0] < entry[1] && entry[0] <= lo && hi <= entry[1]
+          if entry[0] < entry[1]
+            return if entry[0] <= lo && hi <= entry[1]
+          elsif free_entry.null?
+            free_entry = entry
+          end
           i &+= 1
         end
+        unless free_entry.null?
+          # A removed entry is taken over in place, so add/remove churn reuses
+          # the table instead of copying it: a copy cannot free the one it
+          # replaces, and 2M add/remove pairs over distinct ranges left 45 MB
+          # of such copies behind when a full table with removed entries was
+          # compacted into a new one. End to 0 first, then the start, then the
+          # end: the hook reads end, start, end and takes the range only when
+          # both ends agree, so it never pairs one range's start with
+          # another's end (`install_roots_hook`).
+          Atomic::Ops.store(free_entry + 1, 0_u64, LLVM::AtomicOrdering::Release, false)
+          Atomic::Ops.store(free_entry, lo, LLVM::AtomicOrdering::Release, false)
+          Atomic::Ops.store(free_entry + 1, hi, LLVM::AtomicOrdering::Release, false)
+          return
+        end
         if table.null? || count == table[1]
-          # Removed entries (`remove_roots`) are left out of the copy: the
-          # capacity follows the live ranges, not every range ever added.
-          live = 0_u64
-          i = 0_u64
-          while i < count
-            entry = table + (2 &+ 2 &* i)
-            live &+= 1 if entry[0] < entry[1]
-            i &+= 1
-          end
-          capacity = table.null? ? 8_u64 : table[1]
-          capacity &*= 2 if live &* 2 >= capacity
+          capacity = table.null? ? 8_u64 : table[1] &* 2
           fresh = LibC.malloc(LibC::SizeT.new((2 &+ 2 &* capacity) &* 8)).as(UInt64*)
           unsupported("GC_add_roots", "out of memory for the root table") if fresh.null?
-          kept = 0_u64
-          i = 0_u64
-          while i < count
-            entry = table + (2 &+ 2 &* i)
-            if entry[0] < entry[1]
-              fresh[2 &+ 2 &* kept] = entry[0]
-              fresh[3 &+ 2 &* kept] = entry[1]
-              kept &+= 1
-            end
-            i &+= 1
-          end
-          fresh[0] = kept
+          fresh[0] = count
           fresh[1] = capacity
+          (table + 2).copy_to(fresh + 2, 2 &* count) unless table.null?
           @@ranges.set(fresh, :release)
+          @@root_table_copies += 1
           table = fresh
-          count = kept
         end
-        table[2 &+ 2 &* count] = lo
-        table[3 &+ 2 &* count] = hi
+        Atomic::Ops.store(table + (2 &+ 2 &* count), lo, LLVM::AtomicOrdering::Release, false)
+        Atomic::Ops.store(table + (3 &+ 2 &* count), hi, LLVM::AtomicOrdering::Release, false)
         Atomic::Ops.store(table, count &+ 1, LLVM::AtomicOrdering::Release, false)
       ensure
         unlock_ranges
@@ -322,7 +322,7 @@ module Gcry
     # memory was then freed stayed scanned. A removed entry keeps its start
     # and has its end stored down to it, one word the hook reads with
     # acquire: the hook sees the range whole or empty, never a mix. The next
-    # copy of the table leaves it out (`add_roots`).
+    # `add_roots` of another range takes the entry over in place.
     def self.remove_roots(low : Void*, high : Void*) : Nil
       return unless low.address < high.address
       lo = low.address
@@ -358,6 +358,13 @@ module Gcry
         i &+= 1
       end
       live
+    end
+
+    # Copies of the `GC_add_roots` table made so far. Each one leaves the
+    # table it replaces allocated, so add/remove churn must not keep making
+    # them.
+    def self.root_table_copies : Int32
+      @@root_table_copies
     end
 
     private def self.lock_ranges : Nil
@@ -709,9 +716,14 @@ module Gcry
           n = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
           while i < n
             entry = table + (2 &+ 2 &* i)
+            # End, start, end: an entry `add_roots` is taking over in place
+            # (end 0, start, end) is skipped unless both ends agree, so a
+            # start is never paired with another range's end; a removed
+            # range reads as empty (`remove_roots`).
             hi = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
-            # A removed range reads as empty (`remove_roots`).
-            Gcry.default_heap.push_stack(Pointer(Void).new(entry[0]), Pointer(Void).new(hi)) if entry[0] < hi
+            lo = Atomic::Ops.load(entry, LLVM::AtomicOrdering::Acquire, false)
+            again = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
+            Gcry.default_heap.push_stack(Pointer(Void).new(lo), Pointer(Void).new(hi)) if hi == again && lo < hi
             i &+= 1
           end
         end

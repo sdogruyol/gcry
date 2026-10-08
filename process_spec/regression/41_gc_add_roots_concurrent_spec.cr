@@ -140,4 +140,24 @@ describe "GC_add_roots" do
     Gcry::CAbi.root_range_count.should eq(before)
     LibC.free(buf.as(Void*))
   end
+
+  # Ranges added and removed over and over reuse the removed entries. A
+  # table copy cannot free the one it replaces (the hook may be reading it),
+  # and the first `GC_remove_roots` compacted a full table into a new copy:
+  # 2M add/remove pairs over distinct ranges, one live at a time, left 45 MB
+  # of copies behind.
+  it "keeps the table's size to its live ranges under add/remove churn" do
+    pairs = 100_000
+    # One word per pair, so no range shares a start with an earlier one.
+    buf = LibC.malloc(LibC::SizeT.new((pairs + 1) * sizeof(Void*))).as(Void**)
+    buf.clear(pairs + 1)
+    copies = Gcry::CAbi.root_table_copies
+    pairs.times do |i|
+      slot = buf + i
+      LibGC.add_roots(slot.as(Void*), (slot + 1).as(Void*))
+      LibGC.remove_roots(slot.as(Void*), (slot + 1).as(Void*))
+    end
+    (Gcry::CAbi.root_table_copies - copies).should be <= 1
+    LibC.free(buf.as(Void*))
+  end
 end
