@@ -642,9 +642,9 @@ module Gcry
         # holds the size actually requested. `block_payload` would give the
         # mapping extent instead — an upper bound, and copying that many
         # bytes reads past the object.
-        ChunkHeader.large_header(chunk).value.size.to_u64
+        ChunkHeader.large_payload(chunk)
       else
-        block_payload(chunk, header).to_u64
+        block_payload(chunk, header)
       end
     end
 
@@ -917,7 +917,7 @@ module Gcry
       if large
         # `header` is already the large header (resolved above), and its size
         # is the size actually requested rather than the mapping extent.
-        payload = header.value.size.to_u64
+        payload = ChunkHeader.large_payload(chunk)
 
         bytes_since_gc_sub(payload)
         note_explicit_free(payload)
@@ -964,7 +964,7 @@ module Gcry
         with_freelist_lock(class_index, nursery) do
           # `push_size_class_free` poisons on the freelist path and this path
           # does not go through it, so the knob would be armed and inert.
-          poison_payload(pointer, payload) if @poison_freed
+          poison_payload(pointer, payload.to_u64) if @poison_freed
           BlockHeader.set_free(header, Pointer(Void).null)
           bitmap_free_block(chunk, header)
         end
@@ -2140,7 +2140,7 @@ module Gcry
     # differ, which a future reader might be tempted to rely on for equality.
     property poison_tag_addr : Bool = false
 
-    private def poison_payload(pointer : Void*, payload : UInt32) : Nil
+    private def poison_payload(pointer : Void*, payload : UInt64) : Nil
       word = if @poison_tag_addr
                POISON_TAG | (pointer.address & POISON_ADDR_MASK)
              else
@@ -2148,7 +2148,7 @@ module Gcry
              end
       words = pointer.as(UInt64*)
       n = payload // sizeof(UInt64)
-      i = 0
+      i = 0_u64
       while i < n
         words[i] = word
         i += 1
@@ -2160,7 +2160,7 @@ module Gcry
     # or an explicit `Heap#free`. It rides in the header (`Flags::SWEPT`) so a
     # crash report can say it; nothing in the allocator reads it back.
     private def push_size_class_free(class_index : Int32, nursery : Bool, header : BlockHeader*, pointer : Void*, payload : UInt32, swept : Bool = false) : Nil
-      poison_payload(pointer, payload) if @poison_freed
+      poison_payload(pointer, payload.to_u64) if @poison_freed
       flags = BlockHeader::Flags::FREE
       flags |= BlockHeader::Flags::SWEPT if swept
       if nursery
@@ -2427,6 +2427,9 @@ module Gcry
     # reclaim and munmap stay page-correct. *recycle*: a cached chunk of
     # another size may be resized for it (`recycle_large_mapping`).
     private def alloc_large(payload : UInt64, flags : UInt32, recycle : Bool) : {Void*, UInt64}
+      # Past what a large header records, and past what any mapping can hold:
+      # the mmap failure it would otherwise be.
+      return {Pointer(Void).null, 0_u64} if payload >= BlockHeader::LARGE_SIZE_LIMIT
       # The large chunk's data offset, not ChunkHeader::SIZE + BlockHeader::SIZE.
       # Under headerless the block header is reserved *inside* the metadata
       # region, so the object starts 16 bytes later than that sum suggests and
@@ -2458,7 +2461,7 @@ module Gcry
         # the USED, unmarked block for dead (`dormant-flush-race`, 2026-09-04).
         @large_alloc_in_flight = user
         ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
-        BlockHeader.set_used_large(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
+        BlockHeader.set_used_large(header, payload, flags | BlockHeader::Flags::LARGE)
         heap_set_mark_allocating(header) if @incremental_marking || @collecting
         return {user, payload}
       end
@@ -2479,7 +2482,7 @@ module Gcry
       trace_large_map(chunk, mapped, payload, reused) if @trace_large
       header = ChunkHeader.large_header(chunk)
       @large_alloc_in_flight = ChunkHeader.large_user(chunk)
-      BlockHeader.set_used_large(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
+      BlockHeader.set_used_large(header, payload, flags | BlockHeader::Flags::LARGE)
       heap_set_mark_allocating(header) if @incremental_marking || @collecting
       dirty = 0_u64
       if reused > 0_u64
@@ -2579,9 +2582,9 @@ module Gcry
           if rest >= LARGE_RECYCLE_SPLIT_MIN
             # FREE before the chunk is published, as the sweep skips it.
             rheader = (tail &+ ChunkHeader::SIZE).to_u64
-            Pointer(BlockHeader).new(rheader).value = BlockHeader.new(
-              (rest &- ChunkHeader.large_data_offset.to_u64).to_u32!,
-              BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, Pointer(Void).null)
+            Pointer(BlockHeader).new(rheader).value = BlockHeader.large(
+              rest &- ChunkHeader.large_data_offset.to_u64,
+              BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE)
             rchunk = map_chunk(rest, UInt32::MAX, 0_u32, Pointer(Void).new(tail))
             link_free_large(rchunk, Pointer(BlockHeader).new(rheader))
           else
@@ -2690,7 +2693,7 @@ module Gcry
     private def link_free_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       mapped = chunk.value.mapped_bytes
       ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_IN)
-      payload = header.value.size
+      payload = BlockHeader.large_size(header)
       bucket = self.class.large_bucket(mapped)
       user = BlockHeader.large_user_from_header(header)
       # Find tail of bucket freelist. Every entry is an indexed chunk, so a
@@ -2710,7 +2713,7 @@ module Gcry
       end
       poison_payload(user, payload) if @poison_freed
       ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
-      header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, Pointer(Void).null)
+      header.value = BlockHeader.large(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE)
       if tail.null?
         @large_freelists[bucket] = user
       else
@@ -2780,7 +2783,7 @@ module Gcry
       if start.null?
         n = RawOut.append(buf.to_unsafe, n, ": none from the head, the chain is just longer than the index")
       else
-        h = BlockHeader.large_header_from_user(start).value
+        h = BlockHeader.large_header_from_user(start)
         n = RawOut.append(buf.to_unsafe, n, ": enters at 0x")
         n = RawOut.append_hex(buf.to_unsafe, n, start.address)
         n = RawOut.append(buf.to_unsafe, n, " after ")
@@ -2788,9 +2791,9 @@ module Gcry
         n = RawOut.append(buf.to_unsafe, n, ", length ")
         n = RawOut.append_u64(buf.to_unsafe, n, length)
         n = RawOut.append(buf.to_unsafe, n, ", entry size ")
-        n = RawOut.append_u64(buf.to_unsafe, n, h.size.to_u64)
+        n = RawOut.append_u64(buf.to_unsafe, n, BlockHeader.large_size(h))
         n = RawOut.append(buf.to_unsafe, n, " flags 0x")
-        n = RawOut.append_hex(buf.to_unsafe, n, h.flags.to_u64)
+        n = RawOut.append_hex(buf.to_unsafe, n, BlockHeader.large_flags(h).to_u64)
         n = RawOut.append(buf.to_unsafe, n, on_cycle ? "; the block in hand is on it" : "; the block in hand is not on it")
       end
       n = RawOut.append(buf.to_unsafe, n, ". cached twice ")
@@ -4006,7 +4009,7 @@ module Gcry
     end
 
     def diag_payload(header : BlockHeader*) : UInt64
-      block_payload(header).to_u64
+      block_payload(header)
     end
 
     def diag_user(header : BlockHeader*) : Void*
@@ -4039,7 +4042,8 @@ module Gcry
     # object's data.
     def diag_flags(header : BlockHeader*) : UInt64
       chunk = diag_chunk(header)
-      return header.value.flags.to_u64 if chunk.nil? || ChunkHeader.large?(chunk)
+      return header.value.flags.to_u64 if chunk.nil?
+      return BlockHeader.large_flags(header).to_u64 if ChunkHeader.large?(chunk)
       {% if !flag?(:gcry_block_headers) %}
         f = 0_u64
         f |= BlockHeader::Flags::FREE.to_u64 unless block_allocated?(chunk, header)
@@ -4071,29 +4075,29 @@ module Gcry
       end
     end
 
-    def block_payload(chunk : ChunkHeader*, header : BlockHeader*) : UInt32
+    def block_payload(chunk : ChunkHeader*, header : BlockHeader*) : UInt64
       if ChunkHeader.large?(chunk)
         # The large header keeps the allocated size in both builds; the
         # mapping only bounds it. Scanning to the mapping's end would read a
         # cached mapping's stale tail (spec/large_scan_bounds_spec.cr).
         user = user_of(chunk, header).address
         finish = ChunkHeader.data_end(chunk).address
-        return 0_u32 if finish <= user
+        return 0_u64 if finish <= user
         extent = finish - user
-        size = header.value.size.to_u64
-        return (size < extent ? size : extent).to_u32
+        size = ChunkHeader.large_payload(chunk)
+        return size < extent ? size : extent
       end
       class_index = chunk.value.size_class.to_i32
-      return 0_u32 if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-      SizeClasses.payload(class_index)
+      return 0_u64 if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      SizeClasses.payload(class_index).to_u64
     end
 
     # Same, without a chunk in hand. O(1) under GCRY_CHUNK_RADIX, a binary
     # search otherwise — which is why hot paths should pass the chunk they
     # already have.
-    def block_payload(header : BlockHeader*) : UInt32
+    def block_payload(header : BlockHeader*) : UInt64
       chunk = chunk_containing(header.address)
-      return 0_u32 unless chunk
+      return 0_u64 unless chunk
       block_payload(chunk, header)
     end
 

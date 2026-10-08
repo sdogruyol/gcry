@@ -172,7 +172,7 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, @ec_sched_obj_size.to_u64)
       len = RawOut.append(buf.to_unsafe, len, "-byte object")
       if hdr = find_block(Pointer(Void).new(arr))
-        pay = block_payload(hdr).to_u64
+        pay = block_payload(hdr)
         len = RawOut.append(buf.to_unsafe, len, ", in a block of payload ")
         len = RawOut.append_u64(buf.to_unsafe, len, pay)
         len = RawOut.append(buf.to_unsafe, len,

@@ -58,7 +58,7 @@ module Gcry
             w0 = u.as(UInt64*).value
             w1 = (u.as(UInt64*) + 1).value
             slot = Roots.hl_slot
-            LibC.printf("STACKSEED cand=%p user=%p base=%d size=%u w0=%llx w1=%llx slot=%p off_entry=%lld off_bottom=%lld\n",
+            LibC.printf("STACKSEED cand=%p user=%p base=%d size=%llu w0=%llx w1=%llx slot=%p off_entry=%lld off_bottom=%lld\n",
               pointer, u, pointer.address == u.address ? 1 : 0, block_payload(c, h), w0, w1,
               Pointer(Void).new(slot), slot.to_i64 - @collect_entry_sp.to_i64, @stack_bottom.address.to_i64 - slot.to_i64)
           end
@@ -291,7 +291,7 @@ module Gcry
     private def note_first_mark(chunk : ChunkHeader*, header : BlockHeader*, source : RootSource) : Nil
       # Size and kind come from the chunk: the header alone has neither for a
       # small block on the headerless layout.
-      bytes = block_payload(chunk, header).to_u64
+      bytes = block_payload(chunk, header)
       atomic = atomic_of(chunk, header)
       case source
       when RootSource::Stack
@@ -352,7 +352,7 @@ module Gcry
       # returns the object's own first word — its type_id — so the gate compared
       # the type_id against itself and rejected live objects, which were then
       # swept and their memory handed out twice.
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return true if size < 4
 
       type_id_word_plausible?(user_of(chunk, header).as(UInt8*))
@@ -534,7 +534,7 @@ module Gcry
                                 shard : MarkShard? = nil) : Nil
       return if atomic_of(chunk, header)
       user = user_of(chunk, header).as(UInt8*)
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       finish = user.address &+ size
       return if from >= finish
       base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
@@ -556,7 +556,7 @@ module Gcry
       return if atomic_of(chunk, header)
 
       user = user_of(chunk, header).as(UInt8*)
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return if size == 0
       base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
       scan_payload(user, size, base_only, skip_lo, skip_hi, shard)
@@ -786,7 +786,7 @@ module Gcry
       chunk = chunk_containing(header.address)
       return unless chunk
       user = user_of(chunk, header).as(UInt8*)
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return if size == 0
 
       # Old Hash objects store keys/values in a separate @entries blob. When the
@@ -821,7 +821,7 @@ module Gcry
       chunk = chunk_containing(header.address)
       return unless chunk
       user = user_of(chunk, header).as(UInt8*)
-      size = block_payload(chunk, header).to_u64
+      size = block_payload(chunk, header)
       return if size == 0
 
       word = sizeof(Void*).to_u64
@@ -1146,7 +1146,7 @@ module Gcry
       end
       lo = header.address
       hi = if ChunkHeader.large?(chunk)
-             user_of(chunk, header).address &+ header.value.size
+             user_of(chunk, header).address &+ ChunkHeader.large_payload(chunk)
            else
              lo &+ @block_bytes[chunk.value.size_class.to_i32]
            end

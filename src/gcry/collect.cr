@@ -2363,7 +2363,7 @@ module Gcry
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.large_header(chunk)
         user = ChunkHeader.large_user(chunk).address
-        finish = user + header.value.size
+        finish = user + ChunkHeader.large_payload(chunk)
         # Accept the header slot too: interior scans and `find_object` hand back
         # the header, and under headerless it sits outside [user, finish).
         return {header, chunk} if addr >= header.address && addr < finish

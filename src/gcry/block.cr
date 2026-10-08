@@ -78,6 +78,37 @@ module Gcry
       # BlockHeader.mark_gen. clear_all_marks bumps gen (O(1)) instead of walking.
       MARK_GEN_SHIFT =          8
       MARK_GEN_MASK  = 0xFF00_u32
+      # Bits 16–31 of a *large* block's header: bits 32–47 of its size
+      # (`BlockHeader.large_size`). The mark and FREE writes are
+      # read-modify-writes of this word and keep them.
+      SIZE_HI_SHIFT =              16
+      SIZE_HI_MASK  = 0xFFFF_0000_u32
+    end
+
+    # A large payload must be below this to be recorded: `size` holds its low
+    # 32 bits and `Flags::SIZE_HI_MASK` the next 16. No supported target maps
+    # that much (x86_64 and arm64 user space is 47–48 bits). A literal, so no
+    # lazy constant initializer lands on the allocation path.
+    LARGE_SIZE_LIMIT = 0x1_0000_0000_0000_u64
+
+    # A large block's header word for *size*. `size` alone truncated at
+    # 4 GiB, and a pointerful object past that was scanned only to its size
+    # mod 2^32, so what it held beyond was swept while live
+    # (`process_spec/regression/43_large_object_over_4gib_spec.cr`).
+    def self.large(size : UInt64, flags : UInt32, next_free : Void* = Pointer(Void).null) : BlockHeader
+      hi = (size >> 32).to_u32! << Flags::SIZE_HI_SHIFT
+      new(size.to_u32!, (flags & ~Flags::SIZE_HI_MASK) | hi, next_free)
+    end
+
+    # The size a large block's header records (`large`).
+    def self.large_size(header : BlockHeader*) : UInt64
+      h = header.value
+      h.size.to_u64 | ((h.flags & Flags::SIZE_HI_MASK).to_u64 << (32 - Flags::SIZE_HI_SHIFT))
+    end
+
+    # Its flags, without the size bits.
+    def self.large_flags(header : BlockHeader*) : UInt32
+      header.value.flags & ~Flags::SIZE_HI_MASK
     end
 
     # Process-wide current mark generation for in-header MARK (mirrors active Heap).
@@ -269,9 +300,9 @@ module Gcry
     # so this always writes. `set_used` is a no-op under headerless because a
     # *small* block has nowhere to write; using it for a large block silently
     # dropped its size and LARGE flag.
-    def self.set_used_large(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
+    def self.set_used_large(header : BlockHeader*, size : UInt64, flags : UInt32) : Nil
       hl_check(header.address, "HL: set_used_large into guarded range\n")
-      header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
+      header.value = large(size, flags & ~Flags::FREE)
     end
 
     # Mark accessors for a block that still has a header — i.e. a large block,
@@ -530,6 +561,12 @@ module Gcry
       {% else %}
         (data_start(chunk).as(UInt8*) + BlockHeader::SIZE).as(Void*)
       {% end %}
+    end
+
+    # The size a large chunk's object was allocated with, in both builds and
+    # past 4 GiB (`BlockHeader.large_size`). The mapping only bounds it.
+    def self.large_payload(chunk : ChunkHeader*) : UInt64
+      BlockHeader.large_size(large_header(chunk))
     end
 
     def self.nursery?(chunk : ChunkHeader*) : Bool
