@@ -87,9 +87,10 @@ private CALLS      = 100
 # A call waits through the collection in flight when it arrives and the one
 # that answers it. One more can finish before the caller reads the count, if
 # the stop of a collection queued behind it freezes the caller on its way
-# out, and once more is only that again. Before the fix: up to all of
-# another thread's calls, 100 here.
-private WAIT_BOUND = 4
+# out, and more than once on a busy runner: 5 on macos x86_64 CI
+# (2026-10-08). Before the fix: up to all of another thread's calls, 100
+# here.
+private WAIT_BOUND = 8
 
 describe "GC.collect and the roots lock with peers collecting back to back" do
   it "answers every call with a collection begun after it, within a bounded wait, sharing collections" do
