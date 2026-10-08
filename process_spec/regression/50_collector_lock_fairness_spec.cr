@@ -18,14 +18,16 @@ require "spec"
 # `@roots_lock` was a `Crystal::SpinLock`, taken by every stop and by
 # `add_root` / `delete_root`. A thread starting a thread spun on it for over
 # 120 s on a 4-vCPU Windows runner while another collected back to back and
-# busy threads took the other CPUs. It hands out tickets now. Linux does not
-# reproduce that one: before the fix, two million add/remove pairs beside a
-# thread collecting back to back waited through at most one of its 3 468
-# collections each. Its stop waits for every thread to acknowledge the resume
-# signal, so a resumed waiter is running before the collector can take the
-# lock again; `ResumeThread` and `thread_resume` wait for nothing. The last
-# example pins the property that closes it, in code that is the same on every
-# platform, and this file runs in the Windows job's process specs as well.
+# busy threads took the other CPUs. A stop now lets the mutators already
+# waiting go first (`Gcry::RootsLock#lock_for_stop`). A FIFO ticket lock did
+# that too, and convoyed every slow `realloc` (whose pin takes this lock
+# twice) once threads outnumbered CPUs: 16 threads growing arrays on 4 CPUs
+# went from about 1.1 s to 41 s. Linux does not reproduce the starvation:
+# its stop waits for every thread to acknowledge the resume signal, so a
+# resumed waiter is running before the collector can take the lock again;
+# `ResumeThread` and `thread_resume` wait for nothing. The last examples pin
+# the property that closes it, in code that is the same on every platform,
+# and this file runs in the Windows job's process specs as well.
 
 # Collections begun and finished, counted by the hook below. Module state and
 # a non-capturing proc: the hook lives on the process heap, which is not in
@@ -51,21 +53,25 @@ private module CollectionCount
   end
 end
 
-# A `Gcry::TicketLock` in a class, so the threads share one lock and not
+# A `Gcry::RootsLock` in a class, so the threads share one lock and not
 # copies of a struct.
-private class SharedTicketLock
-  @lock = Gcry::TicketLock.new
+private class SharedRootsLock
+  @lock = Gcry::RootsLock.new
 
   def lock : Nil
     @lock.lock
+  end
+
+  def lock_for_stop : Nil
+    @lock.lock_for_stop
   end
 
   def unlock : Nil
     @lock.unlock
   end
 
-  def queued : UInt32
-    @lock.queued
+  def waiting : UInt64
+    @lock.waiting
   end
 end
 
@@ -141,27 +147,55 @@ describe "GC.collect and the roots lock with peers collecting back to back" do
     (heap.collect_satisfied_by_peer - satisfied_before).should be > 0
   end
 
-  it "serves the roots lock in arrival order, so its holder cannot take it back ahead of a waiter" do
-    lock = SharedTicketLock.new
+  it "lets a mutator already waiting for the roots lock in ahead of the next stop" do
+    lock = SharedRootsLock.new
     overtaken = 0
     100.times do
       waiter_entered = Atomic(Int32).new(0)
-      lock.lock
+      lock.lock_for_stop
       waiter = Thread.new do
         lock.lock
         waiter_entered.set(1)
         lock.unlock
       end
-      # The waiter has its ticket: two taken, the holder's and its own.
-      until lock.queued == 2
+      until lock.waiting == 1
         Thread.yield
       end
+      # The stop lets go and comes straight back, as a collector looping
+      # `GC.collect` does.
       lock.unlock
-      lock.lock
+      lock.lock_for_stop
       overtaken += 1 if waiter_entered.get == 0
       lock.unlock
       waiter.join
     end
-    overtaken.should eq(0)
+    # A plain spin lock let the stop back in first in 81–100 of 100 rounds.
+    # The stop defers for a bounded spin only, so a waiter the OS happens to
+    # deschedule for longer than that is overtaken; that is rare.
+    overtaken.should be <= 5
+  end
+
+  # Mutators keep no order among themselves, so a descheduled one holds up
+  # no one: with 3 threads per CPU taking and dropping the lock as a slow
+  # `realloc`'s pin does, they all finish at the pace of a plain spin lock.
+  # The ticket lock that came before took 30–40× as long here.
+  it "does not convoy mutators when threads outnumber CPUs" do
+    lock = SharedRootsLock.new
+    threads = System.cpu_count.to_i * 3
+    rounds = 20_000
+    shared = Pointer(Int64).malloc(1)
+    started = Time.instant
+    workers = Array.new(threads) do
+      Thread.new do
+        rounds.times do
+          lock.lock
+          shared.value &+= 1
+          lock.unlock
+        end
+      end
+    end
+    workers.each(&.join)
+    shared.value.should eq(threads.to_i64 * rounds)
+    (Time.instant - started).should be < 10.seconds
   end
 end

@@ -843,33 +843,14 @@ module Gcry
       #
       # `GCRY_MONITOR_GATE_LATE_CLOSE=1` restores the old ordering for the gate.
       #
-      # `@roots_lock` hands out tickets (src/gcry/ticket_lock.cr), and the
-      # stop below freezes threads queued in it. A spin lock's frozen waiter
-      # cost no one anything; a ticket's keeps its place, since the lock goes
-      # to the next ticket whether or not that thread is running. It still
-      # cannot wedge a stop:
-      #
-      # - The stop can only freeze a thread queued *behind* this one: this
-      #   thread holds the lock across the whole stop.
-      # - The release below, with the world stopped, may serve a frozen
-      #   ticket. Nothing waits on it while the world is stopped: the
-      #   collector's `add_root` / `delete_root` skip the lock under
-      #   `@world_stopped`, and the birth-root release runs under this hold.
-      # - `start_world` resumes every thread this stop suspended before this
-      #   thread can reach the next stop's `lock`, and a failed stop resumes
-      #   them before it returns (`try_stop_world_threads` on Windows,
-      #   `stop_world_threads` on Darwin). The next stop then waits only for
-      #   that ticket's critical section, which is the point.
-      # - A ticket descheduled by the OS holds the queue until it runs again,
-      #   which is what fairness costs. Only a thread the OS never runs again
-      #   would wedge it, and one frozen inside the lock always did.
-      #
-      # Not covered: an `add_root` from a `ThreadUnsuspended` hook on Darwin
-      # or Windows, which runs after `@world_stopped` is cleared and before
-      # the resume. Boehm calls that hook with its allocation lock held, so a
-      # collector call from it deadlocks there as well.
+      # `@roots_lock` lets mutators already waiting in first
+      # (src/gcry/roots_lock.cr): the stop defers to them for a bounded spin,
+      # then competes, so a collector stopping the world back to back no
+      # longer keeps a thread in `add_root` / `delete_root` out — the Windows
+      # livelock of 2026-09-30. A waiter the stop then freezes still costs no
+      # one anything: a test-and-set lock goes to whoever is running.
       MonitorGate.close unless @monitor_gate_late_close
-      @roots_lock.lock
+      @roots_lock.lock_for_stop
       @finalizers.lock_for_stw
       slots_locked = false
       begin
@@ -1039,7 +1020,7 @@ module Gcry
       @thread_register_gate = Crystal::RWLock.new
       @alloc_lock = Crystal::SpinLock.new
       init_freelist_locks
-      @roots_lock = TicketLock.new
+      @roots_lock = RootsLock.new
       @index_lock = Crystal::SpinLock.new
       @chunk_list_lock = Crystal::SpinLock.new
       init_post_stw_mutex

@@ -24,7 +24,7 @@ require "./mark"
 require "./roots"
 require "./stack_maps"
 require "./finalizer"
-require "./ticket_lock"
+require "./roots_lock"
 
 module Gcry
   class Heap
@@ -890,9 +890,10 @@ module Gcry
     @roots = Roots::Set.new
     # Serializes Roots::Set mutate vs STW: stop_world must not freeze a thread
     # mid-add_root/delete_root (half-linked / freed node → SEGV on @roots.each).
-    # First come, first served (src/gcry/ticket_lock.cr), so a collector that
-    # stops the world back to back cannot keep a mutator out of it.
-    @roots_lock = TicketLock.new
+    # Mutators first, then a stop (src/gcry/roots_lock.cr), so a collector
+    # looping `GC.collect` cannot keep a thread out of `add_root` /
+    # `delete_root`.
+    @roots_lock = RootsLock.new
     # The collection section: serializes post-STW munmap/madvise vs the next
     # collect's stop_world, held from before the stop until the flush is done.
     # Waiters sleep, not spin: under Parallel, SpinLock waiters burned a whole
