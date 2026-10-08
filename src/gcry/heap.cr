@@ -1144,9 +1144,9 @@ module Gcry
     # `alloc_large`. One slot suffices: large allocation is under `@alloc_lock`.
     @large_alloc_in_flight = Pointer(Void).null
 
-    private def alloc_large_counted(rounded : UInt64, flags : UInt32, recycle : Bool) : {Void*, UInt64}
+    private def alloc_large_counted(rounded : UInt64, flags : UInt32, recycle : Bool, clear : Bool) : {Void*, UInt64}
       with_alloc_lock do
-        u, fc = alloc_large(rounded, flags, recycle)
+        u, fc = alloc_large(rounded, flags, recycle, clear)
         # From here `u` is in the caller's registers or frame, which the scan
         # accepts; the collector's copy is no longer needed.
         @large_alloc_in_flight = Pointer(Void).null
@@ -1312,13 +1312,13 @@ module Gcry
       needs_clear = clear
       clear_bytes = rounded
       if class_index < 0
-        user, dirty = alloc_large_counted(rounded, flags, recycle)
+        user, dirty = alloc_large_counted(rounded, flags, recycle, clear)
         if user.null?
           # `map_chunk` returned null rather than raising under `@alloc_lock`;
           # the lock is gone by now, so the collection and the error both
           # belong here.
           oom!("mmap failed") unless retry_after_emergency_collect?
-          user, dirty = alloc_large_counted(rounded, flags, recycle)
+          user, dirty = alloc_large_counted(rounded, flags, recycle, clear)
           oom!("mmap failed") if user.null?
         end
         # Only the bytes a previous object wrote: past them a large chunk is
@@ -2422,11 +2422,16 @@ module Gcry
     end
 
     # Returns {user, dirty}: how many of the object's leading bytes a previous
-    # object wrote, 0 when all of it is fresh `mmap` zero pages. Mapped size
-    # is host-page aligned (16 KiB on Apple Silicon) so Darwin free-page
-    # reclaim and munmap stay page-correct. *recycle*: a cached chunk of
-    # another size may be resized for it (`recycle_large_mapping`).
-    private def alloc_large(payload : UInt64, flags : UInt32, recycle : Bool) : {Void*, UInt64}
+    # object may have written, 0 when all of it is fresh `mmap` zero pages.
+    # Mapped size is host-page aligned (16 KiB on Apple Silicon) so Darwin
+    # free-page reclaim and munmap stay page-correct. *recycle*: a cached
+    # chunk of another size may be resized for it (`recycle_large_mapping`).
+    # *clear*: the caller zeroes `dirty` bytes, so a recycled chunk's pages
+    # nothing wrote are found and left out of them (`large_written_bytes`);
+    # without it they are not looked for. An exact fit taken in place clears
+    # all of its payload, as it always did: zlib's blocks there are written
+    # through, and asking the kernel cost the gzip loop 5% for nothing.
+    private def alloc_large(payload : UInt64, flags : UInt32, recycle : Bool, clear : Bool) : {Void*, UInt64}
       # Past what a large header records, and past what any mapping can hold:
       # the mmap failure it would otherwise be.
       return {Pointer(Void).null, 0_u64} if payload >= BlockHeader::LARGE_SIZE_LIMIT
@@ -2469,9 +2474,11 @@ module Gcry
       @large_cache_misses += 1
 
       reused = 0_u64
-      at = recycle ? recycle_large_mapping(mapped) : Pointer(Void).null
+      written = 0_u64
+      at = recycle ? recycle_large_mapping(mapped, clear) : Pointer(Void).null
       unless at.null?
         reused = @recycled_from
+        written = @recycled_written
         # The old chunk's block header is FREE with a stale link. A fresh
         # mapping publishes zeroes there, which the sweep reads as an
         # allocation not yet filled in (`sweep_large_one`).
@@ -2485,8 +2492,8 @@ module Gcry
       BlockHeader.set_used_large(header, payload, flags | BlockHeader::Flags::LARGE)
       heap_set_mark_allocating(header) if @incremental_marking || @collecting
       dirty = 0_u64
-      if reused > 0_u64
-        kept = reused < mapped ? reused : mapped
+      if written > 0_u64
+        kept = written < mapped ? written : mapped
         dirty = kept &- ChunkHeader.large_data_offset.to_u64
         dirty = payload if dirty > payload
       end
@@ -2501,6 +2508,9 @@ module Gcry
     # Resident bytes at the front of the mapping the last
     # `recycle_large_mapping` returned.
     @recycled_from = 0_u64
+    # Of those, the front that may hold what the old chunk's objects wrote;
+    # the rest reads zeroes (`large_written_bytes`).
+    @recycled_written = 0_u64
     # Cached large bytes recycling may keep: what the last major left in the
     # cache, less every byte mapped fresh since. Without recycling those
     # bytes would have gone back at the sweep, so a cache that gives back
@@ -2523,6 +2533,30 @@ module Gcry
       @large_recycle_budget > floor ? @large_recycle_budget : floor
     end
 
+    # Leading bytes of the first `len` of a cached large chunk at `base` that
+    # may hold a previous object's writes; past them the chunk reads zeroes
+    # (`Gcry.os_written_prefix`). An allocation that reuses the chunk clears
+    # only those. It used to clear the whole of what it reused, and a block
+    # the program wrote a byte of before `GC.free` cost its successor of
+    # another size a fault and a write of zeroes per page it never touched:
+    # a loop over 16 sizes from 256 KiB to 1.7 MiB took 580-680 ms, 90-115
+    # now, 60-67 mapping fresh each time and 215-260 under Boehm
+    # (`process_spec/regression/46`). A block written through clears as much
+    # as before: that loop stays at 1 015-1 110 ms, Boehm 550-600. The
+    # pages that hold the chunk's headers count as written: nothing may drop
+    # them. The whole of `len` while a release audit wants every release to
+    # go through `guard_release`, and off Linux.
+    private def large_written_bytes(base : Void*, len : UInt64) : UInt64
+      {% if flag?(:linux) %}
+        return len if @release_quarantine != 0 || @release_ledger || @unmap_guard || @release_holders
+        meta = align_up(ChunkHeader.large_data_offset.to_u64, Platform.host_page_size)
+        return len if len <= meta
+        meta &+ Gcry.os_written_prefix(base + meta, len &- meta)
+      {% else %}
+        len
+      {% end %}
+    end
+
     # A remainder at least this long becomes a cached chunk of its own when a
     # cached chunk is split; a shorter one is unmapped.
     LARGE_RECYCLE_SPLIT_MIN = 65536_u64
@@ -2542,7 +2576,11 @@ module Gcry
     # address now named the third, and 5 of 20 runs kept its 65 MB through
     # two more majors (peak 588 MiB against 526; 0 of 20 with recycling off).
     # Moved, 0 of 20 (`bench/log/linux/2026-10-06-large-recycle/`).
-    private def recycle_large_mapping(mapped : UInt64) : Void*
+    #
+    # *clear*: the allocation zeroes what the old chunk wrote, so
+    # `@recycled_written` is that much (`large_written_bytes`), not all it
+    # kept.
+    private def recycle_large_mapping(mapped : UInt64, clear : Bool) : Void*
       {% if flag?(:linux) %}
         return Pointer(Void).null unless @large_recycle && @large_free_bytes != 0_u64
         # Walks of `@chunks` with the world running read chunk headers without
@@ -2572,6 +2610,7 @@ module Gcry
           @unmapped_bytes += old_mapped
           update_heap_bounds_after_unmap
           @recycled_from = 0_u64
+          @recycled_written = 0_u64
           return Pointer(Void).null unless dst_kept
           @large_recycle_budget = sat_sub(@large_recycle_budget, mapped)
           return dst
@@ -2596,6 +2635,7 @@ module Gcry
         # A grown tail is fresh pages, as a fresh mapping's are.
         @large_recycle_budget = sat_sub(@large_recycle_budget, mapped &- kept)
         @recycled_from = kept
+        @recycled_written = clear ? large_written_bytes(dst, kept) : kept
         @large_recycles &+= 1
         @large_recycled_bytes &+= kept
         dst
