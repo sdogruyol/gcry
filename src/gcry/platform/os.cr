@@ -35,6 +35,15 @@
     end
   end
 %}
+# Crystal's deprecated multi-threaded scheduler, `-Dpreview_mt` without
+# `-Dexecution_context`, is not one the process GC supports
+# (docs/POLICY.md): its fiber and thread roots come from the execution
+# contexts' structures. Until 2026-10-08 such a build failed deep in type
+# inference ("instance variable '@current_thread' of Fiber must be
+# Atomic(Thread | Nil), not Nil"), which named neither gcry nor the flag.
+{% if flag?(:gc_none) && flag?(:preview_mt) && !flag?(:execution_context) %}
+  {% raise "gcry as the process GC needs Crystal's execution contexts: build with -Dpreview_mt -Dexecution_context, or without -Dpreview_mt (execution contexts are Crystal's default scheduler); -Dpreview_mt alone selects the deprecated scheduler, which gcry does not support" %}
+{% end %}
 {% if flag?(:win32) %}
   require "./windows_os"
 {% else %}

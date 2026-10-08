@@ -171,6 +171,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrupts the mark on purpose, and once on Windows CI it hung on that
   until the 30-minute job timeout instead of failing.
 
+- **`-Dpreview_mt` without `-Dexecution_context` stops the build with the
+  reason.** Crystal's deprecated scheduler is not one the process GC
+  supports (`docs/POLICY.md`), and such a build failed deep in type
+  inference ("instance variable '@current_thread' of Fiber must be
+  Atomic(Thread | Nil), not Nil"), naming neither gcry nor the flag. It now
+  fails at `src/gcry/platform/os.cr` with the remedy; `-Dpreview_mt
+  -Dexecution_context` builds as before.
+
 - **A large object over 4 GiB is scanned, sized and reallocated at its
   whole size.** The large block header kept the size in 32 bits and both
   `alloc_large` paths stored `payload.to_u32!`, so a block of 4 GiB + 1 MiB
