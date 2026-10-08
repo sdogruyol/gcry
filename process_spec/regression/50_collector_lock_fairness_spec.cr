@@ -82,13 +82,15 @@ end
 # a lock that does not hand over, whichever thread holds it keeps it, and the
 # rest wait out its calls — which thread that is changes from run to run.
 # Finite calls, so a regression shows as a count rather than as a hang.
-private COLLECTORS =   4
-private CALLS      = 100
+private COLLECTORS = 4
+# 30 calls each: a whole `process_spec` heap makes every collection slow, and
+# 100 took 25–40 s there (7 min on the aarch64 runner's freelist arm).
+private CALLS = 30
 # A call waits through the collection in flight when it arrives and the one
 # that answers it. One more can finish before the caller reads the count, if
 # the stop of a collection queued behind it freezes the caller on its way
 # out, and more than once on a busy runner: 5 on macos x86_64 CI
-# (2026-10-08). Before the fix: up to all of another thread's calls, 100
+# (2026-10-08). Before the fix: up to all of another thread's calls, 30
 # here.
 private WAIT_BOUND = 8
 

@@ -51,12 +51,15 @@ private def run(runs : Int32*, &build : ->) : Nil
   done = Channel(Nil).new
   spawn { build.call; done.send(nil) }
   done.receive
-  20.times do
+  # Each object dies on its own, so one collection queues them all; a few
+  # more cover a stale word. The bound stops the loop at the few a stale
+  # word keeps, so it does not run on through a whole `process_spec` heap.
+  6.times do
     GC.collect
     # Over what the collection freed, so a stale word does not keep naming a
     # dead object's block.
     2_000.times { Bytes.new(64) }
-    break if finalized(runs) == OBJECTS
+    break if finalized(runs) >= OBJECTS - 10
   end
 end
 

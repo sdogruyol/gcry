@@ -10,12 +10,13 @@ require "spec"
 # (`GC.add_root`, the realloc pin) were marked *before* it, so a root in such
 # a chunk lost its bit and was swept with its range still naming it: with 16
 # threads registering ranges while another thread collected, 900–2600 of 3200
-# objects held only by registered ranges were freed and reused, every run.
+# objects held only by registered ranges were freed and reused, every run;
+# with the 8 x 100 here, 134–389 of 800 in 5 of 5 runs.
 # One adder thread, or a heap array instead of ranges, never showed it: it
 # takes allocation racing a collection to pin chunks.
 
-private THREADS    =                        16
-private PER_THREAD =                       200
+private THREADS    =                         8
+private PER_THREAD =                       100
 private WORDS      =                         4
 private TAG_BASE   = 0x4900_0000_0000_0000_u64
 
