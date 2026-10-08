@@ -107,4 +107,37 @@ describe "GC_add_roots" do
       LibC.free(hidden.as(Void*))
     end
   end
+
+  # Boehm's `GC_remove_roots` drops every range wholly inside its bounds and
+  # no other (mark_rts.c). Until 2026-10-08 gcry did not define it.
+  it "stops scanning a range GC_remove_roots takes back, and only that one" do
+    words = 8
+    buf = LibC.malloc(LibC::SizeT.new(words * sizeof(Void*))).as(Void**)
+    buf.clear(words)
+    before = Gcry::CAbi.root_range_count
+    LibGC.add_roots(buf.as(Void*), (buf + 2).as(Void*))
+    LibGC.add_roots((buf + 4).as(Void*), (buf + 6).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 2)
+    dropped = block_in(buf)
+    kept = block_in(buf + 4)
+
+    # Bounds that only partly cover the second range leave it alone.
+    LibGC.remove_roots(buf.as(Void*), (buf + 5).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 1)
+    collect_and_churn
+    live_and_intact?(kept).should be_true
+    # The dropped range still holds the address; read on this frame only as
+    # a masked comparison, the block itself is gone or reused.
+    live_and_intact?(dropped).should be_false
+
+    # The same start registered again is a root again.
+    LibGC.add_roots(buf.as(Void*), (buf + 2).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 2)
+    revived = block_in(buf)
+    collect_and_churn
+    live_and_intact?(revived).should be_true
+    LibGC.remove_roots(buf.as(Void*), (buf + words).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before)
+    LibC.free(buf.as(Void*))
+  end
 end

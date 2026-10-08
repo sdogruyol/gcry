@@ -69,6 +69,7 @@ lib LibGC
   fun collect_a_little = GC_collect_a_little : Int
   fun collect = GC_gcollect
   fun add_roots = GC_add_roots(low : Void*, high : Void*)
+  fun remove_roots = GC_remove_roots(low : Void*, high : Void*)
   fun enable = GC_enable
   fun disable = GC_disable
   fun is_disabled = GC_is_disabled : Int
@@ -265,22 +266,45 @@ module Gcry
         i = 0_u64
         while i < count
           entry = table + (2 &+ 2 &* i)
-          return if entry[0] <= lo && hi <= entry[1]
+          # One with the same start extends it — a removed one too, which
+          # takes its start back with the single store of its end.
           if entry[0] == lo
-            Atomic::Ops.store(entry + 1, hi, LLVM::AtomicOrdering::Release, false)
+            Atomic::Ops.store(entry + 1, hi, LLVM::AtomicOrdering::Release, false) if entry[1] < hi
             return
           end
+          return if entry[0] < entry[1] && entry[0] <= lo && hi <= entry[1]
           i &+= 1
         end
         if table.null? || count == table[1]
-          capacity = table.null? ? 8_u64 : table[1] &* 2
+          # Removed entries (`remove_roots`) are left out of the copy: the
+          # capacity follows the live ranges, not every range ever added.
+          live = 0_u64
+          i = 0_u64
+          while i < count
+            entry = table + (2 &+ 2 &* i)
+            live &+= 1 if entry[0] < entry[1]
+            i &+= 1
+          end
+          capacity = table.null? ? 8_u64 : table[1]
+          capacity &*= 2 if live &* 2 >= capacity
           fresh = LibC.malloc(LibC::SizeT.new((2 &+ 2 &* capacity) &* 8)).as(UInt64*)
           unsupported("GC_add_roots", "out of memory for the root table") if fresh.null?
-          fresh[0] = count
+          kept = 0_u64
+          i = 0_u64
+          while i < count
+            entry = table + (2 &+ 2 &* i)
+            if entry[0] < entry[1]
+              fresh[2 &+ 2 &* kept] = entry[0]
+              fresh[3 &+ 2 &* kept] = entry[1]
+              kept &+= 1
+            end
+            i &+= 1
+          end
+          fresh[0] = kept
           fresh[1] = capacity
-          (table + 2).copy_to(fresh + 2, 2 &* count) unless table.null?
           @@ranges.set(fresh, :release)
           table = fresh
+          count = kept
         end
         table[2 &+ 2 &* count] = lo
         table[3 &+ 2 &* count] = hi
@@ -290,10 +314,48 @@ module Gcry
       end
     end
 
-    # Ranges in the `GC_add_roots` table.
+    # Boehm's `GC_remove_roots`: every registered range wholly inside
+    # `[low, high)` stops being a root (`GC_remove_roots_inner`, mark_rts.c).
+    # Until 2026-10-08 gcry had no way to take one back, so a range whose
+    # memory was then freed stayed scanned. A removed entry keeps its start
+    # and has its end stored down to it, one word the hook reads with
+    # acquire: the hook sees the range whole or empty, never a mix. The next
+    # copy of the table leaves it out (`add_roots`).
+    def self.remove_roots(low : Void*, high : Void*) : Nil
+      return unless low.address < high.address
+      lo = low.address
+      hi = high.address
+      lock_ranges
+      begin
+        table = @@ranges.get(:acquire)
+        return if table.null?
+        count = table[0]
+        i = 0_u64
+        while i < count
+          entry = table + (2 &+ 2 &* i)
+          if entry[0] < entry[1] && lo <= entry[0] && entry[1] <= hi
+            Atomic::Ops.store(entry + 1, entry[0], LLVM::AtomicOrdering::Release, false)
+          end
+          i &+= 1
+        end
+      ensure
+        unlock_ranges
+      end
+    end
+
+    # Ranges in the `GC_add_roots` table, removed ones not counted.
     def self.root_range_count : Int32
       table = @@ranges.get(:acquire)
-      table.null? ? 0 : Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false).to_i32
+      return 0 if table.null?
+      count = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
+      live = 0
+      i = 0_u64
+      while i < count
+        entry = table + (2 &+ 2 &* i)
+        live += 1 if entry[0] < Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
+        i &+= 1
+      end
+      live
     end
 
     private def self.lock_ranges : Nil
@@ -626,7 +688,8 @@ module Gcry
           while i < n
             entry = table + (2 &+ 2 &* i)
             hi = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Acquire, false)
-            Gcry.default_heap.push_stack(Pointer(Void).new(entry[0]), Pointer(Void).new(hi))
+            # A removed range reads as empty (`remove_roots`).
+            Gcry.default_heap.push_stack(Pointer(Void).new(entry[0]), Pointer(Void).new(hi)) if entry[0] < hi
             i &+= 1
           end
         end
@@ -736,6 +799,10 @@ end
 
 fun gcry_c_add_roots = GC_add_roots(low : Void*, high : Void*) : Nil
   Gcry::CAbi.add_roots(low, high)
+end
+
+fun gcry_c_remove_roots = GC_remove_roots(low : Void*, high : Void*) : Nil
+  Gcry::CAbi.remove_roots(low, high)
 end
 
 # Boehm counts: `GC_disable` twice needs `GC_enable` twice. `Heap#enable` /
