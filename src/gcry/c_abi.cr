@@ -789,7 +789,7 @@ module Gcry
     end
 
     # One `before_collect` hook serves both root sources; it runs in the root
-    # phase of every collection, world stopped, where `push_stack` is valid —
+    # phase of every collection, world stopped, where `push_root_range` is valid —
     # which is where Boehm calls its push-other-roots procedure too. Installed
     # once by `GC.init`, before any user code: installed by the first
     # `GC_add_roots` instead, it allocated mid-call, and a collection that
@@ -816,7 +816,7 @@ module Gcry
               hi = Atomic::Ops.load(entry + 2, LLVM::AtomicOrdering::Monotonic, false)
               Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
               next unless Atomic::Ops.load(entry, LLVM::AtomicOrdering::Monotonic, false) == seq
-              Gcry.default_heap.push_stack(Pointer(Void).new(lo), Pointer(Void).new(hi)) if lo < hi
+              Gcry.default_heap.push_root_range(Pointer(Void).new(lo), Pointer(Void).new(hi)) if lo < hi
               break
             end
             i &+= 1
@@ -1072,7 +1072,7 @@ fun gcry_c_get_push_other_roots = GC_get_push_other_roots : ->
 end
 
 fun gcry_c_push_all_eager = GC_push_all_eager(bottom : Void*, top : Void*) : Nil
-  Gcry.default_heap.push_stack(bottom, top)
+  Gcry.default_heap.push_root_range(bottom, top)
 end
 
 # gcry's handle is always null (`GC.current_thread_stack_bottom`), and its

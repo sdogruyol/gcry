@@ -141,6 +141,22 @@ describe "GC_add_roots" do
     LibC.free(buf.as(Void*))
   end
 
+  # Boehm scans a registered range whole, whatever its length. Until
+  # 2026-10-09 gcry pushed it through the stack scan's 64 MiB valve, so a
+  # longer range was skipped every collection and what only it held was swept.
+  it "scans a range longer than 64 MiB to its end" do
+    bytes = 65_u64 * 1024 * 1024
+    words = bytes // sizeof(Void*)
+    buf = LibC.malloc(LibC::SizeT.new(bytes)).as(Void**)
+    buf.clear(words)
+    LibGC.add_roots(buf.as(Void*), (buf + words).as(Void*))
+    hidden = block_in(buf + words - 1)
+    collect_and_churn
+    live_and_intact?(hidden).should be_true
+    LibGC.remove_roots(buf.as(Void*), (buf + words).as(Void*))
+    LibC.free(buf.as(Void*))
+  end
+
   # Ranges added and removed over and over reuse the removed entries. A
   # table copy cannot free the one it replaces (the hook may be reading it),
   # and the first `GC_remove_roots` compacted a full table into a new copy:
