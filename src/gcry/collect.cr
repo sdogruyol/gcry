@@ -2484,7 +2484,7 @@ module Gcry
       return if monitor_thread?
       return if thread_not_ready_for_collect?
       # Before any lock the allocation takes, on a mutator with a scheduler.
-      run_deferred_finalizers if @finalizers_deferred
+      invoke_finalizers if @finalizers_deferred
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
@@ -3393,8 +3393,13 @@ module Gcry
     # by the end, against 7 799 with the idle collector off.
     @finalizers_deferred = false
 
-    private def run_deferred_finalizers : Nil
+    # Run what is queued now, on this thread, and say how many ran: the
+    # deferred run above, and Boehm's `GC_invoke_finalizers`. Usually nothing
+    # is queued — gcry runs the queue after every collection — but an idle
+    # collection leaves it for a mutator, and a finalizer can queue more.
+    def invoke_finalizers : Int32
       @finalizers_deferred = false
+      return 0 if @finalizers.pending_count == 0
       @running_finalizers = true
       begin
         @finalizers.run_pending

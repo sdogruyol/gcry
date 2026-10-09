@@ -342,4 +342,24 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     AbiRegLog.count.times { |k| AbiRegLog.which(k).should eq(partner.address) }
     abi_log_objects_distinct(hidden)
   end
+
+  # Boehm's `GC_invoke_finalizers` runs what is queued and answers how many
+  # ran (finalize.c). Until 2026-10-09 gcry answered 0 whatever was queued.
+  # An idle collection leaves its finalizers queued for a mutator; nothing
+  # between it and the call allocates, so no slow path runs them first.
+  it "runs the finalizers an idle collection left queued and answers how many" do
+    AbiRegLog.reset(SALT + 0x9000, SALT + 0xA000)
+    hidden = Array(UInt64).new(ABI_BLOCKS) do |i|
+      abi_block(32, atomic: true) do |p|
+        abi_register(p, ABI_FIRST, abi_data(i, SALT + 0x9000), ignore_self: true)
+      end
+    end
+    Gcry.default_heap.idle_collect
+    before = AbiRegLog.count
+    ran = LibGC.invoke_finalizers
+    before.should eq(0)
+    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    ran.should be >= AbiRegLog.count
+    abi_log_matches(hidden, SALT + 0x9000, 1_u64)
+  end
 end

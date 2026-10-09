@@ -669,16 +669,18 @@ module Gcry
       # collection marks from (`each_pending`). A collection that runs while a
       # finalizer does — another thread's — therefore still keeps every object
       # queued behind it, and the one running is on this thread's stack.
-      def run_pending : Nil
+      # Returns how many ran; 0 when this fiber is already draining.
+      def run_pending : Int32
         # `Thread.current?`: `Thread.current` allocates on a raw thread.
         fiber = ::Thread.current?.try(&.@current_fiber)
         if fiber
-          return if fiber.gcry_draining?
+          return 0 if fiber.gcry_draining?
           fiber.gcry_draining = true
         else
-          return if @@draining_no_fiber
+          return 0 if @@draining_no_fiber
           @@draining_no_fiber = true
         end
+        ran = 0
         begin
           loop do
             @lock.lock
@@ -695,6 +697,7 @@ module Gcry
             LibC.free(node.as(Void*))
             # Callbacks outside the lock (may re-enter add / allocate).
             Trace.finalizer("run", object)
+            ran += 1
             Finalizers.invoke(object, callback, c_abi)
           end
         ensure
@@ -704,6 +707,7 @@ module Gcry
             @@draining_no_fiber = false
           end
         end
+        ran
       end
 
       def pending_count : Int32

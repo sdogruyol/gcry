@@ -522,7 +522,9 @@ module Gcry
       end
     end
 
-    # Boehm runs the start callback, then reports `GC_EVENT_START`.
+    # Boehm reports `GC_EVENT_START` and then runs the start callback
+    # (`GC_try_to_collect_inner`, then `GC_notify_full_gc`, alloc.c); gcry
+    # calls the callback first, before the world is stopped (§ Boehm parity).
     def self.collection_event(event : Heap::CollectionEvent) : Nil
       if event.start?
         @@start_callback.try &.call
@@ -1015,7 +1017,9 @@ fun gcry_c_remove_roots = GC_remove_roots(low : Void*, high : Void*) : Nil
 end
 
 # Boehm counts: `GC_disable` twice needs `GC_enable` twice. `Heap#enable` /
-# `#disable` nest the same way, and an unmatched `GC_enable` is a no-op in both.
+# `#disable` nest the same way. An unmatched `GC_enable` is a no-op here;
+# Boehm's asserts in a debug build and takes its counter below zero in a
+# release one, after which `GC_is_disabled` reports disabled.
 fun gcry_c_enable = GC_enable : Nil
   Gcry.default_heap.enable
   nil
@@ -1077,10 +1081,12 @@ fun gcry_c_register_finalizer_ignore_self = GC_register_finalizer_ignore_self(ob
   Gcry::CAbi.register_finalizer(obj, fn, cd, ofn, ocd, Gcry::Finalizers::Order::IgnoreSelf)
 end
 
-# gcry runs finalizers itself at the end of each collection — Boehm's default
-# (`GC_finalize_on_demand` 0), under which this call also has nothing to run.
+# Runs the finalizers queued now on the calling thread and answers how many
+# ran, as Boehm's. gcry runs the queue after every collection, so this is
+# usually 0; an idle collection leaves its finalizers for a mutator, and this
+# is one. Until 2026-10-09 it answered 0 whatever was queued.
 fun gcry_c_invoke_finalizers = GC_invoke_finalizers : LibGC::Int
-  0
+  Gcry.default_heap.invoke_finalizers
 end
 
 fun gcry_c_get_heap_usage_safe = GC_get_heap_usage_safe(heap_size : LibGC::Word*, free_bytes : LibGC::Word*,
