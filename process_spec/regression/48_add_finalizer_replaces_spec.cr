@@ -61,6 +61,15 @@ private def run(runs : Int32*, &build : ->) : Nil
     2_000.times { Bytes.new(64) }
     break if finalized(runs) >= OBJECTS - 10
   end
+  # A duplicate row runs one collection after the row before it (ordered
+  # finalization keeps the object until each queued row has run), so the
+  # `<= 1` checks need a collection per extra registration after the first
+  # runs. Without these, the loop's early exit checked before any duplicate
+  # could run and the spec passed on the code it guards against.
+  2.times do
+    GC.collect
+    2_000.times { Bytes.new(64) }
+  end
 end
 
 describe "Regression: GC.add_finalizer replaces, as Boehm's ignore-self registration" do
