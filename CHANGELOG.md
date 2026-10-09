@@ -12,7 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`GC_invoke_finalizers` runs the queued finalizers and answers how many
   ran, as Boehm.** It answered 0 whatever was queued; an idle collection
   leaves its finalizers for a mutator, and a C caller asking for them got
-  none (`25_boehm_finalizer_registration_spec.cr`).
+  none (`25_boehm_finalizer_registration_spec.cr`). Called from a finalizer
+  it answers 0 and leaves the queue to the drain already running, as a
+  finalizer that collects does; that call, and an allocation in a finalizer
+  while an idle collection's finalizers were deferred, also no longer clear
+  the outer drain's guard against automatic collections.
 
 - **`GC_remove_roots` does not return while a collection still scans the
   range.** It stored the entry's end down and returned at once; the roots

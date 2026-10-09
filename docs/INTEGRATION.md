@@ -199,7 +199,7 @@ regressions named.
 | `GC_register_disappearing_link(link)` | Object is `GC_base(link)` | Same | Matches (`25_*`) |
 | Allocation slack (`EXTRA_BYTES`) | Every block | Atomic blocks only | Differs (`24_*`) |
 | `realloc` shrink / move | — | Shrink keeps the block; on a move the old block is left to the sweep | Differs (`30_*`) |
-| `GC_invoke_finalizers` | Runs pending, returns count | Same; usually 0, since the collector runs the queue after each collection | Matches (`25_*`) |
+| `GC_invoke_finalizers` | Runs pending, returns count; from a finalizer, drains the rest one frame deeper | Same, usually 0 since the collector runs the queue after each collection; from a finalizer 0, the drain already running takes the rest | Differs from a finalizer (`25_*`) |
 | `GC_set_start_callback` | Full collections, after `GC_EVENT_START` | Every collection (incl. minor, idle), before `GC_EVENT_START` | Differs (`28_*`) |
 | `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Same | Matches (`21_*`) |
 | `GC_get_prof_stats` | Returns bytes filled | Returns nothing | Differs |

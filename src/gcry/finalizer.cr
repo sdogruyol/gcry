@@ -664,6 +664,17 @@ module Gcry
       @[ThreadLocal]
       @@draining_no_fiber : Bool = false
 
+      # Whether this fiber — this thread, where there is no fiber — is inside
+      # `run_pending` already, where another call returns 0 at once.
+      def draining? : Bool
+        # `Thread.current?`: `Thread.current` allocates on a raw thread.
+        if fiber = ::Thread.current?.try(&.@current_fiber)
+          fiber.gcry_draining?
+        else
+          @@draining_no_fiber
+        end
+      end
+
       # One node at a time, each taken off the queue only when its finalizer
       # is about to run: until then it is still on `@pending`, which every
       # collection marks from (`each_pending`). A collection that runs while a
@@ -671,13 +682,11 @@ module Gcry
       # queued behind it, and the one running is on this thread's stack.
       # Returns how many ran; 0 when this fiber is already draining.
       def run_pending : Int32
-        # `Thread.current?`: `Thread.current` allocates on a raw thread.
+        return 0 if draining?
         fiber = ::Thread.current?.try(&.@current_fiber)
         if fiber
-          return 0 if fiber.gcry_draining?
           fiber.gcry_draining = true
         else
-          return 0 if @@draining_no_fiber
           @@draining_no_fiber = true
         end
         ran = 0

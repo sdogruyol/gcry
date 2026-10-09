@@ -3397,9 +3397,15 @@ module Gcry
     # deferred run above, and Boehm's `GC_invoke_finalizers`. Usually nothing
     # is queued — gcry runs the queue after every collection — but an idle
     # collection leaves it for a mutator, and a finalizer can queue more.
+    #
+    # 0 from inside a finalizer, where Boehm's would drain the rest of the
+    # queue one frame deeper: the drain already running takes it, as it does
+    # for a finalizer that collects. Returning before the flag also keeps the
+    # outer drain's `@running_finalizers` set; clearing it on the way out let
+    # its remaining finalizers start automatic collections.
     def invoke_finalizers : Int32
       @finalizers_deferred = false
-      return 0 if @finalizers.pending_count == 0
+      return 0 if @finalizers.pending_count == 0 || @finalizers.draining?
       @running_finalizers = true
       begin
         @finalizers.run_pending
