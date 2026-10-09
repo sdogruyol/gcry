@@ -191,7 +191,7 @@ regressions named.
 | Finalizer that calls `GC.collect` | Nested finalizers bounded per thread | No nesting on the same thread | Matches (`37_*`) |
 | Oversize `GC_malloc` / `GC_realloc` | NULL | NULL | Matches (`39_*`) |
 | `GC_pthread_create`, `GC_beginthreadex` | Registers the thread | Registers it (`GC_pthread_create` on Linux and macOS, `GC_beginthreadex` on Windows) | Matches (`40_*`) |
-| `GC_add_roots`, `GC_remove_roots` | Locked; bounds rounded inward to words; same-start ranges merged (Windows: overlapping and adjacent too); scanned whole | Writers locked, the collector reads without the lock; bounds rounded the same; a range inside a live one is merged too; scanned whole | Differs: merge rule (`41_*`) |
+| `GC_add_roots`, `GC_remove_roots` | Locked; bounds rounded inward to words; same-start ranges merged (Windows: overlapping and adjacent too); scanned whole; removal waits out a running collection | Writers locked, the collector reads without the lock; bounds rounded the same; a range inside a live one is merged too; scanned whole; `GC_remove_roots` waits out a scan in progress | Differs: merge rule (`41_*`, `51_*`) |
 | Roots marked in a collection's root phase | Kept | Kept: the cursor settle that zeroes pinned chunks' marks runs before any root is marked | Matches (`49_*`) |
 | Loaded libraries' data | Re-walked every collection | Followed through `r_debug`, also mid-`dlopen`/`dlclose` (Linux) | Matches (`16_*`, `42_*`) |
 | Mark under `-Dwithout_mt` | Safe (libgc's own locks) | Safe: serial, since `Crystal::SpinLock` is a no-op there | Matches (`38_*`) |

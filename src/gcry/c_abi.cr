@@ -207,6 +207,11 @@ module Gcry
     # whatever Crystal's threading flags say.
     @@ranges_lock = 0
     @@root_table_copies = 0
+    # Odd while the roots hook reads the table and scans its ranges, even
+    # otherwise; it only grows. `remove_roots` waits on it
+    # (`wait_for_roots_scan`). Hooks never overlap: each runs inside a stop,
+    # and stops exclude each other (`lock_write`).
+    @@roots_scan_epoch = 0_u64
 
     def self.unsupported(name : String, why : String) : NoReturn
       buf = uninitialized UInt8[RawOut::LIMIT]
@@ -353,11 +358,14 @@ module Gcry
     # memory was then freed stayed scanned. A removed entry keeps its start
     # and has its end stored down to it, one word the hook reads with
     # acquire: the hook sees the range whole or empty, never a mix. The next
-    # `add_roots` of another range takes the entry over in place.
+    # `add_roots` of another range takes the entry over in place. Returns only
+    # once no collection is still scanning what it removed, so the caller may
+    # free the memory then, as after Boehm's.
     def self.remove_roots(low : Void*, high : Void*) : Nil
       return unless low.address < high.address
       lo = low.address
       hi = high.address
+      removed = false
       lock_ranges
       begin
         table = @@ranges.get(:acquire)
@@ -368,11 +376,43 @@ module Gcry
           entry = table + (2 &+ ROOT_ENTRY_WORDS &* i)
           if entry[1] < entry[2] && lo <= entry[1] && entry[2] <= hi
             Atomic::Ops.store(entry + 2, entry[1], LLVM::AtomicOrdering::Release, false)
+            removed = true
           end
           i &+= 1
         end
       ensure
         unlock_ranges
+      end
+      wait_for_roots_scan if removed
+    end
+
+    # A hook that read a range before `remove_roots` stored its end down may
+    # still be scanning it. Boehm's `GC_remove_roots` takes the lock a
+    # collection holds, so it cannot return mid-mark; until 2026-10-09 gcry's
+    # returned at once, and a C thread gcry does not stop that then unmapped
+    # the range crashed the collector in the scan
+    # (`process_spec/regression/51_remove_roots_waits_for_scan_spec.cr`).
+    #
+    # Store, seq_cst fence, load the epoch here; bump the epoch, seq_cst
+    # fence, load the table in the hook: either the hook reads the end stored
+    # down or this reads its odd epoch, and then waits for the bump past it
+    # that follows the scan. Spins outside `@@ranges_lock`, which the hook
+    # does not take. Only a thread the stop left running can read an odd
+    # epoch — any other is stopped before the hook bumps it — and never the
+    # collector's own: no caller's code runs inside the hook's odd window,
+    # and `before_collect` callbacks and push-other-roots run outside it.
+    private def self.wait_for_roots_scan : Nil
+      Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, false)
+      epoch = Atomic::Ops.load(pointerof(@@roots_scan_epoch), LLVM::AtomicOrdering::Acquire, false)
+      return if epoch.even?
+      spins = 0
+      while Atomic::Ops.load(pointerof(@@roots_scan_epoch), LLVM::AtomicOrdering::Acquire, false) == epoch
+        spins += 1
+        if spins & 63 == 0
+          Thread.yield
+        else
+          Intrinsics.pause
+        end
       end
     end
 
@@ -823,30 +863,39 @@ module Gcry
     # hook existed, or left the install half done if it raised.
     def self.install_roots_hook : Nil
       GC.before_collect do
-        table = @@ranges.get(:acquire)
-        unless table.null?
-          i = 0_u64
-          n = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
-          while i < n
-            entry = table + (2 &+ ROOT_ENTRY_WORDS &* i)
-            # Sequence, start, end, sequence: an entry `add_roots` is taking
-            # over in place has an odd sequence, or one that moved by the
-            # second read, and is skipped or read again — so a start is never
-            # paired with another range's end. An end extended or removed in
-            # place is one store, so either value read is a whole range; a
-            # removed range reads as empty (`remove_roots`).
-            loop do
-              seq = Atomic::Ops.load(entry, LLVM::AtomicOrdering::Acquire, false)
-              break if seq.odd?
-              lo = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Monotonic, false)
-              hi = Atomic::Ops.load(entry + 2, LLVM::AtomicOrdering::Monotonic, false)
-              Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
-              next unless Atomic::Ops.load(entry, LLVM::AtomicOrdering::Monotonic, false) == seq
-              Gcry.default_heap.push_root_range(Pointer(Void).new(lo), Pointer(Void).new(hi)) if lo < hi
-              break
+        # Odd from before the table is read until its ranges are scanned; the
+        # fence pairs with the one in `wait_for_roots_scan`.
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@roots_scan_epoch), 1_u64, LLVM::AtomicOrdering::SequentiallyConsistent, false)
+        Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, false)
+        begin
+          table = @@ranges.get(:acquire)
+          unless table.null?
+            i = 0_u64
+            n = Atomic::Ops.load(table, LLVM::AtomicOrdering::Acquire, false)
+            while i < n
+              entry = table + (2 &+ ROOT_ENTRY_WORDS &* i)
+              # Sequence, start, end, sequence: an entry `add_roots` is taking
+              # over in place has an odd sequence, or one that moved by the
+              # second read, and is skipped or read again — so a start is never
+              # paired with another range's end. An end extended or removed in
+              # place is one store, so either value read is a whole range; a
+              # removed range reads as empty (`remove_roots`).
+              loop do
+                seq = Atomic::Ops.load(entry, LLVM::AtomicOrdering::Acquire, false)
+                break if seq.odd?
+                lo = Atomic::Ops.load(entry + 1, LLVM::AtomicOrdering::Monotonic, false)
+                hi = Atomic::Ops.load(entry + 2, LLVM::AtomicOrdering::Monotonic, false)
+                Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+                next unless Atomic::Ops.load(entry, LLVM::AtomicOrdering::Monotonic, false) == seq
+                Gcry.default_heap.push_root_range(Pointer(Void).new(lo), Pointer(Void).new(hi)) if lo < hi
+                break
+              end
+              i &+= 1
             end
-            i &+= 1
           end
+        ensure
+          # Release: the scan's reads come before a remover's free.
+          Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@roots_scan_epoch), 1_u64, LLVM::AtomicOrdering::Release, false)
         end
         @@push_other_roots.try &.call
       end
