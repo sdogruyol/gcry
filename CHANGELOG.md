@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`GC_add_roots` ranges longer than 64 MiB are scanned.** The roots hook
+  pushed each registered range through the stack scan, whose 64 MiB valve
+  refuses a longer range whole: an object held only from a 65 MiB range was
+  swept on the first collection, and only `Roots.oversize_skips` said so.
+  Boehm scans a registered range whatever its length. Registered ranges and
+  `GC_push_all_eager` now go through `Heap#push_root_range`, which splits
+  them as the static roots are split
+  (`process_spec/regression/41_gc_add_roots_concurrent_spec.cr`).
+
 - **Roots marked before the cursor settle are no longer swept.** A
   collection's root phase zeroes the mark bits of every chunk the previous
   cycle pinned (a thread frozen mid-allocation), in
@@ -1090,9 +1099,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`src/gcry/c_abi.cr`). `crystal i` resolves `LibGC` from the compiler
   binary, and shards bind it directly; Crystal's `spec/std` is one of them.
   The signatures match stdlib's `gc/boehm.cr`. A function gcry cannot honour
-  aborts with a message rather than silently doing nothing. That covers
-  `GC_set_max_heap_size` and `GC_beginthreadex`. `GC_gc_no`, `GC_bytes_found`
-  and `GC_current_warn_proc` are variables, which Crystal cannot export.
+  aborts with a message rather than silently doing nothing:
+  `GC_set_max_heap_size`. `GC_gc_no`, `GC_bytes_found` and
+  `GC_current_warn_proc` are variables, which Crystal cannot export.
   `process_spec/regression/21_boehm_c_abi_spec.cr`.
 
 - **`Gcry.usable_size(ptr)` / `Heap#usable_size`**, Boehm's `GC_size`: the
