@@ -116,7 +116,7 @@ the names, each pinned by a regression:
 | `GC_set_on_thread_event` | `THREAD_SUSPENDED` / `THREAD_UNSUSPENDED` with the `pthread_t` of each thread a stop suspends and resumes, `GC.stop_world` included. On macOS and Windows the resume is reported just before it happens. | `28_*` |
 | `GC_set_on_heap_resize` | The new heap size each time the heap maps a chunk. | `28_*` |
 | `GC_register_my_thread`, `GC_unregister_my_thread`, `GC_thread_is_registered`, `GC_get_stack_base`, `GC_allow_register_threads` | A thread C created goes on Crystal's thread list — what gcry stops and scans — and comes off it again; one that exits still registered is taken off by its exit key (a pthread key, an FLS slot on Windows). Linux, macOS and Windows. A stack base outside the thread's stack is refused with `GC_UNIMPLEMENTED` (3). On Linux the thread may block every signal, as C pools do: registration unblocks the suspend signal, and a resume signal it keeps blocked cannot end a later stop early (`47_*`). | `29_*`, `47_*` |
-| `GC_add_roots`, `GC_remove_roots` | A range is rounded inward to whole words, ignored if that leaves none, and scanned whole, whatever its length. One entry per range: a range inside a live one, or one with the same start, is merged into it (Boehm merges same-start ranges only, and on Windows overlapping and adjacent ones too). `GC_remove_roots` drops every range wholly inside its bounds, and the next range added takes the entry over. | `41_*` |
+| `GC_add_roots`, `GC_remove_roots` | A range is rounded inward to whole words, ignored if that leaves none, and scanned whole, whatever its length. One entry per range: a range inside a live one, or one with the same start, is merged into it (Boehm merges same-start ranges only, and on Windows overlapping and adjacent ones too). `GC_remove_roots` drops every range wholly inside its bounds and returns only once no collection is still scanning one, so the caller may free it then; the next range added takes the entry over. | `41_*`, `51_*` |
 | `GC_register_disappearing_link`, `GC_general_register_disappearing_link`, `GC_unregister_disappearing_link` | The short form's link is a field of a heap object, cleared when that object — `GC_base(link)` — dies, before its finalizer runs. A link outside the heap, null or misaligned aborts, as Boehm's "Bad arg"; no memory for the registration answers `GC_NO_MEMORY` (2). Unregistering leaves the word alone and answers 1 if there was a registration, 0 for a misaligned link. | `25_*` |
 
 Callbacks run inside the collector, most of them with every other thread
@@ -188,7 +188,7 @@ regressions named.
 | Disappearing link registered twice | `GC_DUPLICATE`, link follows the new object | Same | Matches (`c_abi.cr`) |
 | Interior pointers; `Crystal.trace :gc` | Recognized; traced | Same | Matches (`21_*`; `gc_override.cr`) |
 | Queued finalizables | Stay roots until run | Same | Matches (`26_*`) |
-| Finalizer that calls `GC.collect` | Nested finalizers bounded per thread | No nesting on the same thread | Matches (`37_*`) |
+| Finalizer that calls `GC.collect` | Nested finalizers bounded per thread | No nesting on the same thread | Differs in depth; both bounded (`37_*`) |
 | Oversize `GC_malloc` / `GC_realloc` | NULL | NULL | Matches (`39_*`) |
 | `GC_pthread_create`, `GC_beginthreadex` | Registers the thread | Registers it (`GC_pthread_create` on Linux and macOS, `GC_beginthreadex` on Windows) | Matches (`40_*`) |
 | `GC_add_roots`, `GC_remove_roots` | Locked; bounds rounded inward to words; same-start ranges merged (Windows: overlapping and adjacent too); scanned whole; removal waits out a running collection | Writers locked, the collector reads without the lock; bounds rounded the same; a range inside a live one is merged too; scanned whole; `GC_remove_roots` waits out a scan in progress | Differs: merge rule (`41_*`, `51_*`) |
@@ -199,7 +199,7 @@ regressions named.
 | `GC_register_disappearing_link(link)` | Object is `GC_base(link)` | Same | Matches (`25_*`) |
 | Allocation slack (`EXTRA_BYTES`) | Every block | Atomic blocks only | Differs (`24_*`) |
 | `realloc` shrink / move | — | Shrink keeps the block; on a move the old block is left to the sweep | Differs (`30_*`) |
-| `GC_invoke_finalizers` | Runs pending, returns count | Returns 0 (finalizers run by the collector) | Differs |
+| `GC_invoke_finalizers` | Runs pending, returns count | Same; usually 0, since the collector runs the queue after each collection | Matches (`25_*`) |
 | `GC_set_start_callback` | Full collections, after `GC_EVENT_START` | Every collection (incl. minor, idle), before `GC_EVENT_START` | Differs (`28_*`) |
 | `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Same | Matches (`21_*`) |
 | `GC_get_prof_stats` | Returns bytes filled | Returns nothing | Differs |
