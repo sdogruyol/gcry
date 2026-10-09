@@ -784,10 +784,8 @@ module Gcry
 
     # Sleep while `@mark_wake` still holds `seq`, for at most `nap_ns`. It
     # returns at once if the word has moved, and early on a wake, a signal or
-    # a spurious return; the result is not looked at, because every caller
-    # re-checks its own condition afterwards and a wait that ended for nothing
-    # costs one more pass of its loop. On Darwin that covers EINTR and
-    # ETIMEDOUT from `__ulock_wait`; on Windows FALSE with ERROR_TIMEOUT.
+    # a spurious return. Every caller re-checks its own condition afterwards,
+    # so a wait that ended for nothing costs one more pass of its loop.
     #
     # The timeout is the safety net for a wake-up the protocol misses, and
     # what finds work published without one. Darwin takes it in whole
@@ -795,30 +793,47 @@ module Gcry
     # milliseconds, rounded up, and then to its timer tick — a 100 µs nap can
     # last 15.6 ms there, which only a missed wake would ever wait out.
     #
-    # A return before `nap_ns` with the word moved is a wake, since no
-    # timeout here is shorter than that, and `parallel_mark_wakes` counts it.
-    # Two clock reads per wait, against the syscall they bracket.
+    # `parallel_mark_wakes` counts a wait the primitive reports cut short,
+    # with the word moved: `futex` 0, not ETIMEDOUT, EINTR or EAGAIN;
+    # `__ulock_wait` ≥ 0, not ETIMEDOUT or EINTR; `WaitOnAddress` TRUE within
+    # the milliseconds it was given. The clock alone is not enough, since on
+    # Windows a wake after `nap_ns` but short of the rounded-up timeout is
+    # still a wake; nor is TRUE alone: with several threads waiting on one
+    # address it also comes back when a timeout expires (Windows 11 x86_64,
+    # 2026-10-09). A wake after those milliseconds goes uncounted there, and
+    # at a raised timer resolution a timeout can land a few µs inside them.
+    # The latter two also succeed when the word differs on entry, so a word
+    # already moved returns here, uncounted and without the syscall; a bump in
+    # the instant between that load and the kernel's compare still counts.
     private def mark_wait(seq : Int32, nap_ns : Int32) : Nil
+      return if @mark_wake.get != seq
+      if wait_on_mark_word(seq, nap_ns) && @mark_wake.get != seq
+        @parallel_mark_wakes.add(1)
+      end
+    end
+
+    # The platform's wait of `mark_wait`; true if it reports a return that
+    # was not its timeout.
+    private def wait_on_mark_word(seq : Int32, nap_ns : Int32) : Bool
       word = pointerof(@mark_wake).as(Int32*)
-      t0 = Clock.monotonic_ns
       {% if flag?(:linux) %}
         req = uninitialized Gcry::OS::Timespec
         req.tv_sec = typeof(req.tv_sec).new(0)
         req.tv_nsec = typeof(req.tv_nsec).new(nap_ns)
         LibC.syscall(LibC::Long.new(SYS_FUTEX), word, LibC::Long.new(FUTEX_WAIT_PRIVATE),
-          LibC::Long.new(seq), pointerof(req), Pointer(Void).null, LibC::Long.new(0))
+          LibC::Long.new(seq), pointerof(req), Pointer(Void).null, LibC::Long.new(0)) == 0
       {% elsif flag?(:darwin) %}
         us = (nap_ns + 999) // 1000
-        LibC.gcry_ulock_wait(UL_COMPARE_AND_WAIT, word.as(Void*), seq.to_u32!.to_u64, (us < 1 ? 1 : us).to_u32)
+        LibC.gcry_ulock_wait(UL_COMPARE_AND_WAIT, word.as(Void*), seq.to_u32!.to_u64, (us < 1 ? 1 : us).to_u32) >= 0
       {% else %}
         # `platform/os.cr` admits Linux, macOS and Windows only.
         compare = seq
         ms = (nap_ns + 999_999) // 1_000_000
-        LibGcryWindowsSync.WaitOnAddress(word.as(Void*), pointerof(compare).as(Void*), LibC::SizeT.new(4), (ms < 1 ? 1 : ms).to_u32)
+        ms = 1 if ms < 1
+        t0 = Clock.monotonic_ns
+        LibGcryWindowsSync.WaitOnAddress(word.as(Void*), pointerof(compare).as(Void*), LibC::SizeT.new(4), ms.to_u32) != 0 &&
+          Clock.monotonic_ns &- t0 < ms.to_u64 * 1_000_000
       {% end %}
-      if @mark_wake.get != seq && Clock.monotonic_ns &- t0 < nap_ns.to_u64
-        @parallel_mark_wakes.add(1)
-      end
     end
 
     # Wake up to `count` of the `sleepers` waiting in `mark_wait`, after the
