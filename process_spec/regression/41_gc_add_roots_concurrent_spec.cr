@@ -141,6 +141,26 @@ describe "GC_add_roots" do
     LibC.free(buf.as(Void*))
   end
 
+  # Boehm stores a range rounded inward to whole words and ignores one that
+  # holds none (`GC_add_roots_inner`); `GC_remove_roots` compares against the
+  # stored bounds. Until 2026-10-09 gcry kept the bounds as given, so the
+  # word-aligned removal below left the range registered and scanned.
+  it "rounds a range inward to whole words, as GC_remove_roots then sees it" do
+    words = 8
+    buf = LibC.malloc(LibC::SizeT.new(words * sizeof(Void*))).as(Void**)
+    buf.clear(words)
+    bytes = buf.as(UInt8*)
+    before = Gcry::CAbi.root_range_count
+    LibGC.add_roots((bytes + 1).as(Void*), (bytes + sizeof(Void*) + 4).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before)
+
+    LibGC.add_roots((bytes + 1).as(Void*), (bytes + 4 * sizeof(Void*) + 5).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 1)
+    LibGC.remove_roots((buf + 1).as(Void*), (buf + 4).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before)
+    LibC.free(buf.as(Void*))
+  end
+
   # Boehm scans a registered range whole, whatever its length. Until
   # 2026-10-09 gcry pushed it through the stack scan's 64 MiB valve, so a
   # longer range was skipped every collection and what only it held was swept.

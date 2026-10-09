@@ -275,10 +275,16 @@ module Gcry
       old_data.value = previous[1] unless old_data.null?
     end
 
+    # Boehm rounds a range inward to whole words and ignores one that holds
+    # none (`GC_add_roots_inner`, mark_rts.c). What is stored is what
+    # `remove_roots` compares against, so `GC_add_roots(p + 1, q + 5)` is
+    # taken back by `GC_remove_roots(p + 8, q)`, as in Boehm.
     def self.add_roots(low : Void*, high : Void*) : Nil
-      return unless low.address < high.address
-      lo = low.address
-      hi = high.address
+      word = sizeof(Void*).to_u64
+      lo = (low.address &+ (word &- 1)) & ~(word &- 1)
+      hi = high.address & ~(word &- 1)
+      # `low.address <= lo`: rounding the top word of the address space up wraps.
+      return unless low.address <= lo && lo < hi
       # The hook that scans these is in from `GC.init` (`install_roots_hook`).
       lock_ranges
       begin
@@ -521,7 +527,27 @@ module Gcry
     # Boehm's result codes (`gc.h`).
     GC_SUCCESS       = 0
     GC_DUPLICATE     = 1
+    GC_NO_MEMORY     = 2
     GC_UNIMPLEMENTED = 3
+
+    # A link Boehm takes: non-null and word-aligned (finalize.c,
+    # `GC_general_register_disappearing_link`). A collection stores a whole
+    # word there, which a misaligned link would split.
+    def self.aligned_link?(link : Void**) : Bool
+      !link.null? && link.address & (sizeof(Void*) - 1) == 0
+    end
+
+    # `GC_SUCCESS`, or `GC_DUPLICATE` when *link* was registered already — its
+    # registration then follows *obj*, as in Boehm
+    # (`GC_register_disappearing_link_inner`). A link Boehm would refuse is its
+    # "Bad arg" abort, and no memory for the row is `GC_NO_MEMORY`: the
+    # registry's `OutOfMemoryError` cannot leave a `fun`.
+    def self.register_link(name : String, link : Void**, obj : Void*) : Int32
+      bad_arg(name) unless aligned_link?(link)
+      Gcry.default_heap.register_disappearing_link(link, obj) ? GC_SUCCESS : GC_DUPLICATE
+    rescue Gcry::OutOfMemoryError
+      GC_NO_MEMORY
+    end
 
     # A thread C created is registered by putting it on Crystal's thread list,
     # which is the set gcry stops and scans on every platform. Linux, Darwin
@@ -967,11 +993,8 @@ fun gcry_c_is_heap_ptr = GC_is_heap_ptr(pointer : Void*) : LibGC::Int
   GC.is_heap_ptr(pointer) ? 1 : 0
 end
 
-# Boehm's `GC_SUCCESS` (0) for a new registration, `GC_DUPLICATE` (1) when
-# *link* was registered already — its registration then follows *obj*, as in
-# Boehm (`GC_register_disappearing_link_inner`).
 fun gcry_c_general_register_disappearing_link = GC_general_register_disappearing_link(link : Void**, obj : Void*) : LibGC::Int
-  Gcry.default_heap.register_disappearing_link(link, obj) ? 0 : 1
+  Gcry::CAbi.register_link("GC_general_register_disappearing_link", link, obj)
 end
 
 # Boehm's short form, for a link that is a field of a heap object: the link is
@@ -984,13 +1007,14 @@ end
 fun gcry_c_register_disappearing_link = GC_register_disappearing_link(link : Void**) : LibGC::Int
   base = Gcry::CAbi.base(link.as(Void*))
   Gcry::CAbi.bad_arg("GC_register_disappearing_link") if base.null?
-  Gcry.default_heap.register_disappearing_link(link, base) ? 0 : 1
+  Gcry::CAbi.register_link("GC_register_disappearing_link", link, base)
 end
 
 # 1 when *link* was registered and is not any more, 0 when it was not
-# (Boehm's `GC_unregister_disappearing_link`). The word at *link* is left as
-# it is.
+# (Boehm's `GC_unregister_disappearing_link`), a misaligned link included,
+# which Boehm answers 0 without a lookup. The word at *link* is left as it is.
 fun gcry_c_unregister_disappearing_link = GC_unregister_disappearing_link(link : Void**) : LibGC::Int
+  return 0 unless Gcry::CAbi.aligned_link?(link)
   Gcry.default_heap.unregister_disappearing_link(link) ? 1 : 0
 end
 
@@ -1218,7 +1242,7 @@ fun gcry_c_start_world_external = GC_start_world_external : Nil
   GC.start_world
 end
 
-{% if flag?(:unix) %}
+{% if flag?(:unix) && !flag?(:darwin) %}
   fun gcry_c_get_suspend_signal = GC_get_suspend_signal : LibGC::Int
     Crystal::System::Thread.sig_suspend.value
   end
@@ -1227,8 +1251,11 @@ end
     Crystal::System::Thread.sig_resume.value
   end
 {% else %}
-  # Boehm answers -1 where threads are stopped without signals, Windows
-  # among them (`GC_get_suspend_signal`, gc.h). Until 2026-10-08 gcry aborted.
+  # Boehm answers -1 where threads are stopped without signals: Darwin, where
+  # bdwgc and gcry both use Mach `thread_suspend` (gcconfig.h leaves DARWIN
+  # out of `PTHREAD_STOP_WORLD_IMPL`), and Windows. Until 2026-10-08 gcry
+  # aborted on Windows; until 2026-10-09 it answered Crystal's signals on
+  # Darwin, which nothing sends.
   fun gcry_c_get_suspend_signal = GC_get_suspend_signal : LibGC::Int
     -1
   end

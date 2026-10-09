@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them as the static roots are split
   (`process_spec/regression/41_gc_add_roots_concurrent_spec.cr`).
 
+- **`GC_add_roots` rounds a range inward to whole words, as Boehm.** It kept
+  the bounds as given, so `GC_add_roots(p + 1, q + 5)` was not taken back by
+  `GC_remove_roots(p + 8, q)` and stayed scanned, and a range holding no
+  whole word took an entry (`41_gc_add_roots_concurrent_spec.cr`).
+
+- **Disappearing-link registration follows Boehm's argument rules.** A null
+  or misaligned link is Boehm's "Bad arg" abort rather than a registration a
+  collection later writes a split word through; unregistering a misaligned
+  link answers 0; no memory for the registration answers `GC_NO_MEMORY`
+  instead of raising out of the C function (`src/gcry/c_abi.cr`).
+
+- **`GC_get_suspend_signal` and `GC_get_thr_restart_signal` answer -1 on
+  macOS, as Boehm.** gcry stops threads there with Mach `thread_suspend`, as
+  Boehm does, and answered Crystal's pair, which nothing sends
+  (`21_boehm_c_abi_spec.cr`).
+
 - **Roots marked before the cursor settle are no longer swept.** A
   collection's root phase zeroes the mark bits of every chunk the previous
   cycle pinned (a thread frozen mid-allocation), in
