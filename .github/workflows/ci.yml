@@ -1829,10 +1829,14 @@ jobs:
           done
           echo "TOTAL: $locked locked-arm faults in $done_n attempts"
 
-  # Native aarch64 (GitHub ubuntu-24.04-arm).
+  # Native aarch64 (GitHub ubuntu-24.04-arm). 30 minutes: the step reached
+  # 1 181 s accounted on 2026-10-09 (five `process_spec` runs, 829 s of it)
+  # and run 37972347063 was cancelled at 20 inside its last gate, with every
+  # earlier one green. A hang is still caught sooner: each gate below carries
+  # its own `timeout`, and the STW watchdog names a stopped world that stalls.
   test-aarch64-native:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 30
     name: test (aarch64 native)
     steps:
       - uses: actions/checkout@v7
