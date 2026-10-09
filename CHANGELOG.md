@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`GC_remove_roots` does not return while a collection still scans the
+  range.** It stored the entry's end down and returned at once; the roots
+  hook had already read the old bounds, so a thread gcry does not stop that
+  removed a range and unmapped it crashed the collector mid-scan (Windows:
+  `C0000005` in `push_root_range`, 10 of 10 runs). Boehm takes its lock
+  there. The hook now holds an epoch odd while it reads and scans the table,
+  and `remove_roots`, after unlocking, waits out an odd epoch it observes. A
+  stopped thread never sees one, and the collector runs no other code while
+  it is odd (`process_spec/regression/51_remove_roots_waits_for_scan_spec.cr`:
+  29 of 29 after).
+
+- **A parked marker's wake is counted by the wait's result, not its time.**
+  `parallel_mark_wakes` counted a wait only if the word moved within the
+  nap, but `WaitOnAddress` rounds its timeout up to milliseconds and the
+  timer tick, so real wakes after the nap went uncounted and spec 45 failed
+  1–7% of runs on Windows. Linux counts a futex 0, Darwin a `__ulock_wait`
+  ≥ 0; Windows counts TRUE inside the milliseconds it was given, since a
+  shared-address TRUE can also arrive unwoken at the tick. Spec 45: 200 of
+  200 standalone and 240 of 240 with 8 copies at once; 89 of 100 still fail
+  with the wake call removed.
+
+- **Spec 48 fails on the duplicate runs it guards against again.** Its loop
+  stopped once nearly every object had run `#finalize` once, before a
+  second or third row could run, so it passed on master. It now collects
+  once per extra registration before the `<= 1` checks: master fails it 3 of
+  3.
+
 - **`GC_add_roots` ranges longer than 64 MiB are scanned.** The roots hook
   pushed each registered range through the stack scan, whose 64 MiB valve
   refuses a longer range whole: an object held only from a 65 MiB range was
