@@ -41,6 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once per extra registration before the `<= 1` checks: master fails it 3 of
   3.
 
+- **Spec 50 bounds the mean wait of a `GC.collect` call, not the worst.** A
+  caller the OS leaves off the CPU — frozen by a stop before it queues, or
+  not yet run after a macOS or Windows resume — sees every collection that
+  runs meanwhile, and one call on macOS x86_64 CI saw 11 against a bound of
+  8. The mean over all 120 calls was 2.5–3.6 before the fix and is
+  1.06–1.36 after, two CPUs beside four busy loops included; it must stay at
+  or under 2. The root thread keeps a worst-case bound, 30, for the
+  starvation the Windows runner showed.
+
 - **`GC_add_roots` ranges longer than 64 MiB are scanned.** The roots hook
   pushed each registered range through the stack scan, whose 64 MiB valve
   refuses a longer range whole: an object held only from a 65 MiB range was

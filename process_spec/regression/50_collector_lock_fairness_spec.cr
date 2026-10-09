@@ -87,12 +87,22 @@ private COLLECTORS = 4
 # 100 took 25–40 s there (7 min on the aarch64 runner's freelist arm).
 private CALLS = 30
 # A call waits through the collection in flight when it arrives and the one
-# that answers it. One more can finish before the caller reads the count, if
-# the stop of a collection queued behind it freezes the caller on its way
-# out, and more than once on a busy runner: 5 on macos x86_64 CI
-# (2026-10-08). Before the fix: up to all of another thread's calls, 30
-# here.
-private WAIT_BOUND = 8
+# that answers it: 1–2, about 1.1 on average. What the count cannot tell from
+# unfairness is a caller the OS leaves off the CPU: a thread frozen by a stop
+# before it queues, or on its way out, sees every collection that runs
+# meanwhile, and on macOS and Windows a resumed thread is not waited for, so
+# back-to-back stops can hold it through several. One call saw 5 on macos
+# x86_64 CI (2026-10-08) and 11 on the next run (2026-10-09), which a bound on
+# the worst call cannot tell from the defect. The mean over every call can:
+# before the fix it was 2.5–2.7 with 12 CPUs and 3.1–3.6 with 2, and after it
+# 1.06–1.36, 2 CPUs with four busy loops beside them included; a freeze that
+# costs one call 11 moves the mean of 120 by under 0.1.
+private MEAN_WAIT_BOUND = 2.0
+# The root thread's pairs wait through no collection at all unless frozen. The
+# Windows defect kept one out for over 120 s of back-to-back collections; this
+# catches that and not a freeze. Mutators going ahead of a stop is the next
+# example's.
+private ROOT_WAIT_BOUND = 30_u64
 
 describe "GC.collect and the roots lock with peers collecting back to back" do
   it "answers every call with a collection begun after it, within a bounded wait, sharing collections" do
@@ -104,9 +114,10 @@ describe "GC.collect and the roots lock with peers collecting back to back" do
     heap.collection_event_hook = ->(event : Gcry::Heap::CollectionEvent) { CollectionCount.note(event) }
     satisfied_before = heap.collect_satisfied_by_peer
     unanswered = Atomic(Int32).new(0)
-    # Most collections one thread's call or root pair waited through; the
-    # last slot is the root thread's.
+    # Most collections one thread's call or root pair waited through, and the
+    # collectors' total; the last slot is the root thread's.
     worst = Array.new(COLLECTORS + 1, 0_u64)
+    waited_total = Array.new(COLLECTORS, 0_u64)
     ready = Atomic(Int32).new(0)
     done = Atomic(Int32).new(0)
     threads = Array.new(COLLECTORS) do |i|
@@ -124,6 +135,7 @@ describe "GC.collect and the roots lock with peers collecting back to back" do
           unanswered.add(1) unless CollectionCount.ends > started
           waited = heap.major_collections - majors
           worst[i] = waited if waited > worst[i]
+          waited_total[i] += waited
         end
         done.add(1)
       end
@@ -146,7 +158,10 @@ describe "GC.collect and the roots lock with peers collecting back to back" do
     end
 
     unanswered.get.should eq(0)
-    worst.max.should be <= WAIT_BOUND
+    mean = waited_total.sum.to_f / (COLLECTORS * CALLS)
+    seen = "mean #{mean.round(2)}, worst call per collector #{worst[0, COLLECTORS]}, root thread #{worst[COLLECTORS]}"
+    fail "collect waits: #{seen}" unless mean <= MEAN_WAIT_BOUND
+    fail "root waits: #{seen}" unless worst[COLLECTORS] <= ROOT_WAIT_BOUND
     (heap.collect_satisfied_by_peer - satisfied_before).should be > 0
   end
 
