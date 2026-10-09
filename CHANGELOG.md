@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or under 2. The root thread keeps a worst-case bound, 30, for the
   starvation the Windows runner showed.
 
+- **Spec 21's `GC_stackbottom` example stands down off the initial thread.**
+  Crystal 1.21's execution-context monitor can move the main fiber to a
+  pool thread, and on one there the main thread's `GC_stackbottom` is above
+  the stack and a bottom set does not move it, as Boehm's would not; Linux
+  CI ran the example there once. It now reports pending in that case, as
+  `spec/stack_bounds_snapshot_spec.cr` does.
+
 - **`GC_add_roots` ranges longer than 64 MiB are scanned.** The roots hook
   pushed each registered range through the stack scan, whose 64 MiB valve
   refuses a longer range whole: an object held only from a 65 MiB range was

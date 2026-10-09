@@ -76,12 +76,15 @@ class BoehmAbiLog
   class_property finalized_count = 0
   class_property other_root : Void** = Pointer(Void*).null
   class_property initial_stackbottom = Pointer(Void).null
+  class_property initial_thread = 0_u64
 end
 
 # Read before any example runs: examples (18's `GC.set_stackbottom` among
-# them) move it, as Boehm's would move.
+# them) move it, as Boehm's would move. The thread is the initial one, which
+# is the main thread `GC_stackbottom` follows.
 {% if flag?(:linux) || flag?(:darwin) %}
   BoehmAbiLog.initial_stackbottom = LibGC.stackbottom
+  BoehmAbiLog.initial_thread = Gcry::Platform.current_thread_id
 {% end %}
 
 describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
@@ -205,6 +208,16 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
     it "defines GC_stackbottom where crystal i looks for it, tracking the main thread's stack bottom" do
       symbol = LibC.dlsym(LibC.dlopen(nil, LibC::RTLD_LAZY), "GC_stackbottom")
       symbol.should eq(pointerof(LibGC.stackbottom).as(Void*))
+
+      # The rest is about the main thread, and the main fiber is not always on
+      # it: Crystal 1.21's execution-context monitor hands a scheduler it
+      # catches inside a syscall to a pool thread, and the main fiber carries
+      # on there (`spec/spec_helper.cr`). CI run 37956882487 had this example
+      # on a pool thread, whose stack top is its mmap, below the initial
+      # thread's `GC_stackbottom`. A bottom set there is rightly not the main
+      # thread's, so nothing below can hold.
+      pending!("the main fiber is not on the initial thread (the execution context's monitor moved it)") \
+        unless Gcry::Platform.current_thread_id == BoehmAbiLog.initial_thread
 
       # Set when the collector starts: the main thread's stack bottom.
       _, high = Gcry::Platform.current_pthread_stack_bounds.not_nil!
