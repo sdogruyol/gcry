@@ -132,8 +132,8 @@ end
 # revival takes its bytes out of `dormant_chunk_bytes` (bitmap_alloc.cr,
 # heap.cr) while the last sweep's `fully_free_chunk_bytes` still counts them.
 # Read after those allocations, the sum came out as two chunks "kept" —
-# 524 288 on macos-26-arm64, master run 38034037360 and 2 of the next 6 push
-# runs — with nothing wrong with the release.
+# 524 288 on macos-26-arm64, master run 38034037360 and again on this
+# branch's run 38074816599 — with nothing wrong with the release.
 kept_empty = heap.fully_free_chunk_bytes.to_i64 - heap.released_chunk_bytes.to_i64 -
              heap.dormant_chunk_bytes.to_i64
 
