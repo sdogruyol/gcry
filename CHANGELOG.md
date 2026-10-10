@@ -33,7 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   join or a foreign detach waits for births in flight. After the fix
   `deaths_unmatched` is 0 in the same churn, and a dying thread waits for
   nobody's `arm`, which a first version did and which left Darwin's churn
-  at 22–44 roots held against a bound of 17
+  at 22–44 roots held against a bound of 17. A dying thread finds its record
+  by its own `Thread` before it looks by handle: a detached thread's record,
+  never stamped, under the same handle was stamped instead, and the
+  creator's `arm` then un-rooted the running thread holding that handle
+  next (6 of 6). A detached `GC_pthread_create` thread's record is now
+  stamped when its routine returns
   (`process_spec/regression/52_birth_root_arm_race_spec.cr`).
 
 - **A collection no longer makes another thread's syscall fail with EINTR,
@@ -64,7 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   go into every `Process.run` child as fds 9 and 10 — and where none can be
   made the probe goes without an fd (`process_vm_readv` on Linux,
   `mach_vm_read_overwrite` on macOS); with neither, init stops and says so.
-  gcry now holds those two fds from `GC.init`
+  The two ends then move to the top of the fd table: made at `GC.init`
+  they took fds 3 and 4, and a program that closed those and opened files
+  again had a byte of every probed page written into its own file
   (`55_probe_pipe_fd_pressure_spec.cr`).
 
 - **A finalizer that waits no longer stops automatic collection
@@ -94,8 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at the fork, and its finalizer raised `pthread_mutex_destroy: Device or
   resource busy` out of the child's `GC.collect` on CI. The fiber list's
   mutex is re-initialised in the child too, so a parent thread that held
-  it at the fork no longer hangs the child's first stop
-  (`57_fork_child_collects_spec.cr`).
+  it at the fork no longer hangs the child's first stop. The unlink walks
+  forward only, so a list a parent thread was mid-`push` or mid-`delete`
+  on comes out whole; the handler allocates nothing when the forking thread
+  is one Crystal never listed; and the stack copy keeps only written pages,
+  136 KiB for 16 dead threads where `GCRY_STACK_LOW_WATER=0` made it
+  139 MiB (`57_fork_child_collects_spec.cr`).
 
 - **`GC_invoke_finalizers` runs the queued finalizers and answers how many
   ran, as Boehm.** It answered 0 whatever was queued; an idle collection
