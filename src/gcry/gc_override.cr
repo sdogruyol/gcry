@@ -40,6 +40,11 @@ module GC
     Gcry::Platform.note_main_thread
     Gcry::ThreadBirthRoot.init
 
+    # The readability probe every safe root scan asks, made now while there
+    # are fds to spare rather than in the first collection
+    # (`Gcry::Roots.ensure_probe_pipe`).
+    Gcry::Roots.ensure_probe_pipe
+
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true

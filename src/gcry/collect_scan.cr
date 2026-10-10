@@ -2,20 +2,28 @@
 
 module Gcry
   class Heap
+    # Crystal's `GC.push_stack`: a parked fiber's [stack_top, bottom). It comes
+    # with no stack to check it against, so the window stands for its own
+    # stack in `Roots.scan_stack`: scanned however deep it is, down to where
+    # its mapping ends. Through `scan_range` it lost everything past 64 MiB,
+    # which Boehm's `GC_push_all_stack` scans.
     def push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
       raise "push_stack outside of collect" unless @collecting
+      return if stack_top.null? || stack_bottom.null?
       # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
       # unreadable pages then bulk-scans (see Roots.scan_range_safe).
-      Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
+      top = stack_top.address
+      bottom = stack_bottom.address
+      Roots.scan_stack(top, bottom, top, bottom) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Parked)
       end
     end
 
     # `push_stack` for a range registered as a root (`GC_add_roots`,
-    # `GC_push_all_eager`), which may be any length. `push_stack` keeps
-    # `scan_range`'s 64 MiB valve, right for a stack and a dropped root here:
-    # an object held only from a 65 MiB `GC_add_roots` range was swept, with
-    # nothing said but `oversize_skips`. Boehm scans such a range whole.
+    # `GC_push_all_eager`), which may be any length. `scan_range`'s 64 MiB
+    # valve was a dropped root here: an object held only from a 65 MiB
+    # `GC_add_roots` range was swept, with nothing said but `oversize_skips`.
+    # Boehm scans such a range whole.
     def push_root_range(low : Void*, high : Void*) : Nil
       raise "push_root_range outside of collect" unless @collecting
       Roots.scan_range_chunked(low, high, safe: true) do |candidate|
@@ -733,7 +741,8 @@ module Gcry
 
     # Spill GP registers, then scan approx SP→bottom for the running fiber.
     private def scan_mutator_stack : Nil
-      bottom = Fiber.current.@stack.bottom
+      stack = Fiber.current.@stack
+      bottom = stack.bottom
       @stack_bottom = bottom
       # A window that does not contain the stack pointer is not a scan. The
       # bottom comes from `Fiber.current`, and a fiber whose stack has not been
@@ -748,7 +757,7 @@ module Gcry
         Roots.each_spilled_register do |candidate|
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
-        scan_exclusive_mutator_spill_window(bottom)
+        scan_exclusive_mutator_spill_window(bottom, stack.pointer)
       else
         {% if flag?(:gcry_hl_assert) %}
           # The entry scrub must have covered every frame between the entry SP
@@ -758,7 +767,7 @@ module Gcry
             LibC.printf("HL: scan chain %llu bytes deep exceeds GCRY_COLLECT_SCRUB=%llu\n", depth, @collect_scrub_bytes)
           end
         {% end %}
-        Roots.scan_mutator(bottom) do |candidate|
+        Roots.scan_mutator(bottom, stack.pointer) do |candidate|
           note_mutator_candidate(candidate.address)
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
@@ -800,14 +809,14 @@ module Gcry
       end
     end
 
-    private def scan_exclusive_mutator_spill_window(bottom : Void*) : Nil
+    private def scan_exclusive_mutator_spill_window(bottom : Void*, stack_low : Void*) : Nil
       red = STACK_SCAN_RED_ZONE.to_u64
       sp = Roots.hardware_stack_pointer.address
       win = EXCLUSIVE_MUTATOR_SPILL_WINDOW
       low = sp > (red &+ win) ? sp - red - win : 0_u64
       hi = bottom.address
       return unless low < hi
-      Roots.scan_range(Pointer(Void).new(low), bottom, safe: true) do |candidate|
+      Roots.scan_stack(low, hi, stack_low.address, hi) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Stack)
       end
     end
@@ -1387,7 +1396,7 @@ module Gcry
               # No usable FP chain (makecontext / stale RBP) and no leaf →
               # full parked word-scan for this fiber (correctness floor).
               if !filled && @precise_stack_fiber_leaf_bytes == 0
-                Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+                Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
                   mark_root_candidate(candidate, source: RootSource::Parked)
                 end
               end
@@ -1396,12 +1405,12 @@ module Gcry
               # (GCRY_DISABLE_FIBER_FP_FILL=1 + LEAF=0).
             end
           else
-            Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+            Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
               mark_root_candidate(candidate, source: RootSource::Parked)
             end
           end
         else
-          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: !pooled_stack_readable?(stack, top)) do |candidate|
+          Roots.scan_stack(top, bottom, stack.pointer.address, bottom, safe: !pooled_stack_readable?(stack, top)) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Parked)
           end
         end
@@ -1601,7 +1610,7 @@ module Gcry
         if spa >= stack.pointer.address && spa < bottom && guard < bottom
           top = stack_scan_low(spa, guard)
           @sp_clamp_hits += 1
-          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+          Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Thread)
           end
           return
@@ -1626,7 +1635,7 @@ module Gcry
         top = guard if top < guard
         if top < bottom
           @sp_clamp_fallbacks += 1
-          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+          Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Thread)
           end
           return
@@ -1653,7 +1662,7 @@ module Gcry
 
         low = stack_scan_low(spa, guard)
         @sp_clamp_hits += 1
-        Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(bottom), safe: true) do |candidate|
+        Roots.scan_stack(low, bottom, base, bottom) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
         return
@@ -1766,7 +1775,7 @@ module Gcry
         end
       end
 
-      Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|
+      Roots.scan_stack(low, high, pthread_bounds[0].address, pthread_bounds[1].address) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)
       end
     end
