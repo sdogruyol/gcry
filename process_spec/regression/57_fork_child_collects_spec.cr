@@ -41,6 +41,10 @@ private def fork_child_idle_listed? : Bool
   found
 end
 
+# Where the child leaves the message of anything it raised, after the verdict
+# word: bytes 8 on, NUL-terminated, in the shared page.
+private FORK_CHILD_MESSAGE_BYTES = 4000
+
 # The child's whole run. Nothing here may return: unwinding into the spec
 # runner in a forked copy of it would run the rest of the suite twice.
 private def fork_child_run(verdict : Int64*) : NoReturn
@@ -52,7 +56,12 @@ private def fork_child_run(verdict : Int64*) : NoReturn
     ok = kept.size == 1_000 && kept[999] == "fork-child-999"
     Atomic::Ops.store(verdict, ok ? FORK_CHILD_OK : FORK_CHILD_LOST, :sequentially_consistent, true)
     LibC._exit(0)
-  rescue
+  rescue ex
+    text = "#{ex.class}: #{ex.message}"
+    n = Math.min(text.bytesize, FORK_CHILD_MESSAGE_BYTES - 1)
+    message = (verdict + 1).as(UInt8*)
+    text.to_unsafe.copy_to(message, n)
+    message[n] = 0_u8
     Atomic::Ops.store(verdict, FORK_CHILD_RAISED, :sequentially_consistent, true)
     LibC._exit(15)
   end
@@ -110,12 +119,14 @@ describe "Regression: a forked child collects with the parent's threads gone" do
         fork_child_nap
       end
       result = Atomic::Ops.load(verdict, :sequentially_consistent, true)
+      raised = result == FORK_CHILD_RAISED ? String.new((verdict + 1).as(UInt8*)) : ""
       # Reap it if Crystal's handler has not; ECHILD if it has.
       status = 0
       LibC.waitpid(pid, pointerof(status), 0)
       LibC.munmap(shared, LibC::SizeT.new(4096))
 
       fail "the child hung in its first collection (killed after #{FORK_CHILD_TIMEOUT})" if hung
+      fail "the child raised: #{raised}" if result == FORK_CHILD_RAISED
       result.should eq(FORK_CHILD_OK)
     ensure
       release.set(1)

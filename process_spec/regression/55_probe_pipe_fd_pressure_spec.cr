@@ -88,10 +88,14 @@ describe "Regression: the readability probe survives fd exhaustion" do
     ours.should_not be_empty
     listing = File.tempfile("fd_pressure")
     begin
-      Process.run("/bin/sh", ["-c", "for f in /proc/self/fd/*; do readlink \"$f\"; done"],
+      # The status is not the check: the glob's own directory fd is gone by
+      # the time its `readlink` runs, and when it sorts last the loop exits 1
+      # (aarch64 CI). What the child listed is.
+      Process.run("/bin/sh", ["-c", "for f in /proc/self/fd/*; do readlink \"$f\"; done; exit 0"],
         output: listing, error: Process::Redirect::Close).success?.should be_true
       listing.flush
       seen = File.read(listing.path).lines
+      seen.should_not be_empty
       (ours & seen).should be_empty
     ensure
       listing.delete
