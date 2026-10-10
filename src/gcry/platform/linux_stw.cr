@@ -3,6 +3,7 @@
 #
 # Replaces Crystal's SIG_SUSPEND handler after init_suspend_resume: same
 # suspended-flag + sigsuspend(SIG_RESUME) dance, plus ucontext SP → table.
+# Reinstalls the empty SIG_RESUME handler too, with SA_RESTART.
 #
 # Linux gnu: x86_64 and aarch64. Fixed glibc offsets avoid Crystal StackT /
 # SigsetT padding mismatches when reading through typed ucontext_t.
@@ -611,9 +612,31 @@ module Gcry
       return if @@stw_installed
       ensure_stw_table
 
+      # The stop has to be invisible to the thread it stops, which takes two
+      # things Boehm's handlers have and this one lacked until 2026-10-10.
+      #
+      # `SA_RESTART`: without it every collection made a restartable syscall
+      # the thread sat in — `read`/`write` on a pipe or tty, `accept`,
+      # `connect`, `flock`, `wait4` — fail with EINTR, which Crystal's
+      # blocking IO raises as `IO::Error`. A thread blocked in `read(2)` on a
+      # pipe took 20 EINTRs over 20 `GC.collect`; Boehm, which installs both
+      # stop signals with `SA_RESTART`, gave 0. `sigsuspend` below is never
+      # restarted whatever the flag says, so the wait still ends on a resume.
+      #
+      # `errno`, saved on entry and put back on the way out: `sigsuspend`
+      # always leaves EINTR in it, so a thread stopped between a failing libc
+      # call and its read of `errno` read EINTR instead — 244 of 204 866 reads,
+      # and `File.info?` on a missing path raised "Interrupted system call"
+      # beside 2 000 collections. Boehm's `GC_suspend_handler` saves it the
+      # same way. `Errno.value` is `*__errno_location()` on glibc and musl
+      # alike: a thread-local load, async-signal-safe, no allocation. The
+      # block has one exit — declined, no-ack and served deliveries all fall
+      # through to the restore — and nothing in it raises
+      # (`process_spec/regression/53_suspend_signal_restart_errno_spec.cr`).
       action = LibC::Sigaction.new
-      action.sa_flags = LibC::SA_SIGINFO
+      action.sa_flags = LibC::SA_SIGINFO | LibC::SA_RESTART
       action.sa_sigaction = LibC::SigactionHandlerT.new do |_sig, _info, uctx|
+        saved_errno = Errno.value
         sp = Platform.sp_from_ucontext(uctx)
         Platform.note_stw_handler(sp)
 
@@ -695,11 +718,25 @@ module Gcry
             ack_thread.@suspended.set(false) if ack_thread
           end
         end
+        Errno.value = saved_errno
       end
       LibC.sigemptyset(pointerof(action.@sa_mask))
       # Block resume for the whole SIGPWR handler except inside sigsuspend.
       LibC.sigaddset(pointerof(action.@sa_mask), STW_SIG_RESUME)
       LibC.sigaction(STW_SIG_SUSPEND, pointerof(action), nil)
+
+      # The stdlib's resume handler, again with `SA_RESTART`. `init_suspend_resume`
+      # installs it with `sa_flags = 0`, and a resume can reach a thread that
+      # is running: `start_world` resends one to a thread slow to drop its
+      # acknowledgement, and the first may already have woken it. Five such
+      # resumes sent to a thread blocked in `read(2)` were five EINTRs. The
+      # handler stays empty — a resume does its work by ending `sigsuspend`
+      # above — so it touches no `errno` and needs nothing saved.
+      resume = LibC::Sigaction.new
+      resume.sa_flags = LibC::SA_RESTART
+      resume.sa_sigaction = LibC::SigactionHandlerT.new { |_sig, _info, _uctx| }
+      LibC.sigemptyset(pointerof(resume.@sa_mask))
+      LibC.sigaction(STW_SIG_RESUME, pointerof(resume), nil)
       @@stw_installed = true
     end
   end

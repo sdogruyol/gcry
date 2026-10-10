@@ -5,7 +5,8 @@
 # its suspend handler on Crystal's `SIG_SUSPEND` (`linux_stw.cr`) after
 # `Crystal::System::Thread.init_suspend_resume` installed Crystal's, and
 # resumes threads through Crystal's `Thread#resume`, which sends Crystal's
-# `SIG_RESUME` to Crystal's empty resume handler — the signal gcry's handler
+# `SIG_RESUME` to an empty resume handler — Crystal's, reinstalled by
+# `linux_stw.cr` with `SA_RESTART` — the signal gcry's handler
 # waits for in `sigsuspend`. Until 2026-10-05 gcry copied the two values with a
 # "must match" comment: a stdlib change to either would have compiled cleanly
 # and left the stop sending a signal no handler of gcry's waited for. Reading
