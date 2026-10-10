@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Windows ARM64 CI jobs install a fixed MSYS2 toolchain.** They took
+  whatever `pacman -S` resolved, and when MSYS2 moved clang, lld, libc++,
+  libunwind and llvm-libs from 22.1.8 to 23.1.3 on 2026-10-10, the pinned
+  Crystal 1.21.0 compiler crashed with "Missing hash key for value: 104" in
+  every arm64 job, master's included, with no gcry change between green and
+  red. `ci/windows-arm64-msys2.sh` installs the last green run's packages by
+  version.
+
 - **A thread's `Thread` keeps its birth root until the thread is done with
   it, whatever order its creator and its end come in.** The root was armed
   after `pthread_create` returned, so a thread could end first: its death
