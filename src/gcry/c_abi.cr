@@ -727,8 +727,18 @@ module Gcry
         end
       {% else %}
         # `GC_pthread_create`'s routine and argument, carried to the new thread
-        # in libc memory.
-        private record PthreadStart, start : Void* -> Void*, arg : Void*
+        # in libc memory, and whether it was created detached.
+        private record PthreadStart, start : Void* -> Void*, arg : Void*, detached : Bool
+
+        lib LibPthreadAttr
+          fun pthread_attr_getdetachstate(attr : LibC::PthreadAttrT*, state : LibC::Int*) : LibC::Int
+        end
+
+        {% if flag?(:darwin) %}
+          PTHREAD_CREATE_DETACHED = 2
+        {% else %}
+          PTHREAD_CREATE_DETACHED = 1
+        {% end %}
 
         # Boehm's `GC_pthread_create` registers the thread before the routine
         # runs and unregisters it after (`GC_pthread_start`). Until 2026-10-07
@@ -741,7 +751,13 @@ module Gcry
         def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*) : LibC::Int
           data = LibC.malloc(sizeof(PthreadStart)).as(PthreadStart*)
           return LibC::EAGAIN if data.null?
-          data.value = PthreadStart.new(start, arg)
+          detached = false
+          unless attr.null?
+            state = 0
+            detached = LibPthreadAttr.pthread_attr_getdetachstate(attr, pointerof(state)) == 0 &&
+                       state == PTHREAD_CREATE_DETACHED
+          end
+          data.value = PthreadStart.new(start, arg, detached)
           ret = GC.pthread_create(thread, attr, ->(raw : Void*) { CAbi.pthread_start(raw) }, data.as(Void*), arg)
           LibC.free(data.as(Void*)) unless ret == 0
           ret
@@ -749,14 +765,29 @@ module Gcry
 
         # On the new thread, its own pthread stack the base. A registration
         # refused (no stop-the-world collector) runs the routine unregistered.
+        #
+        # A thread created detached never reaches `GC_pthread_detach` or
+        # `GC_pthread_join`, so nothing said it was over, and its birth record
+        # stayed live and unstamped until libc handed its handle to another
+        # birth — an argument rooted for as long, and a record that a later
+        # owner of the handle, looking by handle alone, could mistake for its
+        # own (src/gcry/thread_birth_root.cr, `stamp_own`). So the routine's
+        # return says it, as a detach would. A routine that ends in
+        # `pthread_exit` passes over this, as it passes over the unregister.
         def self.pthread_start(raw : Void*) : Void*
           data = raw.as(PthreadStart*)
           start = data.value.start
           arg = data.value.arg
+          detached = data.value.detached
           LibC.free(raw)
           registered = register_my_thread(Pointer(LibGC::StackBase).null) == GC_SUCCESS
           result = start.call(arg)
           unregister_my_thread if registered
+          # Recorded under *arg*, which other births may share: matched by
+          # handle and argument together, never by a claim (`own_claim`).
+          if detached && !arg.null?
+            ThreadBirthRoot.note_death(Platform.current_thread_id, arg, own_claim: false)
+          end
           result
         end
       {% end %}

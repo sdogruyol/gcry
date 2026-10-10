@@ -72,6 +72,40 @@ module BirthArmRaceSpec
 end
 
 {% unless flag?(:win32) %}
+  lib LibBirthArmRace
+    fun pthread_attr_init(attr : LibC::PthreadAttrT*) : LibC::Int
+    fun pthread_attr_setdetachstate(attr : LibC::PthreadAttrT*, state : LibC::Int) : LibC::Int
+    fun pthread_attr_destroy(attr : LibC::PthreadAttrT*) : LibC::Int
+  end
+
+  {% if flag?(:darwin) %}
+    BIRTH_ARM_RACE_DETACHED = 2
+  {% else %}
+    BIRTH_ARM_RACE_DETACHED = 1
+  {% end %}
+
+  # A thread created detached through `GC.pthread_create` never says it is
+  # over, so its birth record stays live and unstamped under its handle after
+  # it has gone (src/gcry/thread_birth_root.cr, `stamp_own`). *flag* is its
+  # argument and libc memory; the routine only stores to it.
+  def birth_arm_race_stale_record : Nil
+    flag = LibC.malloc(8).as(Int64*)
+    flag.value = 0
+    attr = uninitialized LibC::PthreadAttrT
+    LibBirthArmRace.pthread_attr_init(pointerof(attr)).should eq(0)
+    LibBirthArmRace.pthread_attr_setdetachstate(pointerof(attr), BIRTH_ARM_RACE_DETACHED).should eq(0)
+    tid = uninitialized LibC::PthreadT
+    GC.pthread_create(pointerof(tid), pointerof(attr),
+      ->(arg : Void*) { Atomic::Ops.store(arg.as(Int64*), 1_i64, :sequentially_consistent, true); Pointer(Void).null },
+      flag.as(Void*)).should eq(0)
+    LibBirthArmRace.pthread_attr_destroy(pointerof(attr))
+    until Atomic::Ops.load(flag, :sequentially_consistent, true) != 0
+      Thread.yield
+    end
+    # Gone, and its handle free for the next birth.
+    Thread.sleep(50.milliseconds)
+  end
+
   # Windows arms before the thread is resumed, so there is no such window.
   describe "Regression: a thread that ends before its creator arms its birth root" do
     # In a process of its own: before the fix the second thread reads its
@@ -85,20 +119,27 @@ end
       captured.to_s.should contain("1 examples, 0 failures")
     end
 
-    # The run, by the example above in a fresh process; a no-op anywhere else.
+    # The same, with a stale record under the handle first: a detached
+    # thread's, which the first thread's death must not take for its own.
+    it "keeps it when a detached thread left a record under the same handle" do
+      captured = IO::Memory.new
+      status = Process.run(Process.executable_path.not_nil!, ["-e", "birth-arm-race child"],
+        env: {"GCRY_BIRTH_ARM_RACE_CHILD" => "detached"}, output: captured, error: captured)
+      fail captured.to_s unless status.success?
+      captured.to_s.should contain("1 examples, 0 failures")
+    end
+
+    # The run, by the examples above in a fresh process; a no-op anywhere else.
     it "birth-arm-race child" do
-      next unless ENV["GCRY_BIRTH_ARM_RACE_CHILD"]? == "1"
+      next unless mode = ENV["GCRY_BIRTH_ARM_RACE_CHILD"]?
       heap = Gcry.default_heap
       # The hold takes the next birth, whoever makes it. A first collection
       # starts the idle thread (`IdleRelease.ensure_started`) from whichever
       # thread collected; let that birth happen now, not inside the hold.
       GC.collect
-      unmatched0 = Gcry::ThreadBirthRoot.deaths_unmatched
-      seen0 = Gcry::ThreadBirthRoot.deaths_seen
+      creator_go = Atomic(Int32).new(0)
       first_handle = Atomic(UInt64).new(0_u64)
       first_done = Atomic(Int32).new(0)
-      creator_go = Atomic(Int32).new(0)
-
       creator = Thread.new do
         until creator_go.get != 0
           Thread.yield
@@ -108,6 +149,9 @@ end
           first_done.set(1)
         end
       end
+      birth_arm_race_stale_record if mode == "detached"
+      unmatched0 = Gcry::ThreadBirthRoot.deaths_unmatched
+      seen0 = Gcry::ThreadBirthRoot.deaths_seen
       Gcry::ThreadBirthRoot.test_hold_birth
       creator_go.set(1)
       deadline = Time.instant + 10.seconds

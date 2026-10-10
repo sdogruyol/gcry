@@ -505,17 +505,19 @@ module Gcry
 
     # From `GC.pthread_detach`, on the dying thread, **before** the real
     # libc call: this handle's thread is done with its `Thread`. Must not
-    # allocate. *object* is the dying thread's own `Thread` when it detaches
-    # itself, which lets it find its record before `arm` has published it;
-    # without it, a death that finds no published record waits for one
-    # (`stamp_own`).
-    def self.note_death(id : UInt64, object : Void* = Pointer(Void).null) : Nil
+    # allocate. *object* is what the thread's birth was recorded with, when
+    # the caller knows it: the dying thread's own `Thread` when it detaches
+    # itself, or a C thread's argument at the end of a detached
+    # `GC_pthread_create` routine (*own_claim* false there: an argument can
+    # be shared). Without it, a death that finds no published record waits
+    # for one (`stamp_own`).
+    def self.note_death(id : UInt64, object : Void* = Pointer(Void).null, own_claim : Bool = true) : Nil
       return if id == 0 || !@@enabled || !@@track_deaths
       heap = Gcry.default_heap?
       return unless heap
       # Never 0: that is the "alive" value, and a death seen before the first
       # collection must still be seen as a death.
-      if stamp_own(id, object) { |slot| stamp(slot, 0_u64, heap.collections &+ 1) }
+      if stamp_own(id, object, own_claim) { |slot| stamp(slot, 0_u64, heap.collections &+ 1) }
         count(pointerof(@@deaths_seen))
       else
         # No slot: the birth overflowed the table, or gcry never recorded it
@@ -570,28 +572,53 @@ module Gcry
     # Stamp the record of *id*'s own birth with the block, which says whether
     # its stamp landed. False when there is none.
     #
-    # First the published records, without waiting. A published, unstamped
-    # record of *id* can only be this thread's: every earlier owner of the
-    # handle let it go through `GC.pthread_detach` or `GC.pthread_join`, and
-    # both stamp before the handle is free. Published means `arm` is over,
-    # reclaim included.
+    # Given the thread's own *object*, the record is found by it first, and
+    # by the handle only after that. A handle alone can name a record that
+    # is not this thread's: one whose thread never said it was over — a
+    # thread created detached through `GC.pthread_create`, or a parent's in a
+    # forked child — and whose handle libc has handed out again. Stamped
+    # there, the death left this thread's own claim unstamped, its creator's
+    # `arm` took the stale record for a reclaimable one, and the reclaim
+    # un-rooted the *next* owner of the handle while it ran (review of
+    # 2026-10-10: that `Thread` swept 6 runs of 6 with one detached thread
+    # started first, `process_spec/regression/52_birth_root_arm_race_spec.cr`).
+    # A `Thread` is in one live record at most: a `LIVE` record holds its
+    # root, so the address cannot be handed to another object meanwhile.
     #
-    # Then, given the thread's own *object*, its claim: a record still
-    # `BUSY`, with no handle yet and this object. Stamped there, it tells
-    # `arm` the thread is over (see "A birth that ends first"), and the
-    # thread goes without waiting. That fails only while `arm` is under way
-    # (`ARMING`), or without an object — a join, or a detach from another
-    # thread — and only then are the births in flight waited out, one claim
-    # per slot (`await_claim`), until this thread's record is published.
-    private def self.stamp_own(id : UInt64, object : Void* = Pointer(Void).null, & : UInt64* -> Bool) : Bool
-      each_slot do |slot|
-        return true if state(slot) == LIVE && slot[W_ID] == id && yield slot
-      end
+    # The object's record is published (`arm` is over, reclaim included), or
+    # still a claim (see "A birth that ends first"): stamped there, it tells
+    # `arm` the thread is over, and the thread goes without waiting. While
+    # `arm` is under way (`ARMING`) the stamp fails, and the thread waits for
+    # that one record to be published. *own_claim* false skips claims: an
+    # object that is not unique to the birth — a C thread's argument — must
+    # not stamp another birth's.
+    #
+    # By the handle, when no record carries the object — a C thread that
+    # registered itself names the `Thread` it was given then, not its
+    # argument — or without an object at all: a join, or a detach from
+    # another thread. First the published records, then the births in
+    # flight are waited out, one claim per slot (`await_claim`), until a
+    # record of *id* is published.
+    private def self.stamp_own(id : UInt64, object : Void* = Pointer(Void).null, own_claim : Bool = true, & : UInt64* -> Bool) : Bool
       unless object.null?
         masked = object.address ^ TABLE_MASK
         each_slot do |slot|
-          return true if state(slot) == BUSY && slot[W_ID] == 0 && slot[W_OBJECT] == masked && yield slot
+          next unless slot[W_OBJECT] == masked
+          if own_claim && state(slot) == BUSY && slot[W_ID] == 0
+            return true if yield slot
+            await_claim(slot)
+          end
+          return true if state(slot) == LIVE && slot[W_ID] == id && slot[W_OBJECT] == masked && yield slot
         end
+        unless own_claim
+          each_slot do |slot|
+            await_claim(slot)
+            return true if state(slot) == LIVE && slot[W_ID] == id && slot[W_OBJECT] == masked && yield slot
+          end
+        end
+      end
+      each_slot do |slot|
+        return true if state(slot) == LIVE && slot[W_ID] == id && yield slot
       end
       each_slot do |slot|
         await_claim(slot)
