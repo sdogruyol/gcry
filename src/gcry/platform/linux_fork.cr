@@ -67,11 +67,20 @@ module Gcry
     # child's `GC.collect` on every CI job of 2026-10-10 (spec 57). So the
     # unlisted threads are chained on `Thread.gcry_fork_orphans` instead,
     # through the same `next` links, and `Heap#scan_fork_orphan_roots` marks
-    # them as `scan_thread_roots` marks a listed thread and scans their
-    # running fibers' stacks whole: there is no SP for a thread that does
-    # not exist. Boehm drops a dead thread's stack in the child; nothing the
-    # child runs can reach what is on it, so keeping it costs memory only,
-    # and freeing it runs finalizers against state no thread will release.
+    # them as `scan_thread_roots` marks a listed thread. Their stacks are
+    # scanned from a copy taken right after this, in the same handler
+    # (`Heap#snapshot_fork_orphan_stacks`): glibc hands a dead thread's
+    # stack to the child's next new thread, or unmaps it. Boehm drops a dead
+    # thread's stack in the child; nothing the child runs can reach what is
+    # on it, so keeping it costs memory only, and freeing it runs finalizers
+    # against state no thread will release.
+    #
+    # What this cannot keep is what a dead thread held only in a register
+    # at the moment of the `fork`. The kernel copies the forking thread's
+    # registers and nobody else's, so those values exist nowhere in the
+    # child. A parent stop reads them from the suspend handler's saved
+    # context; the child has no such context to read. Boehm has the same
+    # limit and drops the stacks besides.
     def self.unlist_threads_after_fork : Nil
       ::Thread.gcry_unlist_all_but(LibC.pthread_self)
     end
@@ -94,33 +103,41 @@ class Thread
     list = @@threads
     # `uninitialized` until `Thread.init`, and a null reference until then.
     return if list.object_id == 0
-    survivor = nil
-    orphans = @@gcry_fork_orphans
-    node = list.@head
-    while node
-      following = node.next
-      if node.to_unsafe == survivor_handle
-        survivor = node
-      else
-        node.previous = nil
-        node.next = orphans
-        orphans = node
-      end
-      node = following
+    @@gcry_fork_orphans = list.gcry_unlink_after_fork(@@gcry_fork_orphans) do |thread|
+      thread.to_unsafe != survivor_handle
     end
-    @@gcry_fork_orphans = orphans
-    list.gcry_reset_after_fork(survivor)
   end
 
   class LinkedList(T)
     # :nodoc:
-    def gcry_reset_after_fork(survivor : T?) : Nil
+    # For a fork child: initialises the mutex afresh — a dead thread may
+    # have held it, in a `push` or `delete` this overwrites — and moves every
+    # node the block selects off the list and onto *chain*, linked through
+    # `next`. Returns the chain's new head. No lock and no allocation.
+    def gcry_unlink_after_fork(chain : T?, & : T -> Bool) : T?
       @mutex.gcry_reinit_after_fork
-      if survivor
-        survivor.previous = nil
-        survivor.next = nil
+      node = @head
+      while node
+        following = node.next
+        if yield node
+          before = node.previous
+          if before
+            before.next = following
+          else
+            @head = following
+          end
+          if following
+            following.previous = before
+          else
+            @tail = before
+          end
+          node.previous = nil
+          node.next = chain
+          chain = node
+        end
+        node = following
       end
-      @head = @tail = survivor
+      chain
     end
   end
 
@@ -134,5 +151,27 @@ class Thread
       LibC.pthread_mutex_init(to_unsafe, pointerof(attributes))
       LibC.pthread_mutexattr_destroy(pointerof(attributes))
     end
+  end
+end
+
+class Fiber
+  # The fibers the parent's threads were on, unlisted in a forked child
+  # (`Heap#snapshot_fork_orphan_stacks` says which), chained through `next`.
+  # Their stacks were glibc's or are not where the fiber says any more, so a
+  # walk of the list must not read them; their objects stay reachable from
+  # here. No initializer, so no lazy guard: nil until the first `fork`.
+  @@gcry_fork_orphans : Fiber?
+
+  # :nodoc:
+  def self.gcry_fork_orphans : Fiber?
+    @@gcry_fork_orphans
+  end
+
+  # :nodoc:
+  def self.gcry_unlist_after_fork(& : Fiber -> Bool) : Nil
+    list = @@fibers
+    # `uninitialized` until `Fiber.init`, and a null reference until then.
+    return if list.object_id == 0
+    @@gcry_fork_orphans = list.gcry_unlink_after_fork(@@gcry_fork_orphans) { |fiber| yield fiber }
   end
 end

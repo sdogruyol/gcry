@@ -1028,10 +1028,14 @@ module Gcry
     def after_fork_child_reinit : Nil
       # First, and before anything here can allocate: until the list holds
       # only this thread, a collection would wait on the parent's (see the
-      # method). The staging table goes with it, since nothing it names can
-      # publish here.
+      # method). Their stacks are copied at once, before anything can start
+      # a thread that glibc would hand one of them to
+      # (`snapshot_fork_orphan_stacks`). The staging table goes with them,
+      # since nothing it names can publish here.
       {% if flag?(:linux) || flag?(:darwin) %}
+        earlier_orphans = Thread.gcry_fork_orphans
         Platform.unlist_threads_after_fork
+        snapshot_fork_orphan_stacks(earlier_orphans)
       {% end %}
       Platform.clear_staging_after_fork
       # A birth a parent thread had claimed and not armed has nobody to

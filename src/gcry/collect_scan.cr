@@ -1417,20 +1417,16 @@ module Gcry
           end
         end
       end
-      scan_fork_orphan_roots(current)
+      scan_fork_orphan_roots
     end
 
     # A forked child's dead threads (`Platform.unlist_threads_after_fork`):
-    # what they held at the fork stays as reachable as it was. Each is marked
-    # as `scan_thread_roots` marks a listed thread, and every running fiber
-    # that no listed thread is running is scanned whole — those are the
-    # fibers the dead threads were on, a mid-swap one included, which the
-    # walk above leaves to the thread scan, and there is no thread to scan.
-    # Whole, from the low-water mark, because a thread that does not exist
-    # has no SP; and probed, because glibc puts a dead thread's stack in its
-    # cache in the child, where it can be reused or unmapped. Nothing here
-    # runs in a process that has not forked.
-    private def scan_fork_orphan_roots(current : Fiber) : Nil
+    # what they held at the fork stays as reachable as it was. Each `Thread`
+    # is marked as `scan_thread_roots` marks a listed one, and their stacks
+    # are scanned from the copy `snapshot_fork_orphan_stacks` took in the
+    # child handler — not where they were. Nothing here runs in a process
+    # that has not forked.
+    private def scan_fork_orphan_roots : Nil
       {% if flag?(:linux) || flag?(:darwin) %}
         orphan = Thread.gcry_fork_orphans
         return unless orphan
@@ -1438,20 +1434,128 @@ module Gcry
           mark_thread_roots(orphan)
           orphan = orphan.next
         end
-        Fiber.unsafe_each do |fiber|
-          next if fiber == current || !fiber.running?
-          next if fiber_current_on_listed_thread?(fiber)
-          stack = fiber.@stack
-          guard = stack.pointer.address + Roots.runtime_page_size
-          bottom = stack.bottom.address
-          next unless guard < bottom
-          top = low_water_or_guard(fiber, guard)
-          next unless top < bottom
-          Roots.scan_stack(top, bottom, stack.pointer.address, bottom, safe: true) do |candidate|
+        fiber = Fiber.gcry_fork_orphans
+        while fiber
+          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+          fiber = fiber.next
+        end
+        seg = @fork_stack_snapshot
+        while seg != 0
+          header = Pointer(UInt64).new(seg)
+          data = seg + FORK_SNAPSHOT_HEADER
+          Roots.scan_range_chunked(Pointer(Void).new(data), Pointer(Void).new(data + header[1])) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Thread)
           end
+          seg = header[0]
         end
       {% end %}
+    end
+
+    # The dead threads' stacks, copied in the child handler, newest fork
+    # first: one OS mapping per fork, a link word, a byte count, the words.
+    # A grandchild inherits the copies with the rest of the address space.
+    #
+    # Copied because the stacks themselves do not stay. glibc's child
+    # handler marks every other thread's stack free and puts it in its stack
+    # cache, so the child's next `pthread_create` — a mark helper or the
+    # idle thread at its first collection, anything the program starts —
+    # can be handed one and write its own frames over the dead thread's, or
+    # unmap it when the cache is over its limit. Measured with glibc 2.39
+    # (Ubuntu 24.04, the CI runners), eight parked threads each holding a
+    # marker word in its frame, 16 copies across their stacks: 8 were gone
+    # from the address space after the child's first `GC.collect`, which
+    # starts the mark helpers, and 10 after one `Thread.new` more. Spec 57
+    # raised `pthread_mutex_destroy: Device or resource busy` in every CI
+    # process_spec run, scanning the stacks where they had been. glibc 2.43
+    # lost none of the 16, which is why it never failed on a workstation.
+    @fork_stack_snapshot = 0_u64
+    FORK_SNAPSHOT_HEADER = 16_u64
+
+    # From the child handler, after the unlisting and before anything can
+    # start a thread. Copies the stack each dead thread's fibers were using:
+    # every main fiber of a thread unlisted by this fork, whatever its
+    # state, since that stack is glibc's; and every fiber still running
+    # that no listed thread is running, a mid-swap one included. Whole,
+    # from the low-water mark, because a thread that does not exist has no
+    # SP. Pages that do not read are left out. *stop* is where the orphans
+    # of earlier forks begin, whose stacks an earlier snapshot holds.
+    #
+    # Then those fibers leave Crystal's fiber list for `Fiber.gcry_fork_orphans`,
+    # so no walk reads where their stacks were. Listed, the live scan kept
+    # reading them there, and a stack glibc had cut up for new threads has a
+    # new guard page in the middle, which the scan does not expect of a
+    # stack: a grandchild of a process with six parked threads, whose child
+    # had started and joined eighteen, faulted in `scan_all_fiber_roots` in
+    # 3 of 3 runs on glibc 2.39. The list's mutex is initialised afresh on
+    # the way, as the thread list's is: a dead thread may have held it, and
+    # every stop takes it.
+    protected def snapshot_fork_orphan_stacks(stop : Thread?) : Nil
+      {% if flag?(:linux) || flag?(:darwin) %}
+        current = Fiber.current
+        copy_fork_orphan_stacks(current, stop)
+        Fiber.gcry_unlist_after_fork { |fiber| fork_orphan_fiber?(fiber, current, stop) }
+      {% end %}
+    end
+
+    private def copy_fork_orphan_stacks(current : Fiber, stop : Thread?) : Nil
+      total = 0_u64
+      each_fork_orphan_range(current, stop) { |lo, hi| total += hi - lo }
+      return if total == 0
+      page = Roots::PAGE_SIZE
+      bytes = (FORK_SNAPSHOT_HEADER + total + page - 1) & ~(page - 1)
+      seg = Gcry.os_map(bytes)
+      if Gcry.mmap_failed?(seg)
+        buf = uninitialized UInt8[RawOut::LIMIT]
+        n = RawOut.append(buf.to_unsafe, 0, "gcry: fork child could not map a copy of the parent's thread stacks; what only they held is not a root in this process\n")
+        RawOut.flush(buf.to_unsafe, n)
+        return
+      end
+      data = seg.as(UInt8*) + FORK_SNAPSHOT_HEADER
+      used = 0_u64
+      each_fork_orphan_range(current, stop) do |lo, hi|
+        at = lo & ~(page - 1)
+        while at < hi
+          from = at < lo ? lo : at
+          to = at + page < hi ? at + page : hi
+          if used + (to - from) <= total && Roots.page_readable?(at)
+            (data + used).copy_from(Pointer(UInt8).new(from), to - from)
+            used += to - from
+          end
+          at += page
+        end
+      end
+      header = seg.as(UInt64*)
+      header[0] = @fork_stack_snapshot
+      header[1] = used
+      @fork_stack_snapshot = seg.address
+    end
+
+    private def each_fork_orphan_range(current : Fiber, stop : Thread?, & : UInt64, UInt64 ->) : Nil
+      word = sizeof(Void*).to_u64
+      Fiber.unsafe_each do |fiber|
+        next unless fork_orphan_fiber?(fiber, current, stop)
+        stack = fiber.@stack
+        guard = stack.pointer.address + Roots.runtime_page_size
+        bottom = stack.bottom.address & ~(word - 1)
+        next unless guard < bottom
+        top = low_water_or_guard(fiber, guard) & ~(word - 1)
+        yield top, bottom if top < bottom
+      end
+    end
+
+    private def fork_orphan_fiber?(fiber : Fiber, current : Fiber, stop : Thread?) : Bool
+      return false if fiber == current
+      (fiber.running? && !fiber_current_on_listed_thread?(fiber)) || fiber_of_new_orphan?(fiber, stop)
+    end
+
+    private def fiber_of_new_orphan?(fiber : Fiber, stop : Thread?) : Bool
+      orphan = Thread.gcry_fork_orphans
+      while orphan && !orphan.same?(stop)
+        return true if (main = orphan.@main_fiber) && main.same?(fiber)
+        return true if (running = orphan.@current_fiber) && running.same?(fiber)
+        orphan = orphan.next
+      end
+      false
     end
 
     private def fiber_current_on_listed_thread?(fiber : Fiber) : Bool
