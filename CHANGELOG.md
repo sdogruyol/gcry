@@ -71,7 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on. The child's reinit now takes every thread but its own off the list
   and clears the staged-thread table, as Boehm's
   `GC_remove_all_threads_but_me` does, and any nonzero `pthread_kill`
-  answer counts as a dead handle (`57_fork_child_collects_spec.cr`).
+  answer counts as a dead handle. What the dead threads held stays
+  reachable: their `Thread` objects and the fibers they were running are
+  roots of every collection in the child, scanned whole. Dropping them,
+  as the unlisting alone did, swept a `Thread::Mutex` a parent thread
+  held locked at the fork, and its finalizer raised
+  `pthread_mutex_destroy: Device or resource busy` out of the child's
+  `GC.collect` on CI (`57_fork_child_collects_spec.cr`).
 
 - **`GC_invoke_finalizers` runs the queued finalizers and answers how many
   ran, as Boehm.** It answered 0 whatever was queued; an idle collection

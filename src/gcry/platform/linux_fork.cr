@@ -58,10 +58,20 @@ module Gcry
     # held by a parent thread at the `fork`, so it is initialised afresh,
     # and a `push` or `delete` it was in the middle of is overwritten.
     #
-    # The unlisted `Thread` objects stay where their birth roots hold them
-    # (`ThreadBirthRoot`): none of the dead threads will ever say it is
-    # done with its object, and one whose handle the child's libc hands to
-    # a new thread is reclaimed by `ThreadBirthRoot.arm`, as in the parent.
+    # What the dead threads held stays as reachable as it was at the fork.
+    # Unlisted and nothing more, their `Thread` objects, their stacks and
+    # their running fibers stopped being roots, and whatever only they held
+    # was swept in the child — finalizers included: a `Thread::Mutex` a
+    # parked parent thread had locked was destroyed by its finalizer, which
+    # raised `pthread_mutex_destroy: Device or resource busy` out of the
+    # child's `GC.collect` on every CI job of 2026-10-10 (spec 57). So the
+    # unlisted threads are chained on `Thread.gcry_fork_orphans` instead,
+    # through the same `next` links, and `Heap#scan_fork_orphan_roots` marks
+    # them as `scan_thread_roots` marks a listed thread and scans their
+    # running fibers' stacks whole: there is no SP for a thread that does
+    # not exist. Boehm drops a dead thread's stack in the child; nothing the
+    # child runs can reach what is on it, so keeping it costs memory only,
+    # and freeing it runs finalizers against state no thread will release.
     def self.unlist_threads_after_fork : Nil
       ::Thread.gcry_unlist_all_but(LibC.pthread_self)
     end
@@ -69,15 +79,36 @@ module Gcry
 end
 
 class Thread
+  # The parent's threads, unlisted in a forked child, chained through
+  # `next`; those of every earlier `fork` in this process's ancestry too.
+  # No initializer, so no lazy guard: nil until the first `fork`.
+  @@gcry_fork_orphans : Thread?
+
+  # :nodoc:
+  def self.gcry_fork_orphans : Thread?
+    @@gcry_fork_orphans
+  end
+
   # :nodoc:
   def self.gcry_unlist_all_but(survivor_handle : LibC::PthreadT) : Nil
     list = @@threads
     # `uninitialized` until `Thread.init`, and a null reference until then.
     return if list.object_id == 0
     survivor = nil
-    list.unsafe_each do |thread|
-      survivor = thread if thread.to_unsafe == survivor_handle
+    orphans = @@gcry_fork_orphans
+    node = list.@head
+    while node
+      following = node.next
+      if node.to_unsafe == survivor_handle
+        survivor = node
+      else
+        node.previous = nil
+        node.next = orphans
+        orphans = node
+      end
+      node = following
     end
+    @@gcry_fork_orphans = orphans
     list.gcry_reset_after_fork(survivor)
   end
 

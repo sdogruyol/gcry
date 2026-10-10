@@ -373,27 +373,7 @@ module Gcry
 
     # Mark Thread objects and Parallel EC roots (TLS alone is not scanned).
     private def scan_thread_roots : Nil
-      Thread.unsafe_each do |thread|
-        mark_root_candidate(Pointer(Void).new(thread.object_id), source: RootSource::Thread)
-        # Parallel EC can briefly have nil current_fiber while a worker OS
-        # thread is between fibers / during shutdown — skip rather than raise.
-        if fiber = thread.@current_fiber
-          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-        end
-        if main = thread.@main_fiber
-          mark_root_candidate(Pointer(Void).new(main.object_id), source: RootSource::Thread)
-        end
-        # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
-        # only on conservative Thread body scan missed them when layout/scan_cap
-        # truncated the object (Kemal EC4 SEGV @ …0008).
-        # Gate on the ivar itself: Crystal 1.21.0 release declares
-        # @execution_context by default; tip needs -Dexecution_context
-        # (-Dpreview_mt). Flag-only gates break one of the two.
-        {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
-          mark_ref_slot(pointerof(thread.@scheduler).address, "thread.@scheduler")
-          mark_ref_slot(pointerof(thread.@execution_context).address, "thread.@execution_context")
-        {% end %}
-      end
+      Thread.unsafe_each { |thread| mark_thread_roots(thread) }
 
       {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
         # `GCRY_DISABLE_EC_PINS=1` skips this derived walk so
@@ -450,6 +430,28 @@ module Gcry
       {% end %}
 
       audit_ec_queues
+    end
+
+    private def mark_thread_roots(thread : Thread) : Nil
+      mark_root_candidate(Pointer(Void).new(thread.object_id), source: RootSource::Thread)
+      # Parallel EC can briefly have nil current_fiber while a worker OS
+      # thread is between fibers / during shutdown — skip rather than raise.
+      if fiber = thread.@current_fiber
+        mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+      end
+      if main = thread.@main_fiber
+        mark_root_candidate(Pointer(Void).new(main.object_id), source: RootSource::Thread)
+      end
+      # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
+      # only on conservative Thread body scan missed them when layout/scan_cap
+      # truncated the object (Kemal EC4 SEGV @ …0008).
+      # Gate on the ivar itself: Crystal 1.21.0 release declares
+      # @execution_context by default; tip needs -Dexecution_context
+      # (-Dpreview_mt). Flag-only gates break one of the two.
+      {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
+        mark_ref_slot(pointerof(thread.@scheduler).address, "thread.@scheduler")
+        mark_ref_slot(pointerof(thread.@execution_context).address, "thread.@execution_context")
+      {% end %}
     end
 
     # ── Execution-context queue audit ─────────────────────────────────────────
@@ -1415,6 +1417,50 @@ module Gcry
           end
         end
       end
+      scan_fork_orphan_roots(current)
+    end
+
+    # A forked child's dead threads (`Platform.unlist_threads_after_fork`):
+    # what they held at the fork stays as reachable as it was. Each is marked
+    # as `scan_thread_roots` marks a listed thread, and every running fiber
+    # that no listed thread is running is scanned whole — those are the
+    # fibers the dead threads were on, a mid-swap one included, which the
+    # walk above leaves to the thread scan, and there is no thread to scan.
+    # Whole, from the low-water mark, because a thread that does not exist
+    # has no SP; and probed, because glibc puts a dead thread's stack in its
+    # cache in the child, where it can be reused or unmapped. Nothing here
+    # runs in a process that has not forked.
+    private def scan_fork_orphan_roots(current : Fiber) : Nil
+      {% if flag?(:linux) || flag?(:darwin) %}
+        orphan = Thread.gcry_fork_orphans
+        return unless orphan
+        while orphan
+          mark_thread_roots(orphan)
+          orphan = orphan.next
+        end
+        Fiber.unsafe_each do |fiber|
+          next if fiber == current || !fiber.running?
+          next if fiber_current_on_listed_thread?(fiber)
+          stack = fiber.@stack
+          guard = stack.pointer.address + Roots.runtime_page_size
+          bottom = stack.bottom.address
+          next unless guard < bottom
+          top = low_water_or_guard(fiber, guard)
+          next unless top < bottom
+          Roots.scan_stack(top, bottom, stack.pointer.address, bottom, safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Thread)
+          end
+        end
+      {% end %}
+    end
+
+    private def fiber_current_on_listed_thread?(fiber : Fiber) : Bool
+      Thread.unsafe_each do |thread|
+        if (running = thread.@current_fiber) && running.same?(fiber)
+          return true
+        end
+      end
+      false
     end
 
     # Can `[top, stack.bottom)` be read without probing it page by page?
