@@ -126,6 +126,17 @@ rounds.times do |round|
   end
 end
 
+# What the last collection left, read before anything below allocates. On
+# macOS an idle collection leaves empties dormant (released in place) rather
+# than unmapped, and the `GC.disable` arm's allocations can revive one: the
+# revival takes its bytes out of `dormant_chunk_bytes` (bitmap_alloc.cr,
+# heap.cr) while the last sweep's `fully_free_chunk_bytes` still counts them.
+# Read after those allocations, the sum came out as two chunks "kept" —
+# 524 288 on macos-26-arm64, master run 38034037360 and again on this
+# branch's run 38074816599 — with nothing wrong with the release.
+kept_empty = heap.fully_free_chunk_bytes.to_i64 - heap.released_chunk_bytes.to_i64 -
+             heap.dormant_chunk_bytes.to_i64
+
 # `GC.disable` must hold off the idle collector: no collection the program did
 # not ask for. The check sits under the post-STW lock, because the one made
 # before asking for it can be stale by the length of the program's own cycles.
@@ -140,8 +151,6 @@ if heap.idle_collections > 0
   GC.enable
 end
 
-kept_empty = heap.fully_free_chunk_bytes.to_i64 - heap.released_chunk_bytes.to_i64 -
-             heap.dormant_chunk_bytes.to_i64
 idle = heap.idle_collections
 fin_ran = FinLog.ran
 fin_idle = FinLog.on_idle

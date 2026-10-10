@@ -718,10 +718,24 @@ module Gcry
     end
 
     # Does this handle still name a live thread? `pthread_kill(id, 0)` sends
-    # nothing and answers exactly that.
+    # nothing and answers exactly that: 0 for a live thread, an error for
+    # anything else. Any error, not only `ESRCH`. A forked child's libc keeps
+    # the parent's thread descriptors with no kernel thread behind them, and
+    # glibc answers those with `EINVAL` (the `tgkill` of tid 0): asked for
+    # `ESRCH` alone, a child stop waiting on a parent thread never gave up
+    # (`process_spec/regression/57_fork_child_collects_spec.cr`). No error
+    # names a live thread of this process — signal 0 is valid and the caller
+    # may signal its own threads — so stopping without one stops nothing
+    # that still runs.
+    @suspend_probe_rc = 0
+
     private def suspend_handle_dead?(id : UInt64) : Bool
-      return true if @stw_test_esrch
-      LibStwProbe.pthread_kill(id.unsafe_as(Gcry::OS::PthreadT), 0) == SUSPEND_ESRCH
+      if @stw_test_esrch
+        @suspend_probe_rc = SUSPEND_ESRCH
+        return true
+      end
+      @suspend_probe_rc = LibStwProbe.pthread_kill(id.unsafe_as(Gcry::OS::PthreadT), 0)
+      @suspend_probe_rc != 0
     end
 
     # Unconditional, unlike `report_stuck_suspend`: this one is not asking a
@@ -735,7 +749,10 @@ module Gcry
       len = RawOut.append_hex(p, len, id)
       len = RawOut.append(p, len, " — no acknowledgement after ")
       len = RawOut.append_u64(p, len, resends.to_u64)
-      len = RawOut.append(p, len, " resends and pthread_kill(0) says ESRCH, so the handle names no live thread. ")
+      len = RawOut.append(p, len, " resends and pthread_kill(0) → ")
+      len = RawOut.append_u64(p, len, @suspend_probe_rc.to_u64)
+      len = RawOut.append(p, len, @suspend_probe_rc == SUSPEND_ESRCH ? " ESRCH" : "")
+      len = RawOut.append(p, len, ", so the handle names no live thread. ")
       len = RawOut.append_u64(p, len, acked.to_u64)
       len = RawOut.append(p, len, " of ")
       len = RawOut.append_u64(p, len, expected.to_u64)
@@ -776,12 +793,14 @@ module Gcry
       len = RawOut.append(p, len, " / redundant ")
       len = RawOut.append_u64(p, len, Platform.stw_redundant_signals)
       len = RawOut.append(p, len, ". ")
-      # ESRCH means the handle names no live thread, which is what a `Thread`
-      # object that was swept and reissued would look like from here.
+      # An error means the handle names no live thread (`suspend_handle_dead?`),
+      # which is what a `Thread` object that was swept and reissued would look
+      # like from here, and what a fork child's copy of a parent thread does.
       rc = LibStwProbe.pthread_kill(id.unsafe_as(Gcry::OS::PthreadT), 0)
       len = RawOut.append(p, len, rc == 0 ? "the handle is live (pthread_kill 0 → 0)" : "pthread_kill(0) → ")
       len = RawOut.append_u64(p, len, rc.to_u64) unless rc == 0
-      len = RawOut.append(p, len, rc == SUSPEND_ESRCH ? " ESRCH: the handle names no live thread" : "")
+      len = RawOut.append(p, len, rc == SUSPEND_ESRCH ? " ESRCH" : "")
+      len = RawOut.append(p, len, rc == 0 ? "" : ": the handle names no live thread")
       len = RawOut.append(p, len, "\n")
       RawOut.flush(p, len)
     end
@@ -1007,13 +1026,27 @@ module Gcry
     # Child after fork: only this OS thread survives. Reset locks / STW / caches
     # so GC can run again (heap mappings are inherited).
     def after_fork_child_reinit : Nil
+      # First, and before anything here can allocate: until the list holds
+      # only this thread, a collection would wait on the parent's (see the
+      # method). Their stacks are copied at once, before anything can start
+      # a thread that glibc would hand one of them to
+      # (`snapshot_fork_orphan_stacks`). The staging table goes with them,
+      # since nothing it names can publish here.
+      {% if flag?(:linux) || flag?(:darwin) %}
+        earlier_orphans = Thread.gcry_fork_orphans
+        Platform.unlist_threads_after_fork
+        snapshot_fork_orphan_stacks(earlier_orphans)
+      {% end %}
+      Platform.clear_staging_after_fork
+      # A birth a parent thread had claimed and not armed has nobody to
+      # finish it here; left `BUSY`, every death and join would wait on it.
+      ThreadBirthRoot.after_fork_child
       @world_stopped = false
       @stw_owner = nil
       @stw_owner_pthread = 0_u64
       @block_other_heap = false
       @collecting = false
       @collector_pthread = 0_u64
-      @running_finalizers = false
       @incremental_marking = false
       @inc_active = false
       @gc_lock = Crystal::RWLock.new

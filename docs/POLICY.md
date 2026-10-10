@@ -25,7 +25,7 @@ Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`; Linux process de
 | `GCRY_DISABLE_ATFORK=1` | No registration; post-fork GC writes to stderr and `_exit(69)` without allocating (`raise` re-enters malloc) |
 | Crystal | `Process.fork` under ExecutionContext is forbidden — use `LibC.fork` + `-Dwithout_mt`, or fork+exec |
 
-Prefer fork+exec. Single-threaded children can keep allocating after reinit.
+Prefer fork+exec. A child keeps allocating and collecting after reinit: only the forking thread exists there, and the reinit takes the parent's other threads — the idle-release thread among them — off Crystal's thread list, as Boehm's `GC_remove_all_threads_but_me` does (`process_spec/regression/57_fork_child_collects_spec.cr`).
 
 ## Signals
 

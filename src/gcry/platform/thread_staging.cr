@@ -213,6 +213,22 @@ module Gcry
       end
     end
 
+    # After `fork`: every staged id names a parent thread, none of which
+    # exists in the child to publish itself, and the child's list no longer
+    # names any of them either (`unlist_threads_after_fork`), so none would
+    # ever drain. The child's first stop would spend the pre-stop wait's
+    # whole budget on them and count a timeout for threads that are not
+    # being born. The counters stay: they are the process's history.
+    def self.clear_staging_after_fork : Nil
+      i = 0
+      while i < STAGED_SLOTS
+        @@staged[i] = 0_u64
+        @@staged_seq[i] = 0_u64
+        i += 1
+      end
+      @@staged_claimed.set(0_u64)
+    end
+
     def self.each_staged(& : UInt64 ->) : Nil
       claimed = @@staged_claimed.get(:acquire)
       i = 0

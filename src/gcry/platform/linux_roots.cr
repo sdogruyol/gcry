@@ -675,9 +675,9 @@ module Gcry
     private def self.scan_loaded_object_roots(& : Void*, Void* ->) : Nil
       return unless @@shared_lib_roots
       return if @@objects_addr == 0
-      # The probe pipe is created lazily by the first safe range scan. Make
-      # sure of it here: without it every page reads as unreadable and an
-      # untrusted pass would skip every library.
+      # `GC.init` makes the readability probe; this call is then a load and a
+      # branch. It stays for a heap the specs build without `GC.init`, where an
+      # untrusted pass with no probe would have nothing to ask.
       Roots.ensure_probe_pipe
       sync_loaded_objects
       i = 0

@@ -955,7 +955,6 @@ module Gcry
     # the guard learned to tell a peer from itself. `make explicit-collect-barrier`
     # needs this arm to lose the guarantee.
     property collect_skip_when_busy : Bool = false
-    @running_finalizers = false
     @incremental_marking = false
     @inc_active = false
     @world_stopped = false
@@ -2155,7 +2154,7 @@ module Gcry
     def collect_a_little(work_units : Int32 = DEFAULT_INCREMENTAL_WORK) : Bool
       return false if @destroyed
       return false if @collecting
-      return false if @running_finalizers
+      return false if @finalizers.draining?
       return false if monitor_thread?
       return false if thread_not_ready_for_collect?
 
@@ -2263,14 +2262,7 @@ module Gcry
         unlock_post_stw
       end
 
-      if finished
-        @running_finalizers = true
-        begin
-          @finalizers.run_pending
-        ensure
-          @running_finalizers = false
-        end
-      end
+      @finalizers.run_pending if finished
       finished
     end
 
@@ -2479,7 +2471,15 @@ module Gcry
     protected def maybe_collect : Nil
       return unless @enabled
       return if @collecting
-      return if @running_finalizers
+      # No automatic collection from a finalizer this fiber is running, and
+      # only from that one: any `run_pending` used to set one heap-wide flag,
+      # so a finalizer waiting on a channel refused every allocation on every
+      # fiber and thread — 2 000 × 1 MiB `Bytes` made 0 collections and a
+      # 2 010 MiB heap, against 85 and 27 MiB without the wait
+      # (`process_spec/regression/56_parked_finalizer_blocks_no_gc_spec.cr`).
+      # A collection elsewhere is safe while a finalizer runs; see
+      # `Finalizers::Registry#run_pending`.
+      return if @finalizers.draining?
       return if @suppress_collect.get > 0
       return if monitor_thread?
       return if thread_not_ready_for_collect?
@@ -2883,7 +2883,7 @@ module Gcry
         # Answered by a peer's collection. Its finalizers are this caller's to
         # run as well, as after one of its own: the idle thread's leaves them
         # queued, and `GC.collect` has always run what it found.
-        run_finalizers_after_collect if want != 0
+        @finalizers.run_pending if want != 0
         return
       end
 
@@ -3338,21 +3338,12 @@ module Gcry
       # `IO::FileDescriptor` close may need one. The next ordinary collection
       # runs them on a mutator — no later than they would have been found
       # without the idle collection at all.
-      run_finalizers_after_collect unless idle
+      @finalizers.run_pending unless idle
 
       # After the cycle, the lock and the finalizers: `Thread.new` allocates,
       # and this is the first point where a mutator may do that without
       # re-entering a collection it is itself running.
       IdleRelease.ensure_started if @stop_the_world
-    end
-
-    private def run_finalizers_after_collect : Nil
-      @running_finalizers = true
-      begin
-        @finalizers.run_pending
-      ensure
-        @running_finalizers = false
-      end
     end
 
     # The idle thread's collection (src/gcry/idle_release.cr): an explicit
@@ -3400,18 +3391,11 @@ module Gcry
     #
     # 0 from inside a finalizer, where Boehm's would drain the rest of the
     # queue one frame deeper: the drain already running takes it, as it does
-    # for a finalizer that collects. Returning before the flag also keeps the
-    # outer drain's `@running_finalizers` set; clearing it on the way out let
-    # its remaining finalizers start automatic collections.
+    # for a finalizer that collects.
     def invoke_finalizers : Int32
       @finalizers_deferred = false
-      return 0 if @finalizers.pending_count == 0 || @finalizers.draining?
-      @running_finalizers = true
-      begin
-        @finalizers.run_pending
-      ensure
-        @running_finalizers = false
-      end
+      return 0 if @finalizers.pending_count == 0
+      @finalizers.run_pending
     end
 
     private def monotonic_ns : UInt64
