@@ -1013,7 +1013,6 @@ module Gcry
       @block_other_heap = false
       @collecting = false
       @collector_pthread = 0_u64
-      @running_finalizers = false
       @incremental_marking = false
       @inc_active = false
       @gc_lock = Crystal::RWLock.new
