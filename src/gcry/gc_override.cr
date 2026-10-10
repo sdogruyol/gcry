@@ -2017,8 +2017,17 @@ module GC
     # :nodoc:
     def self.pthread_detach(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
-        Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
-        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
+        id = thread.unsafe_as(UInt64)
+        # A thread detaching itself — `Thread#start`'s `ensure` — names its
+        # own `Thread`, the object its birth was claimed with, so a death
+        # before the creator's `arm` stamps that claim instead of waiting for
+        # it (src/gcry/thread_birth_root.cr, "A birth that ends first").
+        own = Pointer(Void).null
+        if id == Gcry::Platform.current_thread_id && (current = ::Thread.current?)
+          own = current.as(Void*)
+        end
+        Gcry::ThreadBirthRoot.note_death(id, own)
+        Gcry::Platform.unstage_thread(id)
       {% end %}
       Gcry::OS.pthread_detach(thread)
     end

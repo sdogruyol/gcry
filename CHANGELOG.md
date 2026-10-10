@@ -19,8 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~4 800 births in plain `Thread.new` churn. The same order leaked: the
   early death left a live slot nothing released (`deaths_unmatched` 15–31,
   up to 9 `Thread`s held, in 8 × 400 births). A birth now claims its slot
-  before `pthread_create`, and a death or join waits for births in flight
-  before it looks; after the fix `deaths_unmatched` is 0 in the same churn
+  before `pthread_create`. A thread that ends before its creator's `arm`
+  stamps that claim itself, and `arm` publishes it already dead and may
+  then reclaim only a record of a thread that is done with its object; a
+  join or a foreign detach waits for births in flight. After the fix
+  `deaths_unmatched` is 0 in the same churn, and a dying thread waits for
+  nobody's `arm`, which a first version did and which left Darwin's churn
+  at 22–44 roots held against a bound of 17
   (`process_spec/regression/52_birth_root_arm_race_spec.cr`).
 
 - **A collection no longer makes another thread's syscall fail with EINTR,

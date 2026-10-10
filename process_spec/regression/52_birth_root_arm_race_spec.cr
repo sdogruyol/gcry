@@ -13,10 +13,11 @@ require "spec"
 # (src/gcry/thread_birth_root.cr, "A birth that ends first").
 #
 # The creator is parked between `pthread_create` and `arm` by the research
-# hold, since nothing else can put it there on demand. Before the fix the
-# first thread's death is unmatched and the second thread's `Thread` is
-# swept; after it, the first thread waits in `note_death` until its creator
-# has armed, so its handle is not free while the second thread is born.
+# hold, since nothing else can put it there on demand. The first thread runs
+# to its end and exits meanwhile, and the second is handed its handle. Before
+# the fix the first thread's death is unmatched and the second thread's
+# `Thread` is swept; after it, the first thread stamps its own claim, and the
+# held `arm` sees that and takes back only a record whose death is stamped.
 
 BIRTH_ARM_RACE_KEY = 0x3C3C_C3C3_3C3C_C3C3_u64
 
@@ -93,6 +94,7 @@ end
       # thread collected; let that birth happen now, not inside the hold.
       GC.collect
       unmatched0 = Gcry::ThreadBirthRoot.deaths_unmatched
+      seen0 = Gcry::ThreadBirthRoot.deaths_seen
       first_handle = Atomic(UInt64).new(0_u64)
       first_done = Atomic(Int32).new(0)
       creator_go = Atomic(Int32).new(0)
@@ -114,20 +116,20 @@ end
         Thread.yield
       end
 
-      # The first thread runs to its end while its creator is held. Unfixed,
-      # its death goes unmatched within microseconds and it exits; fixed, it
-      # waits for its creator's `arm`, and this only spends the grace.
+      # The first thread runs to its end while its creator is held: its death
+      # is counted, unmatched before the fix and matched against its claim
+      # after it, and it exits.
       until first_done.get != 0
         fail "the first thread never ran" if Time.instant > deadline
         Thread.yield
       end
-      grace = Time.instant + 200.milliseconds
-      until Gcry::ThreadBirthRoot.deaths_unmatched != unmatched0 || Time.instant > grace
+      until Gcry::ThreadBirthRoot.deaths_unmatched != unmatched0 || Gcry::ThreadBirthRoot.deaths_seen != seen0
+        fail "the first thread's death was never counted" if Time.instant > deadline
         Thread.sleep(1.millisecond)
       end
-      # Long enough for an unmatched thread to finish exiting, so glibc can
-      # hand its handle to the next birth.
-      Thread.sleep(50.milliseconds) if Gcry::ThreadBirthRoot.deaths_unmatched != unmatched0
+      # Long enough for it to finish exiting, so libc can hand its handle to
+      # the next birth.
+      Thread.sleep(50.milliseconds)
 
       hidden = BirthArmRaceSpec.spawn_parked
       until BirthArmRaceSpec.handle != 0
