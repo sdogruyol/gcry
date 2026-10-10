@@ -114,29 +114,40 @@ class Thread
     # have held it, in a `push` or `delete` this overwrites — and moves every
     # node the block selects off the list and onto *chain*, linked through
     # `next`. Returns the chain's new head. No lock and no allocation.
+    #
+    # Forward links only, and every back link and `@tail` rebuilt from them.
+    # A parent thread can have been inside `push` or `delete` at the `fork`,
+    # and both write the forward link before the back link and `@tail`:
+    # `delete(D)` leaves `X.next == N` with `N.previous` still `D`, and
+    # `push` can leave `@tail` on the node before the one it appended.
+    # Splicing through `previous` there wrote to `D`, kept `X.next == N`,
+    # and, with `N` moved to the chain, cut every node after it off the
+    # list: a fiber parked after it went unscanned in the child and lost
+    # what its frame held (the torn-list example in spec 57).
     def gcry_unlink_after_fork(chain : T?, & : T -> Bool) : T?
       @mutex.gcry_reinit_after_fork
+      kept = nil
       node = @head
+      @head = nil
       while node
         following = node.next
         if yield node
-          before = node.previous
-          if before
-            before.next = following
-          else
-            @head = following
-          end
-          if following
-            following.previous = before
-          else
-            @tail = before
-          end
           node.previous = nil
           node.next = chain
           chain = node
+        else
+          if kept
+            kept.next = node
+          else
+            @head = node
+          end
+          node.previous = kept
+          kept = node
         end
         node = following
       end
+      kept.next = nil if kept
+      @tail = kept
       chain
     end
   end

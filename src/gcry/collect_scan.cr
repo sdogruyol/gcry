@@ -1476,9 +1476,16 @@ module Gcry
     # every main fiber of a thread unlisted by this fork, whatever its
     # state, since that stack is glibc's; and every fiber still running
     # that no listed thread is running, a mid-swap one included. Whole,
-    # from the low-water mark, because a thread that does not exist has no
-    # SP. Pages that do not read are left out. *stop* is where the orphans
-    # of earlier forks begin, whose stacks an earlier snapshot holds.
+    # because a thread that does not exist has no SP — but only what was
+    # ever written: from the low-water mark, asked of the platform whatever
+    # `GCRY_STACK_LOW_WATER` says, and without the pages that read zero, so
+    # an unreadable pagemap costs a read and not a copy. With the knob at 0
+    # the copy started at the guard: 16 parked threads made a 139 196 KiB
+    # snapshot (child RSS 143 408 KiB) where 136 KiB holds every written
+    # word, and the same with pagemap unreadable. Unreadable pages are left out too.
+    # Zero words root nothing and the scan reads words, so the pages kept
+    # are packed end to end. *stop* is where the orphans of earlier forks
+    # begin, whose stacks an earlier snapshot holds.
     #
     # Then those fibers leave Crystal's fiber list for `Fiber.gcry_fork_orphans`,
     # so no walk reads where their stacks were. Listed, the live scan kept
@@ -1489,17 +1496,26 @@ module Gcry
     # 3 of 3 runs on glibc 2.39. The list's mutex is initialised afresh on
     # the way, as the thread list's is: a dead thread may have held it, and
     # every stop takes it.
+    #
+    # The forking thread's own fiber is found with `Thread.current?`, never
+    # `Fiber.current`: on a thread Crystal never listed — a raw pthread that
+    # calls `fork` — `Thread.current` creates a `Thread` and its main fiber,
+    # which allocates and pushes onto the fiber list, here, before its mutex
+    # and the allocator's locks are initialised again. A parent thread
+    # holding the list's mutex at the `fork` left such a child in this
+    # handler for good. Nil excludes nothing: that thread has no fiber on
+    # the list to keep.
     protected def snapshot_fork_orphan_stacks(stop : Thread?) : Nil
       {% if flag?(:linux) || flag?(:darwin) %}
-        current = Fiber.current
+        current = Thread.current?.try(&.current_fiber?)
         copy_fork_orphan_stacks(current, stop)
         Fiber.gcry_unlist_after_fork { |fiber| fork_orphan_fiber?(fiber, current, stop) }
       {% end %}
     end
 
-    private def copy_fork_orphan_stacks(current : Fiber, stop : Thread?) : Nil
+    private def copy_fork_orphan_stacks(current : Fiber?, stop : Thread?) : Nil
       total = 0_u64
-      each_fork_orphan_range(current, stop) { |lo, hi| total += hi - lo }
+      each_fork_orphan_piece(current, stop) { |from, to| total += to - from }
       return if total == 0
       page = Roots::PAGE_SIZE
       bytes = (FORK_SNAPSHOT_HEADER + total + page - 1) & ~(page - 1)
@@ -1512,17 +1528,10 @@ module Gcry
       end
       data = seg.as(UInt8*) + FORK_SNAPSHOT_HEADER
       used = 0_u64
-      each_fork_orphan_range(current, stop) do |lo, hi|
-        at = lo & ~(page - 1)
-        while at < hi
-          from = at < lo ? lo : at
-          to = at + page < hi ? at + page : hi
-          if used + (to - from) <= total && Roots.page_readable?(at)
-            (data + used).copy_from(Pointer(UInt8).new(from), to - from)
-            used += to - from
-          end
-          at += page
-        end
+      each_fork_orphan_piece(current, stop) do |from, to|
+        next if used + (to - from) > total
+        (data + used).copy_from(Pointer(UInt8).new(from), to - from)
+        used += to - from
       end
       header = seg.as(UInt64*)
       header[0] = @fork_stack_snapshot
@@ -1530,21 +1539,45 @@ module Gcry
       @fork_stack_snapshot = seg.address
     end
 
-    private def each_fork_orphan_range(current : Fiber, stop : Thread?, & : UInt64, UInt64 ->) : Nil
+    # The readable, not all-zero, page-bounded pieces of every orphan stack's
+    # written range, word-aligned. The child is single-threaded here, so two
+    # walks see the same pieces.
+    private def each_fork_orphan_piece(current : Fiber?, stop : Thread?, & : UInt64, UInt64 ->) : Nil
       word = sizeof(Void*).to_u64
+      page = Roots::PAGE_SIZE
       Fiber.unsafe_each do |fiber|
         next unless fork_orphan_fiber?(fiber, current, stop)
         stack = fiber.@stack
         guard = stack.pointer.address + Roots.runtime_page_size
-        bottom = stack.bottom.address & ~(word - 1)
-        next unless guard < bottom
-        top = low_water_or_guard(fiber, guard) & ~(word - 1)
-        yield top, bottom if top < bottom
+        hi = stack.bottom.address & ~(word - 1)
+        next unless guard < hi
+        lo = Platform.stack_low_water(guard, hi)
+        lo = guard if lo < guard
+        lo = (lo + word - 1) & ~(word - 1)
+        at = lo & ~(page - 1)
+        while at < hi
+          from = at < lo ? lo : at
+          to = at + page < hi ? at + page : hi
+          if from < to && Roots.page_readable?(at) && !words_zero?(from, to)
+            yield from, to
+          end
+          at += page
+        end
       end
     end
 
-    private def fork_orphan_fiber?(fiber : Fiber, current : Fiber, stop : Thread?) : Bool
-      return false if fiber == current
+    private def words_zero?(from : UInt64, to : UInt64) : Bool
+      p = Pointer(UInt64).new(from)
+      e = Pointer(UInt64).new(to)
+      while p < e
+        return false if p.value != 0
+        p += 1
+      end
+      true
+    end
+
+    private def fork_orphan_fiber?(fiber : Fiber, current : Fiber?, stop : Thread?) : Bool
+      return false if current && fiber.same?(current)
       (fiber.running? && !fiber_current_on_listed_thread?(fiber)) || fiber_of_new_orphan?(fiber, stop)
     end
 

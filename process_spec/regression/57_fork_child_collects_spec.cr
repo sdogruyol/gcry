@@ -129,6 +129,57 @@ private def fork_child_run(verdict : Int64*) : NoReturn
   end
 end
 
+# A node for `Thread::LinkedList`, whose fork-child unlink is checked on a
+# list built by hand into the state a `push` or `delete` cut short by `fork`
+# leaves behind: forward link written, back link or `@tail` not yet.
+private class ForkTornNode
+  property previous : ForkTornNode?
+  property next : ForkTornNode?
+  getter name : String
+
+  def initialize(@name : String)
+  end
+end
+
+private def fork_torn_names(list : Thread::LinkedList(ForkTornNode)) : Array(String)
+  names = [] of String
+  list.unsafe_each { |node| names << node.name }
+  names
+end
+
+# The words a raw pthread and the test share, in a `MAP_SHARED` page so the
+# raw thread's child can answer too: go, the child's pid, forked, and the
+# child's word that it left the `fork` handler.
+private enum ForkRawSlot
+  Go
+  Pid
+  Forked
+  ChildOut
+end
+
+private def fork_raw_load(shared : Int64*, slot : ForkRawSlot) : Int64
+  Atomic::Ops.load(shared + slot.value, :sequentially_consistent, true)
+end
+
+private def fork_raw_store(shared : Int64*, slot : ForkRawSlot, value : Int64) : Nil
+  Atomic::Ops.store(shared + slot.value, value, :sequentially_consistent, true)
+end
+
+# A thread Crystal never listed, so it has no `Thread`: forks on the word,
+# and its child says it got out of the handler and leaves.
+private def fork_raw_body(shared : Int64*) : Nil
+  until fork_raw_load(shared, ForkRawSlot::Go) != 0
+    fork_child_nap
+  end
+  pid = LibC.fork
+  if pid == 0
+    fork_raw_store(shared, ForkRawSlot::ChildOut, 1)
+    LibC._exit(0)
+  end
+  fork_raw_store(shared, ForkRawSlot::Pid, pid.to_i64)
+  fork_raw_store(shared, ForkRawSlot::Forked, 1)
+end
+
 describe "Regression: a forked child collects with the parent's threads gone" do
   it "stops the world in the child without waiting on a parent thread, and keeps what they held" do
     if Gcry::IdleRelease.armed?
@@ -216,5 +267,79 @@ describe "Regression: a forked child collects with the parent's threads gone" do
       LibC.munmap(shared, LibC::SizeT.new(FORK_CHILD_PAGE))
     end
     intact.get.should eq(FORK_CHILD_HOLDERS)
+  end
+
+  # The unlink is forward-only. Through `previous`, the torn `delete` below
+  # cut `m` off the list (it read `[x, n]`), and the torn `push` left `@tail`
+  # on `x`, so the next push would have dropped `y`.
+  it "unlinks from a list a fork caught mid-push or mid-delete without losing the rest" do
+    list = Thread::LinkedList(ForkTornNode).new
+    x, d, n, m = ForkTornNode.new("x"), ForkTornNode.new("d"), ForkTornNode.new("n"), ForkTornNode.new("m")
+    [x, d, n, m].each { |node| list.push(node) }
+    # `delete(d)` stopped after its forward half: `n.previous` is still `d`.
+    d.previous = nil
+    x.next = n
+    chain = list.gcry_unlink_after_fork(nil, &.same?(n))
+    fork_torn_names(list).should eq(["x", "m"])
+    m.previous.should be(x)
+    list.@tail.should be(m)
+    chain.should be(n)
+    n.next.should be_nil
+
+    list = Thread::LinkedList(ForkTornNode).new
+    x, y = ForkTornNode.new("x"), ForkTornNode.new("y")
+    list.push(x)
+    # `push(y)` stopped after `tail.next = y`, before `@tail = y`.
+    y.previous = x
+    x.next = y
+    list.gcry_unlink_after_fork(nil) { false }.should be_nil
+    list.@tail.should be(y)
+    fork_torn_names(list).should eq(["x", "y"])
+  end
+
+  # A raw pthread has no `Thread`, and `Fiber.current` there makes one,
+  # allocating and pushing onto the fiber list. The handler asked it before
+  # that list's mutex was initialised again, so a parent thread holding the
+  # mutex at the `fork` — the test's own, here, for a moment — left the
+  # child in the handler for good: killed at the timeout every run.
+  it "leaves the handler in a child forked by a thread Crystal never listed" do
+    shared = LibC.mmap(nil, LibC::SizeT.new(FORK_CHILD_PAGE), LibC::PROT_READ | LibC::PROT_WRITE,
+      LibC::MAP_SHARED | LibC::MAP_ANON, -1, 0)
+    shared.address.should_not eq(UInt64::MAX)
+    words = shared.as(Int64*)
+    words.clear(4)
+    LibC.pthread_create(out tid, nil, ->(arg : Void*) { fork_raw_body(arg.as(Int64*)); Pointer(Void).null }, shared).should eq(0)
+    # Nothing in the window allocates: a collection here would wait for the
+    # mutex this thread holds.
+    locked = Fiber.gcry_lock_list
+    fork_raw_store(words, ForkRawSlot::Go, 1)
+    spins = 0
+    until fork_raw_load(words, ForkRawSlot::Forked) != 0 || spins > 20_000
+      fork_child_nap
+      spins += 1
+    end
+    Fiber.gcry_unlock_list if locked
+    fork_raw_load(words, ForkRawSlot::Forked).should eq(1)
+    pid = fork_raw_load(words, ForkRawSlot::Pid).to_i32
+
+    deadline = Time.instant + FORK_CHILD_TIMEOUT
+    hung = false
+    while fork_raw_load(words, ForkRawSlot::ChildOut) == 0
+      status = 0
+      break if LibC.waitpid(pid, pointerof(status), LibC::WNOHANG) == pid
+      if Time.instant > deadline
+        hung = true
+        LibC.kill(pid, LibC::SIGKILL)
+        break
+      end
+      fork_child_nap
+    end
+    answered = fork_raw_load(words, ForkRawSlot::ChildOut)
+    status = 0
+    LibC.waitpid(pid, pointerof(status), 0)
+    LibC.pthread_join(tid, nil).should eq(0)
+    LibC.munmap(shared, LibC::SizeT.new(FORK_CHILD_PAGE))
+    fail "the raw thread's child never left the fork handler (killed after #{FORK_CHILD_TIMEOUT})" if hung
+    answered.should eq(1)
   end
 end
