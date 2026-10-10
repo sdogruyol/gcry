@@ -9,14 +9,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A thread's `Thread` keeps its birth root until the thread is done with
+  it, whatever order its creator and its end come in.** The root was armed
+  after `pthread_create` returned, so a thread could end first: its death
+  found no slot, its handle went to the next thread created, and the first
+  creator's late `arm` then reclaimed *that* thread's slot as a recycled
+  handle and un-rooted a running thread's `Thread` — swept in its death
+  window 6 of 6 times with the creator held there, and seen 1–7 times per
+  ~4 800 births in plain `Thread.new` churn. The same order leaked: the
+  early death left a live slot nothing released (`deaths_unmatched` 15–31,
+  up to 9 `Thread`s held, in 8 × 400 births). A birth now claims its slot
+  before `pthread_create`, and a death or join waits for births in flight
+  before it looks; after the fix `deaths_unmatched` is 0 in the same churn
+  (`process_spec/regression/52_birth_root_arm_race_spec.cr`).
+
+- **A collection no longer makes another thread's syscall fail with EINTR,
+  or change its `errno` (Linux).** The suspend handler had no `SA_RESTART`,
+  so a thread blocked in `read`/`write` on a pipe or tty, `accept`,
+  `connect`, `flock` or `wait4` got EINTR on every collection — Crystal's
+  blocking IO raises that as `IO::Error` — and it left `sigsuspend`'s EINTR
+  in `errno` for a thread stopped between a failing call and its read of
+  `errno` (38–61 of at most 100 collections). The stdlib's resume handler,
+  installed with no flags, did the same to a running thread when
+  `start_world` resent a resume. Both handlers now have `SA_RESTART`, and
+  the suspend handler saves and restores `errno`, as Boehm's do
+  (`53_suspend_signal_restart_errno_spec.cr`).
+
+- **A stack deeper than 64 MiB is a root.** Every stack scan went through
+  the 64 MiB valve meant for nonsense bounds, so under `ulimit -s unlimited`
+  a thread recursing past it lost its whole stack from the root set: a
+  block held only by `main`'s frame was swept at depth 20 000. A window
+  inside the stack it came from is now scanned in 64 MiB pieces down to the
+  end of the mapped stack; the valve stays for windows outside their stack
+  (`54_deep_stack_roots_spec.cr`).
+
+- **A full fd table no longer drops every root.** The pipe the readability
+  probe writes through was made by the first collection, and when `pipe()`
+  failed there (EMFILE) every page read as unreadable: the collection
+  scanned no stack, no static range and no `GC_add_roots` range, and the
+  program crashed. `GC.init` now makes the pipe, close-on-exec — it used to
+  go into every `Process.run` child as fds 9 and 10 — and where none can be
+  made the probe goes without an fd (`process_vm_readv` on Linux,
+  `mach_vm_read_overwrite` on macOS); with neither, init stops and says so.
+  gcry now holds those two fds from `GC.init`
+  (`55_probe_pipe_fd_pressure_spec.cr`).
+
+- **A finalizer that waits no longer stops automatic collection
+  everywhere.** Collection was refused while any fiber ran finalizers, on
+  one heap-wide flag, so a finalizer parked on a `Channel` or a contended
+  `Mutex` left every other fiber and thread allocating with no collection:
+  2 000 × 1 MiB made 0 collections and a 2 010 MiB heap, against 84 and
+  27 MiB without the wait. The guard is now the draining fiber's own, and
+  two drains no longer clear each other's
+  (`56_parked_finalizer_blocks_no_gc_spec.cr`).
+
+- **A forked child collects (Linux, macOS).** Crystal's thread list in the
+  child still named every thread of the parent, the idle-release thread
+  among them once the parent had collected, and the child's first stop
+  signalled one nothing could answer and waited for good — glibc answers
+  `pthread_kill(id, 0)` with EINVAL there, not the ESRCH the stop gave up
+  on. The child's reinit now takes every thread but its own off the list
+  and clears the staged-thread table, as Boehm's
+  `GC_remove_all_threads_but_me` does, and any nonzero `pthread_kill`
+  answer counts as a dead handle (`57_fork_child_collects_spec.cr`).
+
 - **`GC_invoke_finalizers` runs the queued finalizers and answers how many
   ran, as Boehm.** It answered 0 whatever was queued; an idle collection
   leaves its finalizers for a mutator, and a C caller asking for them got
   none (`25_boehm_finalizer_registration_spec.cr`). Called from a finalizer
   it answers 0 and leaves the queue to the drain already running, as a
-  finalizer that collects does; that call, and an allocation in a finalizer
-  while an idle collection's finalizers were deferred, also no longer clear
-  the outer drain's guard against automatic collections.
+  finalizer that collects does.
 
 - **`GC_remove_roots` does not return while a collection still scans the
   range.** It stored the entry's end down and returned at once; the roots
