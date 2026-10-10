@@ -1269,8 +1269,10 @@ end
     if value.null?
       GC.pthread_join(thread)
     else
-      Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
-      Gcry::ThreadBirthRoot.joining(thread.unsafe_as(UInt64)) { LibC.pthread_join(thread, value) }
+      Gcry::ThreadBirthRoot.joining(thread.unsafe_as(UInt64)) do
+        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
+        LibC.pthread_join(thread, value)
+      end
     end
   end
 

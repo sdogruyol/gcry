@@ -118,7 +118,9 @@ module Gcry
     #
     # `BUSY` belongs to exactly one thread, which writes the record and only
     # then publishes `LIVE`; every release takes `LIVE` -> `BUSY` first, so a
-    # record is never read half-written and never released twice.
+    # record is never read half-written and never released twice. A birth
+    # holds its slot `BUSY` from before `pthread_create` to the end of `arm`
+    # (see "A birth that ends first").
     FREE = 0_u32
     BUSY = 1_u32
     LIVE = 2_u32
@@ -135,7 +137,9 @@ module Gcry
     # it), and on Windows gcry's own wait handle (see `release_exited`). A
     # segment is one link word — the next segment's address, 0 at the tail —
     # and then `SLOTS` slots. Fresh mappings read zero, which is `FREE`,
-    # generation 0, no death and no next segment.
+    # generation 0, no death and no next segment. The generation moves on
+    # every release (`vacate`) and never while a birth holds the slot, so a
+    # `BUSY` slot and its generation name one claim (`await_births`).
     {% if flag?(:win32) %}
       SLOT_WORDS = 5
     {% else %}
@@ -157,6 +161,9 @@ module Gcry
     @@released = uninitialized UInt64
     @@overflows = uninitialized UInt64
     @@outstanding = uninitialized Int32
+    # Research only: see `test_hold_birth`. 0 off, 1 armed for the next
+    # birth, 2 holding one.
+    @@test_hold = uninitialized Int32
 
     # ── Ending a birth root ─────────────────────────────────────────────────
     #
@@ -243,6 +250,7 @@ module Gcry
       @@released = 0_u64
       @@overflows = 0_u64
       @@outstanding = 0
+      @@test_hold = 0
     end
 
     def self.enabled=(value : Bool) : Bool
@@ -298,20 +306,96 @@ module Gcry
       n < 0 ? 0 : n
     end
 
+    # ── A birth that ends first ─────────────────────────────────────────────
+    #
+    # Until 2026-10-10 a birth's slot was claimed in `arm`, after
+    # `pthread_create` had returned, and nothing stopped the new thread from
+    # ending before that. Its `note_death` then found no slot, counted itself
+    # unmatched and detached — and a detached, exited thread's handle is
+    # glibc's to hand out again. A second creator given the same `pthread_t`
+    # armed it for *its* thread, and when the first creator reached `arm`,
+    # `reclaim_handle` took that slot as a recycled handle's and un-rooted a
+    # thread that was still running, whose death window was then covered by
+    # nothing. With one creator held before `arm` and the second thread parked
+    # in its death window, that `Thread` was swept 6 runs of 6 (0 of 6 without
+    # the hold; `process_spec/regression/52_birth_root_arm_race_spec.cr`), and
+    # plain churn of 8–16 creators crossed 1–7 of ~4 800 births with no help.
+    # The same order leaked: the late `arm` recorded a thread that was already
+    # gone, and nothing would ever release it — 8 creators × 400
+    # `Thread.new {}` ended with `deaths_unmatched` at 15–471 and 4–33 slots
+    # outstanding. With the claim below: 0 unmatched, and nothing outstanding
+    # past the threads still alive.
+    #
+    # So a birth claims its slot **before** the call (`claim`) and holds it
+    # `BUSY` until `arm` has filled and published it, and a death or a join
+    # first waits out every slot it finds `BUSY` (`await_births`). The thread
+    # cannot exist before its creator's claim, so when the wait reaches that
+    # slot the record is either published or being written, and the wait
+    # leaves only once it is published. Its handle cannot be released before
+    # that, so it cannot reach another birth while this one's `arm` is still
+    # to come, and `reclaim_handle` only ever meets owners that are gone.
+    #
+    # The wait is per slot: each `BUSY` slot until its claim ends — one
+    # `pthread_create`, and any stop that freezes its creator meanwhile. A
+    # count of births in flight, waited down to zero, measured no different
+    # in that churn, but it has no bound: creators that overlap hold it above
+    # zero for as long as they keep creating. What the wait costs there is
+    # `pthread_create` itself, which took up to 0.2–2.0 s under 8 creators
+    # (0.6–5.5 s before the change): a death waited up to 1–3 s, and the
+    # churn still finished in 0.7–1.8 s against 1.9–6.2 s before. Spinning
+    # with `Thread.yield` beat sleeping with backoff on both time and CPU.
+    #
+    # It cannot deadlock. The waiter holds nothing: a dying thread has left
+    # `Thread.threads` and `Fiber.inactive`, and `Thread#detach` / `#join`
+    # guard the call with an atomic swap, not a lock. A creator inside its
+    # window waits on nothing in this table, only on `pthread_create`, the
+    # lock-free staging table and `@roots_lock`; the stop that holds that lock
+    # waits only for threads on Crystal's list, which a dying thread is not
+    # and a joiner answers from inside the spin. A creator frozen by a stop
+    # mid-window holds its waiters for that stop. A `fork` that leaves a
+    # claim behind is undone in the child (`after_fork_child`).
+
+    # From `GC.pthread_create`, **before** the real call: a slot for the birth,
+    # `BUSY` until `arm` publishes it or `abandon` gives it back. Null when
+    # there is nothing to record or no slot could be had; `arm` then takes the
+    # overflow path.
+    def self.claim(object : Void*) : UInt64*
+      return Pointer(UInt64).null unless @@enabled && !object.null? && Gcry.default_heap?
+      loop do
+        each_slot do |slot|
+          return slot if state(slot) == FREE && transition(slot, FREE, BUSY)
+        end
+        # Every slot was live when walked: add a segment and walk again. A
+        # creator that raced this one to a full table appends its own segment
+        # behind it, so both find a free slot on the next walk.
+        break unless grow
+      end
+      Pointer(UInt64).null
+    end
+
+    # The real call failed: there is no thread, and every death and join
+    # would otherwise wait on this slot for good.
+    def self.abandon(slot : UInt64*) : Nil
+      publish(slot, FREE) unless slot.null?
+    end
+
     # From `GC.pthread_create` / `GC.beginthreadex` (and their C entry points),
     # immediately after it returns. *object* is the `arg` Crystal passed, which
     # for a `Thread` is the object itself. *wait* is gcry's own handle on the
     # thread on Windows, owned by this table from here on, and 0 elsewhere.
-    def self.arm(id : UInt64, object : Void*, wait : UInt64 = 0_u64) : Nil
+    # *slot* is the birth's `claim`: POSIX claims before the real call; Windows
+    # arms before the thread can run (it is created suspended) and claims here.
+    def self.arm(id : UInt64, object : Void*, wait : UInt64 = 0_u64, slot : UInt64* = claim(object)) : Nil
       heap = Gcry.default_heap?
       unless heap && @@enabled && id != 0 && !object.null?
+        abandon(slot)
         close_wait(wait)
         return
       end
       # A handle glibc has handed out again is proof its previous owner is
       # fully gone — `pthread_t` is not reusable until the thread has exited
       # and been detached or joined. So the old thread's slot needs no grace:
-      # reclaim it here, on the creating thread, before claiming a new one.
+      # reclaim it here, on the creating thread, before publishing the new one.
       #
       # The first version only *cancelled* the pending death notice, on the
       # grounds that it could not be allowed to land on the new birth. It
@@ -320,66 +404,70 @@ module Gcry
       # 1 487 of 3 203 births still overflowed the table. Reclaiming keeps
       # both properties.
       #
+      # Only a birth that holds a slot may. One without was invisible to
+      # `await_births`, so its thread may have ended and its handle gone to a
+      # thread that is running now: that is the slot this would find.
+      #
       # Not on Windows: a `HANDLE` value is free for reuse as soon as it is
       # closed, and Crystal closes it while the thread may still be running.
       {% unless flag?(:win32) %}
-        if @@track_deaths && (stale = reclaim_handle(id))
+        if @@track_deaths && !slot.null? && (stale = reclaim_handle(id))
           heap.delete_root(stale)
         end
       {% end %}
-      loop do
-        each_slot do |slot|
-          if state(slot) == FREE && transition(slot, FREE, BUSY)
-            slot[W_ID] = id
-            slot[W_OBJECT] = object.address ^ TABLE_MASK
-            slot[W_DEAD_AT] = 0_u64
-            (slot.as(UInt32*) + 1).value &+= 1
-            {% if flag?(:win32) %}
-              slot[W_WAIT] = wait
-            {% end %}
-            # Rooted **before** the slot is published, so no release can hand
-            # back an object whose root is not in the set yet.
-            # The twin walks the same table and offers nothing.
-            heap.add_root(object) unless @@noroot
-            count(pointerof(@@armed))
-            count_outstanding(1)
-            publish(slot, LIVE)
-            return
-          end
-        end
-        # Every slot was live when walked: add a segment and walk again. A
-        # creator that raced this one to a full table appends its own segment
-        # behind it, so both find a free slot on the next walk.
-        break unless grow
+      if slot.null?
+        # No slot, and no segment could be mapped (or
+        # `GCRY_THREAD_BIRTH_NOGROW=1` holds the table at one). The root is
+        # taken anyway and there is nothing left that can release it, because
+        # nothing records it — so this leaks one `Thread` object and the graph
+        # it holds.
+        #
+        # That is the deliberate side of the trade. The alternative is what
+        # this path used to do: count the overflow and return without rooting,
+        # which leaves the birth covered by nothing at all — exactly the window
+        # this file exists to close, silently reopened by a table size. A leak
+        # is a memory bug; an unrooted birth is the use-after-free.
+        #
+        # `outstanding` counts it, because the root really is outstanding.
+        # `GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1` restores the old behaviour,
+        # and is how `make thread-birth-root` shows the block dying.
+        close_wait(wait)
+        count(pointerof(@@overflows))
+        return if @@noroot || @@overflow_unrooted
+        count_outstanding(1)
+        heap.add_root(object)
+        return
       end
-      # No slot, and no segment could be mapped (or `GCRY_THREAD_BIRTH_NOGROW=1`
-      # holds the table at one). The root is taken anyway and there is nothing
-      # left that can release it, because nothing records it — so this leaks
-      # one `Thread` object and the graph it holds.
-      #
-      # That is the deliberate side of the trade. The alternative is what this
-      # path used to do: count the overflow and return without rooting, which
-      # leaves the birth covered by nothing at all — exactly the window this
-      # file exists to close, silently reopened by a table size. A leak is a
-      # memory bug; an unrooted birth is the use-after-free.
-      #
-      # `outstanding` counts it, because the root really is outstanding.
-      # `GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1` restores the old behaviour, and
-      # is how `make thread-birth-root` shows the block dying.
-      close_wait(wait)
-      count(pointerof(@@overflows))
-      return if @@noroot || @@overflow_unrooted
+      # Rooted **before** the slot is published, so no release can hand
+      # back an object whose root is not in the set yet.
+      # The twin walks the same table and offers nothing.
+      begin
+        heap.add_root(object) unless @@noroot
+      rescue ex
+        # Out of memory for the root's node. Not left `BUSY` behind.
+        abandon(slot)
+        close_wait(wait)
+        raise ex
+      end
+      slot[W_ID] = id
+      slot[W_OBJECT] = object.address ^ TABLE_MASK
+      slot[W_DEAD_AT] = 0_u64
+      {% if flag?(:win32) %}
+        slot[W_WAIT] = wait
+      {% end %}
+      count(pointerof(@@armed))
       count_outstanding(1)
-      heap.add_root(object)
+      publish(slot, LIVE)
     end
 
     # From `GC.pthread_detach`, on the dying thread, **before** the real
-    # libc call: this handle's thread is done with its `Thread`. Must be
-    # wait-free and must not allocate.
+    # libc call: this handle's thread is done with its `Thread`. Must not
+    # allocate, and waits only for births in flight (`await_births`).
     def self.note_death(id : UInt64) : Nil
       return if id == 0 || !@@enabled || !@@track_deaths
       heap = Gcry.default_heap?
       return unless heap
+      await_births
       # Never 0: that is the "alive" value, and a death seen before the first
       # collection must still be seen as a death.
       at = heap.collections &+ 1
@@ -389,8 +477,8 @@ module Gcry
           return
         end
       end
-      # No slot: the birth overflowed the table, or the handle was already
-      # reclaimed by a later `arm`. Both are accounted for elsewhere.
+      # No slot: the birth overflowed the table, or gcry never recorded it
+      # (born with the birth root off, or not through `GC.pthread_create`).
       count(pointerof(@@deaths_unmatched))
     end
 
@@ -402,13 +490,19 @@ module Gcry
     # joiner can wait for a long time, so a thread still running user code
     # could lose its root two collections into the wait and spend its death
     # window held only by the joiner's frame.
+    #
+    # A joiner can hold the handle before the creator has armed it — the new
+    # thread stores it in its `Thread` itself (`Thread.thread_proc`), and can
+    # do so before `pthread_create` returns — so it waits for births in
+    # flight first, as a death does.
     def self.joining(id : UInt64, & : -> Int32) : Int32
       slot = Pointer(UInt64).null
       mark = 0_u64
       if id != 0 && @@enabled && @@track_deaths
+        await_births
         each_slot do |s|
           if state(s) == LIVE && s[W_ID] == id
-            pending = JOINING | (s.as(UInt32*) + 1).value
+            pending = JOINING | generation(s)
             if stamp(s, 0_u64, pending)
               slot = s
               mark = pending
@@ -432,6 +526,74 @@ module Gcry
         end
       end
       ret
+    end
+
+    # Wait out every birth between its `claim` and the end of its `arm` (see
+    # "A birth that ends first"). A slot found `BUSY` is waited on until it
+    # is not, or until its generation moves: then the `BUSY` seen was a
+    # release, and what holds the slot now is a birth that began after this
+    # thread was looking. One claim per slot at most, never "until nothing is
+    # being born".
+    private def self.await_births : Nil
+      each_slot do |slot|
+        next unless state(slot) == BUSY
+        gen = generation(slot)
+        spins = 0
+        while state(slot) == BUSY && generation(slot) == gen
+          spins += 1
+          if spins & 63 == 0
+            Thread.yield
+          else
+            Intrinsics.pause
+          end
+        end
+      end
+    end
+
+    # Child after `fork`: only the forking thread exists, so a slot another
+    # thread held `BUSY` — a birth between its claim and its `arm`, or a
+    # release under way — has nobody left to finish it, and every death and
+    # join in the child would wait on it for good (`await_births`). Given
+    # back. `LIVE` slots stay: their roots hold the parent's unlisted
+    # `Thread` objects (src/gcry/platform/linux_fork.cr).
+    def self.after_fork_child : Nil
+      Atomic::Ops.store(pointerof(@@test_hold), 0, LLVM::AtomicOrdering::Release, false)
+      each_slot do |slot|
+        publish(slot, FREE) if state(slot) == BUSY
+      end
+    end
+
+    # Research only, for `process_spec/regression/52_birth_root_arm_race_spec.cr`:
+    # hold the next birth's creator between `pthread_create` returning and
+    # `arm` (`test_hold_point`) until `test_release_birth`. That race needs a
+    # creator parked there while its thread ends and another birth is handed
+    # the handle, and nothing else can park one on demand: the interval takes
+    # no lock and makes no call that can be held from outside. Costs every
+    # birth one load.
+    def self.test_hold_birth : Nil
+      Atomic::Ops.store(pointerof(@@test_hold), 1, LLVM::AtomicOrdering::SequentiallyConsistent, false)
+    end
+
+    # A creator is parked at `test_hold_point`.
+    def self.test_birth_held? : Bool
+      Atomic::Ops.load(pointerof(@@test_hold), LLVM::AtomicOrdering::Acquire, false) == 2
+    end
+
+    # Lets a parked creator go, or disarms a hold nobody reached.
+    def self.test_release_birth : Nil
+      Atomic::Ops.store(pointerof(@@test_hold), 0, LLVM::AtomicOrdering::SequentiallyConsistent, false)
+    end
+
+    # From `GC.pthread_create`, between the real call and `arm`.
+    @[AlwaysInline]
+    def self.test_hold_point : Nil
+      return if Atomic::Ops.load(pointerof(@@test_hold), LLVM::AtomicOrdering::Monotonic, false) == 0
+      _, held = Atomic::Ops.cmpxchg(pointerof(@@test_hold), 1, 2,
+        LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
+      return unless held
+      while Atomic::Ops.load(pointerof(@@test_hold), LLVM::AtomicOrdering::Acquire, false) == 2
+        Thread.yield
+      end
     end
 
     # Release the slot the handle's previous owner held, returning its object
@@ -509,6 +671,7 @@ module Gcry
         close_wait(slot[W_WAIT])
         slot[W_WAIT] = 0_u64
       {% end %}
+      Atomic::Ops.store(slot.as(UInt32*) + 1, generation(slot) &+ 1, LLVM::AtomicOrdering::Release, false)
       count(pointerof(@@released))
       count_outstanding(-1)
       publish(slot, FREE)
@@ -572,6 +735,13 @@ module Gcry
       Atomic::Ops.load(slot.as(UInt32*), LLVM::AtomicOrdering::Acquire, false)
     end
 
+    # Read while another thread may hold the slot `BUSY` (`await_births`),
+    # so it is written atomically too (`vacate`).
+    @[AlwaysInline]
+    private def self.generation(slot : UInt64*) : UInt32
+      Atomic::Ops.load(slot.as(UInt32*) + 1, LLVM::AtomicOrdering::Acquire, false)
+    end
+
     @[AlwaysInline]
     private def self.transition(slot : UInt64*, from : UInt32, to : UInt32) : Bool
       _, ok = Atomic::Ops.cmpxchg(slot.as(UInt32*), from, to,
@@ -604,10 +774,11 @@ module Gcry
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@outstanding), delta, LLVM::AtomicOrdering::Monotonic, false)
     end
 
-    # Deaths the hooks matched to a slot, and deaths whose slot was already
-    # gone — an overflowed birth, or a handle a later `arm` reclaimed first.
-    # `released_dead` plus `reclaimed` against `armed` is the reading that
-    # says whether short-lived threads still accumulate roots.
+    # Deaths the hooks matched to a slot, and deaths that found none — an
+    # overflowed birth, or one gcry never recorded; until 2026-10-10 also a
+    # thread that ended before its creator's `arm` (see "A birth that ends
+    # first"). `released_dead` plus `reclaimed` against `armed` is the
+    # reading that says whether short-lived threads still accumulate roots.
     def self.deaths_seen : UInt64
       @@deaths_seen
     end

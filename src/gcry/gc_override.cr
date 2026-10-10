@@ -1953,17 +1953,25 @@ module GC
         if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
           h.heap_counters_atomic = true
         end
+        # The birth's slot, claimed **before** the call too: the new thread can
+        # run to its end before this returns, and its death waits for the
+        # record only if the record's slot is already taken
+        # (src/gcry/thread_birth_root.cr, "A birth that ends first").
+        birth = Gcry::ThreadBirthRoot.claim(root)
       {% end %}
       ret = Gcry::OS.pthread_create(thread, attr, start, arg)
       {% if flag?(:gc_none) %}
         if ret == 0
+          Gcry::ThreadBirthRoot.test_hold_point
           Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64))
           # Crystal passes the `Thread` object itself as `arg`
           # (`crystal/system/unix/pthread.cr`: `arg: self.as(Void*)`), so the
           # object whose only other holder is the new thread's unscanned stack
-          # is right here. Root it until the thread publishes itself
+          # is right here. Root it until the thread is done with it
           # (src/gcry/thread_birth_root.cr).
-          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), root)
+          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), root, 0_u64, birth)
+        else
+          Gcry::ThreadBirthRoot.abandon(birth)
         end
       {% end %}
       ret
@@ -1991,10 +1999,16 @@ module GC
     # alive. They were not: the birth root is, for the whole life, and
     # `make thread-death-window` holds dying threads in that window across
     # collections with no wait at all (src/gcry/platform/thread_staging.cr).
+    # It goes after the birth table's wait for births in flight, not before:
+    # the creator stages the handle once `pthread_create` has returned, so a
+    # thread that ended first would unstage a record that did not exist yet
+    # and leave the creator's behind.
     def self.pthread_join(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
-        Gcry::ThreadBirthRoot.joining(thread.unsafe_as(UInt64)) { Gcry::OS.pthread_join(thread, nil) }
+        Gcry::ThreadBirthRoot.joining(thread.unsafe_as(UInt64)) do
+          Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
+          Gcry::OS.pthread_join(thread, nil)
+        end
       {% else %}
         Gcry::OS.pthread_join(thread, nil)
       {% end %}
@@ -2003,8 +2017,8 @@ module GC
     # :nodoc:
     def self.pthread_detach(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
         Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
+        Gcry::Platform.unstage_thread(thread.unsafe_as(UInt64))
       {% end %}
       Gcry::OS.pthread_detach(thread)
     end
