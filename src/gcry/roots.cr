@@ -521,8 +521,8 @@ module Gcry
         if made
           flags = LibC.fcntl(fds[0], LibC::F_GETFL)
           LibC.fcntl(fds[0], LibC::F_SETFL, flags | LibC::O_NONBLOCK) if flags >= 0
-          @@probe_rd = fds[0]
-          @@probe_wr = fds[1]
+          @@probe_rd = probe_fd_up(fds[0])
+          @@probe_wr = probe_fd_up(fds[1])
           return
         end
         pipe_errno = Errno.value.value
@@ -536,6 +536,34 @@ module Gcry
         no_probe(pipe_errno, Errno.value.value)
       {% end %}
     end
+
+    {% unless flag?(:win32) %}
+      {% if flag?(:darwin) %}
+        private F_DUPFD_CLOEXEC = 67
+      {% else %}
+        private F_DUPFD_CLOEXEC = 1030
+      {% end %}
+
+      # Made at `GC.init`, the pipe would take the lowest free fds, 3 and 4,
+      # and a program that closes fds it did not open and opens files again
+      # gets them back: the probe then wrote a byte of every page it asked
+      # about into the program's file (40 bytes in one test, three
+      # collections) and would read bytes out of whatever held the read end.
+      # So each end moves to the top of the fd table, where `open` reaches
+      # last: just under the soft `RLIMIT_NOFILE`, at most 1 024. A close of
+      # the moved fd is still answered by the fd-free probe (`page_readable?`).
+      # Kept where it is when the table has no room up there.
+      private def self.probe_fd_up(fd : Int32) : Int32
+        rl = uninitialized LibC::Rlimit
+        return fd unless LibC.getrlimit(LibC::RLIMIT_NOFILE, pointerof(rl)) == 0
+        top = Math.min(rl.rlim_cur.to_u64, 1024_u64)
+        return fd if top < 16
+        moved = LibC.fcntl(fd, F_DUPFD_CLOEXEC, (top - 8).to_i32)
+        return fd if moved < 0
+        LibC.close(fd)
+        moved
+      end
+    {% end %}
 
     {% unless flag?(:win32) %}
       private def self.no_probe(pipe_errno : Int32, fd_free_errno : Int32) : NoReturn
