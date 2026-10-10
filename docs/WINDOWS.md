@@ -77,11 +77,11 @@ scrubbing dead stack. Conservative root scans include that red zone.
 - The research stack-map walker assumes a SysV fiber context. Windows ignores
   `GCRY_PRECISE_STACK` and `GCRY_PRECISE_FIBERS` with a warning and retains
   conservative stack scanning.
-- Boehm C ABI (`c_abi.cr`): `GC_register_my_thread` answers
-  `GC_UNIMPLEMENTED` (3), so a C-created thread cannot register (Boehm
-  supports it). `GC_beginthreadex`, `GC_get_suspend_signal` and
-  `GC_get_thr_restart_signal` print what is missing and abort; Boehm's
-  signal getters return -1 here. See
+- Boehm C ABI (`c_abi.cr`): a C-created thread registers with
+  `GC_register_my_thread` as on Linux and macOS, and one that exits still
+  registered comes off the thread list through an FLS callback;
+  `GC_beginthreadex` starts a thread that is registered for its routine,
+  and the stop-signal getters answer -1, as Boehm's do here. See
   [INTEGRATION.md § Boehm parity](INTEGRATION.md#boehm-parity).
 - The large-object recycler and the `realloc` page move are Linux-only:
   `GCRY_LARGE_RECYCLE` and `GCRY_REALLOC_MOVE` have no effect on Windows
@@ -102,9 +102,12 @@ scrubbing dead stack. Conservative root scans include that red zone.
   - **`err` rows.** Eight crystal-metric benches print `err` on Windows under
     Boehm too, with the same value in every arm, so the A/B compares
     identical work.
-  - **Idle mark helpers.** Off Linux they sleep-poll instead of waiting on a
-    futex, at no measured cost: on a list-shaped heap, 4 workers use 1.01
-    cores with a pause on par with serial (29.4 vs 30.4 ms).
+  - **Idle mark helpers.** They wait on `WaitOnAddress` and are woken when
+    work is published, as Linux helpers are on a futex. Until 2026-10-08
+    they slept in `Sleep(1)` naps with no wake, about 15.6 ms each at the
+    default timer resolution, so helpers took almost no work: CI steals per
+    `make parallel-mark-process` run fell from 330 k to 0.7–5.6 k. The
+    VM numbers above predate the change.
 - Parallel stress has run on CI runners: about 15 000 bounded runs, no
   failures on fast runners
   (`bench/log/linux/2026-09-30-cross-platform-stress/`).

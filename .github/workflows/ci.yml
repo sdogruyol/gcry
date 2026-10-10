@@ -1218,11 +1218,14 @@ jobs:
       # And what that divergence costs, since its marks are now cleared anyway:
       # a stranded chunk is never swept and can never rejoin the list, so the
       # leak is permanent but rides mappings rather than uptime. The shipped
-      # tree must strand under 5 per 1000 chunks mapped; restoring the pre-fix
-      # mutator-count reads must exceed it, which is also how this measured
-      # that the latch fix closed a near-total leak (97-99% of the heap) and
-      # not only the rare use-after-free it was landed for.
-      - name: Chunk-list divergence stays rare
+      # tree must strand nothing: the after-world sweep's store splices back
+      # what was prepended during its walk, and two window arms map a chunk in
+      # that window every collection — none may strand with the splice, and
+      # some must without it. Restoring the pre-fix mutator-count reads must
+      # still strand over 5 per 1000, which is also how this measured that the
+      # latch fix closed a near-total leak (97-99% of the heap) and not only
+      # the rare use-after-free it was landed for.
+      - name: No chunk leaves the chunk list
         run: |
           make chunk-list-drift
 
@@ -1826,10 +1829,14 @@ jobs:
           done
           echo "TOTAL: $locked locked-arm faults in $done_n attempts"
 
-  # Native aarch64 (GitHub ubuntu-24.04-arm).
+  # Native aarch64 (GitHub ubuntu-24.04-arm). 30 minutes: the step reached
+  # 1 181 s accounted on 2026-10-09 (five `process_spec` runs, 829 s of it)
+  # and run 37972347063 was cancelled at 20 inside its last gate, with every
+  # earlier one green. A hang is still caught sooner: each gate below carries
+  # its own `timeout`, and the STW watchdog names a stopped world that stalls.
   test-aarch64-native:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 30
     name: test (aarch64 native)
     steps:
       - uses: actions/checkout@v7

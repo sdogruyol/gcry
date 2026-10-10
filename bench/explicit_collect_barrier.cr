@@ -167,15 +167,18 @@ end
 # the knob too: the skipping guard only refuses a call made while *someone else*
 # is collecting, and this thread is the someone else.
 #
-# The sleep is load-bearing. Without it this loop re-enters `run_collection` the
-# instant it leaves, and `@post_stw_mutex` is a plain `pthread_mutex_t` with no
-# fairness guarantee: on the 4-vCPU CI runner the collector re-acquired it
-# before the waiting prober was ever scheduled, and the arm was killed at its
-# 90 s budget having landed nothing (run 35229134467). Two milliseconds against
-# a ~45 ms cycle leaves the window open about 96% of the time and lets the
-# prober in. That starvation is a real property of the barrier, not just of this
-# harness — an explicit collect now waits, and against an adversarial collect
-# loop it can wait a long time. It is recorded rather than worked around.
+# The sleep was load-bearing until 2026-10-09. Without it this loop re-entered
+# `run_collection` the instant it left, and the collection section was a plain
+# `pthread_mutex_t` with no handover: on the 4-vCPU CI runner the collector
+# re-acquired it before the waiting prober was ever scheduled, and the arm was
+# killed at its 90 s budget having landed nothing (run 35229134467). The
+# section now goes to waiters in arrival order, so the prober is served after
+# the collection in flight whatever this loop does
+# (`process_spec/regression/50_collector_lock_fairness_spec.cr`). The sleep
+# stays for this harness's own `Thread.sleep`s: a sleep a stop interrupts
+# resumes with only the time it had left, so next to a collector with no gap
+# it barely advances — a 20 ms sleep sat for over 60 s beside one thread
+# looping `GC.collect`, before the fix and after it.
 unless quiet
   threads << Thread.new do
     started.add(1)

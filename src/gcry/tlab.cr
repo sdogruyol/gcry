@@ -262,10 +262,12 @@ module Gcry
       # stays true through the post-STW phase while every other thread runs —
       # so a refill that missed once there (a dormant revive refused mid-walk,
       # say) was reported as `OutOfMemoryError` with memory to spare. Any other
-      # thread collects instead, which waits out the cycle in flight on
-      # `@post_stw_mutex` and then runs its own. Surfaced by the idle collector
-      # (`GCRY_IDLE_RELEASE_MS`), whose background cycles overlap allocation:
-      # `stw_mt_property_test --tlab` failed 3 of 3 with it on at 5 ms.
+      # thread collects instead: it queues for the collection section behind
+      # the cycle in flight, and returns once a full collection that began
+      # after its call has finished, its own or a peer's. Surfaced by the idle
+      # collector (`GCRY_IDLE_RELEASE_MS`), whose background cycles overlap
+      # allocation: `stw_mt_property_test --tlab` failed 3 of 3 with it on at
+      # 5 ms.
       if @collecting
         Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
         return Pointer(Void).null if @collector_pthread == Gcry::Platform.current_thread_id

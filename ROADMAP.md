@@ -2081,6 +2081,21 @@ kept finding the rest.
       would red CI on the real event; three orders of magnitude under the
       pre-fix rate, so reopening it fails).
       `bench/log/linux/2026-09-13-chunk-list-drift/FINDINGS.md`
+      **CLOSED (2026-10-08, readiness-2).** The splice landed as
+      `Heap#publish_relinked_chunks`: under `@chunk_list_lock`, the store puts
+      the chunks prepended during the walk back in front of `kept`, once it
+      has checked that the walk's first chunk is still indexed (the check is
+      what makes the prefix walk safe against a concurrent unlink). The
+      2026-09-12 attempt "moved nothing" because the latch defect dominated
+      then. The gate is now cap 0, with a window arm that maps a chunk between
+      the walk and the store every collection (0 of 300 stranded, 299 of 300
+      without the splice) and a window-free arm: a `GC.free` trim in that
+      window detached a chunk the rebuild had kept, and the flush unmapped it
+      while listed (a fault in the first collection); the trim now declines
+      during the relink walk. Still open, inferred and not reproduced: a list
+      writer frozen inside its locked section by an *in-STW* sweep resumes
+      against the rebuilt list (0 of 37 334 mappings under
+      `GCRY_DISABLE_LAZY_SWEEP=1`).
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which
@@ -3850,7 +3865,7 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       plain arm, the plain arm with `GCRY_IDLE_RELEASE_MS=0`, and the atomic
       arm on macos-15-intel. All 36 counted 0, so it is too rare to bisect at
       that budget.
-- [ ] **Two collector locks are unfair to a waiter under back-to-back
+- [x] **Two collector locks are unfair to a waiter under back-to-back
       collections (Windows, 2026-09-30).** Both were found with `cdb` on
       hung CI probes, and both are livelocks: the collector was still
       collecting. (1) `@roots_lock`: a thread creating a thread
@@ -3865,6 +3880,15 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       one is ever needed, is a handoff to a waiter, or treating an explicit
       collect as satisfied once a whole collection has run after it was
       requested (`bench/log/linux/2026-09-30-windows-zero-handle/`).
+      **FIXED (2026-10-08, readiness-2)** in the product, both ways: the
+      collection section hands over in arrival order, `GC.collect` returns
+      once any full collection that began after the call has finished, and
+      `@roots_lock` (`Gcry::RootsLock`) lets the mutators waiting when a
+      stop arrives in first, yielding for 50 ms at most; a FIFO ticket lock
+      tried first convoyed `realloc` pins past the CPU count (16 threads on 4
+      CPUs: 1.1 s → 41 s). The harness yield is gone;
+      `process_spec/regression/50_collector_lock_fairness_spec.cr` failed 20
+      of 20 before and passes on one and two CPUs after.
 - [ ] **Attribute the residual per-rep spread** — open below. Until it closes it
       bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp
       on post-GC RSS, at 12 reps.

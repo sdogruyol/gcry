@@ -842,8 +842,15 @@ module Gcry
       # start new work, and the call it is already in can finish.
       #
       # `GCRY_MONITOR_GATE_LATE_CLOSE=1` restores the old ordering for the gate.
+      #
+      # `@roots_lock` lets mutators already waiting in first
+      # (src/gcry/roots_lock.cr): the stop defers to them for a bounded spin,
+      # then competes, so a collector stopping the world back to back no
+      # longer keeps a thread in `add_root` / `delete_root` out — the Windows
+      # livelock of 2026-09-30. A waiter the stop then freezes still costs no
+      # one anything: a test-and-set lock goes to whoever is running.
       MonitorGate.close unless @monitor_gate_late_close
-      @roots_lock.lock
+      @roots_lock.lock_for_stop
       @finalizers.lock_for_stw
       slots_locked = false
       begin
@@ -1013,7 +1020,7 @@ module Gcry
       @thread_register_gate = Crystal::RWLock.new
       @alloc_lock = Crystal::SpinLock.new
       init_freelist_locks
-      @roots_lock = Crystal::SpinLock.new
+      @roots_lock = RootsLock.new
       @index_lock = Crystal::SpinLock.new
       @chunk_list_lock = Crystal::SpinLock.new
       init_post_stw_mutex

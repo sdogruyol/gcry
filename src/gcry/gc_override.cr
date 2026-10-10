@@ -1766,12 +1766,15 @@ module GC
   def self.add_finalizer(object)
   end
 
+  # One finalizer per object, as Boehm's `GC_register_finalizer_ignore_self`
+  # that stdlib's `gc/boehm.cr` calls: registering again replaces the first
+  # (`Gcry::Heap#replace_finalizer`), so `#finalize` runs once.
   private def self.add_finalizer_impl(object : T) forall T
     return unless @@gcry_ready
     {% if flag?(:win32) %}
       gcry_register_finalizer(object.as(Void*), ->(ptr : Void*) { ptr.as(T).finalize })
     {% else %}
-      Gcry.default_heap.add_finalizer(object.as(Void*)) do |ptr|
+      Gcry.default_heap.replace_finalizer(object.as(Void*)) do |ptr|
         ptr.as(T).finalize
       end
     {% end %}
@@ -2190,7 +2193,7 @@ end
   # finalizers -> collector locks -> exceptions -> IOCP initializers.
   fun gcry_register_finalizer(object : Void*, callback : Void* ->) : Nil
     if heap = Gcry.default_heap?
-      heap.add_finalizer(object, callback)
+      heap.replace_finalizer(object, callback)
     end
   end
 {% end %}

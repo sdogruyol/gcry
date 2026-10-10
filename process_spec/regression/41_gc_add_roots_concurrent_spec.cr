@@ -107,4 +107,93 @@ describe "GC_add_roots" do
       LibC.free(hidden.as(Void*))
     end
   end
+
+  # Boehm's `GC_remove_roots` drops every range wholly inside its bounds and
+  # no other (mark_rts.c). Until 2026-10-08 gcry did not define it.
+  it "stops scanning a range GC_remove_roots takes back, and only that one" do
+    words = 8
+    buf = LibC.malloc(LibC::SizeT.new(words * sizeof(Void*))).as(Void**)
+    buf.clear(words)
+    before = Gcry::CAbi.root_range_count
+    LibGC.add_roots(buf.as(Void*), (buf + 2).as(Void*))
+    LibGC.add_roots((buf + 4).as(Void*), (buf + 6).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 2)
+    dropped = block_in(buf)
+    kept = block_in(buf + 4)
+
+    # Bounds that only partly cover the second range leave it alone.
+    LibGC.remove_roots(buf.as(Void*), (buf + 5).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 1)
+    collect_and_churn
+    live_and_intact?(kept).should be_true
+    # The dropped range still holds the address; read on this frame only as
+    # a masked comparison, the block itself is gone or reused.
+    live_and_intact?(dropped).should be_false
+
+    # The same start registered again is a root again.
+    LibGC.add_roots(buf.as(Void*), (buf + 2).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 2)
+    revived = block_in(buf)
+    collect_and_churn
+    live_and_intact?(revived).should be_true
+    LibGC.remove_roots(buf.as(Void*), (buf + words).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before)
+    LibC.free(buf.as(Void*))
+  end
+
+  # Boehm stores a range rounded inward to whole words and ignores one that
+  # holds none (`GC_add_roots_inner`); `GC_remove_roots` compares against the
+  # stored bounds. Until 2026-10-09 gcry kept the bounds as given, so the
+  # word-aligned removal below left the range registered and scanned.
+  it "rounds a range inward to whole words, as GC_remove_roots then sees it" do
+    words = 8
+    buf = LibC.malloc(LibC::SizeT.new(words * sizeof(Void*))).as(Void**)
+    buf.clear(words)
+    bytes = buf.as(UInt8*)
+    before = Gcry::CAbi.root_range_count
+    LibGC.add_roots((bytes + 1).as(Void*), (bytes + sizeof(Void*) + 4).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before)
+
+    LibGC.add_roots((bytes + 1).as(Void*), (bytes + 4 * sizeof(Void*) + 5).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before + 1)
+    LibGC.remove_roots((buf + 1).as(Void*), (buf + 4).as(Void*))
+    Gcry::CAbi.root_range_count.should eq(before)
+    LibC.free(buf.as(Void*))
+  end
+
+  # Boehm scans a registered range whole, whatever its length. Until
+  # 2026-10-09 gcry pushed it through the stack scan's 64 MiB valve, so a
+  # longer range was skipped every collection and what only it held was swept.
+  it "scans a range longer than 64 MiB to its end" do
+    bytes = 65_u64 * 1024 * 1024
+    words = bytes // sizeof(Void*)
+    buf = LibC.malloc(LibC::SizeT.new(bytes)).as(Void**)
+    buf.clear(words)
+    LibGC.add_roots(buf.as(Void*), (buf + words).as(Void*))
+    hidden = block_in(buf + words - 1)
+    collect_and_churn
+    live_and_intact?(hidden).should be_true
+    LibGC.remove_roots(buf.as(Void*), (buf + words).as(Void*))
+    LibC.free(buf.as(Void*))
+  end
+
+  # Ranges added and removed over and over reuse the removed entries. A
+  # table copy cannot free the one it replaces (the hook may be reading it),
+  # and the first `GC_remove_roots` compacted a full table into a new copy:
+  # 2M add/remove pairs over distinct ranges, one live at a time, left 45 MB
+  # of copies behind.
+  it "keeps the table's size to its live ranges under add/remove churn" do
+    pairs = 100_000
+    # One word per pair, so no range shares a start with an earlier one.
+    buf = LibC.malloc(LibC::SizeT.new((pairs + 1) * sizeof(Void*))).as(Void**)
+    buf.clear(pairs + 1)
+    copies = Gcry::CAbi.root_table_copies
+    pairs.times do |i|
+      slot = buf + i
+      LibGC.add_roots(slot.as(Void*), (slot + 1).as(Void*))
+      LibGC.remove_roots(slot.as(Void*), (slot + 1).as(Void*))
+    end
+    (Gcry::CAbi.root_table_copies - copies).should be <= 1
+    LibC.free(buf.as(Void*))
+  end
 end

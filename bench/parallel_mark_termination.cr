@@ -37,6 +37,8 @@ CHAINS    =  64
 CHAIN_LEN = 400
 COLLECTS  =  60
 WORKERS   =   4
+# The longest an arm's child may run. The fixed arm takes about a second.
+CHILD_LIMIT = 120.seconds
 
 class Node
   property next : Node?
@@ -92,19 +94,46 @@ unless ARGV.includes?("--child")
   [{"fixed", {} of String => String, ["--child"]},
    {"unlocked", {"GCRY_MARK_BUSY_UNLOCKED" => "1"}, ["--child", "--unlocked"]}].each do |(arm, env, args)|
     captured = IO::Memory.new
-    status = Process.run(exe, args, env: env, output: captured, error: captured)
+    child = Process.new(exe, args, env: env, output: captured, error: captured)
+    # A bounded wait. The red arm loses live objects on purpose, and what that
+    # does next is up to the memory it corrupts: it reports damage, dies of
+    # it, or — seen once on Windows x86_64 CI, 2026-10-08 — spins on a
+    # corrupted word until the job's timeout killed it 29 minutes later.
+    hung = Atomic(Int32).new(0)
+    done = Atomic(Int32).new(0)
+    # A thread, not a fiber: `Process#wait` may block this one. It reads only
+    # `done`, so it never races `wait` for the child's status.
+    watchdog = Thread.new do
+      deadline = Time.instant + CHILD_LIMIT
+      while Time.instant < deadline && done.get == 0
+        Thread.sleep(100.milliseconds)
+      end
+      if done.get == 0
+        hung.set(1)
+        begin
+          child.terminate(graceful: false)
+        rescue
+          # It exited between the check and the kill.
+        end
+      end
+    end
+    status = child.wait
+    done.set(1)
+    watchdog.join
     text = captured.to_s
     verdict = text.lines.find(&.starts_with?("child ")) || "(no verdict line)"
+    verdict = "(killed after #{CHILD_LIMIT.total_seconds.to_i} s) #{verdict}" if hung.get == 1
     puts "#{arm}: exit=#{status.exit_code?.inspect} #{verdict}"
 
     if arm == "fixed"
+      failures << "fixed: hung past #{CHILD_LIMIT.total_seconds.to_i} s" if hung.get == 1
       failures << "fixed: exited #{status.exit_code?.inspect}" unless status.success?
       failures << "fixed: the graph was damaged — a live object was reclaimed" if text.includes?("damage=")
       failures << "fixed: the parallel marker never ran" if text.includes?("runs=0 ")
       failures << "fixed: no worker ever took a batch, so no arm here means anything" if text.includes?("stolen=0 ")
     else
-      # Either it reported damage, or it died of it. Both are the defect.
-      if status.success? && !text.includes?("damage=")
+      # It reported damage, died of it, or hung on it. All three are the defect.
+      if hung.get == 0 && status.success? && !text.includes?("damage=")
         failures << "unlocked: the pre-fix protocol ran #{COLLECTS} collections " \
                     "with no damage, so the fixed arm's silence is not evidence"
       end

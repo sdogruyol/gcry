@@ -11,6 +11,18 @@ module Gcry
       end
     end
 
+    # `push_stack` for a range registered as a root (`GC_add_roots`,
+    # `GC_push_all_eager`), which may be any length. `push_stack` keeps
+    # `scan_range`'s 64 MiB valve, right for a stack and a dropped root here:
+    # an object held only from a 65 MiB `GC_add_roots` range was swept, with
+    # nothing said but `oversize_skips`. Boehm scans such a range whole.
+    def push_root_range(low : Void*, high : Void*) : Nil
+      raise "push_root_range outside of collect" unless @collecting
+      Roots.scan_range_chunked(low, high, safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Parked)
+      end
+    end
+
     # Module-typed Reference ivars (Scheduler, ExecutionContext) cannot
     # `.as(Reference)` / `unsafe_as(Reference)` yet — load the pointer bits.
     #

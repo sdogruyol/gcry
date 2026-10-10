@@ -102,9 +102,8 @@ points, on gcry's heap: `crystal i` resolves its interpreted program's
 `LibGC` calls from the compiler binary, Crystal's `spec/std` calls
 `LibGC.size`, and C code linked into the program can call them. Where gcry
 has no equivalent the call prints what is missing and aborts
-(`GC_set_max_heap_size`; on Windows `GC_beginthreadex` and the signal
-queries). Behaviour that differs from a plain reading of the names, each
-pinned by a regression:
+(`GC_set_max_heap_size`). Behaviour that differs from a plain reading of
+the names, each pinned by a regression:
 
 | Call | gcry, as Boehm | Regression |
 |------|----------------|------------|
@@ -116,7 +115,9 @@ pinned by a regression:
 | `GC_set_on_collection_event` | `START`, `PRE/POST_STOP_WORLD`, `MARK_START/END`, `RECLAIM_START/END`, `PRE/POST_START_WORLD`, `END`. gcry sweeps inside the stop unless the sweep is deferred, so the reclaim pair usually precedes the start-world pair. A sliced cycle reports `START`/`MARK_START` when it begins, a stop pair per slice, the rest when it ends. | `28_*` |
 | `GC_set_on_thread_event` | `THREAD_SUSPENDED` / `THREAD_UNSUSPENDED` with the `pthread_t` of each thread a stop suspends and resumes, `GC.stop_world` included. On macOS and Windows the resume is reported just before it happens. | `28_*` |
 | `GC_set_on_heap_resize` | The new heap size each time the heap maps a chunk. | `28_*` |
-| `GC_register_my_thread`, `GC_unregister_my_thread`, `GC_thread_is_registered`, `GC_get_stack_base`, `GC_allow_register_threads` | A thread C created goes on Crystal's thread list — what gcry stops and scans — and comes off it again. Linux and macOS; elsewhere `GC_UNIMPLEMENTED` (3). A stack base outside the thread's pthread stack is refused the same way. As with Boehm, the thread must unregister before it exits and must not touch the heap after. | `29_*` |
+| `GC_register_my_thread`, `GC_unregister_my_thread`, `GC_thread_is_registered`, `GC_get_stack_base`, `GC_allow_register_threads` | A thread C created goes on Crystal's thread list — what gcry stops and scans — and comes off it again; one that exits still registered is taken off by its exit key (a pthread key, an FLS slot on Windows). Linux, macOS and Windows. A stack base outside the thread's stack is refused with `GC_UNIMPLEMENTED` (3). On Linux the thread may block every signal, as C pools do: registration unblocks the suspend signal, and a resume signal it keeps blocked cannot end a later stop early (`47_*`). | `29_*`, `47_*` |
+| `GC_add_roots`, `GC_remove_roots` | A range is rounded inward to whole words, ignored if that leaves none, and scanned whole, whatever its length. One entry per range: a range inside a live one, or one with the same start, is merged into it (Boehm merges same-start ranges only, and on Windows overlapping and adjacent ones too). `GC_remove_roots` drops every range wholly inside its bounds and returns only once no collection is still scanning one, so the caller may free it then; the next range added takes the entry over. | `41_*`, `51_*` |
+| `GC_register_disappearing_link`, `GC_general_register_disappearing_link`, `GC_unregister_disappearing_link` | The short form's link is a field of a heap object, cleared when that object — `GC_base(link)` — dies, before its finalizer runs. A link outside the heap, null or misaligned aborts, as Boehm's "Bad arg"; no memory for the registration answers `GC_NO_MEMORY` (2). Unregistering leaves the word alone and answers 1 if there was a registration, 0 for a misaligned link. | `25_*` |
 
 Callbacks run inside the collector, most of them with every other thread
 stopped, and must not allocate: Boehm's rule. The start callback is the
@@ -187,23 +188,25 @@ regressions named.
 | Disappearing link registered twice | `GC_DUPLICATE`, link follows the new object | Same | Matches (`c_abi.cr`) |
 | Interior pointers; `Crystal.trace :gc` | Recognized; traced | Same | Matches (`21_*`; `gc_override.cr`) |
 | Queued finalizables | Stay roots until run | Same | Matches (`26_*`) |
-| Finalizer that calls `GC.collect` | Nested finalizers bounded per thread | No nesting on the same thread | Matches (`37_*`) |
+| Finalizer that calls `GC.collect` | Nested finalizers bounded per thread | No nesting on the same thread | Differs in depth; both bounded (`37_*`) |
 | Oversize `GC_malloc` / `GC_realloc` | NULL | NULL | Matches (`39_*`) |
-| `GC_pthread_create` | Registers the thread | Registers it (Linux, macOS) | Matches (`40_*`) |
-| `GC_add_roots` | Locked, deduplicated | Same | Matches (`41_*`) |
+| `GC_pthread_create`, `GC_beginthreadex` | Registers the thread | Registers it (`GC_pthread_create` on Linux and macOS, `GC_beginthreadex` on Windows) | Matches (`40_*`) |
+| `GC_add_roots`, `GC_remove_roots` | Locked; bounds rounded inward to words; same-start ranges merged (Windows: overlapping and adjacent too); scanned whole; removal waits out a running collection | Writers locked, the collector reads without the lock; bounds rounded the same; a range inside a live one is merged too; scanned whole; `GC_remove_roots` waits out a scan in progress | Differs: merge rule (`41_*`, `51_*`) |
+| Roots marked in a collection's root phase | Kept | Kept: the cursor settle that zeroes pinned chunks' marks runs before any root is marked | Matches (`49_*`) |
 | Loaded libraries' data | Re-walked every collection | Followed through `r_debug`, also mid-`dlopen`/`dlclose` (Linux) | Matches (`16_*`, `42_*`) |
 | Mark under `-Dwithout_mt` | Safe (libgc's own locks) | Safe: serial, since `Crystal::SpinLock` is a no-op there | Matches (`38_*`) |
-| `GC.add_finalizer` twice | Second replaces first | Both run | Differs |
+| `GC.add_finalizer` twice | Second replaces first | Same | Matches (`48_*`) |
+| `GC_register_disappearing_link(link)` | Object is `GC_base(link)` | Same | Matches (`25_*`) |
 | Allocation slack (`EXTRA_BYTES`) | Every block | Atomic blocks only | Differs (`24_*`) |
 | `realloc` shrink / move | — | Shrink keeps the block; on a move the old block is left to the sweep | Differs (`30_*`) |
-| `GC_invoke_finalizers` | Runs pending, returns count | Returns 0 (finalizers run by the collector) | Differs |
+| `GC_invoke_finalizers` | Runs pending, returns count; from a finalizer, drains the rest one frame deeper | Same, usually 0 since the collector runs the queue after each collection; from a finalizer 0, the drain already running takes the rest | Differs from a finalizer (`25_*`) |
 | `GC_set_start_callback` | Full collections, after `GC_EVENT_START` | Every collection (incl. minor, idle), before `GC_EVENT_START` | Differs (`28_*`) |
-| `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Crystal's signals on Linux and Darwin; abort on Windows | Differs |
+| `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Same | Matches (`21_*`) |
 | `GC_get_prof_stats` | Returns bytes filled | Returns nothing | Differs |
 | `unmapped_bytes` (stats, `GC_get_heap_usage_safe`) | Currently unmapped | Cumulative bytes returned to the OS | Differs |
 | `GC_set_max_heap_size` | Heap limit | Abort | Differs |
-| Foreign threads on Windows | `GC_register_my_thread`, `GC_beginthreadex` | `GC_UNIMPLEMENTED` (3); `GC_beginthreadex` aborts | Differs (`29_*`) |
-| Not exported | `GC_malloc_uncollectable`, `GC_unregister_disappearing_link`, `GC_move_disappearing_link`, long links, `_no_order` / `_unreachable` finalizers, `GC_remove_roots`, `GC_exclude_static_roots`, `GC_get_heap_size`, `GC_get_gc_no`, `GC_do_blocking`, `GC_call_with_alloc_lock`, `GC_set_finalize_on_demand`, `GC_strdup`, `GC_gc_no` | — | Missing; none used by stdlib or `crystal i` |
+| Foreign threads on Windows | `GC_register_my_thread`, `GC_beginthreadex`, `GC_CreateThread`, `GC_ExitThread`, `GC_endthreadex` | The first two | Matches for those two (`29_*`, `40_*`) |
+| Not exported | `GC_malloc_uncollectable`, `GC_move_disappearing_link`, long links, `_no_order` / `_unreachable` finalizers, `GC_exclude_static_roots`, `GC_clear_roots`, `GC_get_heap_size`, `GC_get_gc_no`, `GC_do_blocking`, `GC_call_with_alloc_lock`, `GC_set_finalize_on_demand`, `GC_strdup`, `GC_gc_no`, `GC_pthread_exit`, `GC_pthread_cancel`, `GC_pthread_sigmask`, `GC_dlopen`, `GC_CreateThread`, `GC_ExitThread`, `GC_endthreadex` | — | Missing; none used by stdlib or `crystal i`. C compiled against Boehm's `gc.h` with `GC_THREADS` has `pthread_cancel`, `pthread_sigmask`, `dlopen` and (with `GC_HAVE_PTHREAD_EXIT`) `pthread_exit` renamed to the `GC_` ones, on Windows `CreateThread`, `ExitThread` and `_endthreadex`, and fails to link if it calls them |
 | Collection trigger, marker count, mark-stack overflow | Boehm's policy | gcry's (`GCRY_*`, [POLICY.md](POLICY.md)) | Differs by design |
 
 ## Windows
@@ -219,7 +222,7 @@ Process GC runs on Windows x86_64 (Crystal's MSVC distribution) and ARM64
 | Win32 thread suspend / resume STW | In gcry (`SuspendThread` + `GetThreadContext`, FP/SIMD included) |
 | Soft-dirty / mprotect barrier | Not available; full collections only |
 | Large-object recycler, `realloc` page move | Linux-only; `GCRY_LARGE_RECYCLE` / `GCRY_REALLOC_MOVE` have no effect |
-| Boehm C ABI | `GC_register_my_thread` answers `GC_UNIMPLEMENTED`; `GC_beginthreadex` and the signal getters abort (§ Boehm parity) |
+| Boehm C ABI | As on Linux and macOS, thread registration and `GC_beginthreadex` included; the signal getters answer -1, as Boehm's (§ Boehm parity) |
 | Windows CI | x86_64 and native ARM64: specs, samples, and the Linux gates that hold there; not Crystal's `spec/std` or `compiler_spec` |
 | Workload numbers | x86_64 on a 12-vCPU QEMU/KVM VM only; ARM64 unmeasured ([WINDOWS.md](WINDOWS.md)) |
 

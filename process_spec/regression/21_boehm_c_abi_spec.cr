@@ -76,12 +76,15 @@ class BoehmAbiLog
   class_property finalized_count = 0
   class_property other_root : Void** = Pointer(Void*).null
   class_property initial_stackbottom = Pointer(Void).null
+  class_property initial_thread = 0_u64
 end
 
 # Read before any example runs: examples (18's `GC.set_stackbottom` among
-# them) move it, as Boehm's would move.
+# them) move it, as Boehm's would move. The thread is the initial one, which
+# is the main thread `GC_stackbottom` follows.
 {% if flag?(:linux) || flag?(:darwin) %}
   BoehmAbiLog.initial_stackbottom = LibGC.stackbottom
+  BoehmAbiLog.initial_thread = Gcry::Platform.current_thread_id
 {% end %}
 
 describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
@@ -105,15 +108,24 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
     LibGC.is_disabled.should eq(0)
   end
 
+  # Eight of each: a stale word in the collect call chain can hold one block
+  # (spec 25 explains), which made the single control block of this example
+  # fail every standalone run of this file on Linux x86_64, master included
+  # (2026-10-08), while it passed inside the whole process_spec run.
   it "keeps a block alive from a GC_add_roots range, and only then" do
-    unrooted = libc_word
-    control = fresh_block { |p| unrooted.value = p }
-    rooted = libc_word
-    kept = fresh_block { |p| rooted.value = p }
-    LibGC.add_roots(rooted.as(Void*), (rooted + 1).as(Void*))
+    controls = Array(UInt64).new(8) do
+      unrooted = libc_word
+      fresh_block { |p| unrooted.value = p }
+    end
+    kept = Array(UInt64).new(8) do
+      rooted = libc_word
+      hidden = fresh_block { |p| rooted.value = p }
+      LibGC.add_roots(rooted.as(Void*), (rooted + 1).as(Void*))
+      hidden
+    end
     collect
-    live_and_intact?(control).should be_false
-    live_and_intact?(kept).should be_true
+    controls.count { |h| live_and_intact?(h) }.should be <= 1
+    kept.each { |h| live_and_intact?(h).should be_true }
   end
 
   it "keeps a block alive from GC_push_all_eager in a GC_set_push_other_roots callback" do
@@ -197,6 +209,16 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
       symbol = LibC.dlsym(LibC.dlopen(nil, LibC::RTLD_LAZY), "GC_stackbottom")
       symbol.should eq(pointerof(LibGC.stackbottom).as(Void*))
 
+      # The rest is about the main thread, and the main fiber is not always on
+      # it: Crystal 1.21's execution-context monitor hands a scheduler it
+      # catches inside a syscall to a pool thread, and the main fiber carries
+      # on there (`spec/spec_helper.cr`). CI run 37956882487 had this example
+      # on a pool thread, whose stack top is its mmap, below the initial
+      # thread's `GC_stackbottom`. A bottom set there is rightly not the main
+      # thread's, so nothing below can hold.
+      pending!("the main fiber is not on the initial thread (the execution context's monitor moved it)") \
+        unless Gcry::Platform.current_thread_id == BoehmAbiLog.initial_thread
+
       # Set when the collector starts: the main thread's stack bottom.
       _, high = Gcry::Platform.current_pthread_stack_bounds.not_nil!
       marker = 0
@@ -210,12 +232,15 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
       moved = LibGC::StackBase.new(mem_base: high - 64)
       LibGC.set_stackbottom(nil, pointerof(moved))
       LibGC.stackbottom.should eq(high - 64)
+      other = Pointer(Void).null
       Thread.new do
         LibGC.get_my_stackbottom(out own)
+        other = own.mem_base
         LibGC.set_stackbottom(nil, pointerof(own))
         {% unless flag?(:without_mt) %} GC.set_stackbottom(Thread.current, own.mem_base) {% end %}
       end.join
-      LibGC.stackbottom.should eq(high - 64)
+      LibGC.stackbottom.should eq(high - 64),
+        "GC_stackbottom #{LibGC.stackbottom}, set to #{high - 64} on the main thread (#{Gcry::Platform.current_thread_id}); the other thread's bottom was #{other}"
       {% unless flag?(:without_mt) %}
         GC.set_stackbottom(Thread.current, high)
         LibGC.stackbottom.should eq(high)
@@ -226,4 +251,19 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
       LibGC.stackbottom.should eq(high)
     end
   {% end %}
+
+  # Boehm's suspend and restart signals: the ones it stops threads with, -1
+  # where it uses none (Darwin's Mach suspend, Windows). gcry answers
+  # Crystal's pair on the other Unixes, the one its own stop uses; until
+  # 2026-10-08 it aborted on Windows, until 2026-10-09 it answered that pair
+  # on Darwin too.
+  it "answers the stop signals where there are some, and -1 on Darwin and Windows" do
+    {% if flag?(:win32) || flag?(:darwin) %}
+      LibGC.get_suspend_signal.should eq(-1)
+      LibGC.get_thr_restart_signal.should eq(-1)
+    {% else %}
+      LibGC.get_suspend_signal.should eq(GC.sig_suspend.value)
+      LibGC.get_thr_restart_signal.should eq(GC.sig_resume.value)
+    {% end %}
+  end
 end

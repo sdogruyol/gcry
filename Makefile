@@ -1806,15 +1806,26 @@ mark-clear-index: $(BIN)
 # and it is an RSS question rather than a soundness one. A chunk stranded off
 # `@chunks` by a prepend racing the sweep's walk is never swept and can never
 # rejoin the list, so the loss is permanent — but it rides *mappings*, not
-# uptime, and a heap that has reached its working size stops mapping. Three
-# arms in one run: the shipped tree must strand under 5 per 1000 chunks mapped
-# (measured 0 of 693 291 in steady state, 0 of 6 280 across 200 short
-# processes), `sweep_mutator_latch = false` must exceed it (measured 80-181 per
-# 1000, with 97-99% of its heap stranded — the latch fix closed a near-total
-# leak, not just a rare use-after-free), and a startup-regime arm reports the
-# short-process rate the one shipped sighting came from. The cap is not zero
-# because the race is still open; it is three orders of magnitude below the
-# pre-fix rate, so a reopened race reds it and the rare event does not. ~35 s.
+# uptime, and a heap that has reached its working size stops mapping. Six
+# arms in one run. The shipped tree must strand **nothing**, in steady state and
+# across 24 short processes: the after-world sweep's store now splices back what
+# `map_chunk` prepended during its walk (`Heap#publish_relinked_chunks`), so the
+# cap is zero where it was 5 per 1000 while that race was open.
+# `sweep_mutator_latch = false` must still exceed 5 per 1000 (measured 80-181,
+# with 97-99% of its heap stranded — the latch fix closed a near-total leak,
+# not just a rare use-after-free), or the workload no longer reaches a race.
+# And a zero over a natural rate (0 of 12.1 million mappings before the splice
+# too) cannot tell closed from unreached, so two window arms map a chunk on the
+# collector's thread between the walk and the store in every collection
+# (`post_stw_hook` `:before_relink_store`): with the splice none may strand,
+# without it (`chunk_list_splice = false`) at least one must — 0 of 300 and 299
+# of 300 here; the tree before the splice strands 299 of 300 on both. And a
+# window-free arm `GC.free`s a 3 MB block in the same window, every collection:
+# the trim that free runs must leave the list alone while the rebuild is in
+# flight, or its chunk goes back on the list in `kept` and is unmapped there —
+# the tree before faults in the first collection (`bitmap_pool_candidate?`),
+# this one declines 300 of 300 trims and ends with the list and the index
+# agreeing and the cache empty. ~10-35 s.
 chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift

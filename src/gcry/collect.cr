@@ -24,6 +24,7 @@ require "./mark"
 require "./roots"
 require "./stack_maps"
 require "./finalizer"
+require "./roots_lock"
 
 module Gcry
   class Heap
@@ -812,7 +813,11 @@ module Gcry
     # chunks queued, off `@chunks`, index entries still alive, no lock held;
     # a cursor exhausted here refills from that pool through the index. That
     # is the whole window, deterministically, which is what makes
-    # `make occupied-release` a gate rather than a sighting.
+    # `make occupied-release` a gate rather than a sighting. And
+    # `:before_relink_store` — the after-world sweep has walked `@chunks` and
+    # not yet published its rebuild, no lock held; a chunk mapped here is a
+    # prepend inside that window (`make chunk-list-drift`, on a process heap,
+    # so the hook must not capture: its closure would be unrooted).
     property post_stw_hook : Proc(Symbol, Nil)? = nil
     # Research only, and it restores a defect: an unreachable object with a
     # finalizer is queued and *not* marked, so the sweep reclaims it and the
@@ -885,12 +890,46 @@ module Gcry
     @roots = Roots::Set.new
     # Serializes Roots::Set mutate vs STW: stop_world must not freeze a thread
     # mid-add_root/delete_root (half-linked / freed node → SEGV on @roots.each).
-    @roots_lock = Crystal::SpinLock.new
-    # Serializes post-STW munmap/madvise vs the next collect's stop_world.
-    # pthread mutex (not SpinLock): under Parallel, SpinLock waiters burned a
-    # whole EC worker for hundreds of ms while another flushes — ~8–11s of
-    # wait in a 20s Kemal /json run. Embedded LibC mutex — no GC malloc at boot.
+    # Mutators first, then a stop (src/gcry/roots_lock.cr), so a collector
+    # looping `GC.collect` cannot keep a thread out of `add_root` /
+    # `delete_root`.
+    @roots_lock = RootsLock.new
+    # The collection section: serializes post-STW munmap/madvise vs the next
+    # collect's stop_world, held from before the stop until the flush is done.
+    # Waiters sleep, not spin: under Parallel, SpinLock waiters burned a whole
+    # EC worker for hundreds of ms while another flushes — ~8–11s of wait in a
+    # 20s Kemal /json run. Embedded LibC mutex and condition variable — no GC
+    # malloc at boot.
+    #
+    # Handed over in arrival order. `@post_stw_mutex` guards only the two
+    # ticket counters and is held for a few instructions; the section belongs
+    # to the ticket `@post_stw_serving` names, and a waiter sleeps on
+    # `@post_stw_cond` until that ticket is its own. Until 2026-10-09 the
+    # section was the mutex itself, and neither a `pthread_mutex_t` nor an
+    # SRWLock hands over: a thread that drops one and asks again at once has
+    # it back before the waiter it woke has run. A thread looping `GC.collect`
+    # kept a birth thread's own `GC.collect` asleep that way in 2 of 173
+    # `thread_birth_fiber` runs on one Windows runner, and
+    # `explicit_collect_barrier`'s prober for 90 s on a 4-vCPU runner (run
+    # 35229134467); both harnesses had to leave a gap after each collect.
     @post_stw_mutex = uninitialized Gcry::OS::PthreadMutexT
+    @post_stw_cond = uninitialized Gcry::OS::PthreadCondT
+    @post_stw_next = 0_u64
+    @post_stw_serving = 0_u64
+    # Full collections begun, numbered from 1; the number of the last one to
+    # finish; and of the last one to finish that also released
+    # (`release_warm`). A request for a full collection reads
+    # `@full_gen_started` and is satisfied by any collection numbered past
+    # what it read — one that began after the request, which is Boehm's
+    # guarantee for `GC_gcollect` — whichever thread ran it. The first is
+    # read outside any lock; the other two are written by the section's
+    # holder and read under `@post_stw_mutex`.
+    @full_gen_started = Atomic(UInt64).new(0_u64)
+    @full_gen_finished = 0_u64
+    @release_gen_finished = 0_u64
+    # Requests for a full collection that returned on a peer's, begun after
+    # they were made, instead of running one of their own.
+    getter collect_satisfied_by_peer : UInt64 = 0_u64
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
@@ -908,8 +947,8 @@ module Gcry
     # — 6 of 85 682 calls did anything with 70 allocating threads, since a cycle
     # there takes ~145 ms and the flag is up for all of it
     # (`bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`). Waiting
-    # for a **peer** is the fix; waiting for *ourselves* would deadlock on
-    # `@post_stw_mutex`, which is not recursive.
+    # for a **peer** is the fix; waiting for *ourselves* would deadlock on the
+    # collection section, which is not recursive.
     @collector_pthread = 0_u64
     # **Control arm** (`GCRY_COLLECT_SKIP_WHEN_BUSY=1`): return from an explicit
     # `collect` the moment any thread is collecting, which is what shipped until
@@ -1858,6 +1897,20 @@ module Gcry
       Trace.finalizer("register", object)
     end
 
+    # `GC.add_finalizer`: *object*'s one finalizer becomes *callback*,
+    # replacing any it had, as under Boehm (`Finalizers::Registry#replace`).
+    # `add_finalizer` above keeps every callback it is given; this is the
+    # process GC's entry.
+    def replace_finalizer(object : Void*, callback : Finalizers::Callback) : Nil
+      return if object.null?
+      @finalizers.replace(object, callback)
+      Trace.finalizer("register", object)
+    end
+
+    def replace_finalizer(object : Void*, &block : Finalizers::Callback) : Nil
+      replace_finalizer(object, block)
+    end
+
     # Boehm's `GC_register_finalizer*` (src/gcry/c_abi.cr): *object*'s one
     # finalizer becomes the C function *fn*, called `fn(object, data)`, or is
     # removed when *fn* is null. Returns the one it replaced as `{fn, cd}`.
@@ -1908,6 +1961,12 @@ module Gcry
         referent = user_of(chunk, header)
       end
       @finalizers.register_disappearing_link(link, referent)
+    end
+
+    # Boehm's `GC_unregister_disappearing_link`: drops *link*'s registration
+    # and leaves the word at *link* as it is. False when it had none.
+    def unregister_disappearing_link(link : Void**) : Bool
+      @finalizers.unregister_disappearing_link(link)
     end
 
     def live?(pointer : Void*) : Bool
@@ -2013,7 +2072,9 @@ module Gcry
 
     # Full major collection (resets any in-progress incremental cycle).
     # `coalesce`: if true and a peer collect already cleared the debt while we
-    # waited on the post-STW mutex, skip (Parallel EC alloc storms).
+    # waited for the collection section, skip (Parallel EC alloc storms).
+    # Without it the call returns once a full collection that began after it
+    # has finished, its own or a peer's (`@full_gen_started`).
     # `release_warm`: the caller is asking for memory back, not for a cycle.
     # The warm-chunk budget exists so an *allocation-driven* major keeps the
     # chunks the next cycle is about to refill; an explicit `GC.collect` (and
@@ -2025,10 +2086,11 @@ module Gcry
                 release_warm : Bool = false, idle : Bool = false) : Nil
       return if @destroyed
       # Only a re-entrant call returns here: a `collect` from inside this
-      # thread's own cycle — a before-collect callback — cannot take
-      # `@post_stw_mutex` again. A **peer's** cycle is waited for instead, in
-      # `run_collection`, which blocks on that mutex and then runs the
-      # collection this caller asked for. Returning early there is what made
+      # thread's own cycle — a before-collect callback — cannot take the
+      # collection section again. A **peer's** cycle is waited for instead, in
+      # `run_collection`, which queues for the section and then runs the
+      # collection this caller asked for, unless one that began after the call
+      # has finished by then. Returning early there is what made
       # `GC.collect` do nothing under load.
       # Read the flag, then the owner, with an acquire fence between them — the
       # mirror of the release the writer takes. Without it a weakly ordered CPU
@@ -2056,14 +2118,9 @@ module Gcry
       note_collect_entry_regs if @birth_grace
       abort_incremental
       Trace.collect_start(major: true)
-      @release_warm_this_collect = release_warm
       @warm_released_collects &+= 1 if release_warm
-      begin
-        run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce,
-          idle: idle)
-      ensure
-        @release_warm_this_collect = false
-      end
+      run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce,
+        idle: idle, release_warm: release_warm)
       Trace.collect_end(self, major: true)
       Invariant.after_collect(self)
     end
@@ -2173,7 +2230,7 @@ module Gcry
             @inc_active = false
             @incremental_marking = false
             finished = true
-            arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            arm_page_barrier_after_major
           end
         ensure
           collection_event(CollectionEvent::PreStartWorld) if stw_reported
@@ -2427,7 +2484,7 @@ module Gcry
       return if monitor_thread?
       return if thread_not_ready_for_collect?
       # Before any lock the allocation takes, on a mutator with a scheduler.
-      run_deferred_finalizers if @finalizers_deferred
+      invoke_finalizers if @finalizers_deferred
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
@@ -2656,20 +2713,75 @@ module Gcry
     end
 
     private def init_post_stw_mutex : Nil
-      # Fresh mutex (also used after fork — parent copy may be locked/undefined).
+      # Fresh mutex, condition variable and tickets (also used after fork —
+      # the parent's copies may be locked, waited on or mid-handover).
       Gcry::OS.pthread_mutex_init(pointerof(@post_stw_mutex), Pointer(Gcry::OS::PthreadMutexattrT).null)
+      Gcry::OS.pthread_cond_init(pointerof(@post_stw_cond), Pointer(Gcry::OS::PthreadCondattrT).null)
+      @post_stw_next = 0_u64
+      @post_stw_serving = 0_u64
     end
 
+    # Queue for the collection section and wait for this ticket's turn.
     private def lock_post_stw : Nil
       Gcry::OS.pthread_mutex_lock(pointerof(@post_stw_mutex))
+      wait_post_stw_turn
+      Gcry::OS.pthread_mutex_unlock(pointerof(@post_stw_mutex))
     end
 
+    # Queue for the collection section, unless a full collection numbered
+    # `want` or later — `release`: one that also released — has finished by
+    # the time this ticket's turn comes. Then the turn passes straight to the
+    # next ticket and this returns false.
+    #
+    # It waits for its turn even when satisfied sooner, which bounds nothing
+    # worse than it would anyway: every ticket ahead of it was taken before
+    # this request read `@full_gen_started`, so the first collection numbered
+    # `want` that finishes satisfies all of them as well, and they pass too.
+    # So a request sees at most the collection in flight when it arrives, then
+    # either its own or one a ticket ahead of it ran — not a stream of them.
+    private def lock_post_stw_unless_satisfied(want : UInt64, release : Bool) : Bool
+      Gcry::OS.pthread_mutex_lock(pointerof(@post_stw_mutex))
+      wait_post_stw_turn
+      if (release ? @release_gen_finished : @full_gen_finished) >= want
+        @collect_satisfied_by_peer &+= 1
+        pass_post_stw_turn
+        return false
+      end
+      Gcry::OS.pthread_mutex_unlock(pointerof(@post_stw_mutex))
+      true
+    end
+
+    # Only if no one holds the section and no one is queued for it.
     private def try_lock_post_stw : Bool
-      Gcry::OS.pthread_mutex_trylock(pointerof(@post_stw_mutex)) == 0
+      Gcry::OS.pthread_mutex_lock(pointerof(@post_stw_mutex))
+      free = @post_stw_next == @post_stw_serving
+      @post_stw_next &+= 1 if free
+      Gcry::OS.pthread_mutex_unlock(pointerof(@post_stw_mutex))
+      free
     end
 
     private def unlock_post_stw : Nil
+      Gcry::OS.pthread_mutex_lock(pointerof(@post_stw_mutex))
+      pass_post_stw_turn
+    end
+
+    # With `@post_stw_mutex` held.
+    private def wait_post_stw_turn : Nil
+      ticket = @post_stw_next
+      @post_stw_next = ticket &+ 1
+      until @post_stw_serving == ticket
+        Gcry::OS.pthread_cond_wait(pointerof(@post_stw_cond), pointerof(@post_stw_mutex))
+      end
+    end
+
+    # With `@post_stw_mutex` held; releases it. Every waiter wakes and the one
+    # holding the next ticket proceeds: the turn is handed over, so the thread
+    # giving it up cannot take it back ahead of them.
+    private def pass_post_stw_turn : Nil
+      @post_stw_serving &+= 1
+      waiting = @post_stw_next != @post_stw_serving
       Gcry::OS.pthread_mutex_unlock(pointerof(@post_stw_mutex))
+      Gcry::OS.pthread_cond_broadcast(pointerof(@post_stw_cond)) if waiting
     end
 
     private def debt_under_threshold?(major : Bool) : Bool
@@ -2687,16 +2799,23 @@ module Gcry
       @max_post_stw_wait_ns = wait_ns if wait_ns > @max_post_stw_wait_ns
     end
 
-    # Acquire post-STW mutex. When *coalesce*, never sleep on the mutex: the
-    # `@collecting=false`→`unlock` window lets every EC worker enter
-    # `run_collection` and pile up (~11s wait / 20s wrk). Failed trylock →
-    # skip; next `maybe_collect` retries after the holder finishes. Returns
-    # false if skipped without holding the lock.
-    private def acquire_post_stw(coalesce : Bool, cols_before : UInt64, major : Bool) : Bool
+    # Take the collection section, or return false without it. When
+    # *coalesce*, never wait: the `@collecting=false`→`unlock` window lets
+    # every EC worker enter `run_collection` and pile up (~11s wait / 20s
+    # wrk). Section busy or queued for → skip; next `maybe_collect` retries
+    # after the holder finishes. With *want* non-zero, also false when a
+    # peer's full collection satisfied the request while it waited
+    # (`lock_post_stw_unless_satisfied`).
+    private def acquire_post_stw(coalesce : Bool, want : UInt64, release : Bool) : Bool
       t_wait = monotonic_ns
       if coalesce
         unless try_lock_post_stw
           @collect_coalesced += 1
+          note_post_stw_wait(monotonic_ns - t_wait)
+          return false
+        end
+      elsif want != 0
+        unless lock_post_stw_unless_satisfied(want, release)
           note_post_stw_wait(monotonic_ns - t_wait)
           return false
         end
@@ -2734,12 +2853,12 @@ module Gcry
     # cycle overwrote them. Measured: 40 stale stack seeds retaining a 44k
     # object web on gc_phases on the headerless layout.
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false,
-                               idle : Bool = false) : Nil
+                               idle : Bool = false, release_warm : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
       # Everything below the SP is dead here, and it is last cycle's collector
       # residue. Zero it before this cycle's scan chain overlays and scans it.
       collect_scrub
-      run_collection_body(major, scan_stack, roots, coalesce, idle)
+      run_collection_body(major, scan_stack, roots, coalesce, idle, release_warm)
       # The frames this cycle just used are dead below the SP again. Zero them
       # so nothing between now and the next entry scans them as live.
       collect_scrub
@@ -2747,14 +2866,32 @@ module Gcry
 
     @[NoInline]
     private def run_collection_body(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool,
-                                    idle : Bool) : Nil
+                                    idle : Bool, release_warm : Bool) : Nil
       cols_before = @collections
       trace_collect = 0_u64
-      # Hold post-STW mutex through flush so Parallel EC cannot stop_world
-      # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
-      return unless acquire_post_stw(coalesce, cols_before, major)
+      # A request for a full collection is answered by any that begins after
+      # this read, its own or a peer's. Automatic cycles (`coalesce`) keep
+      # their own skip below, and the idle thread runs its own, since
+      # `idle_collections` counts what it ran. Only on the whole root set: a
+      # cycle with extra `roots` or no stacks answers no request and is
+      # answered by no other cycle.
+      full = major && scan_stack && roots.nil?
+      want = full && !coalesce && !idle ? @full_gen_started.get &+ 1 : 0_u64
+      # Hold the collection section through flush so Parallel EC cannot
+      # stop_world mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
+      unless acquire_post_stw(coalesce, want, release_warm)
+        # Answered by a peer's collection. Its finalizers are this caller's to
+        # run as well, as after one of its own: the idle thread's leaves them
+        # queued, and `GC.collect` has always run what it found.
+        run_finalizers_after_collect if want != 0
+        return
+      end
 
       begin
+        # Set inside the section, not by `collect` before it queues: a waiter
+        # writing it then changed whether the cycle in flight released, and
+        # the next caller's write could clear it before this one ran.
+        @release_warm_this_collect = release_warm
         # The idle thread's cycle re-checks `GC.disable` here, holding the
         # lock, because the check it made before asking can be long stale: it
         # may have waited on this lock through the program's own collections
@@ -2774,6 +2911,9 @@ module Gcry
         # Pause timer starts after mutex wait so p50/p99 reflect STW work only.
         started = monotonic_ns
         trace_collect = CrystalTrace.start(self)
+        # Numbered before the stop: a request that read the count before this
+        # add is one the stop, and so the mark, comes after.
+        gen = full ? @full_gen_started.add(1_u64) &+ 1 : 0_u64
         # Owner first, then the flag, with a release fence between them: the
         # re-entrancy guard in `collect` reads the pair as "a cycle is running
         # and it is mine". Set the other way round there is a window in which
@@ -2850,6 +2990,22 @@ module Gcry
           @last_roots_fibers_ns = 0_u64
           @last_roots_threads_ns = 0_u64
           root_part = @root_phase_timing ? monotonic_ns : 0_u64
+          # First, before any root is marked: the settle zeroes the mark bits
+          # of every chunk the last cycle pinned, and a root marked ahead of it
+          # in such a chunk lost its bit and was swept with the range or
+          # `add_root` that named it still holding it. That is how `GC_add_roots`
+          # ranges and `GC_set_push_other_roots` (both from the before-collect
+          # hook), `GC.add_root` and the realloc pin (`@roots`) lost objects as
+          # soon as threads allocated while another collected: 900–2600 of
+          # 3200 objects held only by registered ranges freed and reused, every
+          # run (`process_spec/regression/49_roots_before_settle_spec.cr`).
+          bitmap_settle_cursor_sets
+          mark_bitmap_alloc_in_flight
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_cursors_ns = now - root_part
+            root_part = now
+          end
           @before_collect_callbacks.each(&.call)
           # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
           # realloc pin / add_root); still respect allow_interior_pointers.
@@ -2859,13 +3015,6 @@ module Gcry
           if @root_phase_timing
             now = monotonic_ns
             @last_roots_explicit_ns = now - root_part
-            root_part = now
-          end
-          bitmap_settle_cursor_sets
-          mark_bitmap_alloc_in_flight
-          if @root_phase_timing
-            now = monotonic_ns
-            @last_roots_cursors_ns = now - root_part
             root_part = now
           end
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
@@ -3017,7 +3166,7 @@ module Gcry
             # Next minor starts a fresh soft-dirty window after a major.
             @soft_dirty_skip_until_major = false
             unless @lazy_sweep_pending
-              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+              arm_page_barrier_after_major
             end
           else
             @nursery_alloc_bytes.set(0_u64)
@@ -3043,8 +3192,8 @@ module Gcry
         end
 
         # Keep @collecting true through post-STW flush so GCRY_STRESS / auto
-        # collect cannot re-enter while we still hold the post-STW mutex (non-
-        # recursive) or munmap mid-peer-collect.
+        # collect cannot re-enter while we still hold the collection section
+        # (non-recursive) or munmap mid-peer-collect.
         @suppress_collect.add(1)
         begin
           # EC1 lazy: pin stw_owner + block SYSMON while rebuilding `@chunks`
@@ -3075,7 +3224,7 @@ module Gcry
               collection_event(CollectionEvent::ReclaimEnd)
               @lazy_sweep_pending = false
               if major
-                arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+                arm_page_barrier_after_major
               else
                 note_nursery_survival
                 arm_page_barrier_after_collect
@@ -3165,11 +3314,18 @@ module Gcry
         ensure
           @suppress_collect.sub(1)
         end
+        # The cycle is complete: a request queued behind it that it answers
+        # can now return without running its own.
+        if gen != 0
+          @full_gen_finished = gen
+          @release_gen_finished = gen if release_warm
+        end
         # Still holding the post-STW lock, so the next collection's `Start`
         # cannot be reported before this one's `End`.
         collection_event(CollectionEvent::End)
       ensure
         @collecting = false
+        @release_warm_this_collect = false
         # Outside a collection the live count is the right answer again; the
         # latch exists only so the decisions inside one agree with each other.
         clear_sweep_mutator_latch
@@ -3182,19 +3338,21 @@ module Gcry
       # `IO::FileDescriptor` close may need one. The next ordinary collection
       # runs them on a mutator — no later than they would have been found
       # without the idle collection at all.
-      unless idle
-        @running_finalizers = true
-        begin
-          @finalizers.run_pending
-        ensure
-          @running_finalizers = false
-        end
-      end
+      run_finalizers_after_collect unless idle
 
       # After the cycle, the lock and the finalizers: `Thread.new` allocates,
       # and this is the first point where a mutator may do that without
       # re-entering a collection it is itself running.
       IdleRelease.ensure_started if @stop_the_world
+    end
+
+    private def run_finalizers_after_collect : Nil
+      @running_finalizers = true
+      begin
+        @finalizers.run_pending
+      ensure
+        @running_finalizers = false
+      end
     end
 
     # The idle thread's collection (src/gcry/idle_release.cr): an explicit
@@ -3235,8 +3393,19 @@ module Gcry
     # by the end, against 7 799 with the idle collector off.
     @finalizers_deferred = false
 
-    private def run_deferred_finalizers : Nil
+    # Run what is queued now, on this thread, and say how many ran: the
+    # deferred run above, and Boehm's `GC_invoke_finalizers`. Usually nothing
+    # is queued — gcry runs the queue after every collection — but an idle
+    # collection leaves it for a mutator, and a finalizer can queue more.
+    #
+    # 0 from inside a finalizer, where Boehm's would drain the rest of the
+    # queue one frame deeper: the drain already running takes it, as it does
+    # for a finalizer that collects. Returning before the flag also keeps the
+    # outer drain's `@running_finalizers` set; clearing it on the way out let
+    # its remaining finalizers start automatic collections.
+    def invoke_finalizers : Int32
       @finalizers_deferred = false
+      return 0 if @finalizers.pending_count == 0 || @finalizers.draining?
       @running_finalizers = true
       begin
         @finalizers.run_pending
@@ -3412,11 +3581,13 @@ module Gcry
         @mark_stack.clear
         clear_all_marks
         @mark_scanned_bytes = 0_u64
+        # Settle first, as in `run_collection_body`: it zeroes pinned chunks'
+        # marks, and a root marked before it there would be swept.
+        bitmap_settle_cursor_sets
+        mark_bitmap_alloc_in_flight
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
         mark_large_alloc_in_flight
-        bitmap_settle_cursor_sets
-        mark_bitmap_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         scrub_parked_fiber_stacks if scan_stack

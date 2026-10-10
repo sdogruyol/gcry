@@ -159,6 +159,18 @@ private def abi_log_matches(hidden : Array(UInt64), salt : UInt64, which : UInt6
   end
 end
 
+# Each log row names a distinct block of *hidden*: one finalization per block.
+private def abi_log_objects_distinct(hidden : Array(UInt64)) : Nil
+  seen = Set(UInt64).new
+  AbiRegLog.count.times do |k|
+    hidden.includes?(AbiRegLog.object(k)).should be_true
+    seen.add?(AbiRegLog.object(k)).should be_true
+  end
+end
+
+# Logs the object's second word, where the link examples keep their field.
+private ABI_FIELD = ->(obj : Void*, cd : Void*) { AbiRegLog.record(obj, cd, obj.as(UInt64*)[1]) }
+
 private NO_FINALIZER = {Pointer(Void).null, Pointer(Void).null}
 
 describe "Regression: Boehm finalizer and disappearing-link registration" do
@@ -280,5 +292,74 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     3.times { LibGC.collect }
     link.value.should eq(Pointer(Void).null)
     LibC.free(link.as(Void*))
+  end
+
+  # `GC_register_disappearing_link(link)` is the short form for a link that is
+  # a field of a heap object: the link is cleared when *that* object,
+  # `GC_base(link)`, becomes unreachable — before its finalizer runs, so a
+  # finalizable object's pointer to its partner reads null there (Boehm's
+  # cycle-breaking idiom). `GC_unregister_disappearing_link` drops a
+  # registration and leaves the word alone, answering 1 if there was one
+  # (finalize.c). Until 2026-10-08 gcry defined neither; the first version of
+  # the short form took `*link`'s object, and the field was never cleared
+  # while its partner lived.
+  it "clears a registered field of a dying finalizable object before its finalizer, and not an unregistered one" do
+    partner = Pointer(UInt64).malloc(4)
+    field_seen = ABI_FIELD
+
+    AbiRegLog.reset(SALT + 0x7000, SALT + 0x8000)
+    answers = [] of Int32
+    hidden = Array(UInt64).new(ABI_BLOCKS) do |i|
+      abi_block(32, atomic: false) do |p|
+        p.as(Void**)[1] = partner.as(Void*)
+        abi_register(p, field_seen, abi_data(i, SALT + 0x7000), ignore_self: true)
+        link = p.as(Void**) + 1
+        answers << LibGC.register_disappearing_link(link)
+        answers << LibGC.register_disappearing_link(link)
+      end
+    end
+    answers.should eq([0, 1] * ABI_BLOCKS)
+    abi_collect(6)
+    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.times { |k| AbiRegLog.which(k).should eq(0_u64) }
+    abi_log_objects_distinct(hidden)
+
+    AbiRegLog.reset(SALT + 0x8000, SALT + 0x9000)
+    answers.clear
+    hidden = Array(UInt64).new(ABI_BLOCKS) do |i|
+      abi_block(32, atomic: false) do |p|
+        p.as(Void**)[1] = partner.as(Void*)
+        abi_register(p, field_seen, abi_data(i, SALT + 0x8000), ignore_self: true)
+        link = p.as(Void**) + 1
+        answers << LibGC.register_disappearing_link(link)
+        answers << LibGC.unregister_disappearing_link(link)
+        answers << LibGC.unregister_disappearing_link(link)
+      end
+    end
+    answers.should eq([0, 1, 0] * ABI_BLOCKS)
+    abi_collect(6)
+    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.times { |k| AbiRegLog.which(k).should eq(partner.address) }
+    abi_log_objects_distinct(hidden)
+  end
+
+  # Boehm's `GC_invoke_finalizers` runs what is queued and answers how many
+  # ran (finalize.c). Until 2026-10-09 gcry answered 0 whatever was queued.
+  # An idle collection leaves its finalizers queued for a mutator; nothing
+  # between it and the call allocates, so no slow path runs them first.
+  it "runs the finalizers an idle collection left queued and answers how many" do
+    AbiRegLog.reset(SALT + 0x9000, SALT + 0xA000)
+    hidden = Array(UInt64).new(ABI_BLOCKS) do |i|
+      abi_block(32, atomic: true) do |p|
+        abi_register(p, ABI_FIRST, abi_data(i, SALT + 0x9000), ignore_self: true)
+      end
+    end
+    Gcry.default_heap.idle_collect
+    before = AbiRegLog.count
+    ran = LibGC.invoke_finalizers
+    before.should eq(0)
+    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    ran.should be >= AbiRegLog.count
+    abi_log_matches(hidden, SALT + 0x9000, 1_u64)
   end
 end

@@ -20,8 +20,10 @@ lib LibGcryWindows
   fun FlsSetValue(index : UInt32, value : Void*) : Int32
   fun InitializeSRWLock(lock : Void**)
   fun AcquireSRWLockExclusive(lock : Void**)
-  fun TryAcquireSRWLockExclusive(lock : Void**) : UInt8
   fun ReleaseSRWLockExclusive(lock : Void**)
+  # `InitializeConditionVariable` and `WakeAllConditionVariable` come from
+  # Crystal's own `LibC`; it binds only the critical-section sleep.
+  fun SleepConditionVariableSRW(cond : LibC::CONDITION_VARIABLE*, lock : Void**, milliseconds : UInt32, flags : UInt32) : Int32
 end
 
 module Gcry::OS
@@ -100,6 +102,8 @@ module Gcry::OS
   alias PthreadAttrT = UInt8
   alias PthreadMutexT = Void*
   alias PthreadMutexattrT = UInt8
+  alias PthreadCondT = LibC::CONDITION_VARIABLE
+  alias PthreadCondattrT = UInt8
   alias GcryPthreadKeyT = FlsKey*
   PROT_NONE     =  0
   PROT_READ     =  1
@@ -143,12 +147,25 @@ module Gcry::OS
     0
   end
 
-  def self.pthread_mutex_trylock(lock) : Int32
-    LibGcryWindows.TryAcquireSRWLockExclusive(lock) != 0 ? 0 : 1
-  end
-
   def self.pthread_mutex_unlock(lock) : Int32
     LibGcryWindows.ReleaseSRWLockExclusive(lock)
+    0
+  end
+
+  # A CONDITION_VARIABLE, which sleeps with the SRWLOCK above.
+  def self.pthread_cond_init(cond, attributes) : Int32
+    LibC.InitializeConditionVariable(cond)
+    0
+  end
+
+  # INFINITE: returns on a wake or spuriously, never on a timeout.
+  def self.pthread_cond_wait(cond, lock) : Int32
+    LibGcryWindows.SleepConditionVariableSRW(cond, lock, LibC::INFINITE, 0_u32)
+    0
+  end
+
+  def self.pthread_cond_broadcast(cond) : Int32
+    LibC.WakeAllConditionVariable(cond)
     0
   end
 

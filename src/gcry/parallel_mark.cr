@@ -18,6 +18,26 @@ require "./platform/os"
   end
 {% end %}
 
+# The compare-and-wait primitives idle markers sleep on (`mark_wait`,
+# `mark_wake`). Linux has `futex` through `syscall`. libSystem exports
+# `__ulock_wait`/`__ulock_wake`, the pair libc++ waits `std::atomic` with on
+# Apple targets; the timeout is in microseconds and 0 means none. Windows has
+# `WaitOnAddress` (Windows 8+), which lives in the `Synchronization` import
+# library, not kernel32.
+{% if flag?(:darwin) %}
+  lib LibC
+    fun gcry_ulock_wait = __ulock_wait(operation : UInt32, addr : Void*, value : UInt64, timeout_us : UInt32) : Int
+    fun gcry_ulock_wake = __ulock_wake(operation : UInt32, addr : Void*, wake_value : UInt64) : Int
+  end
+{% elsif flag?(:win32) %}
+  @[Link("synchronization")]
+  lib LibGcryWindowsSync
+    fun WaitOnAddress(address : Void*, compare_address : Void*, address_size : LibC::SizeT, milliseconds : UInt32) : Int32
+    fun WakeByAddressSingle(address : Void*) : Nil
+    fun WakeByAddressAll(address : Void*) : Nil
+  end
+{% end %}
+
 # C ABI entry — must not be a Crystal::Thread so STW will not suspend it.
 fun gcry_mark_worker_main(arg : Void*) : Void*
   Gcry::Heap.run_mark_worker(arg)
@@ -103,6 +123,15 @@ module Gcry
 
     def parallel_mark_stolen : UInt64
       @parallel_mark_stolen
+    end
+
+    # Waits of an idle marker on `@mark_wake` (`mark_wait`) that a wake ended
+    # before their timeout. Every collection with parked helpers has some —
+    # the cycle's start and end wake all of them — so a parallel mark that
+    # leaves it at 0 has markers that only ever time out, which is what every
+    # target but Linux had until 2026-10-08.
+    def parallel_mark_wakes : UInt64
+      @parallel_mark_wakes.get
     end
 
     # Entry for `gcry_mark_worker_main` (raw pthread).
@@ -653,8 +682,9 @@ module Gcry
       # condition variable because there is no lost wake-up to reason about,
       # and Windows maps this layer's mutex to an SRWLOCK with no condvar.
       #
-      # On Linux the sleep is a `futex` wait with the same timeout, which the
-      # master cuts short when a cycle starts (`wake_mark_helpers`). Between
+      # The sleep is a wait on `@mark_wake` with the same timeout (`mark_wait`:
+      # `futex`, `__ulock_wait` or `WaitOnAddress`), which the master cuts
+      # short when a cycle starts (`wake_mark_helpers`). Between
       # two collections of an allocation storm the helpers are asleep, and a
       # sleep that only timed out joined each mark up to 5 ms late: with the
       # helpers spinning instead, Σ mark fell 10–15% on JsonParsePure and
@@ -725,23 +755,115 @@ module Gcry
       end
     end
 
+    # Every idle mark thread waits on `@mark_wake`: helpers between cycles
+    # (`wait_for_mark_epoch`) and any marker parked inside one
+    # (`park_idle_marker`). Both follow one protocol on every platform: count
+    # yourself a sleeper, read the word, check the condition you would sleep
+    # on, then `mark_wait` on the value read. A waker changes the condition,
+    # reads the sleeper count, bumps the word and then wakes
+    # (`wake_parked_markers`), so a waiter that read the word before the bump
+    # returns at once, and one that read it after sees the condition changed.
+    #
+    # Until 2026-10-08 only Linux waited here; elsewhere both functions were a
+    # `nanosleep` of the timeout with no wake, and Windows rounds that up to
+    # whole milliseconds of `Sleep`, about 15.6 ms at the default timer
+    # resolution. A helper parked in a cycle then took published work only
+    # after its sleep, and the marks were over by then: the steals per run of
+    # `make parallel-mark-process` fell from 380 k to 1–5 k on darwin x86_64,
+    # from 330 k to 0.7–5.6 k on Windows x86_64 and to 0 on darwin arm64,
+    # against 165–369 k on Linux (CI, 2026-10-06).
     {% if flag?(:linux) %}
       FUTEX_WAIT_PRIVATE = 128
       FUTEX_WAKE_PRIVATE = 129
       SYS_FUTEX          = {{ flag?(:aarch64) ? 98 : 202 }}
-
-      # Every idle mark thread waits on `@mark_wake`: helpers between cycles
-      # (`wait_for_mark_epoch`) and any marker parked inside one
-      # (`park_idle_marker`). A waker bumps the word before the wake, so a
-      # waiter that read it before the bump returns at once.
-      private def mark_futex_wait(seq : Int32, req : Gcry::OS::Timespec*) : Nil
-        LibC.syscall(LibC::Long.new(SYS_FUTEX), pointerof(@mark_wake).as(Int32*), LibC::Long.new(FUTEX_WAIT_PRIVATE),
-          LibC::Long.new(seq), req, Pointer(Void).null, LibC::Long.new(0))
-      end
+    {% elsif flag?(:darwin) %}
+      # <sys/ulock.h>: compare a 32-bit word, process-private; wake all.
+      UL_COMPARE_AND_WAIT =     1_u32
+      ULF_WAKE_ALL        = 0x100_u32
     {% end %}
 
-    # One idle helper's sleep of at most `nap_ns`, cut short on Linux by the
-    # next cycle's `wake_mark_helpers`.
+    # Sleep while `@mark_wake` still holds `seq`, for at most `nap_ns`. It
+    # returns at once if the word has moved, and early on a wake, a signal or
+    # a spurious return. Every caller re-checks its own condition afterwards,
+    # so a wait that ended for nothing costs one more pass of its loop.
+    #
+    # The timeout is the safety net for a wake-up the protocol misses, and
+    # what finds work published without one. Darwin takes it in whole
+    # microseconds, where 0 would mean no timeout at all; Windows in whole
+    # milliseconds, rounded up, and then to its timer tick — a 100 µs nap can
+    # last 15.6 ms there, which only a missed wake would ever wait out.
+    #
+    # `parallel_mark_wakes` counts a wait the primitive reports cut short,
+    # with the word moved: `futex` 0, not ETIMEDOUT, EINTR or EAGAIN;
+    # `__ulock_wait` ≥ 0, not ETIMEDOUT or EINTR; `WaitOnAddress` TRUE within
+    # the milliseconds it was given. The clock alone is not enough, since on
+    # Windows a wake after `nap_ns` but short of the rounded-up timeout is
+    # still a wake; nor is TRUE alone: with several threads waiting on one
+    # address it also comes back when a timeout expires (Windows 11 x86_64,
+    # 2026-10-09). A wake after those milliseconds goes uncounted there, and
+    # at a raised timer resolution a timeout can land a few µs inside them.
+    # The latter two also succeed when the word differs on entry, so a word
+    # already moved returns here, uncounted and without the syscall; a bump in
+    # the instant between that load and the kernel's compare still counts.
+    private def mark_wait(seq : Int32, nap_ns : Int32) : Nil
+      return if @mark_wake.get != seq
+      if wait_on_mark_word(seq, nap_ns) && @mark_wake.get != seq
+        @parallel_mark_wakes.add(1)
+      end
+    end
+
+    # The platform's wait of `mark_wait`; true if it reports a return that
+    # was not its timeout.
+    private def wait_on_mark_word(seq : Int32, nap_ns : Int32) : Bool
+      word = pointerof(@mark_wake).as(Int32*)
+      {% if flag?(:linux) %}
+        req = uninitialized Gcry::OS::Timespec
+        req.tv_sec = typeof(req.tv_sec).new(0)
+        req.tv_nsec = typeof(req.tv_nsec).new(nap_ns)
+        LibC.syscall(LibC::Long.new(SYS_FUTEX), word, LibC::Long.new(FUTEX_WAIT_PRIVATE),
+          LibC::Long.new(seq), pointerof(req), Pointer(Void).null, LibC::Long.new(0)) == 0
+      {% elsif flag?(:darwin) %}
+        us = (nap_ns + 999) // 1000
+        LibC.gcry_ulock_wait(UL_COMPARE_AND_WAIT, word.as(Void*), seq.to_u32!.to_u64, (us < 1 ? 1 : us).to_u32) >= 0
+      {% else %}
+        # `platform/os.cr` admits Linux, macOS and Windows only.
+        compare = seq
+        ms = (nap_ns + 999_999) // 1_000_000
+        ms = 1 if ms < 1
+        t0 = Clock.monotonic_ns
+        LibGcryWindowsSync.WaitOnAddress(word.as(Void*), pointerof(compare).as(Void*), LibC::SizeT.new(4), ms.to_u32) != 0 &&
+          Clock.monotonic_ns &- t0 < ms.to_u64 * 1_000_000
+      {% end %}
+    end
+
+    # Wake up to `count` of the `sleepers` waiting in `mark_wait`, after the
+    # word's bump. `futex` takes the count. The other two wake one or all, so
+    # a count short of the sleepers is that many single wakes, at most
+    # `MAX_MARK_PTHREADS` − 1: waking all of them for a flush worth two pops
+    # would send the rest back to park through a futile check each.
+    private def mark_wake(count : Int32, sleepers : Int32) : Nil
+      word = pointerof(@mark_wake).as(Void*)
+      {% if flag?(:linux) %}
+        LibC.syscall(LibC::Long.new(SYS_FUTEX), word, LibC::Long.new(FUTEX_WAKE_PRIVATE),
+          LibC::Long.new(count), Pointer(Void).null, Pointer(Void).null, LibC::Long.new(0))
+      {% elsif flag?(:darwin) %}
+        # ENOENT, no waiter left, is the normal answer to a late wake.
+        if count >= sleepers
+          LibC.gcry_ulock_wake(UL_COMPARE_AND_WAIT | ULF_WAKE_ALL, word, 0_u64)
+        else
+          count.times { LibC.gcry_ulock_wake(UL_COMPARE_AND_WAIT, word, 0_u64) }
+        end
+      {% else %}
+        if count >= sleepers
+          LibGcryWindowsSync.WakeByAddressAll(word)
+        else
+          count.times { LibGcryWindowsSync.WakeByAddressSingle(word) }
+        end
+      {% end %}
+    end
+
+    # One idle helper's sleep of at most `nap_ns`, cut short by the next
+    # cycle's `wake_mark_helpers`.
     #
     # The helper counts itself a sleeper before it reads the wake word and
     # then the epoch; the master bumps the epoch before it reads the sleeper
@@ -751,31 +873,22 @@ module Gcry
     # once or wakes it. The timeout stays as before, so a lost wake-up could
     # only cost what the plain sleep always did.
     private def wait_for_mark_epoch(local_epoch : UInt64, nap_ns : Int32) : Nil
-      req = uninitialized Gcry::OS::Timespec
-      req.tv_sec = typeof(req.tv_sec).new(0)
-      req.tv_nsec = typeof(req.tv_nsec).new(nap_ns)
-      {% if flag?(:linux) %}
-        @mark_sleepers.add(1)
-        seq = @mark_wake.get
-        if @mark_epoch.get == local_epoch && @mark_shutdown.get == 0
-          mark_futex_wait(seq, pointerof(req))
-        end
-        @mark_sleepers.add(-1)
-      {% else %}
-        rem = uninitialized Gcry::OS::Timespec
-        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
-      {% end %}
+      @mark_sleepers.add(1)
+      seq = @mark_wake.get
+      if @mark_epoch.get == local_epoch && @mark_shutdown.get == 0
+        mark_wait(seq, nap_ns)
+      end
+      @mark_sleepers.add(-1)
     end
 
     # Inside a cycle, a marker that has found the shared stack empty for
     # `MARK_STEAL_SPIN_NS` sleeps here for at most `nap_ns`.
     #
-    # On Linux it is a futex wait, and it is entered only if, under
-    # `@mark_lock`, the cycle is live and the shared stack empty — for the
-    # master, also with a batch still held somewhere, since `busy == 0` there
-    # is the end of the mark. Everything that ends such a state announces
-    # itself, after the same lock where it has one, and reads the sleeper
-    # count after it:
+    # The wait is entered only if, under `@mark_lock`, the cycle is live and
+    # the shared stack empty — for the master, also with a batch still held
+    # somewhere, since `busy == 0` there is the end of the mark. Everything
+    # that ends such a state announces itself, after the same lock where it
+    # has one, and reads the sleeper count after it:
     #
     # - work published to the shared stack (`flush_pushbuf`,
     #   `publish_mark_entry`) wakes sleepers when it is worth a pop;
@@ -790,38 +903,25 @@ module Gcry
     # or is woken. The third is not under the lock; it is a sequentially
     # consistent RMW followed by a load against this one, as in
     # `wait_for_mark_epoch`. The timeout bounds any wake-up this misses, and
-    # it is what finds work that was published without a wake.
-    #
-    # Elsewhere there is no wake to wait for and this is a plain sleep, so a
-    # parked helper takes work up to `nap_ns` late; the master does not park
-    # there (`mark_loop_drain`), because its lateness would be the pause's.
+    # it is what finds work that was published without a wake — which is
+    # only ever work its awake publisher takes back itself.
     private def park_idle_marker(nap_ns : Int32, master : Bool) : Nil
-      req = uninitialized Gcry::OS::Timespec
-      req.tv_sec = typeof(req.tv_sec).new(0)
-      req.tv_nsec = typeof(req.tv_nsec).new(nap_ns)
-      {% if flag?(:linux) %}
-        @mark_sleepers.add(1)
-        seq = @mark_wake.get
-        @mark_lock.lock
-        idle = @mark_parallel && @mark_stack.empty? && (!master || @mark_workers_busy.get != 0)
-        @mark_lock.unlock
-        mark_futex_wait(seq, pointerof(req)) if idle && @mark_shutdown.get == 0
-        @mark_sleepers.add(-1)
-      {% else %}
-        rem = uninitialized Gcry::OS::Timespec
-        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
-      {% end %}
+      @mark_sleepers.add(1)
+      seq = @mark_wake.get
+      @mark_lock.lock
+      idle = @mark_parallel && @mark_stack.empty? && (!master || @mark_workers_busy.get != 0)
+      @mark_lock.unlock
+      mark_wait(seq, nap_ns) if idle && @mark_shutdown.get == 0
+      @mark_sleepers.add(-1)
     end
 
     # Wake up to `count` sleepers on `@mark_wake`. No syscall while none is.
     @[AlwaysInline]
     private def wake_parked_markers(count : Int32) : Nil
-      {% if flag?(:linux) %}
-        return if @mark_sleepers.get == 0
-        @mark_wake.add(1)
-        LibC.syscall(LibC::Long.new(SYS_FUTEX), pointerof(@mark_wake).as(Int32*), LibC::Long.new(FUTEX_WAKE_PRIVATE),
-          LibC::Long.new(count), Pointer(Void).null, Pointer(Void).null, LibC::Long.new(0))
-      {% end %}
+      sleepers = @mark_sleepers.get
+      return if sleepers == 0
+      @mark_wake.add(1)
+      mark_wake(count, sleepers)
     end
 
     # After an epoch bump or the end of a cycle: wake every helper that is in
@@ -910,16 +1010,16 @@ module Gcry
           break if mark_drain_finished?
           # A helper holds the rest of the mark — one long chain, say — and
           # the master waits for it parked, as an idle helper does, rather
-          # than polling for the whole of it. Linux only: the batch end that
-          # finishes the work wakes it (`end_helper_batch`); a sleep that
-          # timed out would add up to `nap` to the pause.
-          {% if flag?(:linux) %}
-            if drought.over?
-              park_idle_marker(nap, master: true)
-              nap = nap * 2 > MARK_STEAL_NAP_MAX_NS ? MARK_STEAL_NAP_MAX_NS : nap * 2
-              next
-            end
-          {% end %}
+          # than polling for the whole of it. The batch end that finishes the
+          # work wakes it (`end_helper_batch`), so only a missed wake-up
+          # would add the wait's timeout to the pause. Until 2026-10-08 this
+          # was Linux only, because elsewhere the park was a plain sleep that
+          # nothing could cut short; every platform waits on `@mark_wake` now.
+          if drought.over?
+            park_idle_marker(nap, master: true)
+            nap = nap * 2 > MARK_STEAL_NAP_MAX_NS ? MARK_STEAL_NAP_MAX_NS : nap * 2
+            next
+          end
           Intrinsics.pause
         end
       ensure

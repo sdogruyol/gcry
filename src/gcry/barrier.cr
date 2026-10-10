@@ -50,6 +50,25 @@ module Gcry
       Platform::BarrierBackend::None
     end
 
+    # After a major: arm the page barrier for the next cycle if a nursery or
+    # sliced majors will read it, and otherwise take down whatever an earlier
+    # cycle armed. Until 2026-10-08 the second half was missing: a heap whose
+    # `incremental_auto` (or nursery) was turned off kept the barrier the last
+    # sliced cycle armed for good — on aarch64 mprotect over every old chunk,
+    # write faults included — and the large-object recycler, which refuses
+    # while any barrier is armed, never ran again
+    # (`process_spec/regression/46_large_recycle_untouched_pages_spec.cr`
+    # after `27_boehm_collect_parity_spec`'s sliced example, aarch64 CI).
+    protected def arm_page_barrier_after_major : Nil
+      if @nursery_enabled || @incremental_auto
+        arm_page_barrier_after_collect
+      elsif !@barrier_backend.none?
+        disarm_mprotect_barrier if @barrier_backend.mprotect?
+        @barrier_backend = Platform::BarrierBackend::None
+        @soft_dirty_armed = false
+      end
+    end
+
     # Arm remembered set after a collect (or at incremental begin).
     protected def arm_page_barrier_after_collect : Nil
       # Whatever the last arm protected is unprotected before anything else

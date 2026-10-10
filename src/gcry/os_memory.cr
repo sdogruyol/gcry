@@ -19,6 +19,12 @@
 # (`GC_our_mem_bytes`), and a library heap's mappings are the process's too.
 require "./platform/os"
 
+{% if flag?(:linux) %}
+  lib LibC
+    fun mincore(addr : Void*, length : SizeT, vec : UInt8*) : Int
+  end
+{% end %}
+
 module Gcry
   # A literal, so it is initialised statically: the first `os_map` runs inside
   # `GC.init`, before `once`-guarded initialisers can run (see `mmap_failed?`).
@@ -66,6 +72,50 @@ module Gcry
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), dst_len,
         LLVM::AtomicOrdering::Monotonic, false)
       {false, false}
+    end
+
+    # Pages `os_written_prefix` asks `mincore` about per call: a byte each, on
+    # the stack, 4 MiB of a 4 KiB-page mapping.
+    WRITTEN_PREFIX_BATCH = 1024
+
+    # How many leading bytes of `[base, base + len)`, a page-aligned private
+    # anonymous range, may hold anything but zeroes once this returns: the
+    # range up to the end of its last resident page. Past that the range is
+    # made to read zeroes, so a caller that must hand it out zeroed clears
+    # only the prefix. A large block the program touched one byte of, or
+    # never wrote past its first megabyte, keeps its untouched pages the
+    # kernel's: clearing them faulted each one in to write zeroes over zeroes
+    # (`Heap#large_written_bytes`). `len` when it cannot tell.
+    #
+    # `mincore` alone would be wrong: it answers "resident", and a written
+    # page swapped out reads as absent once it leaves the swap cache (the trap
+    # `Platform.stack_low_water` avoids with pagemap). So the tail it calls
+    # absent goes through `MADV_DONTNEED`, which drops a swap entry as it
+    # drops a page and costs a page-table walk where nothing is there. A page
+    # that faults in between the two calls is one nobody may write: the range
+    # is the caller's, off every list, under the allocation lock.
+    def self.os_written_prefix(base : Void*, len : UInt64) : UInt64
+      page = Platform.host_page_size
+      vec = uninitialized StaticArray(UInt8, WRITTEN_PREFIX_BATCH)
+      hi = len // page
+      prefix = 0_u64
+      while hi > 0 && prefix == 0_u64
+        lo = hi > WRITTEN_PREFIX_BATCH ? hi &- WRITTEN_PREFIX_BATCH : 0_u64
+        n = hi &- lo
+        return len unless LibC.mincore(base + lo &* page, LibC::SizeT.new(n &* page), vec.to_unsafe) == 0
+        i = n
+        while i > 0
+          i &-= 1
+          if (vec[i] & 1_u8) != 0
+            prefix = (lo &+ i &+ 1) &* page
+            break
+          end
+        end
+        hi = lo
+      end
+      return prefix if prefix >= len
+      return len unless Platform.release_physical_pages(base.address &+ prefix, len &- prefix)
+      prefix
     end
   {% end %}
 

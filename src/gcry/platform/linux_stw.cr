@@ -671,7 +671,25 @@ module Gcry
             # atomically unblocks it — otherwise a fast resume is consumed by
             # the empty SIG_RESUME handler and sigsuspend waits forever
             # (GCRY_STRESS).
-            LibC.sigsuspend(pointerof(mask))
+            #
+            # A resume ends the wait only once this stop is over, as Boehm's
+            # handler waits for `GC_stop_count` to move (pthread_stop_world.c,
+            # `GC_suspend_handler_inner`). `start_world` closes the epoch
+            # before its first resume, and resends a resume to a thread slow
+            # to acknowledge, so a thread can be left with one it never took:
+            # a thread that keeps SIG_RESUME blocked in its own mask — a C
+            # thread under `GC_register_my_thread`, whose pool blocks every
+            # signal — holds it pending until the next stop's `sigsuspend`,
+            # where it arrives at once. Without this loop the thread then ran
+            # through a stopped world, and the collection wedged on a lock it
+            # took (`process_spec/regression/47_stale_resume_signal_spec.cr`).
+            # Before the table is booted no stop has an epoch (0), and the
+            # first resume ends the wait as it always did.
+            stop = Platform.stw_epoch
+            loop do
+              LibC.sigsuspend(pointerof(mask))
+              break if stop == 0 || Platform.stw_epoch != stop
+            end
 
             Platform.set_suspend_ack(ack_slot, false)
             ack_thread.@suspended.set(false) if ack_thread
