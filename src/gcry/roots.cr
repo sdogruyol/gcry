@@ -280,6 +280,12 @@ module Gcry
     @@probe_wr = -1
     @@probe_fd_free = false
 
+    # The probe pipe's read and write ends, -1 when the probe goes without an
+    # fd (`process_spec/regression/55_probe_pipe_fd_pressure_spec.cr`).
+    def self.probe_fds : {Int32, Int32}
+      {@@probe_rd, @@probe_wr}
+    end
+
     # Ranges `scan_range` refused for being longer than `MAX_SCAN_BYTES`.
     #
     # The refusal is a sanity valve against nonsense bounds. For anything that
