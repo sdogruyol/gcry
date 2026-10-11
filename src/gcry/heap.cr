@@ -951,7 +951,7 @@ module Gcry
         bytes_since_gc_sub(payload)
         note_explicit_free(payload)
         live_objects_dec
-        @finalizers.notice_reclaim(pointer)
+        @finalizers.notice_reclaim(pointer, payload)
         @large_cached_by_free &+= 1
         # Marked for the in-place exact-size take recycling reserves to the
         # program's own frees (`alloc_large`).
@@ -974,7 +974,7 @@ module Gcry
       return FreeResult::BadSizeClass if class_index < 0 || class_index >= SIZE_CLASS_COUNT
       payload = SizeClasses.payload(class_index)
 
-      @finalizers.notice_reclaim(pointer)
+      @finalizers.notice_reclaim(pointer, payload.to_u64)
 
       # Per *chunk*, not on the heap-wide flag. A nursery chunk keeps the
       # freelist representation — `bitmap_alloc_chunk?` excludes it, because

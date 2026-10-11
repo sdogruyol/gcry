@@ -5,22 +5,6 @@ require "./spec_helper"
 # the guard became an O(1) registration index. These pin the behaviour the flags
 # used to provide — especially the case a single flag bit could not express.
 describe "finalizer registration index" do
-  it "still runs a finalizer after an explicit free" do
-    heap = Gcry::Heap.new
-    begin
-      ran = 0
-      obj = heap.malloc(32)
-      heap.add_finalizer(obj) { ran += 1 }
-      heap.free(obj)
-      # notice_reclaim drops the row on the free path; the object is gone, so
-      # the finalizer must not be left queued against freed memory.
-      heap.collect(scan_stack: false, roots: [] of Void*)
-      ran.should be <= 1
-    ensure
-      heap.destroy
-    end
-  end
-
   it "keeps the weak link when only the finalizer is removed" do
     # The case two independent flag bits handled and a naive presence-set would
     # get wrong: one object carrying BOTH a finalizer entry and a disappearing
@@ -186,7 +170,8 @@ class FinalizerIndexModel
       when 22...40 then replace
       when 40...55 then register_link
       when 55...63 then unregister_link
-      when 63...71 then reclaim
+      when 63...68 then reclaim
+      when 68...71 then free_holder
       when 71...85 then queue_entry
       when 85...93 then clear_link
       else              remove_link
@@ -277,16 +262,33 @@ class FinalizerIndexModel
     @links.delete(k)
   end
 
+  # An explicit free of *obj*: its entry rows go without being queued — the
+  # block is about to be handed back, so nothing may run on it — and its
+  # links are cleared.
   private def reclaim : Nil
     obj = random_object
     pending = @registry.pending_count
-    queued = @rows.count { |r| r.object == obj }
-    @registry.notice_reclaim(obj)
-    @registry.pending_count.should eq(pending + queued)
+    @registry.notice_reclaim(obj, 48_u64)
+    @registry.pending_count.should eq(pending)
     @rows.reject! { |r| r.object == obj }
     @links.select { |_, o| o == obj }.each_key do |k|
       @slots[k].should eq(Pointer(Void).null)
       @links.delete(k)
+    end
+  end
+
+  # An explicit free of a block holding link locations, such as a `WeakRef`:
+  # every link inside it goes, and its word is left alone — the block is no
+  # longer the registry's to write. Up to 16 words, so the free takes both
+  # the per-word probe and the scan of the rows.
+  private def free_holder : Nil
+    n = 1 + @random.rand(16)
+    k = @random.rand(@link_slots - n + 1)
+    words = Array.new(n) { |j| @slots[k + j] = unique }
+    @registry.notice_reclaim((@slots + k).as(Void*), (n * sizeof(Void*)).to_u64)
+    n.times do |j|
+      @slots[k + j].should eq(words[j])
+      @links.delete(k + j)
     end
   end
 

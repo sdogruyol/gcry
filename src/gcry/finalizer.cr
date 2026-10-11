@@ -28,7 +28,9 @@ module Gcry
     # One open-addressing slot. `object.null?` is empty; TOMBSTONE is deleted.
     # In the registry's object index, *count* is the number of entry and link
     # rows naming *object* and *row* the newest of its entry rows (-1: none).
-    # In its link index, *row* is the location's link row and *count* unused.
+    # In its link index, *row* is the location's link row and *count* unused;
+    # in its granule index, *count* is the link locations in the granule and
+    # *row* unused.
     # Two Int32 fill the word one would pad to: 16 bytes either way.
     struct IndexSlot
       property object : Void*
@@ -350,6 +352,13 @@ module Gcry
       # row per location — `register_disappearing_link` keeps it so — which is
       # what lets a location map to a single row.
       @link_index = PointerIndex.new
+      # Granule of the address space (`LINK_GRANULE_SHIFT`) -> how many link
+      # locations lie in it, so a free asks the few granules a block covers
+      # whether it can hold a link at all before it probes every word of the
+      # block or scans every row (`drop_links_inside`). Kept by
+      # `register_disappearing_link` and `swap_remove_link`, which every link
+      # removal goes through.
+      @link_granules = PointerIndex.new
 
       @entries : Entry* = Pointer(Entry).null
       @entries_size = 0
@@ -370,6 +379,7 @@ module Gcry
         begin
           @index.clear
           @link_index.clear
+          @link_granules.clear
           LibC.free(@entries.as(Void*)) unless @entries.null?
           LibC.free(@links.as(Void*)) unless @links.null?
           @entries = Pointer(Entry).null
@@ -520,6 +530,10 @@ module Gcry
           @links_size += 1
           slot = @link_index.claim(link.as(Void*))
           @link_index[slot] = IndexSlot.new(link.as(Void*), 0, row) if slot >= 0
+          granule = link_granule(link.as(Void*))
+          if (slot = @link_granules.claim(granule)) >= 0
+            @link_granules[slot] = IndexSlot.new(granule, @link_granules[slot].count + 1)
+          end
           count_link(object)
           true
         ensure
@@ -595,14 +609,36 @@ module Gcry
         @lock.unlock
       end
 
-      # Explicit free path: drop registry rows for one object.
-      # Common realloc/free of ordinary objects must not scan thousands of
-      # unrelated finalizer entries (perf: ~15%+ CPU on HTTP apps).
-      def notice_reclaim(object : Void*) : Nil
+      # Explicit free path (`GC.free`, `GC_free`, `GC_realloc(p, 0)`): drop
+      # every row that names the block *object* .. *object* + *bytes* before
+      # the allocator takes it back. Common free of ordinary objects must not
+      # scan thousands of unrelated finalizer entries (perf: ~15%+ CPU on
+      # HTTP apps).
+      #
+      # A finalizer row is dropped, never queued. Until 2026-10-11 it was
+      # queued, and the queue kept the raw address of a block the free had
+      # just handed back: the next `run_pending` called `#finalize` on
+      # whatever reused it. Measured, a `GC.free`d object with `#finalize`
+      # whose block a live object of the same size took back (61 allocations
+      # later on a bitmap chunk, the next one on a freelist) had its
+      # finalizer read the new object's field (`tag=999`) and write its own
+      # into it, in all three layouts; with `GCRY_POISON_FREED=1` and no
+      # reuse it read the poison. A finalizer that closes its fd closes the
+      # new owner's. Boehm calls freeing a finalizable object a caller error
+      # (`GC_free`, gc.h) and leaves its row in place; dropping the row
+      # forgives the error (`process_spec/regression/60_free_finalizable_spec.cr`).
+      # Nothing ran a finalizer on purpose this way: stdlib frees only zlib
+      # and GMP buffers (`Compress::Deflate`, `BigInt`), which have none.
+      # `realloc` never comes here when it moves: the old block, finalizer
+      # and all, is left for the sweep, which runs it on memory that is still
+      # its own.
+      def notice_reclaim(object : Void*, bytes : UInt64) : Nil
         return if object.null?
         @lock.lock
         begin
           return if @entries_size == 0 && @links_size == 0
+
+          drop_links_inside(object, bytes) if @links_size > 0
 
           # Was two header flag bits; now an O(1) index lookup. Phase 7 needs
           # those bits out of the header, and this is strictly better than what
@@ -615,7 +651,6 @@ module Gcry
             return if slot < 0
             # A released slot is a tombstone, whose row is -1.
             while (row = @index[slot].row) >= 0
-              queue_pending(@entries[row])
               swap_remove_entry(row)
             end
             # Released: no link names it either.
@@ -626,7 +661,6 @@ module Gcry
             i = 0
             while i < @entries_size
               if @entries[i].object == object
-                queue_pending(@entries[i])
                 swap_remove_entry(i)
               else
                 i += 1
@@ -646,6 +680,93 @@ module Gcry
         ensure
           @lock.unlock
         end
+      end
+
+      # How many rows a scan must outnumber the probes another way would make
+      # before `drop_links_inside` takes that way instead. A scan compares
+      # rows in a sequential, vectorised read; a probe is a hash and a jump
+      # into a table. Measured 2026-10-11 (`--release`, x86_64, a warm
+      # table): a scan 0.25 ns a row (8192 rows, 2066 ns), a probe 0.7 ns a
+      # word (128 words, 90 ns) — 3x, and 4 since a cold table, the usual
+      # case on a free, only widens the gap.
+      LINK_PROBE_RATIO = 4_u64
+
+      # `@link_granules` granule: 64 KiB, the size of most of zlib's deflate
+      # buffers, so each free `Compress::Deflate` makes asks one or two
+      # granules. Measured 2026-10-11 with 4096 `WeakRef`s live, a
+      # `GC.malloc_atomic` + `GC.free` pair against master: 64 KiB 70 ns
+      # against 70 (a scan of the rows instead, 1360), 1 KiB 80 against 79
+      # (a probe per word instead, 214-235), 1 MiB 88-97 against 72-75, 16
+      # bytes 47 against 44-47.
+      LINK_GRANULE_SHIFT = 16
+
+      # Drops, without writing to them, the links whose *location* lies in
+      # the block being freed, *lo* .. *lo* + *bytes*: a `WeakRef` freed with
+      # `GC.free` holds its own link. The collector cannot catch it later
+      # (`dead_link_location?` in collect_mark.cr): once the block is reused
+      # its new owner is marked, so the row stayed, and when the target died
+      # the collector nulled a word of the new object. Measured before this:
+      # a freed `WeakRef`'s block reused 59 allocations later by a live
+      # 16-byte buffer filled with {0x1111, 0x2222} read {0x1111, 0x0} once
+      # the target went (`process_spec/regression/61_free_link_holder_spec.cr`).
+      # Boehm, too, calls freeing an object with a link inside it an error.
+      #
+      # Three ways to find them, each taken only while it costs less than
+      # the one after it, down to the scan of every row (`LINK_PROBE_RATIO`).
+      # First `@link_granules`, when the block covers fewer granules than it
+      # has words: no location in any granule it covers — a zlib window or an
+      # `Array`'s buffer in its own chunk, almost always — and nothing is
+      # inside. Then a probe of `@link_index` per word: a location is a
+      # pointer-aligned word — Boehm aborts on any other
+      # (`GC_general_register_disappearing_link`) — so a probe per word misses
+      # none. A table that gave up its C allocation is skipped, for the scan:
+      # slower, never wrong. The caller has checked that there are links:
+      # with none, a free pays only the `@links_size` test, as before.
+      private def drop_links_inside(lo : Void*, bytes : UInt64) : Nil
+        return if bytes == 0
+        links = @links_size.to_u64
+        words = bytes // sizeof(Void*)
+        first = lo.address >> LINK_GRANULE_SHIFT
+        last = (lo.address &+ bytes &- 1) >> LINK_GRANULE_SHIFT
+        granules = last &- first &+ 1
+        if !@link_granules.disabled? && granules < words && granules &* LINK_PROBE_RATIO <= links
+          g = first
+          until g > last
+            break if @link_granules.find(link_granule(Pointer(Void).new(g << LINK_GRANULE_SHIFT))) >= 0
+            g &+= 1
+          end
+          return if g > last
+        end
+        if @link_index.available? && words &* LINK_PROBE_RATIO <= links
+          addr = lo.address
+          stop = addr &+ bytes
+          while addr < stop
+            if (slot = @link_index.find(Pointer(Void).new(addr))) >= 0
+              swap_remove_link(@link_index[slot].row)
+            end
+            addr &+= sizeof(Void*)
+          end
+          return
+        end
+        i = 0
+        while i < @links_size
+          if @links[i].link.address &- lo.address < bytes
+            swap_remove_link(i)
+          else
+            i += 1
+          end
+        end
+      end
+
+      # The `@link_granules` key of the granule holding *address*: the granule
+      # number in bits 4 and up, which `PointerIndex#hash` mixes, and bit 1
+      # set, so never null nor `PointerIndex::TOMBSTONE`. A granule's *base*
+      # as key put the number at bit 16, and the hash's shift by 4 left the
+      # product's low 12 bits zero: every granule began probing at one slot,
+      # and with 2 000 links spread over as many granules a million 16-byte
+      # frees took 898 ms against 6 ms.
+      private def link_granule(address : Void*) : Void*
+        Pointer(Void).new(((address.address >> LINK_GRANULE_SHIFT) << 4) | 2_u64)
       end
 
       # Set while a fiber is in `run_pending`. A finalizer that collects
@@ -759,6 +880,7 @@ module Gcry
         begin
           @index.give_up
           @link_index.give_up
+          @link_granules.give_up
         ensure
           @lock.unlock
         end
@@ -804,6 +926,21 @@ module Gcry
               return "link row #{i} indexed as #{row}" if row != i
             end
             return "@link_index has #{@link_index.live_count} keys, #{@links_size} links" if @link_index.live_count != @links_size
+          end
+          unless @link_granules.disabled?
+            granules = 0
+            @links_size.times do |i|
+              granule = link_granule(@links[i].link.as(Void*))
+              # Count each granule at its first row only.
+              next if (0...i).any? { |j| link_granule(@links[j].link.as(Void*)) == granule }
+              granules += 1
+              rows = 0
+              @links_size.times { |j| rows += 1 if link_granule(@links[j].link.as(Void*)) == granule }
+              slot = @link_granules.find(granule)
+              count = slot >= 0 ? @link_granules[slot].count : 0
+              return "@link_granules counts #{count} links in #{granule}, table has #{rows}" if count != rows
+            end
+            return "@link_granules has #{@link_granules.live_count} keys, #{granules} granules" if @link_granules.live_count != granules
           end
           unless @index.disabled?
             return "#{chained} chained of #{@entries_size} rows" if chained != @entries_size
@@ -1008,6 +1145,15 @@ module Gcry
         uncount_link(@links[i].object)
         if (slot = @link_index.find(@links[i].link.as(Void*))) >= 0
           @link_index.release(slot)
+        end
+        granule = link_granule(@links[i].link.as(Void*))
+        if (slot = @link_granules.find(granule)) >= 0
+          held = @link_granules[slot]
+          if held.count > 1
+            @link_granules[slot] = IndexSlot.new(granule, held.count - 1)
+          else
+            @link_granules.release(slot)
+          end
         end
         last = @links_size - 1
         if i != last
