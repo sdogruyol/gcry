@@ -682,7 +682,32 @@ module Gcry
       # request and lost the contents.
       new_size = sat_add(new_size, @atomic_slack) if atomic
 
-      return pointer if new_size <= old_size
+      # A large block shrunk below half its size moves, as Boehm's
+      # `GC_realloc` moves anything shrunk below half (`lb < sz/2`): clearing
+      # the cut-off tail in place would write — and fault in — pages the
+      # block may never have touched. `GC.malloc(512 MiB)` then
+      # `GC.realloc(p, 8)` took RSS from 7 MB to 519 MB and 123 ms that way.
+      shrink_move = !atomic && new_size < old_size && ChunkHeader.large?(rchunk) &&
+                    new_size < (old_size >> 1)
+      if new_size <= old_size && !shrink_move
+        # In place, so the block keeps `old_size`, and a later `realloc` back
+        # up to it returns in place too: whatever the shrink cut off has to
+        # read as zeroes by then. Boehm's `GC_realloc` clears it here
+        # (`mallocx.c`, `BZERO(p + lb, orig_sz - lb)`), and `gc.h` promises
+        # the grown part of an object zeroed, "not guaranteed for atomic
+        # object type". Left as it was, a 0xFF-filled block shrunk to 8 bytes
+        # and grown back came back with 56, 4 088 and 99 992 of its bytes
+        # still 0xFF at 64, 4 096 and 100 000, and the scan went on reading
+        # those stale words as pointers. Atomic blocks keep them: nothing
+        # scans them, `gc.h` does not ask, and `String::Builder#to_s` shrinks
+        # every builder it finishes. At most half a large block is cleared
+        # here; below half it moves (above).
+        (pointer.as(UInt8*) + new_size).clear(old_size &- new_size) unless atomic
+        return pointer
+      end
+      # What the new block takes from the old: all of it on a grow, the kept
+      # prefix on a moving shrink.
+      copy_size = shrink_move ? new_size : old_size
 
       # Pin across allocate. The reason first written here — that the type_id
       # gate rejects raw Pointer buffers as ambient stack roots — **no longer
@@ -729,7 +754,7 @@ module Gcry
       unless fresh.null?
         realloc_copy_enter
         begin
-          fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+          fresh.as(UInt8*).copy_from(pointer.as(UInt8*), copy_size)
         ensure
           realloc_copy_leave
         end
@@ -755,8 +780,8 @@ module Gcry
         # directly, which a crash-rate A/B cannot do at these rates.
         realloc_copy_enter
         begin
-          unless move_large_contents(rchunk, pointer, fresh, old_size)
-            fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+          unless !shrink_move && move_large_contents(rchunk, pointer, fresh, old_size)
+            fresh.as(UInt8*).copy_from(pointer.as(UInt8*), copy_size)
           end
         ensure
           realloc_copy_leave
@@ -2489,7 +2514,15 @@ module Gcry
         (at.as(UInt8*) + ChunkHeader::SIZE).clear(BlockHeader::LARGE_HEADER_BYTES)
       end
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32, at)
-      return {Pointer(Void).null, 0_u64} if chunk.null?
+      if chunk.null?
+        # A recycled mapping is off every list, and `map_chunk` leaves it to
+        # its caller; the old chunk's pages it carried leave the heap with it.
+        unless at.null?
+          Gcry.os_unmap(at, mapped)
+          @unmapped_bytes += reused
+        end
+        return {Pointer(Void).null, 0_u64}
+      end
       trace_large_map(chunk, mapped, payload, reused) if @trace_large
       header = ChunkHeader.large_header(chunk)
       @large_alloc_in_flight = ChunkHeader.large_user(chunk)
@@ -2622,6 +2655,7 @@ module Gcry
         if old_mapped > mapped
           rest = old_mapped &- mapped
           tail = old.address &+ mapped
+          rchunk = Pointer(ChunkHeader).null
           if rest >= LARGE_RECYCLE_SPLIT_MIN
             # FREE before the chunk is published, as the sweep skips it.
             rheader = (tail &+ ChunkHeader::SIZE).to_u64
@@ -2629,8 +2663,10 @@ module Gcry
               rest &- ChunkHeader.large_data_offset.to_u64,
               BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE)
             rchunk = map_chunk(rest, UInt32::MAX, 0_u32, Pointer(Void).new(tail))
-            link_free_large(rchunk, Pointer(BlockHeader).new(rheader))
-          else
+            link_free_large(rchunk, Pointer(BlockHeader).new(rheader)) unless rchunk.null?
+          end
+          # Too short to keep, or the index had no room for it.
+          if rchunk.null?
             Gcry.os_unmap(Pointer(Void).new(tail), rest)
             @unmapped_bytes += rest
           end
@@ -3229,20 +3265,16 @@ module Gcry
     # So: fail quietly, let the caller unwind out of its lock, and leave both
     # the collection and the raise to the allocation entry points, where no
     # allocator lock is held. `alloc_old_small` already states the rule at its
-    # own tight-grow collect: never collect under the freelist lock.
-    # *at*: memory already mapped for this chunk (the out-of-memory reserve);
-    # null maps a fresh one.
+    # own tight-grow collect: never collect under the freelist lock. The rule
+    # covers the chunk index's own `malloc` too (`index_reserve`): a failure
+    # anywhere in here publishes nothing and keeps no mapping it made.
+    # *at*: memory already mapped for this chunk (the out-of-memory reserve, a
+    # recycled large mapping, a split tail); null maps a fresh one. A failure
+    # leaves *at* mapped and the caller's.
     private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32,
                           at : Void* = Pointer(Void).null) : ChunkHeader*
       ptr = at.null? ? mmap_anonymous(bytes) : at
       return Pointer(ChunkHeader).null if Gcry.mmap_failed?(ptr)
-
-      # The denominator for the chunk-list divergence rate. A chunk is stranded
-      # off `@chunks` only by a prepend that races the sweep's walk, so the
-      # event scales with *mappings*, not with uptime or collections: a heap
-      # that has reached its working size stops mapping and stops losing.
-      # Free beside an mmap.
-      @chunks_mapped &+= 1
 
       # Linux: disable THP on GC-managed mmaps. THP can inflate RSS by
       # rounding 128 KiB chunks up to 2 MiB huge pages — madvise on a
@@ -3335,7 +3367,16 @@ module Gcry
       # unlink walks the list to find a predecessor, and holding the index lock
       # across that starves every `chunk_containing` — measured as a Darwin job
       # going from 1m50s to a 20-minute timeout. Order is list → index.
-      @chunk_list_lock.sync do
+      published = @chunk_list_lock.sync do
+        # Before the header, the list and the radix table: past this point
+        # nothing can fail, and short of it nothing has been written.
+        next false unless index_reserve(chunk)
+        # The denominator for the chunk-list divergence rate. A chunk is
+        # stranded off `@chunks` only by a prepend that races the sweep's
+        # walk, so the event scales with *mappings*, not with uptime or
+        # collections: a heap that has reached its working size stops mapping
+        # and stops losing. Free beside an mmap.
+        @chunks_mapped &+= 1
         chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags, data_offset, bitmap_words)
         # Release store: the in-STW sweep and `each_chunk` walk this list
         # unlocked, and a mutator can be suspended between these two stores.
@@ -3346,6 +3387,13 @@ module Gcry
         # `next`. Same discipline as `index_insert_locked`'s count store.
         Atomic::Ops.store(pointerof(@chunks), chunk, :release, true)
         index_insert(chunk)
+        true
+      end
+      unless published
+        # Nothing names the mapping, and no mapping was recorded against its
+        # base (`note_map_base` is below), so it goes straight back.
+        Gcry.os_unmap(ptr, bytes) if at.null?
+        return Pointer(ChunkHeader).null
       end
       @heap_size += bytes
       @large_recycle_budget = sat_sub(@large_recycle_budget, bytes) if at.null?
@@ -4239,6 +4287,40 @@ module Gcry
     # N ms at the point the old array is no longer the one the index is
     # about to name, so a collection lands there. Under `@index_lock`.
     property index_grow_stall_ms : UInt32 = 0_u32
+    # Test only: the next growth of the sorted index fails as a refused
+    # `malloc` would, once (`process_spec/regression/58`). Read only where the
+    # index is about to grow, never on an allocation's own path.
+    property test_fail_next_index_grow : Bool = false
+
+    # Room in the sorted index for one more entry, *chunk*, before `map_chunk`
+    # publishes anything. Caller holds `@chunk_list_lock`.
+    #
+    # Growth used to happen inside `index_insert_locked`, after `radix_insert`
+    # had published the chunk and after `map_chunk` had put it on `@chunks`,
+    # and a refused `malloc` there raised `OutOfMemoryError` with the caller's
+    # class lock or `@alloc_lock`, `@chunk_list_lock` and `@index_lock` all
+    # held. Building the error allocates; an allocation that needed a chunk
+    # of its own spun on the `@chunk_list_lock` its own thread held — a
+    # 400 000-`Array` program whose index `malloc(4096)` was refused hung at
+    # 100% CPU, `index_ensure_cap → Exception.new → alloc_old_small →
+    # bitmap_take_pool_chunk → SpinLock#lock`. Had the error got out, it
+    # would have left a chunk on the list and in the radix table that the
+    # sorted index and `@heap_size` never saw. Reserved first, a refusal is a
+    # `false` with nothing published, and the caller's null.
+    #
+    # Every insert holds `@chunk_list_lock`, so nothing takes this room before
+    # the caller does, and this is the only writer of `@chunk_index_cap`: the
+    # check needs no `@index_lock`. A concurrent removal only lowers the count
+    # read here, which over-reserves.
+    private def index_reserve(chunk : ChunkHeader*) : Bool
+      need = @chunk_index_count + 1
+      return true if need <= @chunk_index_cap
+      note_index_lock_section
+      StwWatchdog.note_index_lock_wait(chunk.address)
+      grown = @index_lock.sync { index_ensure_cap(need) }
+      StwWatchdog.note_index_lock_done
+      grown
+    end
 
     # Grow by allocate, copy, publish, and only then free the old array.
     #
@@ -4259,16 +4341,26 @@ module Gcry
     # Now every state a suspended thread can leave names an intact array: the
     # old one until the release store, the fully copied new one after it.
     # Growth holds `@index_lock`, so locked readers never see either switch.
-    private def index_ensure_cap(need : Int32) : Nil
-      return if need <= @chunk_index_cap
+    #
+    # False, with the index untouched, when the array cannot be had: the
+    # caller holds spin locks an `OutOfMemoryError` would need
+    # (`index_reserve`).
+    private def index_ensure_cap(need : Int32) : Bool
+      return true if need <= @chunk_index_cap
       new_cap = @chunk_index_cap == 0 ? 16 : @chunk_index_cap
       while new_cap < need
+        return false if new_cap > Int32::MAX // 2
         new_cap *= 2
       end
-      bytes = LibC::SizeT.new(sizeof(ChunkHeader*) * new_cap)
+      bytes = LibC::SizeT.new(sizeof(ChunkHeader*)) * new_cap
       old = @chunk_index
-      fresh = LibC.malloc(bytes).as(ChunkHeader**)
-      raise OutOfMemoryError.new("chunk index allocation failed") if fresh.null?
+      fresh = if @test_fail_next_index_grow
+                @test_fail_next_index_grow = false
+                Pointer(ChunkHeader*).null
+              else
+                LibC.malloc(bytes).as(ChunkHeader**)
+              end
+      return false if fresh.null?
       fresh.copy_from(old, @chunk_index_count) unless old.null?
       if @index_grow_free_first && !old.null?
         index_free_old(old, @chunk_index_cap)
@@ -4279,6 +4371,7 @@ module Gcry
       old_cap = @chunk_index_cap
       @chunk_index_cap = new_cap
       index_free_old(old, old_cap) unless old.null?
+      true
     end
 
     # Under `GCRY_POISON_FREED` the old array is poisoned before it is freed,
@@ -4489,6 +4582,9 @@ module Gcry
     # suspended thread can expose is a sorted array with at most one
     # *adjacent duplicate* — harmless to a binary search — and never one
     # with an entry hidden.
+    #
+    # No growth here: `map_chunk` reserved the slot (`index_reserve`) before
+    # it published the chunk anywhere, so nothing below can fail.
     private def index_insert_locked(chunk : ChunkHeader*) : Nil
       invalidate_chunk_cache
       # Same critical section as the sorted index, deliberately. A reader that
@@ -4496,7 +4592,6 @@ module Gcry
       # must not outlive the mapping — and matching the sorted index's lifetime
       # exactly is cheaper to reason about than a second protocol.
       radix_insert(chunk)
-      index_ensure_cap(@chunk_index_count + 1)
       pos = index_lower_bound(chunk.address)
       count = @chunk_index_count
       if count > pos
