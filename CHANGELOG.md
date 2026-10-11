@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A collection no longer calls the C heap while other threads are
+  suspended (Windows, macOS).** Both platforms suspend a thread wherever
+  it is. A thread frozen inside `malloc` or `free` holds the C heap's
+  lock until the world restarts, so the collector's own call there waits
+  forever. Two such calls ran in every default stop: the sweep `malloc`'d
+  a node for each finalizer it queued, and `stop_world` `free`'d the root
+  node of each dead thread's birth root. Finalizer nodes now come from a
+  pool, kept at least as large as the registered finalizers at
+  registration time, and a finalizer that has run returns its node there.
+  A birth root ended inside the stop keeps its node for the next `add`.
+  Suspected cause, unconfirmed: in 4 of about 32 runs since 2026-10-08,
+  the Windows x86_64 gates job sat until its 30-minute cap with a gcry
+  parent stuck past every child's deadline, three times in
+  `find_block_race` and once in `parallel_mark_termination`.
+
 - **The heap reports out of memory when growing the chunk index fails,
   rather than hanging.** `map_chunk` published the new chunk and only then
   grew the index under `@chunk_list_lock`, and the raise from the failed

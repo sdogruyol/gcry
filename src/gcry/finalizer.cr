@@ -372,6 +372,19 @@ module Gcry
       # `each_pending`.
       @pending : PendingNode* = Pointer(PendingNode).null
       @pending_count = 0
+      # Nodes for `queue_pending`, which runs in the sweep with the world
+      # stopped and so may not take the C heap's lock: on Windows and macOS
+      # a thread is suspended wherever it is, and one frozen inside
+      # `malloc` holds that lock until the world restarts — so a `malloc`
+      # there waits forever. Suspected, not caught in the act: in 4 of about
+      # 32 Windows CI runs a gcry parent spawning and waiting on children —
+      # `find_block_race` three times, `parallel_mark_termination` once —
+      # stopped past every child's deadline, its idle collector running. At
+      # least one node per entry is kept here (`reserve_pending_nodes`, at
+      # registration): a collection queues each entry at most once, and takes
+      # a node for each.
+      @spare : PendingNode* = Pointer(PendingNode).null
+      @spare_count = 0
       # LibC table mutate vs MT allocators (preview_mt / EC).
       @lock = Crystal::SpinLock.new
 
@@ -390,6 +403,7 @@ module Gcry
           @links_size = 0
           @links_cap = 0
           free_pending
+          free_spare
         ensure
           @lock.unlock
         end
@@ -898,12 +912,25 @@ module Gcry
               @pending = node.value.next
               @pending_count -= 1
             end
-            @lock.unlock
-            break if node.null?
+            if node.null?
+              @lock.unlock
+              break
+            end
             object = node.value.object
             callback = node.value.callback
             c_abi = node.value.c_abi?
-            LibC.free(node.as(Void*))
+            # Back to the spares, outside any stop. Only a pool past twice
+            # what the entries can take goes back to the C heap, so one that
+            # a burst of registrations grew does not stay at its peak.
+            if @spare_count > @entries_size &* 2 &+ 64
+              @lock.unlock
+              LibC.free(node.as(Void*))
+            else
+              node.value.next = @spare
+              @spare = node
+              @spare_count += 1
+              @lock.unlock
+            end
             # Callbacks outside the lock (may re-enter add / allocate).
             Trace.finalizer("run", object)
             ran += 1
@@ -974,6 +1001,8 @@ module Gcry
       def debug_index_error : String?
         @lock.lock
         begin
+          # The sweep takes a node per entry it queues and cannot allocate one.
+          return "#{@spare_count} spare pending nodes for #{@entries_size} entries" if @spare_count < @entries_size
           chained = 0
           @entries_size.times do |r|
             e = @entries[r]
@@ -1101,6 +1130,7 @@ module Gcry
       # no other row's position.
       private def append_entry(entry : Entry, slot : Int32) : Nil
         ensure_entries_cap(@entries_size + 1)
+        reserve_pending_nodes(@entries_size + 1)
         row = @entries_size
         entry.prev_row = -1
         entry.slot = slot
@@ -1239,18 +1269,55 @@ module Gcry
         @links_size = last
       end
 
+      # With the world stopped (the sweep, `queue_and_remove_entry_at`): a
+      # node from `@spare`, which registration keeps at least as long as the
+      # entries — each queued entry leaves the table as it takes one. Never
+      # the C heap here (see `@spare`).
       private def queue_pending(entry : Entry) : Nil
-        node = LibC.malloc(sizeof(PendingNode)).as(PendingNode*)
-        raise OutOfMemoryError.new("finalizer pending malloc failed") if node.null?
+        node = @spare
+        if node.null?
+          # Registration broke the invariant above. Said without allocating:
+          # the world is stopped.
+          buf = uninitialized UInt8[RawOut::LIMIT]
+          n = RawOut.append(buf.to_unsafe, 0, "gcry: finalizer pending pool empty with ")
+          n = RawOut.append_u64(buf.to_unsafe, n, @entries_size.to_u64)
+          n = RawOut.append(buf.to_unsafe, n, " entries\n")
+          RawOut.flush(buf.to_unsafe, n)
+          LibC.abort
+        end
+        @spare = node.value.next
+        @spare_count -= 1
         node.value = PendingNode.new(entry.object, entry.callback, entry.c_abi?, @pending)
         @pending = node
         @pending_count += 1
+      end
+
+      # Grows `@spare` to *entries* nodes, outside any stop and under `@lock`.
+      private def reserve_pending_nodes(entries : Int32) : Nil
+        while @spare_count < entries
+          node = LibC.malloc(sizeof(PendingNode)).as(PendingNode*)
+          raise OutOfMemoryError.new("finalizer pending malloc failed") if node.null?
+          node.value = PendingNode.new(Pointer(Void).null, Callback.new(Pointer(Void).null, Pointer(Void).null), false, @spare)
+          @spare = node
+          @spare_count += 1
+        end
       end
 
       private def free_pending : Nil
         node = @pending
         @pending = Pointer(PendingNode).null
         @pending_count = 0
+        while node
+          nxt = node.value.next
+          LibC.free(node.as(Void*))
+          node = nxt
+        end
+      end
+
+      private def free_spare : Nil
+        node = @spare
+        @spare = Pointer(PendingNode).null
+        @spare_count = 0
         while node
           nxt = node.value.next
           LibC.free(node.as(Void*))

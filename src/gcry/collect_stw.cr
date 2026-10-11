@@ -187,11 +187,14 @@ module Gcry
           Thread.unsafe_each do |thread|
             Platform.unstage_thread(thread.to_unsafe.address)
           end
-          ThreadBirthRoot.release_exited { |rooted| @roots.delete(rooted) }
+          # `retire`, not `delete`: the threads are suspended by now, and a
+          # `free` waits forever on one frozen inside the C heap.
+          ThreadBirthRoot.release_exited { |rooted| @roots.retire(rooted) }
         {% else %}
           # Until 2026-10-05 Darwin released nothing here at all, so a
-          # birth root ended only when the handle was recycled.
-          ThreadBirthRoot.release_dead(@collections) { |rooted| @roots.delete(rooted) }
+          # birth root ended only when the handle was recycled. `retire` for
+          # the reason above.
+          ThreadBirthRoot.release_dead(@collections) { |rooted| @roots.retire(rooted) }
         {% end %}
       {% else %}
         # `GCRY_STAGED_WAIT=1`: give a thread that exists but has not published

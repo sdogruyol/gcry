@@ -31,6 +31,8 @@ module Gcry
     class Set
       getter size : Int32 = 0
       @head : RootNode* = Pointer(RootNode).null
+      # Nodes `retire` unlinked, for `add` to take before it mallocs.
+      @spare : RootNode* = Pointer(RootNode).null
 
       def finalize
         clear
@@ -38,15 +40,41 @@ module Gcry
 
       def add(pointer : Void*) : Nil
         return if pointer.null?
-        node = LibC.malloc(sizeof(RootNode)).as(RootNode*)
-        raise OutOfMemoryError.new("root node malloc failed") if node.null?
+        if (node = @spare)
+          @spare = node.value.next
+        else
+          node = LibC.malloc(sizeof(RootNode)).as(RootNode*)
+          raise OutOfMemoryError.new("root node malloc failed") if node.null?
+        end
         node.value = RootNode.new(pointer, @head)
         @head = node
         @size += 1
       end
 
       def delete(pointer : Void*) : Bool
-        return false if pointer.null?
+        return false unless (node = unlink(pointer))
+        LibC.free(node.as(Void*))
+        true
+      end
+
+      # `delete` for a stopped world: keeps the node for the next `add`
+      # rather than `free` it. On Windows and macOS a thread is suspended
+      # wherever it is, and one frozen inside the C heap holds its lock until
+      # the world restarts, so a `free` in the stop waits forever. `stop_world`
+      # drops dead threads' birth roots here; the births that follow take
+      # the nodes back.
+      def retire(pointer : Void*) : Bool
+        return false unless (node = unlink(pointer))
+        n = node.value
+        n.next = @spare
+        node.value = n
+        @spare = node
+        true
+      end
+
+      # The node holding *pointer*, off the list; null if none does.
+      private def unlink(pointer : Void*) : RootNode*
+        return Pointer(RootNode).null if pointer.null?
         prev = Pointer(RootNode).null
         node = @head
         while node
@@ -58,24 +86,26 @@ module Gcry
               n.next = node.value.next
               prev.value = n
             end
-            LibC.free(node.as(Void*))
             @size -= 1
-            return true
+            return node
           end
           prev = node
           node = node.value.next
         end
-        false
+        Pointer(RootNode).null
       end
 
       def clear : Nil
-        node = @head
-        while node
-          nxt = node.value.next
-          LibC.free(node.as(Void*))
-          node = nxt
+        {@head, @spare}.each do |list|
+          node = list
+          while node
+            nxt = node.value.next
+            LibC.free(node.as(Void*))
+            node = nxt
+          end
         end
         @head = Pointer(RootNode).null
+        @spare = Pointer(RootNode).null
         @size = 0
       end
 
