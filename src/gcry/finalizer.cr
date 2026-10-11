@@ -30,7 +30,7 @@ module Gcry
     # rows naming *object* and *row* the newest of its entry rows (-1: none).
     # In its link index, *row* is the location's link row and *count* unused;
     # in its granule index, *count* is the link locations in the granule and
-    # *row* unused.
+    # *row* a mask of its pages that have held one (`link_page_bit`).
     # Two Int32 fill the word one would pad to: 16 bytes either way.
     struct IndexSlot
       property object : Void*
@@ -353,11 +353,12 @@ module Gcry
       # what lets a location map to a single row.
       @link_index = PointerIndex.new
       # Granule of the address space (`LINK_GRANULE_SHIFT`) -> how many link
-      # locations lie in it, so a free asks the few granules a block covers
-      # whether it can hold a link at all before it probes every word of the
-      # block or scans every row (`drop_links_inside`). Kept by
-      # `register_disappearing_link` and `swap_remove_link`, which every link
-      # removal goes through.
+      # locations lie in it and which of its pages (`LINK_PAGE_SHIFT`) have
+      # held one. A free asks the few granules a block covers whether it can
+      # hold a link at all, and on a hit probes only those pages, before it
+      # probes every word of the block or scans every row
+      # (`drop_links_inside`). Kept by `register_disappearing_link` and
+      # `swap_remove_link`, which every link removal goes through.
       @link_granules = PointerIndex.new
 
       @entries : Entry* = Pointer(Entry).null
@@ -530,10 +531,7 @@ module Gcry
           @links_size += 1
           slot = @link_index.claim(link.as(Void*))
           @link_index[slot] = IndexSlot.new(link.as(Void*), 0, row) if slot >= 0
-          granule = link_granule(link.as(Void*))
-          if (slot = @link_granules.claim(granule)) >= 0
-            @link_granules[slot] = IndexSlot.new(granule, @link_granules[slot].count + 1)
-          end
+          link_granules_add(link.as(Void*))
           count_link(object)
           true
         ensure
@@ -693,12 +691,25 @@ module Gcry
 
       # `@link_granules` granule: 64 KiB, the size of most of zlib's deflate
       # buffers, so each free `Compress::Deflate` makes asks one or two
-      # granules. Measured 2026-10-11 with 4096 `WeakRef`s live, a
-      # `GC.malloc_atomic` + `GC.free` pair against master: 64 KiB 70 ns
-      # against 70 (a scan of the rows instead, 1360), 1 KiB 80 against 79
-      # (a probe per word instead, 214-235), 1 MiB 88-97 against 72-75, 16
-      # bytes 47 against 44-47.
+      # granules. Measured 2026-10-11 (`--release`, x86_64, best of 7) with
+      # 4096 `WeakRef`s live, a `GC.malloc_atomic` + `GC.free` pair against
+      # master: 16 bytes 41.5-42.0 ns against 39.3-40.4, 1 KiB 41.1 against
+      # 39.2-40.1, 64 KiB 61.5-62.2 against 59.2-59.4 (a scan of the rows
+      # instead, 1 360), 1 MiB 71.6-71.9 against 59.7-62.5. Registering and
+      # unregistering a link, which keep the counts: 108-110 ns a pair
+      # against 87-88.
       LINK_GRANULE_SHIFT = 16
+
+      # `@link_granules` page: what heap mappings are aligned to. A granule
+      # hit is most often a neighbour's, since a 64 KiB zlib buffer is
+      # page-aligned and so shares a granule with whatever lies next to it —
+      # 5 638 of its words in one measured case. Probing those, or scanning
+      # every row, made a 64 KiB `GC.malloc_atomic` + `GC.free` pair 1 200 ns
+      # against 66 on master with 4 096 links at the base of neighbouring
+      # 32 KiB blocks. A count per page, a second key per location, made
+      # registering and unregistering a link 30-55% slower; a mask in the
+      # granule's slot costs no probe.
+      LINK_PAGE_SHIFT = 12
 
       # Drops, without writing to them, the links whose *location* lies in
       # the block being freed, *lo* .. *lo* + *bytes*: a `WeakRef` freed with
@@ -716,8 +727,9 @@ module Gcry
       # First `@link_granules`, when the block covers fewer granules than it
       # has words: no location in any granule it covers — a zlib window or an
       # `Array`'s buffer in its own chunk, almost always — and nothing is
-      # inside. Then a probe of `@link_index` per word: a location is a
-      # pointer-aligned word — Boehm aborts on any other
+      # inside; in a granule that has one, the same question per page. Then a
+      # probe of `@link_index` per word, of the pages that hold a location: a
+      # location is a pointer-aligned word — Boehm aborts on any other
       # (`GC_general_register_disappearing_link`) — so a probe per word misses
       # none. A table that gave up its C allocation is skipped, for the scan:
       # slower, never wrong. The caller has checked that there are links:
@@ -726,36 +738,102 @@ module Gcry
         return if bytes == 0
         links = @links_size.to_u64
         words = bytes // sizeof(Void*)
-        first = lo.address >> LINK_GRANULE_SHIFT
-        last = (lo.address &+ bytes &- 1) >> LINK_GRANULE_SHIFT
+        lo_a = lo.address
+        hi_a = lo_a &+ bytes
+        first = lo_a >> LINK_GRANULE_SHIFT
+        last = (hi_a &- 1) >> LINK_GRANULE_SHIFT
         granules = last &- first &+ 1
         if !@link_granules.disabled? && granules < words && granules &* LINK_PROBE_RATIO <= links
-          g = first
-          until g > last
-            break if @link_granules.find(link_granule(Pointer(Void).new(g << LINK_GRANULE_SHIFT))) >= 0
-            g &+= 1
-          end
-          return if g > last
-        end
-        if @link_index.available? && words &* LINK_PROBE_RATIO <= links
-          addr = lo.address
-          stop = addr &+ bytes
-          while addr < stop
-            if (slot = @link_index.find(Pointer(Void).new(addr))) >= 0
-              swap_remove_link(@link_index[slot].row)
-            end
-            addr &+= sizeof(Void*)
-          end
+          return if drop_links_by_granule(lo_a, hi_a, first, last, links)
+        elsif @link_index.available? && words &* LINK_PROBE_RATIO <= links
+          drop_links_probing(lo_a, hi_a)
           return
         end
+        # The scan covers the whole block; whatever a granule pass dropped
+        # before it gave up is out of the rows already.
         i = 0
         while i < @links_size
-          if @links[i].link.address &- lo.address < bytes
+          if @links[i].link.address &- lo_a < bytes
             swap_remove_link(i)
           else
             i += 1
           end
         end
+      end
+
+      # The granule and page part of `drop_links_inside`, for granules
+      # *first* .. *last* of *lo_a* ... *hi_a*. False once the probes it
+      # would make cost more than a scan of the *links* rows: the caller
+      # scans then.
+      private def drop_links_by_granule(lo_a : UInt64, hi_a : UInt64, first : UInt64, last : UInt64, links : UInt64) : Bool
+        probe = @link_index.available?
+        probed = 0_u64
+        g = first
+        until g > last
+          base = g << LINK_GRANULE_SHIFT
+          if (slot = @link_granules.find(link_granule(Pointer(Void).new(base)))) >= 0
+            pages = @link_granules[slot].row
+            a = Math.max(lo_a, base)
+            b = Math.min(hi_a, base &+ (1_u64 << LINK_GRANULE_SHIFT))
+            page = a & ~((1_u64 << LINK_PAGE_SHIFT) &- 1)
+            while page < b
+              if pages & link_page_bit(page) != 0
+                pa = Math.max(a, page)
+                pb = Math.min(b, page &+ (1_u64 << LINK_PAGE_SHIFT))
+                probed &+= (pb &- pa) // sizeof(Void*)
+                return false unless probe && probed &* LINK_PROBE_RATIO <= links
+                drop_links_probing(pa, pb)
+              end
+              page &+= 1_u64 << LINK_PAGE_SHIFT
+            end
+          end
+          g &+= 1
+        end
+        true
+      end
+
+      # `drop_links_inside` for the words *addr* ... *stop*, a probe of
+      # `@link_index` each.
+      private def drop_links_probing(addr : UInt64, stop : UInt64) : Nil
+        while addr < stop
+          if (slot = @link_index.find(Pointer(Void).new(addr))) >= 0
+            swap_remove_link(@link_index[slot].row)
+          end
+          addr &+= sizeof(Void*)
+        end
+      end
+
+      # Counts a new link location in its granule and marks its page.
+      private def link_granules_add(link : Void*) : Nil
+        key = link_granule(link)
+        if (slot = @link_granules.claim(key)) >= 0
+          held = @link_granules[slot]
+          # A slot just claimed holds the default -1, not a mask.
+          pages = held.count == 0 ? 0 : held.row
+          @link_granules[slot] = IndexSlot.new(key, held.count + 1, pages | link_page_bit(link.address))
+        end
+      end
+
+      # Takes a removed link location off its granule's count. Its page's bit
+      # stays until the granule has none left: telling whether the page still
+      # holds another would take a count per page. A stale bit costs a free
+      # the probes of one page, within the same budget as any other.
+      private def link_granules_sub(link : Void*) : Nil
+        key = link_granule(link)
+        if (slot = @link_granules.find(key)) >= 0
+          held = @link_granules[slot]
+          if held.count > 1
+            @link_granules[slot] = IndexSlot.new(key, held.count - 1, held.row)
+          else
+            @link_granules.release(slot)
+          end
+        end
+      end
+
+      # The bit of the page holding *address* in its granule's mask: 16 pages
+      # to a granule, so the mask fits the slot's `row`.
+      private def link_page_bit(address : UInt64) : Int32
+        1 << ((address >> LINK_PAGE_SHIFT) & ((1_u64 << (LINK_GRANULE_SHIFT - LINK_PAGE_SHIFT)) &- 1))
       end
 
       # The `@link_granules` key of the granule holding *address*: the granule
@@ -931,13 +1009,17 @@ module Gcry
             granules = 0
             @links_size.times do |i|
               granule = link_granule(@links[i].link.as(Void*))
+              slot = @link_granules.find(granule)
+              # Every location's page is in its granule's mask.
+              if slot < 0 || @link_granules[slot].row & link_page_bit(@links[i].link.address) == 0
+                return "@link_granules lacks the page of link row #{i}"
+              end
               # Count each granule at its first row only.
               next if (0...i).any? { |j| link_granule(@links[j].link.as(Void*)) == granule }
               granules += 1
               rows = 0
               @links_size.times { |j| rows += 1 if link_granule(@links[j].link.as(Void*)) == granule }
-              slot = @link_granules.find(granule)
-              count = slot >= 0 ? @link_granules[slot].count : 0
+              count = @link_granules[slot].count
               return "@link_granules counts #{count} links in #{granule}, table has #{rows}" if count != rows
             end
             return "@link_granules has #{@link_granules.live_count} keys, #{granules} granules" if @link_granules.live_count != granules
@@ -1146,15 +1228,7 @@ module Gcry
         if (slot = @link_index.find(@links[i].link.as(Void*))) >= 0
           @link_index.release(slot)
         end
-        granule = link_granule(@links[i].link.as(Void*))
-        if (slot = @link_granules.find(granule)) >= 0
-          held = @link_granules[slot]
-          if held.count > 1
-            @link_granules[slot] = IndexSlot.new(granule, held.count - 1)
-          else
-            @link_granules.release(slot)
-          end
-        end
+        link_granules_sub(@links[i].link.as(Void*))
         last = @links_size - 1
         if i != last
           @links[i] = @links[last]
