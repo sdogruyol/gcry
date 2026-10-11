@@ -14,6 +14,11 @@ module Gcry
     # Trims that declined for it. `make chunk-list-drift` reads it to know its
     # frees reached the window.
     getter relink_trims_declined : UInt64 = 0_u64
+    # Queued-empty chunks the flush kept because an allocation cursor stood on
+    # them (`refuse_occupied_release`). Its own field for the reason
+    # `release_refused_forced` has one: `release_refused_occupied` is the
+    # number that says a block was live in a released chunk.
+    getter release_refused_cursor : UInt64 = 0_u64
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -747,27 +752,83 @@ module Gcry
       # -1 is "cannot tell": no occupancy bitmap, which is the header layout.
       # There the sweep's own emptiness decision is all there is, and widening
       # this to a header walk belongs with a measurement rather than here.
-      return false if occ <= 0
-      @release_refused_occupied &+= 1
-      # `GCRY_RELEASE_OCCUPIED=1` counts the refusal and releases anyway, which
-      # is what this code did before 2026-09-14. A control arm needs the old
-      # behaviour reachable, and a number that says the window was hit either
-      # way is what makes the shipped arm's silence attributable.
-      return false if @release_occupied_anyway
-      note_kept_release(chunk.as(Void*).address, chunk.value.mapped_bytes, occ.to_u64)
-      if @release_refused_occupied == 1
-        buf = uninitialized UInt8[RawOut::LIMIT]
-        n = RawOut.append(buf.to_unsafe, 0, "gcry: refusing to release chunk 0x")
-        n = RawOut.append_hex(buf.to_unsafe, n, chunk.as(Void*).address)
-        n = RawOut.append(buf.to_unsafe, n, " — the sweep queued it empty and ")
-        n = RawOut.append_u64(buf.to_unsafe, n, occ.to_u64)
-        n = RawOut.append(buf.to_unsafe, n,
-          " block(s) are allocated in it now. A mutator took one after the sweep " \
-          "unlinked it and before this flush, through the index entry it still has. " \
-          "Kept mapped; reported once per process\n")
-        RawOut.flush(buf.to_unsafe, n)
+      if occ > 0
+        @release_refused_occupied &+= 1
+        # `GCRY_RELEASE_OCCUPIED=1` counts the refusal and releases anyway, which
+        # is what this code did before 2026-09-14. A control arm needs the old
+        # behaviour reachable, and a number that says the window was hit either
+        # way is what makes the shipped arm's silence attributable.
+        return false if @release_occupied_anyway
+        note_kept_release(chunk.as(Void*).address, chunk.value.mapped_bytes, occ.to_u64)
+        if @release_refused_occupied == 1
+          buf = uninitialized UInt8[RawOut::LIMIT]
+          n = RawOut.append(buf.to_unsafe, 0, "gcry: refusing to release chunk 0x")
+          n = RawOut.append_hex(buf.to_unsafe, n, chunk.as(Void*).address)
+          n = RawOut.append(buf.to_unsafe, n, " — the sweep queued it empty and ")
+          n = RawOut.append_u64(buf.to_unsafe, n, occ.to_u64)
+          n = RawOut.append(buf.to_unsafe, n,
+            " block(s) are allocated in it now. A mutator took one after the sweep " \
+            "unlinked it and before this flush, through the index entry it still has. " \
+            "Kept mapped; reported once per process\n")
+          RawOut.flush(buf.to_unsafe, n)
+        end
+        return true
       end
+      # An empty `occ` is not an unowned chunk. The refill that takes a pooled
+      # chunk sets CURSOR under `@chunk_list_lock` and lets go of the lock
+      # before its first `occ` store; a flush that was waiting on the lock
+      # then reads zero, unmaps, and the mutator resumes into
+      # `chunk_block_count` on the freed header. The same holds after the
+      # cursor's last block is freed again: the slot still names the chunk and
+      # the next allocation of the class reads its bitmap. Measured on
+      # `make occupied-release` with the taken block freed in `:before_flush`:
+      # 0 refusals, `is_heap_ptr` false, then SIGSEGV in `fast_alloc` on the
+      # next `malloc` — process_spec 63 is that construction. The flag is
+      # read under the lock `set_cursor` holds, so a take that won the lock
+      # first is seen here, and one that lost it fails the index lookup
+      # against the `index_remove` below. The kept chunk carries a cursor, so
+      # the sweep that retires it (`bitmap_retire_cursor_on`) queues it again
+      # and the release is only late, never leaked.
+      return false unless ChunkHeader.cursor?(chunk)
+      @release_refused_cursor &+= 1
+      # The pre-fix release decision for the control arm as well, so a
+      # construction can show the window is still reached on a fixed tree.
+      return false if @release_occupied_anyway
+      note_kept_release(chunk.as(Void*).address, chunk.value.mapped_bytes, 0_u64)
       true
+    end
+
+    # Give back what the sweep's munmap branch took from the counters when it
+    # queued `chunk`, for a chunk the flush keeps. Without it a refused chunk
+    # is mapped, indexed and allocating while `heap_size` and `free_bytes`
+    # call it gone — `make occupied-release` left `heap_size` at 131072 with
+    # two 131072-byte chunks mapped — and the major that releases it later
+    # subtracts it a second time, saturating at zero. The free payload is
+    # what that branch subtracted: every block of a bitmap chunk (it queues
+    # only at `live == 0`), the FREE blocks of a header chunk. A block a
+    # mutator has since taken was subtracted again by its own credit, so the
+    # sum comes out at what the chunk holds now.
+    private def unqueue_kept_chunk_accounting(chunk : ChunkHeader*) : Nil
+      mapped = chunk.value.mapped_bytes
+      @heap_size &+= mapped
+      @released_chunk_bytes = sat_sub(@released_chunk_bytes, mapped)
+      @last_empty_unmap_bytes = sat_sub(@last_empty_unmap_bytes, mapped)
+      class_index = chunk.value.size_class.to_i32
+      return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      payload = SizeClasses.payload(class_index).to_u64
+      free = 0_u64
+      if bitmap_alloc_chunk?(chunk)
+        free = chunk_block_count(chunk) &* payload
+      else
+        block_bytes = BlockHeader::SIZE.to_u64 + payload
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          free &+= payload if BlockHeader.free?(cursor.as(BlockHeader*))
+          cursor += block_bytes
+        end
+      end
+      free_bytes_add(free) if free > 0
     end
 
     private def flush_pending_empty_chunks_locked(chunk : ChunkHeader*) : Nil
@@ -783,6 +844,7 @@ module Gcry
         nxt = c.value.next
         @release_flush_chunks &+= 1
         if refuse_occupied_release(c)
+          unqueue_kept_chunk_accounting(c)
           ChunkHeader.set_next(c, keep)
           keep = c
         else
