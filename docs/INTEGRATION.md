@@ -198,7 +198,9 @@ regressions named.
 | `GC.add_finalizer` twice | Second replaces first | Same | Matches (`48_*`) |
 | `GC_register_disappearing_link(link)` | Object is `GC_base(link)` | Same | Matches (`25_*`) |
 | Allocation slack (`EXTRA_BYTES`) | Every block | Atomic blocks only | Differs (`24_*`) |
-| `realloc` shrink / move | — | Shrink keeps the block; on a move the old block is left to the sweep | Differs (`30_*`) |
+| `realloc` shrink / move | Shrink in place clears the tail; below half, moves | Non-atomic: in place with the tail cleared, except a large block shrunk below half, which moves; atomic blocks keep the tail; on a move the old block is left to the sweep | Differs (`30_*`, `59_*`) |
+| `GC_free` of a finalizable object or of a block holding disappearing links | Finalizer dropped; links inside the block dropped | Same | Matches (`60_*`, `61_*`) |
+| `GC_stop_world_external` / `GC_start_world_external` | Takes the allocation lock, then stops; collections wait | Takes a collection's locks, then stops; collections wait; one asked for inside the stop returns without running (Boehm's would hang); start from a thread other than the stopper does nothing | Differs: collect inside the stop (`62_*`) |
 | `GC_invoke_finalizers` | Runs pending, returns count; from a finalizer, drains the rest one frame deeper | Same, usually 0 since the collector runs the queue after each collection; from a finalizer 0, the drain already running takes the rest | Differs from a finalizer (`25_*`) |
 | `GC_set_start_callback` | Full collections, after `GC_EVENT_START` | Every collection (incl. minor, idle), before `GC_EVENT_START` | Differs (`28_*`) |
 | `GC_get_suspend_signal`, `GC_get_thr_restart_signal` | Its signals; -1 on Darwin and Windows | Same | Matches (`21_*`) |
