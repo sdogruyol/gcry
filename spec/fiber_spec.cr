@@ -82,7 +82,7 @@ describe "Gcry::Heap finalizers" do
     end
   end
 
-  it "runs finalizers on explicit free" do
+  it "drops finalizers on explicit free without running them" do
     heap = Gcry::Heap.new
     begin
       finalized = [] of Void*
@@ -90,9 +90,10 @@ describe "Gcry::Heap finalizers" do
       heap.add_finalizer(obj) { |ptr| finalized << ptr }
       heap.free(obj)
       heap.finalizer_entry_count.should eq(0)
-      # Pending finalizers run at the next collect (same as GC path).
+      # Not queued either: the block is free, and the allocator may already
+      # have handed it to another object.
       heap.collect(scan_stack: false)
-      finalized.should eq([obj])
+      finalized.should be_empty
     ensure
       heap.destroy
     end

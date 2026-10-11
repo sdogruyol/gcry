@@ -1117,10 +1117,18 @@ module Gcry
       end
     end
 
-    # The block holding a link location is dead: unmarked now, or already
-    # freed (`GC.free` on the holder, which `notice_reclaim` does not catch —
-    # it matches link *targets*). A location outside the heap (a C slot, a
-    # static) resolves to no block and stays registered.
+    # The block holding a link location is dead: unmarked now, or free. A
+    # location outside the heap (a C slot, a static) resolves to no block and
+    # stays registered.
+    #
+    # A holder freed with `GC.free` is not this check's to find: its rows
+    # leave on the free path (`Registry#drop_links_inside`). Until 2026-10-11
+    # they were left for here, and the "free" arm caught them only while the
+    # block stayed free. Reused, the block's new owner is marked, so the row
+    # stayed and step 1 nulled a word of the new object when the target died
+    # (`process_spec/regression/61_free_link_holder_spec.cr`). The free arm
+    # stays for a location registered inside a block that was never handed
+    # out or already free, which no path drops.
     private def dead_link_location?(location : Void*) : Bool
       found = find_block_with_chunk(location)
       return false unless found

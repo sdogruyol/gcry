@@ -25,6 +25,16 @@ module Gcry
     def lock_read : Nil
       {% unless (flag?(:darwin) || flag?(:win32)) %}
         return unless @stop_the_world
+        # Inside its own `stop_world_external` this thread holds `@gc_lock`
+        # for writing, and the execution context takes the read side around
+        # every fiber switch (`Scheduler#swapcontext`): a `sleep` or channel
+        # wait between `GC.stop_world` and `GC.start_world` spun on its own
+        # lock for good, where Boehm — which does not take Crystal's lock in
+        # `GC_stop_world_external` — and master let it switch. Skipped on
+        # both sides, which stays balanced: a switch's lock and unlock run
+        # back to back on this thread, with nothing between them that could
+        # start or end the stop.
+        return if holds_external_stop?
         wait_if_world_stopped_other_thread
         @gc_lock.read_lock
       {% end %}
@@ -33,6 +43,7 @@ module Gcry
     def unlock_read : Nil
       {% unless (flag?(:darwin) || flag?(:win32)) %}
         return unless @stop_the_world
+        return if holds_external_stop?
         @gc_lock.read_unlock
       {% end %}
     end
@@ -105,7 +116,11 @@ module Gcry
     #   allocate/lock_read spin until start_world (cooperative STW).
     # - Still signal-suspend other mutator threads; busy-wait `@suspended`.
     # - Hold `Thread.lock` for stop→start (Crystal list-mutex protocol).
-    def stop_world(*, raise_on_error : Bool = true) : Nil
+    #
+    # Private: every stop comes through `stop_world_quiescing_roots`, behind
+    # the locks it takes. `GC.stop_world` reached this directly until
+    # 2026-10-11 — see `stop_world_external`.
+    private def stop_world(*, raise_on_error : Bool = true) : Nil
       return unless @stop_the_world
       return if @world_stopped
 
@@ -119,10 +134,10 @@ module Gcry
       end
       # The Monitor is never signal-suspended, so it is shut out by handshake
       # instead — before anything it could be mutating is touched.
-      # Second close, kept deliberately: `GC.stop_world` calls `stop_world`
-      # directly, so removing this would leave that entry point with the
-      # Monitor still running. On the normal path the gate is already shut and
-      # this costs two atomic reads.
+      # Second close, kept deliberately: it is the late close
+      # `GCRY_MONITOR_GATE_LATE_CLOSE=1` restores for `make
+      # monitor-gate-deadlock`. On the normal path `stop_world_quiescing_roots`
+      # has already shut the gate and this costs two atomic reads.
       MonitorGate.close
       StwWatchdog.note_suspend_step(StwWatchdog::STEP_GATE_CLOSED)
       @stw_owner = current_thread
@@ -252,7 +267,10 @@ module Gcry
           # handing the handle to a new thread — one collection after the
           # stamp (src/gcry/thread_birth_root.cr). `@roots` directly: `@roots_lock`
           # is already held by `stop_world_quiescing_roots` and it is not
-          # reentrant.
+          # reentrant. Held on every stop since 2026-10-11: `GC.stop_world`
+          # used to arrive here without it, and this ran beside mutators inside
+          # `@roots_lock.sync`, which is a malloc'd list losing a node or
+          # freeing one under a walk (`stop_world_external`).
           ThreadBirthRoot.release_dead(@collections) { |rooted| @roots.delete(rooted) }
           # Does the set about to be stopped account for every thread the
           # process has? gcry learns about threads from Crystal's list, so a
@@ -902,7 +920,96 @@ module Gcry
       {% end %}
     end
 
-    def start_world : Nil
+    # `GC.stop_world` / `GC_stop_world_external`. Boehm's is `LOCK();
+    # ENTER_GC(); STOP_WORLD()`, so the stop excludes collections and root
+    # edits for as long as the caller holds it. This takes what a collection
+    # takes, in the same order: the collection section, the write lock, then
+    # `stop_world_quiescing_roots`'s Monitor gate, `@roots_lock`, finalizer
+    # lock and TLAB slots. As in a collection, the last three are let go once
+    # the world is stopped; `start_world_external` releases the rest in
+    # reverse.
+    #
+    # Until 2026-10-11 it was the bare `stop_world`, and two things broke
+    # (`process_spec/regression/62_external_stop_world_spec.cr`):
+    #
+    # - `stop_world` drops dead threads' birth roots with `@roots.delete`, on
+    #   Linux before any thread is signalled. Without `@roots_lock` that ran
+    #   beside mutators inside `@roots_lock.sync` — the realloc pin,
+    #   `ThreadBirthRoot.arm`, `GC.add_root` — on a malloc'd list. Threads
+    #   looping `GC.collect`, the stop pair and batches of 32 `Thread.new` /
+    #   `join`, beside two looping `add_root` / `delete_root`, crashed in
+    #   `Roots::Set#delete` under `GC::stop_world` 2 of 2 within 15 s.
+    # - A collection and an external stop both passed `return if
+    #   @world_stopped`, and whichever restarted first opened the gate and
+    #   cleared `@stw_owner` under the other's stopped world. With a thread
+    #   looping the pair, a MarkStart hook saw another thread as the owner in
+    #   395 of 401 collections and the gate open in 15; 0 of 14 676 without.
+    #
+    # Between the two calls every other thread is stopped wherever it was, so
+    # the caller must not allocate, spawn or start a thread, as under Boehm.
+    # Nor may a fiber start or finish: both edit the fiber list this stop
+    # holds. Switching fibers is fine (`lock_read`).
+    # A collection it asks for anyway returns without running
+    # (`holds_external_stop?`): it would wait for the section this stop holds,
+    # where Boehm's `LOCK` would hang it. The thread already holding the world
+    # stopped — this stop, or its own collection from a hook — gets a no-op.
+    def stop_world_external : Nil
+      return unless @stop_the_world
+      me = Gcry::Platform.current_thread_id
+      return if @external_stop_pthread == me
+      if @collecting
+        Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+        return if @collector_pthread == me
+      end
+      # Before any lock: on a thread Crystal has not seen — a C thread calling
+      # `GC_stop_world_external` — this makes its `Thread`, which allocates,
+      # and `stop_world` would otherwise do that holding the TLAB slot locks.
+      Thread.current
+      lock_post_stw
+      lock_write
+      # Boehm's `ENTER_GC`. A collection is kept off this thread's allocations
+      # by `@collecting`, and an external stop by this.
+      @suppress_collect.add(1)
+      begin
+        stop_world_quiescing_roots
+      rescue ex
+        @suppress_collect.sub(1)
+        unlock_write
+        unlock_post_stw
+        raise ex
+      end
+      # A stop held for the caller, not a collector stalled after its
+      # suspension: what the watchdog should say if it is held too long.
+      StwWatchdog.enter(StwWatchdog::PHASE_STOPPED)
+      @external_stop_pthread = me
+    end
+
+    # `GC.start_world` / `GC_start_world_external`, on the thread whose
+    # `stop_world_external` holds the world. Anywhere else a no-op, as the bare
+    # `start_world` was with no world stopped.
+    def start_world_external : Nil
+      return unless holds_external_stop?
+      @external_stop_pthread = 0_u64
+      @suppress_collect.sub(1)
+      begin
+        start_world
+      ensure
+        unlock_write
+        unlock_post_stw
+      end
+    end
+
+    # The thread holding `stop_world_external`'s stop, 0 for none.
+    @external_stop_pthread = 0_u64
+
+    # Is this thread inside its own `stop_world_external`? Then it holds the
+    # collection section and the write lock, and a collection it started
+    # would wait for itself.
+    private def holds_external_stop? : Bool
+      (holder = @external_stop_pthread) != 0_u64 && holder == Gcry::Platform.current_thread_id
+    end
+
+    private def start_world : Nil
       return unless @world_stopped
 
       # Drop last-chunk cache before mutators resume — index_remove already
@@ -1047,6 +1154,13 @@ module Gcry
       @block_other_heap = false
       @collecting = false
       @collector_pthread = 0_u64
+      # Forked from inside `GC.stop_world`: the world runs here and the locks
+      # it held are replaced below, so the stop is over. Left set, this
+      # thread's `GC.start_world` would release the fresh ones.
+      if @external_stop_pthread != 0_u64
+        @external_stop_pthread = 0_u64
+        @suppress_collect.sub(1)
+      end
       @incremental_marking = false
       @inc_active = false
       @gc_lock = Crystal::RWLock.new

@@ -2137,14 +2137,18 @@ module GC
   end
 
   # :nodoc:
-  # Suspends other OS threads (Monitor / extra schedulers) for a safe mark–sweep.
+  # Boehm's `GC_stop_world_external`: every other thread suspended, and no
+  # collection or root edit until `start_world`, from this thread. Crystal
+  # 1.21's stdlib only wraps the pair (`Crystal::System::Thread.stop_world`)
+  # and calls neither; it is for programs and C libraries, and the caller
+  # must not allocate in between (`Heap#stop_world_external`).
   def self.stop_world : Nil
-    Gcry.default_heap.stop_world if @@gcry_ready
+    Gcry.default_heap.stop_world_external if @@gcry_ready
   end
 
   # :nodoc:
   def self.start_world : Nil
-    Gcry.default_heap.start_world if @@gcry_ready
+    Gcry.default_heap.start_world_external if @@gcry_ready
   end
 
   private def self.bootstrap_malloc(size : LibC::SizeT, clear : Bool) : Void*

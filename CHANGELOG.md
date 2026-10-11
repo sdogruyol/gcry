@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The heap reports out of memory when growing the chunk index fails,
+  rather than hanging.** `map_chunk` published the new chunk and only then
+  grew the index under `@chunk_list_lock`, and the raise from the failed
+  grow left that lock held, so the next allocation spun on it for good. The
+  index slot is now reserved before anything is published. If the reserve
+  fails, the fresh mapping is unmapped and the allocation returns null,
+  which `alloc_large` and the large-mapping split surface like any other
+  OOM (`58_*`).
+
+- **`GC.realloc` shrink-then-grow reads zeroes.** An in-place shrink kept
+  the block's full size, so growing back to it returned in place with the
+  cut-off bytes as they were: a 0xFF block shrunk to 8 bytes and grown back
+  still had 56, 4 088 and 99 992 stale bytes at 64 B, 4 KiB and 100 KB, and
+  the scan read them as pointers. A shrink of a non-atomic block now clears
+  the cut-off tail, as Boehm's `GC_realloc` does. A large block shrunk below
+  half its size moves instead, as in Boehm, so the clear writes at most half
+  the block: `GC.malloc(512 MiB)` then `GC.realloc(p, 8)` faulted in 512 MB
+  before the move and 352 KB after. A shrink to between half and the full
+  size still clears in place, as Boehm does, and faults in what it clears.
+  Atomic blocks are left alone, as `gc.h` allows (`59_*`).
+
+- **`GC.free` of an object with a finalizer drops the finalizer instead of
+  running it on freed memory.** The free queued the row, so the finalizer
+  ran later on a block that might belong to someone else by then. `gc.h`
+  calls freeing a finalizable object a caller error, and Boehm leaves the
+  row in place. gcry now drops it, which forgives the error (`60_*`).
+
+- **`GC.free` of a block that holds disappearing links drops those
+  links.** A freed `WeakRef`'s link stayed registered, and when its target
+  died the collector nulled that word in whatever the block had become.
+  Links located inside a freed block are now unregistered (`gc.h` forbids
+  them there too; Boehm leaves them). The free finds them through a
+  per-64-KiB count index with a mask of the pages that hold a link, so a
+  free with no links nearby costs what it did before, within 2-12 ns. Keeping
+  the index costs registering and unregistering a link about 21 ns a pair
+  (87 → 108 ns) (`61_*`).
+
+- **`GC.stop_world` / `GC_stop_world_external` take the locks a collection
+  takes.** The external stop ran with neither the collection section nor
+  the write lock. A concurrent collection then opened the gate and cleared
+  the owner under the other's stopped world, and the stop's dead-thread
+  root cleanup edited the root list beside `GC.add_root`. With a thread
+  looping the pair this crashed in `Roots::Set#delete`, and a hook saw
+  another thread as the owner in 395 of 401 collections. The pair now
+  locks as Boehm's `LOCK` + `STOP_WORLD` does. A collection requested
+  inside the stop returns without running, `GC.start_world` from any
+  thread but the stopper is a no-op, and the stopping thread can still
+  switch fibers (`62_*`).
+
+- **An empty chunk holding a thread's allocation cursor is not released.**
+  The sweep queued it for release while the cursor still pointed into it.
+  The post-stop flush then unmapped it, and the next bump allocation read
+  its freed chunk header (SIGSEGV). Such a chunk is now kept
+  (`release_refused_cursor`). Every kept chunk also gives back the
+  `heap_size` and free-byte accounting its queueing had taken, which had
+  drifted on each refusal (`63_*`).
+
 - **The Windows ARM64 CI jobs install a fixed MSYS2 toolchain.** They took
   whatever `pacman -S` resolved, and when MSYS2 moved clang, lld, libc++,
   libunwind and llvm-libs from 22.1.8 to 23.1.3 on 2026-10-10, the pinned

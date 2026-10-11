@@ -1322,6 +1322,10 @@ fun gcry_c_set_warn_proc = GC_set_warn_proc(proc : LibGC::WarnProc) : Nil
   Gcry::CAbi.warn_proc = proc
 end
 
+# Boehm's pair: `LOCK(); ENTER_GC(); STOP_WORLD()` and the reverse, so no
+# collection and no root edit runs while the caller holds the world, and the
+# start must come from the thread that stopped it. Until 2026-10-11 gcry's
+# took none of those locks (`Heap#stop_world_external`).
 fun gcry_c_stop_world_external = GC_stop_world_external : Nil
   GC.stop_world
 end
