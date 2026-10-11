@@ -29,7 +29,13 @@ module Gcry::MonitorGate
   end
 end
 
-private EXTERNAL_STOP_RUN_MS = 1500
+# The run lasts at least this long, and past it until it has seen the floors
+# below, up to `EXTERNAL_STOP_RUN_MAX_MS`: pinned to one CPU it saw only 18–27
+# marks and stops in 1.5 s, against 230–285 unpinned.
+private EXTERNAL_STOP_RUN_MS     =  1500
+private EXTERNAL_STOP_RUN_MAX_MS = 30000
+private EXTERNAL_STOP_MIN_MARKS  =    50
+private EXTERNAL_STOP_MIN_STOPS  =    50
 # The child takes a few seconds. Before the fix it also hung, 1 of 5 runs:
 # two stops racing for one world.
 private EXTERNAL_STOP_CHILD_LIMIT_S = 60
@@ -172,7 +178,13 @@ describe "Regression: an external stop takes the locks a collection takes" do
       end
     end
 
+    started = Time.instant
     sleep EXTERNAL_STOP_RUN_MS.milliseconds
+    until (ExternalStopCounters.marks >= EXTERNAL_STOP_MIN_MARKS && stops.get >= EXTERNAL_STOP_MIN_STOPS &&
+          births.get >= EXTERNAL_STOP_CHURN && roots_cycled.get >= EXTERNAL_STOP_RING) ||
+          Time.instant - started >= EXTERNAL_STOP_RUN_MAX_MS.milliseconds
+      sleep 50.milliseconds
+    end
     done.set(1)
     workers.each(&.join)
     heap.collection_event_hook = nil
@@ -194,7 +206,8 @@ describe "Regression: an external stop takes the locks a collection takes" do
               "foreign_owner=#{ExternalStopCounters.foreign_owner} stops=#{stops.get} births=#{births.get} " \
               "roots_cycled=#{roots_cycled.get} lost=#{lost.get} broken=#{broken.get}"
     # Enough of each for the run to have been the race it is meant to be.
-    fail "too little overlap: #{summary}" if ExternalStopCounters.marks < 10 || stops.get < 10 ||
+    fail "too little overlap: #{summary}" if ExternalStopCounters.marks < EXTERNAL_STOP_MIN_MARKS ||
+                                             stops.get < EXTERNAL_STOP_MIN_STOPS ||
                                              births.get < EXTERNAL_STOP_CHURN || roots_cycled.get < EXTERNAL_STOP_RING
     {ExternalStopCounters.gate_open, ExternalStopCounters.foreign_owner, lost.get, broken.get}.should eq({0, 0, 0, 0}), summary
   end
