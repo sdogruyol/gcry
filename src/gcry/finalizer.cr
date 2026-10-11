@@ -665,7 +665,8 @@ module Gcry
       @@draining_no_fiber : Bool = false
 
       # Whether this fiber — this thread, where there is no fiber — is inside
-      # `run_pending` already, where another call returns 0 at once.
+      # `run_pending` already, where another call returns 0 at once and no
+      # automatic collection starts (`Heap#maybe_collect`).
       def draining? : Bool
         # `Thread.current?`: `Thread.current` allocates on a raw thread.
         if fiber = ::Thread.current?.try(&.@current_fiber)

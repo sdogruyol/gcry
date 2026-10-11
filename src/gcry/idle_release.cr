@@ -115,7 +115,10 @@ module Gcry
     end
 
     # A forked child has only the thread that called `fork`; start again at
-    # its first collection.
+    # its first collection. The parent's `Thread` leaves Crystal's list with
+    # every other dead one (`Platform.unlist_threads_after_fork`): forgetting
+    # it here alone also ended its exemption from the suspend signal, and the
+    # child's first stop waited on it for good.
     def self.after_fork_child : Nil
       @@thread = nil
       @@started = false

@@ -2184,18 +2184,9 @@ jobs:
         with:
           msystem: CLANGARM64
           update: true
-      - name: Install ARM64 linker and libraries
+      - name: Install ARM64 linker and libraries (pinned, ci/windows-arm64-msys2.sh)
         shell: msys2 {0}
-        run: |
-          # Mirrors occasionally exceed pacman's short transfer timeout.
-          # Completed downloads are reused; a final failure still fails CI.
-          for attempt in 1 2 3; do
-            if pacman --noconfirm -S --needed mingw-w64-clang-aarch64-crystal mingw-w64-clang-aarch64-lld; then
-              exit 0
-            fi
-            sleep "$((attempt * 5))"
-          done
-          exit 1
+        run: ./ci/windows-arm64-msys2.sh
       - name: Install pinned native ARM64 Crystal
         shell: pwsh
         env:
@@ -2224,16 +2215,9 @@ jobs:
         with:
           msystem: CLANGARM64
           update: true
-      - name: Install ARM64 linker and libraries
+      - name: Install ARM64 linker and libraries (pinned, ci/windows-arm64-msys2.sh)
         shell: msys2 {0}
-        run: |
-          for attempt in 1 2 3; do
-            if pacman --noconfirm -S --needed mingw-w64-clang-aarch64-crystal mingw-w64-clang-aarch64-lld; then
-              exit 0
-            fi
-            sleep "$((attempt * 5))"
-          done
-          exit 1
+        run: ./ci/windows-arm64-msys2.sh
       - name: Install pinned native ARM64 Crystal
         shell: pwsh
         env:

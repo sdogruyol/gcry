@@ -118,7 +118,11 @@ describe "GC_add_roots" do
     LibGC.add_roots(buf.as(Void*), (buf + 2).as(Void*))
     LibGC.add_roots((buf + 4).as(Void*), (buf + 6).as(Void*))
     Gcry::CAbi.root_range_count.should eq(before + 2)
-    dropped = block_in(buf)
+    # Two blocks in the range taken back, one per word: a stale word in the
+    # collect chain can keep one of them, as the other files here allow
+    # (Windows x86_64 CI kept the one block this held, once). A range still
+    # scanned keeps both.
+    dropped = [block_in(buf), block_in(buf + 1)]
     kept = block_in(buf + 4)
 
     # Bounds that only partly cover the second range leave it alone.
@@ -126,9 +130,9 @@ describe "GC_add_roots" do
     Gcry::CAbi.root_range_count.should eq(before + 1)
     collect_and_churn
     live_and_intact?(kept).should be_true
-    # The dropped range still holds the address; read on this frame only as
-    # a masked comparison, the block itself is gone or reused.
-    live_and_intact?(dropped).should be_false
+    # The dropped range still holds the addresses; read on this frame only as
+    # a masked comparison, the blocks themselves are gone or reused.
+    dropped.count { |hidden| live_and_intact?(hidden) }.should be <= 1
 
     # The same start registered again is a root again.
     LibGC.add_roots(buf.as(Void*), (buf + 2).as(Void*))

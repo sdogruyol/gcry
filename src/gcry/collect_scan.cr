@@ -2,20 +2,28 @@
 
 module Gcry
   class Heap
+    # Crystal's `GC.push_stack`: a parked fiber's [stack_top, bottom). It comes
+    # with no stack to check it against, so the window stands for its own
+    # stack in `Roots.scan_stack`: scanned however deep it is, down to where
+    # its mapping ends. Through `scan_range` it lost everything past 64 MiB,
+    # which Boehm's `GC_push_all_stack` scans.
     def push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
       raise "push_stack outside of collect" unless @collecting
+      return if stack_top.null? || stack_bottom.null?
       # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
       # unreadable pages then bulk-scans (see Roots.scan_range_safe).
-      Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
+      top = stack_top.address
+      bottom = stack_bottom.address
+      Roots.scan_stack(top, bottom, top, bottom) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Parked)
       end
     end
 
     # `push_stack` for a range registered as a root (`GC_add_roots`,
-    # `GC_push_all_eager`), which may be any length. `push_stack` keeps
-    # `scan_range`'s 64 MiB valve, right for a stack and a dropped root here:
-    # an object held only from a 65 MiB `GC_add_roots` range was swept, with
-    # nothing said but `oversize_skips`. Boehm scans such a range whole.
+    # `GC_push_all_eager`), which may be any length. `scan_range`'s 64 MiB
+    # valve was a dropped root here: an object held only from a 65 MiB
+    # `GC_add_roots` range was swept, with nothing said but `oversize_skips`.
+    # Boehm scans such a range whole.
     def push_root_range(low : Void*, high : Void*) : Nil
       raise "push_root_range outside of collect" unless @collecting
       Roots.scan_range_chunked(low, high, safe: true) do |candidate|
@@ -365,27 +373,7 @@ module Gcry
 
     # Mark Thread objects and Parallel EC roots (TLS alone is not scanned).
     private def scan_thread_roots : Nil
-      Thread.unsafe_each do |thread|
-        mark_root_candidate(Pointer(Void).new(thread.object_id), source: RootSource::Thread)
-        # Parallel EC can briefly have nil current_fiber while a worker OS
-        # thread is between fibers / during shutdown — skip rather than raise.
-        if fiber = thread.@current_fiber
-          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-        end
-        if main = thread.@main_fiber
-          mark_root_candidate(Pointer(Void).new(main.object_id), source: RootSource::Thread)
-        end
-        # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
-        # only on conservative Thread body scan missed them when layout/scan_cap
-        # truncated the object (Kemal EC4 SEGV @ …0008).
-        # Gate on the ivar itself: Crystal 1.21.0 release declares
-        # @execution_context by default; tip needs -Dexecution_context
-        # (-Dpreview_mt). Flag-only gates break one of the two.
-        {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
-          mark_ref_slot(pointerof(thread.@scheduler).address, "thread.@scheduler")
-          mark_ref_slot(pointerof(thread.@execution_context).address, "thread.@execution_context")
-        {% end %}
-      end
+      Thread.unsafe_each { |thread| mark_thread_roots(thread) }
 
       {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
         # `GCRY_DISABLE_EC_PINS=1` skips this derived walk so
@@ -442,6 +430,28 @@ module Gcry
       {% end %}
 
       audit_ec_queues
+    end
+
+    private def mark_thread_roots(thread : Thread) : Nil
+      mark_root_candidate(Pointer(Void).new(thread.object_id), source: RootSource::Thread)
+      # Parallel EC can briefly have nil current_fiber while a worker OS
+      # thread is between fibers / during shutdown — skip rather than raise.
+      if fiber = thread.@current_fiber
+        mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+      end
+      if main = thread.@main_fiber
+        mark_root_candidate(Pointer(Void).new(main.object_id), source: RootSource::Thread)
+      end
+      # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
+      # only on conservative Thread body scan missed them when layout/scan_cap
+      # truncated the object (Kemal EC4 SEGV @ …0008).
+      # Gate on the ivar itself: Crystal 1.21.0 release declares
+      # @execution_context by default; tip needs -Dexecution_context
+      # (-Dpreview_mt). Flag-only gates break one of the two.
+      {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
+        mark_ref_slot(pointerof(thread.@scheduler).address, "thread.@scheduler")
+        mark_ref_slot(pointerof(thread.@execution_context).address, "thread.@execution_context")
+      {% end %}
     end
 
     # ── Execution-context queue audit ─────────────────────────────────────────
@@ -733,7 +743,8 @@ module Gcry
 
     # Spill GP registers, then scan approx SP→bottom for the running fiber.
     private def scan_mutator_stack : Nil
-      bottom = Fiber.current.@stack.bottom
+      stack = Fiber.current.@stack
+      bottom = stack.bottom
       @stack_bottom = bottom
       # A window that does not contain the stack pointer is not a scan. The
       # bottom comes from `Fiber.current`, and a fiber whose stack has not been
@@ -748,7 +759,7 @@ module Gcry
         Roots.each_spilled_register do |candidate|
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
-        scan_exclusive_mutator_spill_window(bottom)
+        scan_exclusive_mutator_spill_window(bottom, stack.pointer)
       else
         {% if flag?(:gcry_hl_assert) %}
           # The entry scrub must have covered every frame between the entry SP
@@ -758,7 +769,7 @@ module Gcry
             LibC.printf("HL: scan chain %llu bytes deep exceeds GCRY_COLLECT_SCRUB=%llu\n", depth, @collect_scrub_bytes)
           end
         {% end %}
-        Roots.scan_mutator(bottom) do |candidate|
+        Roots.scan_mutator(bottom, stack.pointer) do |candidate|
           note_mutator_candidate(candidate.address)
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
@@ -800,14 +811,14 @@ module Gcry
       end
     end
 
-    private def scan_exclusive_mutator_spill_window(bottom : Void*) : Nil
+    private def scan_exclusive_mutator_spill_window(bottom : Void*, stack_low : Void*) : Nil
       red = STACK_SCAN_RED_ZONE.to_u64
       sp = Roots.hardware_stack_pointer.address
       win = EXCLUSIVE_MUTATOR_SPILL_WINDOW
       low = sp > (red &+ win) ? sp - red - win : 0_u64
       hi = bottom.address
       return unless low < hi
-      Roots.scan_range(Pointer(Void).new(low), bottom, safe: true) do |candidate|
+      Roots.scan_stack(low, hi, stack_low.address, hi) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Stack)
       end
     end
@@ -1387,7 +1398,7 @@ module Gcry
               # No usable FP chain (makecontext / stale RBP) and no leaf →
               # full parked word-scan for this fiber (correctness floor).
               if !filled && @precise_stack_fiber_leaf_bytes == 0
-                Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+                Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
                   mark_root_candidate(candidate, source: RootSource::Parked)
                 end
               end
@@ -1396,16 +1407,197 @@ module Gcry
               # (GCRY_DISABLE_FIBER_FP_FILL=1 + LEAF=0).
             end
           else
-            Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+            Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
               mark_root_candidate(candidate, source: RootSource::Parked)
             end
           end
         else
-          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: !pooled_stack_readable?(stack, top)) do |candidate|
+          Roots.scan_stack(top, bottom, stack.pointer.address, bottom, safe: !pooled_stack_readable?(stack, top)) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Parked)
           end
         end
       end
+      scan_fork_orphan_roots
+    end
+
+    # A forked child's dead threads (`Platform.unlist_threads_after_fork`):
+    # what they held at the fork stays as reachable as it was. Each `Thread`
+    # is marked as `scan_thread_roots` marks a listed one, and their stacks
+    # are scanned from the copy `snapshot_fork_orphan_stacks` took in the
+    # child handler — not where they were. Nothing here runs in a process
+    # that has not forked.
+    private def scan_fork_orphan_roots : Nil
+      {% if flag?(:linux) || flag?(:darwin) %}
+        orphan = Thread.gcry_fork_orphans
+        return unless orphan
+        while orphan
+          mark_thread_roots(orphan)
+          orphan = orphan.next
+        end
+        fiber = Fiber.gcry_fork_orphans
+        while fiber
+          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+          fiber = fiber.next
+        end
+        seg = @fork_stack_snapshot
+        while seg != 0
+          header = Pointer(UInt64).new(seg)
+          data = seg + FORK_SNAPSHOT_HEADER
+          Roots.scan_range_chunked(Pointer(Void).new(data), Pointer(Void).new(data + header[1])) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Thread)
+          end
+          seg = header[0]
+        end
+      {% end %}
+    end
+
+    # The dead threads' stacks, copied in the child handler, newest fork
+    # first: one OS mapping per fork, a link word, a byte count, the words.
+    # A grandchild inherits the copies with the rest of the address space.
+    #
+    # Copied because the stacks themselves do not stay. glibc's child
+    # handler marks every other thread's stack free and puts it in its stack
+    # cache, so the child's next `pthread_create` — a mark helper or the
+    # idle thread at its first collection, anything the program starts —
+    # can be handed one and write its own frames over the dead thread's, or
+    # unmap it when the cache is over its limit. Measured with glibc 2.39
+    # (Ubuntu 24.04, the CI runners), eight parked threads each holding a
+    # marker word in its frame, 16 copies across their stacks: 8 were gone
+    # from the address space after the child's first `GC.collect`, which
+    # starts the mark helpers, and 10 after one `Thread.new` more. Spec 57
+    # raised `pthread_mutex_destroy: Device or resource busy` in every CI
+    # process_spec run, scanning the stacks where they had been. glibc 2.43
+    # lost none of the 16, which is why it never failed on a workstation.
+    @fork_stack_snapshot = 0_u64
+    FORK_SNAPSHOT_HEADER = 16_u64
+
+    # From the child handler, after the unlisting and before anything can
+    # start a thread. Copies the stack each dead thread's fibers were using:
+    # every main fiber of a thread unlisted by this fork, whatever its
+    # state, since that stack is glibc's; and every fiber still running
+    # that no listed thread is running, a mid-swap one included. Whole,
+    # because a thread that does not exist has no SP — but only what was
+    # ever written: from the low-water mark, asked of the platform whatever
+    # `GCRY_STACK_LOW_WATER` says, and without the pages that read zero, so
+    # an unreadable pagemap costs a read and not a copy. With the knob at 0
+    # the copy started at the guard: 16 parked threads made a 139 196 KiB
+    # snapshot (child RSS 143 408 KiB) where 136 KiB holds every written
+    # word, and the same with pagemap unreadable. Unreadable pages are left out too.
+    # Zero words root nothing and the scan reads words, so the pages kept
+    # are packed end to end. *stop* is where the orphans of earlier forks
+    # begin, whose stacks an earlier snapshot holds.
+    #
+    # Then those fibers leave Crystal's fiber list for `Fiber.gcry_fork_orphans`,
+    # so no walk reads where their stacks were. Listed, the live scan kept
+    # reading them there, and a stack glibc had cut up for new threads has a
+    # new guard page in the middle, which the scan does not expect of a
+    # stack: a grandchild of a process with six parked threads, whose child
+    # had started and joined eighteen, faulted in `scan_all_fiber_roots` in
+    # 3 of 3 runs on glibc 2.39. The list's mutex is initialised afresh on
+    # the way, as the thread list's is: a dead thread may have held it, and
+    # every stop takes it.
+    #
+    # The forking thread's own fiber is found with `Thread.current?`, never
+    # `Fiber.current`: on a thread Crystal never listed — a raw pthread that
+    # calls `fork` — `Thread.current` creates a `Thread` and its main fiber,
+    # which allocates and pushes onto the fiber list, here, before its mutex
+    # and the allocator's locks are initialised again. A parent thread
+    # holding the list's mutex at the `fork` left such a child in this
+    # handler for good. Nil excludes nothing: that thread has no fiber on
+    # the list to keep.
+    protected def snapshot_fork_orphan_stacks(stop : Thread?) : Nil
+      {% if flag?(:linux) || flag?(:darwin) %}
+        current = Thread.current?.try(&.current_fiber?)
+        copy_fork_orphan_stacks(current, stop)
+        Fiber.gcry_unlist_after_fork { |fiber| fork_orphan_fiber?(fiber, current, stop) }
+      {% end %}
+    end
+
+    private def copy_fork_orphan_stacks(current : Fiber?, stop : Thread?) : Nil
+      total = 0_u64
+      each_fork_orphan_piece(current, stop) { |from, to| total += to - from }
+      return if total == 0
+      page = Roots::PAGE_SIZE
+      bytes = (FORK_SNAPSHOT_HEADER + total + page - 1) & ~(page - 1)
+      seg = Gcry.os_map(bytes)
+      if Gcry.mmap_failed?(seg)
+        buf = uninitialized UInt8[RawOut::LIMIT]
+        n = RawOut.append(buf.to_unsafe, 0, "gcry: fork child could not map a copy of the parent's thread stacks; what only they held is not a root in this process\n")
+        RawOut.flush(buf.to_unsafe, n)
+        return
+      end
+      data = seg.as(UInt8*) + FORK_SNAPSHOT_HEADER
+      used = 0_u64
+      each_fork_orphan_piece(current, stop) do |from, to|
+        next if used + (to - from) > total
+        (data + used).copy_from(Pointer(UInt8).new(from), to - from)
+        used += to - from
+      end
+      header = seg.as(UInt64*)
+      header[0] = @fork_stack_snapshot
+      header[1] = used
+      @fork_stack_snapshot = seg.address
+    end
+
+    # The readable, not all-zero, page-bounded pieces of every orphan stack's
+    # written range, word-aligned. The child is single-threaded here, so two
+    # walks see the same pieces.
+    private def each_fork_orphan_piece(current : Fiber?, stop : Thread?, & : UInt64, UInt64 ->) : Nil
+      word = sizeof(Void*).to_u64
+      page = Roots::PAGE_SIZE
+      Fiber.unsafe_each do |fiber|
+        next unless fork_orphan_fiber?(fiber, current, stop)
+        stack = fiber.@stack
+        guard = stack.pointer.address + Roots.runtime_page_size
+        hi = stack.bottom.address & ~(word - 1)
+        next unless guard < hi
+        lo = Platform.stack_low_water(guard, hi)
+        lo = guard if lo < guard
+        lo = (lo + word - 1) & ~(word - 1)
+        at = lo & ~(page - 1)
+        while at < hi
+          from = at < lo ? lo : at
+          to = at + page < hi ? at + page : hi
+          if from < to && Roots.page_readable?(at) && !words_zero?(from, to)
+            yield from, to
+          end
+          at += page
+        end
+      end
+    end
+
+    private def words_zero?(from : UInt64, to : UInt64) : Bool
+      p = Pointer(UInt64).new(from)
+      e = Pointer(UInt64).new(to)
+      while p < e
+        return false if p.value != 0
+        p += 1
+      end
+      true
+    end
+
+    private def fork_orphan_fiber?(fiber : Fiber, current : Fiber?, stop : Thread?) : Bool
+      return false if current && fiber.same?(current)
+      (fiber.running? && !fiber_current_on_listed_thread?(fiber)) || fiber_of_new_orphan?(fiber, stop)
+    end
+
+    private def fiber_of_new_orphan?(fiber : Fiber, stop : Thread?) : Bool
+      orphan = Thread.gcry_fork_orphans
+      while orphan && !orphan.same?(stop)
+        return true if (main = orphan.@main_fiber) && main.same?(fiber)
+        return true if (running = orphan.@current_fiber) && running.same?(fiber)
+        orphan = orphan.next
+      end
+      false
+    end
+
+    private def fiber_current_on_listed_thread?(fiber : Fiber) : Bool
+      Thread.unsafe_each do |thread|
+        if (running = thread.@current_fiber) && running.same?(fiber)
+          return true
+        end
+      end
+      false
     end
 
     # Can `[top, stack.bottom)` be read without probing it page by page?
@@ -1601,7 +1793,7 @@ module Gcry
         if spa >= stack.pointer.address && spa < bottom && guard < bottom
           top = stack_scan_low(spa, guard)
           @sp_clamp_hits += 1
-          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+          Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Thread)
           end
           return
@@ -1626,7 +1818,7 @@ module Gcry
         top = guard if top < guard
         if top < bottom
           @sp_clamp_fallbacks += 1
-          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+          Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Thread)
           end
           return
@@ -1653,7 +1845,7 @@ module Gcry
 
         low = stack_scan_low(spa, guard)
         @sp_clamp_hits += 1
-        Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(bottom), safe: true) do |candidate|
+        Roots.scan_stack(low, bottom, base, bottom) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
         return
@@ -1766,7 +1958,7 @@ module Gcry
         end
       end
 
-      Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|
+      Roots.scan_stack(low, high, pthread_bounds[0].address, pthread_bounds[1].address) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)
       end
     end
