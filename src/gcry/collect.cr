@@ -2109,6 +2109,12 @@ module Gcry
           return
         end
       end
+      # Inside its own `GC.stop_world`, which holds the collection section:
+      # the cycle would wait for this thread. Boehm's `LOCK` would hang it.
+      if holds_external_stop?
+        @collect_reentrant_skips &+= 1
+        return
+      end
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
@@ -2137,6 +2143,10 @@ module Gcry
           return
         end
       end
+      if holds_external_stop?
+        @collect_reentrant_skips &+= 1
+        return
+      end
       return if monitor_thread?
       return if thread_not_ready_for_collect?
       return unless @nursery_enabled
@@ -2154,6 +2164,7 @@ module Gcry
     def collect_a_little(work_units : Int32 = DEFAULT_INCREMENTAL_WORK) : Bool
       return false if @destroyed
       return false if @collecting
+      return false if holds_external_stop?
       return false if @finalizers.draining?
       return false if monitor_thread?
       return false if thread_not_ready_for_collect?

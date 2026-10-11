@@ -185,8 +185,8 @@ require "./spec_helper"
         end
 
         before = Gcry::Platform.stw_capture_no_slot
-        heap.stop_world
-        heap.start_world
+        heap.stop_world_external
+        heap.start_world_external
         # Every thread it suspended got a slot: on this platform a thread
         # without one is suspended with no SP clamp and no registers, and
         # `GetThreadContext` is their only copy.
@@ -195,8 +195,8 @@ require "./spec_helper"
 
         # And the collector's locks came back: a second stop, and an allocation
         # after it, rather than a half-stopped world.
-        heap.stop_world
-        heap.start_world
+        heap.stop_world_external
+        heap.start_world_external
         heap.malloc(16).null?.should be_false
       ensure
         finish.set(1)

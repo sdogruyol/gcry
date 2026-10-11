@@ -150,10 +150,10 @@ def phase_stw_latency : NamedTuple(p50: UInt64, p99: UInt64, max: UInt64)
 
   COLLECT_SAMPLES.times do
     t0 = Time.instant
-    HEAP.stop_world
+    HEAP.stop_world_external
     _x = 0
     t1 = Time.instant
-    HEAP.start_world
+    HEAP.start_world_external
     t2 = Time.instant
 
     timings << (t2 - t0).total_nanoseconds.to_u64
