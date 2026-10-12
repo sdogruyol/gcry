@@ -304,17 +304,8 @@ lib LibC
 end
 
 module Gcry::OS
-  # Every caller of `Gcry::OS.getenv` reads a `GCRY_*` flag or decimal
-  # number and is done with the pointer before the next read (paths such as
-  # `GCRY_TRACE_FILE` go through `ENV`). The longest legitimate value is a
-  # 20-digit `UInt64`, so 256 bytes is ample; a longer value reads as unset,
-  # which no flag or number parser would have accepted anyway. It was 32 KiB
-  # (the Win32 maximum), and a `ThreadLocal` is reserved in every thread's
-  # TLS block whether or not that thread ever reads a knob.
-  ENV_BUFFER_BYTES = 256
-
   @[ThreadLocal]
-  @@env_buffer = uninitialized UInt8[ENV_BUFFER_BYTES]
+  @@env_buffer = uninitialized UInt8[32768]
 
   # The CRT keeps a separate environment snapshot; Crystal's ENV updates the
   # Win32 environment. Read the latter so runtime knob changes are observed.
@@ -324,8 +315,8 @@ module Gcry::OS
 
   def self.getenv(name : UInt8*) : UInt8*
     buffer = @@env_buffer.to_unsafe
-    size = LibGcryWindows.GetEnvironmentVariableA(name, buffer, ENV_BUFFER_BYTES)
-    size > 0 && size < ENV_BUFFER_BYTES ? buffer : Pointer(UInt8).null
+    size = LibGcryWindows.GetEnvironmentVariableA(name, buffer, 32768)
+    size > 0 && size < 32768 ? buffer : Pointer(UInt8).null
   end
 
   def self.write(fd : Int32, buffer : String, count) : Int32

@@ -642,10 +642,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the other inert knobs do. About 250 lines of code with no caller went
   with them.
 
-- **Windows reads a knob's value into 256 bytes per thread, not 32 KiB.**
-  Every value read that way is a flag or a number; a longer one reads as
-  unset.
-
 - **Docs say what is Boehm-compatible and what is not, and what Windows
   covers.** `docs/INTEGRATION.md` has a Boehm parity table: what matches,
   what differs (`GC.add_finalizer` twice, atomic-only slack,
