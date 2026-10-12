@@ -937,15 +937,18 @@ ignored-knob-warnings: $(BIN)
 	if env GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "is ignored"; then \
 	  echo "  FAIL GCRY_PAGE_DONTNEED=1 warned beside GCRY_PAGE_RELEASE_BITMAP_WALK=1, which walks bitmap chunks"; fail=1; \
 	else echo "  ok   GCRY_PAGE_DONTNEED=1 is silent beside the research bitmap walk"; fi; \
-	if env GCRY_ALLOC_BATCH=8 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "GCRY_ALLOC_BATCH is ignored on the headerless layout"; then \
-	  echo "  ok   GCRY_ALLOC_BATCH=8 warns on the headerless default"; \
-	else echo "  FAIL GCRY_ALLOC_BATCH=8 is silently ignored on the headerless default"; fail=1; fi; \
-	if env GCRY_ALLOC_BATCH=8 $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "GCRY_ALLOC_BATCH is ignored on the bitmap allocator"; then \
-	  echo "  ok   GCRY_ALLOC_BATCH=8 warns on the header layout's bitmap default"; \
-	else echo "  FAIL GCRY_ALLOC_BATCH=8 is silently ignored on the header layout's bitmap default"; fail=1; fi; \
-	if env GCRY_ALLOC_BATCH=8 GCRY_BITMAP_ALLOC=0 $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "is ignored"; then \
-	  echo "  FAIL GCRY_ALLOC_BATCH=8 warned on the freelist, which batches"; fail=1; \
-	else echo "  ok   GCRY_ALLOC_BATCH=8 is silent on -Dgcry_block_headers GCRY_BITMAP_ALLOC=0"; fi; \
+	for knob in GCRY_ALLOC_BATCH=8; do \
+	  name=$${knob%%=*}; \
+	  if env $$knob $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "$$name is ignored on the headerless layout"; then \
+	    echo "  ok   $$knob warns on the headerless default"; \
+	  else echo "  FAIL $$knob is silently ignored on the headerless default"; fail=1; fi; \
+	  if env $$knob $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "$$name is ignored on the bitmap allocator"; then \
+	    echo "  ok   $$knob warns on the header layout's bitmap default"; \
+	  else echo "  FAIL $$knob is silently ignored on the header layout's bitmap default"; fail=1; fi; \
+	  if env $$knob GCRY_BITMAP_ALLOC=0 $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "is ignored"; then \
+	    echo "  FAIL $$knob warned on the freelist, which batches"; fail=1; \
+	  else echo "  ok   $$knob is silent on -Dgcry_block_headers GCRY_BITMAP_ALLOC=0"; fi; \
+	done; \
 	[ $$fail -eq 0 ] || exit 1
 	@echo "ok — every knob the compile default ignores says so, and only there"
 
