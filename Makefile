@@ -1853,8 +1853,8 @@ chunk-list-drift: $(BIN)
 # one below the walk in 3 runs of 40, in a program whose only threads were main
 # and the monitor. That flake was fixed as a *scope* correction — the invariant
 # is stated only of a heap that keeps its counter — which made the checker
-# honest and retired the measurement. `GCRY_INVARIANT_COUNTER_LOSS=1` states it
-# anyway and counts. Three arms: atomic and plain must both come out at zero
+# honest and retired the measurement. The harness states it anyway
+# (`Invariant.enable` + `Invariant.force_counters`) and counts. Three arms: atomic and plain must both come out at zero
 # (measured, 4.6 M forced comparisons across three shapes — the loss does not
 # reproduce on this tree, so the plain default stays and the atomic path stays
 # an escape), and `--inject` drops one increment through

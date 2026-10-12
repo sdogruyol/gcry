@@ -55,8 +55,11 @@ module Gcry
     end
 
     # State the counter invariant even of a heap whose counters may lose
-    # updates, and count the failures instead of declining. Research only
-    # (`GCRY_INVARIANT_COUNTER_LOSS=1`).
+    # updates, and count the failures instead of declining. Research only,
+    # called after `GC.init` (`make counter-loss`). Its env knob enabled the
+    # checker inside `GC.init` and crashed there on the runtime's first
+    # allocation, before any `Thread` exists (`init_from_env` says why), so it
+    # was removed.
     #
     # The scope correction that shipped with this checker was right — an
     # invariant stated of a heap that cannot keep its counter is a flake, and
@@ -333,5 +336,7 @@ module Gcry
   end
 end
 
-# Auto-init from environment at require time.
+# At require time, not in `GC.init` with the other knobs: enabled there, the
+# first check runs on `Thread.init`'s allocation and faults (SIGSEGV in
+# `concurrent_mutators?`, no current thread yet; measured 2026-10-12).
 Gcry::Invariant.init_from_env

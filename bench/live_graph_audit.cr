@@ -34,7 +34,7 @@
 #
 #   default (no walk)             must be clean
 #   GCRY_PAGE_DONTNEED=1          the HOLED walk, MADV_DONTNEED
-#   GCRY_MOSTLY_EMPTY=1 + DISABLE_PAGE_RELEASE=1   the sparse walk, MADV_FREE
+#   GCRY_MOSTLY_EMPTY=1 + DISABLE_MADVISE=1   the sparse walk, MADV_FREE
 #
 #   crystal build -Dgc_none -Dgcry_block_headers bench/live_graph_audit.cr \
 #     -o bin/live_graph_audit
@@ -544,9 +544,12 @@ puts ""
 # the walk and the gate rightly refuses to certify a walk that never ran.
 BASE_ENV = {"GCRY_THRESHOLD" => "33554432", "GCRY_BITMAP_ALLOC" => "0"}
 ARMS     = {
-  "no walk"      => BASE_ENV.merge({"GCRY_DISABLE_MADVISE" => "1"}),
-  "HOLED"        => BASE_ENV.merge({"GCRY_PAGE_DONTNEED" => "1"}),
-  "mostly-empty" => BASE_ENV.merge({"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1"}),
+  "no walk" => BASE_ENV.merge({"GCRY_DISABLE_MADVISE" => "1"}),
+  "HOLED"   => BASE_ENV.merge({"GCRY_PAGE_DONTNEED" => "1"}),
+  # `GCRY_MOSTLY_EMPTY` is ignored while the HOLED walk is on, so an inherited
+  # `GCRY_PAGE_DONTNEED=1` would make this arm measure HOLED again;
+  # `GCRY_DISABLE_MADVISE` turns that off on both platforms.
+  "mostly-empty" => BASE_ENV.merge({"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_MADVISE" => "1"}),
 }
 
 failures = [] of String

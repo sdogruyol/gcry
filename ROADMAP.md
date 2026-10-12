@@ -1822,7 +1822,7 @@ kept finding the rest.
       (`bench/counters_ab.sh`, 12 paired trials, warm-up discarded) is ±10% on
       this host and cannot see a few percent at all, which is worth recording:
       end-to-end RPS is the wrong instrument for an allocation-path question.
-      Then the loss: `GCRY_INVARIANT_COUNTER_LOSS=1` states the `live_objects`
+      Then the loss: `Invariant.force_counters` states the `live_objects`
       invariant even of a heap that may lose updates — the measurement the
       scope correction retired — and counts instead of raising, with the
       checker's double read still skipping a counter that *moves* between the

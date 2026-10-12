@@ -1404,14 +1404,6 @@ module GC
     # Once, before any collection: prime the kernel's page size, which the
     # guard offsets and the pagemap probe read while the world is stopped.
     Gcry::Roots.runtime_page_size
-    # Research only: state the `live_objects` invariant even of a heap whose
-    # counters may lose updates, and count the failures rather than raising.
-    # This is the measurement the checker's scope correction stopped making, and
-    # it is what decides whether `heap_counters_atomic` should be the default.
-    if env_flag_one?("GCRY_INVARIANT_COUNTER_LOSS")
-      Gcry::Invariant.enable
-      Gcry::Invariant.force_counters
-    end
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.

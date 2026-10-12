@@ -88,8 +88,9 @@ module Gcry
       len
     end
 
-    def self.flush(buf : UInt8*, len : Int32) : Nil
-      Gcry::OS.write(2, buf, LibC::SizeT.new(len))
+    # *fd* is stderr except for `Trace`, whose lines go to `GCRY_TRACE_FILE`.
+    def self.flush(buf : UInt8*, len : Int32, fd : Int32 = 2) : Nil
+      Gcry::OS.write(fd, buf, LibC::SizeT.new(len))
     end
   end
 end

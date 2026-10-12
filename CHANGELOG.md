@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The idle collector's thread and the Monitor (`SYSMON`) are stopped
+  like any thread until they reach their loops (Linux).** Both were exempt
+  from the suspend signal from the moment they existed, but their births
+  allocate a main fiber, and an allocation already past its stopped-world
+  check ran on through the stop. The idle thread is born at the end of the
+  first collection and runs into the second, so it mapped a chunk and
+  wrote the chunk index while the collector read the index unlocked: in
+  69 of 100 runs of `chunk-list-drift`'s window-free child, 0 of 1 000
+  after. SYSMON did the same in 14 of 100 runs with the window widened,
+  0 of 200 after. Each is exempt now only once it has entered its loop
+  (`65_*`).
+
 - **`GCRY_NURSERY=0` turns the nursery off under `-Dgcry_block_headers`.**
   `0` passed the "is it set" test there, so asking for no nursery enabled
   the barrier-less one, while the headerless build read `0` as unset. It is
@@ -634,8 +646,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default; `GCRY_RADIX_THP` (no win, +3.27% RSS), `GCRY_PARALLEL_RELEASE`
   (unsupported, could hang), `GCRY_MOSTLY_EMPTY_MODE` /
   `GCRY_MOSTLY_EMPTY_UNLINK` (rejected) and `GCRY_FIBER_FP_FILL_MISS_ONLY`
-  (a use-after-free arm) had answered what they were for. Setting one now
-  does nothing. `/gc-stats` loses the fields that reported them:
+  (a use-after-free arm) had answered what they were for, and
+  `GCRY_INVARIANT_COUNTER_LOSS` crashed at startup (it enabled the checker
+  inside `GC.init`, before the runtime's first `Thread`; `make
+  counter-loss` calls the API instead). Setting one now does nothing.
+  `/gc-stats` loses the fields that reported them:
   `mostly_empty_dontneed`, `precise_stack_fiber_fp_fill_miss_only`,
   `parked_fp_fill_skipped_frames`, `parked_fp_fill_skipped_bytes`.
   `GCRY_ALLOC_BATCH` warns that it is ignored on the bitmap allocator, as
@@ -1057,7 +1072,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bench/perf_smoke.sh` no longer runs a word of a Python comment as a
   shell command (`noise_ratio: command not found`, four times a run).
 - CI drops four apt-get steps that could not run on their runners, two
-  rebuilds of `stw_mt_property_test`, and a repeated `apt-get update`.
+  rebuilds of `stw_mt_property_test`, and a repeated `apt-get update`; the
+  other twenty refreshes go through one composite action.
+- CI runs on pushes to master and on pull requests, not on every branch
+  push: each PR commit ran the whole workflow twice. A newer commit on a PR
+  cancels its older run.
+- `make chunk-list-drift` excuses a chunk only while its mapper is
+  suspended between the list and index stores, and prints how many it
+  excused; a mapper the stop left running still counts.
+- `GCRY_TRACE` lines go through `RawOut` (byte-identical output), and the
+  page-release harnesses set `GCRY_DISABLE_MADVISE`, which Linux reads,
+  instead of `GCRY_DISABLE_PAGE_RELEASE`, which it does not.
 - Windows ARM64 CI installs a pinned MSYS2 toolchain
   (`ci/windows-arm64-msys2.sh`): MSYS2's LLVM 23.1.3 update of 2026-10-10
   crashed the pinned Crystal 1.21.0 compiler in every arm64 job.

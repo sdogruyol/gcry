@@ -2,9 +2,9 @@
 # SP and its general-purpose registers until the mark is done with them.
 #
 # **Why this is not in the platform files.** It used to be, three times over —
-# `linux_stw.cr`, `darwin_stw.cr` and `windows_stw.cr` each had the same
-# `@@stw_ids` / `@@stw_sps` / `@@stw_gregs` / claim-mask quartet with the same
-# 64-slot bound. A first attempt at growing the Darwin and Windows copies
+# `linux_stw.cr`, `darwin_stw.cr` and `windows_stw.cr` each kept their own
+# thread-id, SP and register arrays and claim mask, with the same 64-slot
+# bound. A first attempt at growing the Darwin and Windows copies
 # crashed the Darwin job with an invalid memory access and had to be reverted,
 # and the reason it could not be debugged is that the code was reachable only
 # from a platform nobody here can run
@@ -12,16 +12,14 @@
 # compiles and runs everywhere, so `spec/stw_slots_spec.cr` exercises the
 # growth, the claiming and the refusals on whatever platform the suite runs on.
 #
-# **The 64 was the claim mask.** `@@stw_claimed` was an `Atomic(UInt64)`, and a
+# **The 64 was the claim mask.** It was an `Atomic(UInt64)`, and a
 # `UInt64` cannot address a 65th slot. Past it `slot_for` returned −1 and the
 # thread was suspended with no SP clamp and no registers captured. The SP half
 # of that is conservative — `scan_pthread_stack` with no SP walks the whole
 # stack — but the registers are not: on Darwin `thread_get_state` is their only
 # copy, so a reference held only in the 65th thread's registers stopped being a
-# root. (Linux is the exception and keeps its own fixed table: its registers
-# arrive in a signal `ucontext` that sits on the interrupted thread's own stack,
-# which the unclamped walk covers, and its table is claimed from the suspend
-# handler on every thread at once.)
+# root. (Linux lost less: its registers arrive in a signal `ucontext` that sits
+# on the interrupted thread's own stack, which the unclamped walk covers.)
 #
 # **Three rules make it safe to grow under a reader.**
 #
@@ -38,8 +36,8 @@
 #
 # **A `Table` is a value, and the collector owns exactly one.** That is not
 # tidiness either. The first version was one module of class variables, and
-# `spec/stw_slots_spec.cr` reconfigured it — which on Linux touches nothing,
-# because this platform keeps its own table, and on Windows reconfigured the
+# `spec/stw_slots_spec.cr` reconfigured it — which on Linux, then still on a
+# table of its own, touched nothing, and on Windows reconfigured the
 # table the collector was *using*: 4 register words per slot instead of 80, so
 # the next capture dropped 76 of every thread's 80 register roots, and an
 # example that fills the table to test the refusal made a real thread's claim
