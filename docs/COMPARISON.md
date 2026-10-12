@@ -6,16 +6,16 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-Snapshot of gcry **0.34.0** (`shard.yml`) plus the unreleased 2026-10-05 sound defaults. Every number is quoted from the README, with its source.
+Snapshot of gcry **0.34.0** (`shard.yml`) plus the unreleased changes through 2026-10-12: sound defaults, parallel mark on by default, Boehm's `GC_*` C ABI, and the default-path fixes in `CHANGELOG.md`. Every number is quoted from the README, with its source.
 
 | | gcry (0.34.0) | Boehm (Crystal default) |
 |--|---------------|-------------------------|
 | Integration | Shard reopen under `-Dgc_none` | Built-in `gc/boehm` |
 | Core language | **Crystal** | C |
-| Model | Conservative STW, headerless layout (nursery / incremental opt-in, header layout only for the nursery) | Conservative BDW |
+| Model | Conservative STW, headerless layout, parallel mark above 32 MiB live (nursery / incremental opt-in, header layout only for the nursery) | Conservative BDW, parallel mark |
 | Roots | Interior + misaligned ambient roots, static roots, whole touched fiber/thread stacks, SP clamp; **no root heuristic on by default** since 2026-10-05 ([SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)) | Interior-friendly |
 | Object bodies | Every non-atomic block word-scanned (layouts not read by the mark since 2026-10-04) | Conservative |
-| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`, [POLICY.md](POLICY.md)); TLAB-on / `PARALLEL_RELEASE` **unsupported** | Yes |
+| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`, [POLICY.md](POLICY.md)); TLAB-on **unsupported** | Yes |
 | Fork | atfork reinit (default) | `GC_set_handle_fork` |
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
 | Empty-chunk RSS | Released by default | LibGC reclaim |

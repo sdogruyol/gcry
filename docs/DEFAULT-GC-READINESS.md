@@ -2,8 +2,9 @@
 
 What gcry is missing to become Crystal's **default** collector, in place of
 Boehm in `crystal-lang/crystal`. Reviewed on 2026-10-04 against gcry 0.34.0
-(`6650b80`). The perf rows were refreshed on 2026-10-05 from the findings
-committed that day. Crystal 1.21.0 (`57cf7da50`), Linux x86_64.
+(`6650b80`), Crystal 1.21.0 (`57cf7da50`), Linux x86_64. The perf rows were
+refreshed on 2026-10-05; the status table was last updated on 2026-10-12,
+after PR #47 and #48.
 
 **Verdict at review time (2026-10-04).** gcry was a solid opt-in shard on
 Linux, macOS and Windows (x86_64/aarch64) under the default ExecutionContext
@@ -19,7 +20,7 @@ compiler PR").
 | E1–E3 | **Fixed** | `layout.cr` resolve check; `Gcry.usable_size`; `crystal_raises_compat.cr` + compiler patch in `bench/log/linux/2026-10-05-raises-cycle/` |
 | B1 | **Fixed**: defaults are root-complete (STW lags 0) | `collect_scan.cr`; `process_spec/regression/14` |
 | B2 | **Closed**: a dying `Thread` is held until proof it is done, on every platform; the root-table race is fixed | `thread_birth_root.cr`; `make thread-death-window`; `process_spec/regression/23` |
-| B3 | **Mostly closed**: parallel mark on by default; the compiler (Parallel EC at CPU count, mt codegen) builds, self-hosts and passes `compiler_spec` under gcry. TLAB and `GCRY_PARALLEL_RELEASE` stay unsupported research arms | `gc_override.cr`; `ci/compiler-spec.sh` |
+| B3 | **Mostly closed**: parallel mark on by default; the compiler (Parallel EC at CPU count, mt codegen) builds, self-hosts and passes `compiler_spec` under gcry. TLAB stays an unsupported research arm | `gc_override.cr`; `ci/compiler-spec.sh` |
 | B4 | **Fixed**: compiler self-hosts with gcry, and `crystal i` runs in the gcry-built compiler (3 of 3). `compiler_spec`, built by the host compiler with gcry linked in (`-Dgc_none`, `require "gcry"`) and run with gcry as the process GC: 13 640 examples, 0 failures, 18 pending (CI run 37437660646). Linux x86_64 only | `c_abi.cr`, `crystal_string_builder_compat.cr`; CI job `compiler-gcry` (`ci/compiler-spec.sh` `step_spec`); `bench/log/linux/2026-10-06-compiler-spec/` |
 | B5 | **Scoped**: unsupported targets fail at compile time with the reason | `platform/os.cr` |
 | B6 | **Proposed**: upstream interface written up | `docs/RFC-GC-BACKEND.md` |
@@ -31,10 +32,11 @@ compiler PR").
 | M8 | **Fixed**: Boehm's `GC_*` C ABI and `lib LibGC`, including `GC_stackbottom`, `GC_remove_roots`, `GC_register_disappearing_link` / `GC_unregister_disappearing_link`, and C-thread registration on Linux, macOS and Windows; `INTEGRATION.md` § Boehm parity lists what still differs | `c_abi.cr`; `process_spec/regression/21`, `25`, `29`, `41`, `47` |
 | m1–m6 | **Fixed**: nesting `disable`, honest `prof_stats`, `Crystal.trace :gc`, `free` and `realloc` never raise into C callers, `set_stackbottom(thread)`, `GC.sig_suspend/resume` | `gc_override.cr`; `process_spec/regression/18` |
 | m7 | **Mitigated**: one byte of slack on atomic blocks, as under Boehm; the argv patch stays | `heap.cr`; `process_spec/regression/24` |
-| m8 | **Fixed**: docs refreshed; `INTEGRATION.md` lists Windows as in scope only, and its Boehm parity table names what differs | `README.md`, `docs/*` |
+| m8 | **Fixed**: docs refreshed; `INTEGRATION.md` lists Windows as in scope only, and its Boehm parity table names what differs; `COMPARISON.md` describes the current tree | `README.md`, `docs/*` |
 | m9 | **Fixed**: `rbp`/`x29` captured unmangled | `roots.cr`; `process_spec/regression/15` |
 | M5 | **Partly closed** (readiness-2): chunk index/list drift is closed (the relink store splices back what was mapped during the walk, and a `GC.free` trim no longer detaches during it; `make chunk-list-drift` cap 0); the Windows collector-lock livelock is fixed in the product (the collection section hands over in arrival order and `GC.collect` is answered by any full collection that began after it; the roots lock lets waiting mutators in ahead of a stop; `process_spec/regression/50`). Still open: `dormant_flush` (unreproduced), the `@index_lock` holder in a stop (policy), Darwin Intel counter loss, O(n) single large unlink, in-place large `realloc` growth | `collect_sweep.cr`, `collect.cr`, `roots_lock.cr`; `ROADMAP.md` |
-| M6, M7 | **Open**: TSan/fuzzing, knob surface | below |
+| M6, M7 | **Open**: TSan/fuzzing, knob surface | §2–4 below; `ROADMAP.md` |
+| D1 | **Fixed** (PR #47, #48; not in the 2026-10-04 review): 11 defects on the default path. #47: a `Thread`'s birth root armed after its thread could end, `EINTR` and `errno` from the stop signals, stacks deeper than 64 MiB, the probe pipe under fd pressure, a parked finalizer blocking collection, a forked child's first stop. #48: chunk-index OOM hang, `realloc` shrink-then-grow stale bytes, `GC.free` of finalizers and of disappearing links, `GC.stop_world` without the collection's locks, release of a chunk holding an allocation cursor. Since then the stop calls no C heap function on Windows and macOS | `CHANGELOG.md` `[Unreleased]`; `process_spec/regression/52`–`63` |
 
 Two Crystal bugs turned up along the way, both outside gcry: `raises?` is not
 a fixpoint (§1, E3), and `String::Builder#to_s` writes one byte past its
@@ -219,47 +221,32 @@ end
 
 ---
 
-## 2. Blockers
+## 2–4. Blockers, major and minor gaps (historical, as of 2026-10-04)
 
-§2–§4 record the review as it was on 2026-10-04. The status table at the
-top supersedes them.
+The full gap tables as reviewed on 2026-10-04, with their evidence, are in
+this file's git history (`git show 828b95c:docs/DEFAULT-GC-READINESS.md`,
+the last commit before they were collapsed). The status table at the top supersedes
+them. One line per ID, as it read then:
 
-| ID | Gap | Evidence |
-|----|-----|----------|
-| **B1** | **Defaults are not sound.** Under multi-mutator STW a parked fiber whose SP is unproven is scanned only within `stw_multi_stack_lag` = 256 KiB of its stack top, and a thread whose SP sits on a pool fiber gets only the top `stw_multi_pthread_lag` = 256 KiB of its pthread stack; a live pointer deeper than the lag is never seen. The parked-fiber-from-saved-SP path relies on runtime invariants the collector does not check (swapcontext store order; SYSMON/idle never running user fibers). `GCRY_SOUND=1` is opt-in, although the README measures its cost as ~0 at EC1 and a small pause increase with more threads. | read: `collect_scan.cr:1055,1071,1108`; `docs/SOUND-DEFAULTS.md` knob table and "How to read this" |
-| **B2** | **Live-object loss keeps turning up under default settings.** Union-buffer UAF (`[Unreleased]`), macOS FP/SIMD-register roots (0.33.0), static-root `type_id` gate (2026-09-29). The Thread UAF family is still open, covered only by a spin budget's timing. | read: `CHANGELOG.md` `[Unreleased]`, 0.33.0; `platform/thread_staging.cr:243-268`; `docs/HARDENING.md` "open Thread use-after-free" |
-| **B3** | **Parallel ExecutionContext is not a supported default.** The compiler itself runs `Fiber::ExecutionContext.default.resize(default_workers_count)`. gcry ships Parallel only as opt-in with TLAB off; `GCRY_TLAB` / `GCRY_PARALLEL_RELEASE` are unsupported; Parallel-specific UAF/SEGV reports are still open. | read: `compiler/crystal.cr:11-12`; `docs/POLICY.md` Threading; `docs/INTEGRATION.md` Scope; `ROADMAP.md` nested_spawn_uaf, 2026-08-10 soak SEGV |
-| **B4** | **No compiler self-host and no interpreter story.** The compiler has never been built or run with gcry. `crystal i` resolves `GC_*` symbols from the host compiler binary, and gcry exports no `GC_*` C ABI (only `gcry_register_finalizer` (win32), `gcry_mark_worker_main`, `gcry_stw_watchdog_main`). | read: `compiler/crystal/interpreter/context.cr:441-460`; grep of `src/` |
-| **B5** | **Platforms.** No platform layer for FreeBSD, OpenBSD, NetBSD, DragonFly or Solaris (`collect.cr:1-20` has no `else`). Android is untested, and its fast path uses `@[ThreadLocal]`, which Crystal avoids there. 32-bit (i386, armhf) compiles with no error but scans roots in 8-byte strides and never installs the STW SP-capture handler. A per-platform rollout ("default on Linux first", ROADMAP Phase 4) would scope this down. | read: `roots.cr:285-289,329-333`; `platform/linux_stw.cr:52-56,610-613`; `platform/os.cr:3-6`; `bitmap_alloc.cr:174-179` |
-| **B6** | **No upstream-grade runtime interface.** gcry reads private stdlib ivars (`Fiber@stack`, `@context.stack_top`, `Thread@current_fiber/@main_fiber/@name/@system_handle`, ExecutionContext `@schedulers/@global_queue`, `Fiber@@fibers.@mutex`), keys the monitor exemption on `Thread#name == "SYSMON"`, reopens `Fiber::ExecutionContext::Monitor`, and gates thread staging on `flag?(:gc_none)` (a future `-Dgc_gcry` would compile it out silently). Every gcry gate pins Crystal 1.21.0. Only `std-spec` also runs `latest` and `nightly`, so a stdlib rename that silently compiles a root source out is caught only if spec/std happens to exercise it. | read: `collect_stw.cr:759,992`; `collect_scan.cr:360-424,1131-1177`; `monitor_gate.cr:230`; `gc_override.cr:1695-1768`; `.github/workflows/ci.yml:79-92` |
-| **B7** | **Crystal's own suites are not in CI.** See §1. At review time std_spec did not compile (E1) and one exception was miscompiled (E3), and compiler_spec had never been tried. All of that is closed as of 2026-10-06 on Linux x86_64: **std_spec passes in full in CI** (`std-spec` job), and so does compiler_spec, built by the host compiler with gcry linked in and run with gcry as the process GC (`compiler-gcry` job; see the status table). macOS and Windows still do not run them. | observed |
-
-## 3. Major gaps
-
-| ID | Gap | Evidence |
-|----|-----|----------|
-| **M1** | **Mark cost and parallel mark.** Serial mark is ~2.6× Boehm's single marker on a large pointer heap, ~10× its default parallel marker. As of 2026-10-05, `GCRY_PARALLEL_MARK=2` with the 32 MiB floor gains 8–16 points on GC-heavy rows for 2–42% more CPU; 4 workers win only on arm64. It is not a default yet (proposed default: `min(2, CPUs−1)`). | read: `ROADMAP.md` "Per-collection mark cost"; `bench/log/linux/2026-10-05-parallel-mark-default/FINDINGS.md` |
-| **M2** | **Allocation-storm throughput.** crystal-metric, speed as % of Boehm (ubuntu-latest, default): Primes 38%, JsonParsePure 47%, JsonGenerate 53%, JsonParseSerializable 68%, Revcomp 79%, Binarytrees 83%, RegexDna 91%. Peak RSS is mostly *under* Boehm (0.43–0.89×). `GCRY_THRESHOLD_MAX=256 MiB` buys +8–23 points at ≤1.1× Boehm RSS. That RSS budget is undecided. | read: `bench/log/linux/2026-10-05-rss-budget-vs-boehm/FINDINGS.md` |
-| **M3** | **Shared-library static data is not scanned.** Roots come from the main executable's writable segments only (Darwin: image 0; Windows: main module). Boehm scans loaded libraries. Crystal code in a `.so`, or a C library holding GC pointers in its globals, loses roots. | read: `platform/linux_roots.cr:8-11,103-118`; `platform/darwin_roots.cr`; `docs/WINDOWS.md` DLL globals |
-| **M4** | **Unordered finalization.** All unmarked finalizables are enqueued in one pass. Boehm's `register_finalizer_ignore_self` is topologically ordered, so close/free order can differ. | read: `collect_mark.cr:778-805`; stdlib `gc/boehm.cr:334-347` |
-| **M5** | **Open races and liveness issues.** Chunk index/list drift ("the race is open"); a large chunk released with a live block (`dormant_flush`, unreproduced); an `@index_lock` holder could wedge the sweep; Windows collector-lock livelock (harness-mitigated); Darwin Intel counter loss; O(n) large free; large `realloc` growth. | read: `ROADMAP.md` open items |
-| **M6** | **Verification depth.** No TSan and no coverage-guided fuzzer. ASan covers one spec, valgrind 4 samples. No production dogfood. ~305 unit examples run the *library* heap under Boehm; the real process GC gets `process_spec/` (~20 examples + regression files) plus `make` gates. | read: `ci/asan_check.py`; `ROADMAP.md` "Production dogfood", "Security / fuzzing"; `docs/INTEGRATION.md` "Two test modes" |
-| **M7** | **Review and maintenance surface.** ~38k LOC; ~210 `GCRY_*` knobs parsed in `GC.init`, several "research only" or "restores a defect"; audits, tripwires and experiments are compiled into the product (`src/gcry.cr:36-47`); three heap representations (headerless, header, freelist). Single maintainer, about 10 weeks old, 34 releases. | read: `docs/HARDENING.md` env table; `src/gcry.cr` |
-| **M8** | **`GC_*` ecosystem ABI.** Shards that bind `LibGC` directly (as std_spec does, E2) have nothing to link against. `Gcry.usable_size` covers `GC_size` at the Crystal level only. | observed (E2); read: `src/` exports |
-
-## 4. Minor gaps
-
-| ID | Gap | Evidence |
-|----|-----|----------|
-| m1 | `GC.disable` is a boolean, not a counter: `disable; disable; enable` re-enables collection (Boehm nests). | read: `gc_override.cr:1546-1555` |
-| m2 | `GC.prof_stats`: `non_gc_bytes` and `markers_m1` are 0; `obtained_from_os_bytes` is approximated. | read: `gc_override.cr:1625-1658` |
-| m3 | No `Crystal.trace :gc` events (both `gc/boehm` and `gc/none` emit them); gcry has its own `GCRY_TRACE`. | read: grep of `src/` |
-| m4 | `GC.free` raises on a stale in-span pointer, which unwinds through C frames when zlib or GMP call it as their allocator callback. Explicitly freeing a finalizable object runs its finalizer (Boehm does not). | read: `gc_override.cr:1557-1568`; `finalizer.cr:183-231` |
-| m5 | `GC.set_stackbottom(thread, ptr)` ignores `thread` and sets one global. | read: `gc_override.cr:1787-1793` |
-| m6 | `GC.sig_suspend` / `sig_resume` are not defined; gcry relies on hard-coding the same values as Crystal's private constants. | read: `platform/linux_stw.cr:19-25` |
-| m7 | stdlib argv allocation relies on Boehm's size rounding; gcry monkey-patches it (`crystal_process_compat.cr`). It needs an upstream stdlib fix. | read |
-| m8 | Docs disagree: `INTEGRATION.md` lists Windows as "Out" and then documents it as shipped; `HARDENING.md` header says "layout scan on"; `COMPARISON.md` is a 0.17.0 snapshot; README's Kemal `/` row is a v0.16 carry. | read |
-| m9 | `[INFERENCE]` On x86_64 the collecting thread's registers are captured with glibc `setjmp`, which mangles `rbp`, and the clobber list omits `rbp`. Commit `d15b0ea` (2026-10-05) touched register scrubbing; not re-checked. | read: `roots.cr:113-189` |
+- **B1** defaults were not root-complete (STW stack lags 256 KiB).
+- **B2** live-object loss kept turning up under default settings.
+- **B3** a Parallel ExecutionContext was not a supported default.
+- **B4** no compiler self-host and no `GC_*` C ABI for `crystal i`.
+- **B5** no platform layer or compile-time refusal for other targets.
+- **B6** no upstream-grade runtime interface (private stdlib ivars).
+- **B7** Crystal's own suites were not in CI.
+- **M1** serial mark ~2.6× Boehm's single marker; parallel mark opt-in.
+- **M2** allocation-storm throughput (Primes 38% of Boehm's speed).
+- **M3** shared-library static data was not scanned.
+- **M4** unordered finalization.
+- **M5** open races and liveness issues.
+- **M6** verification depth: no TSan, no coverage-guided fuzzer.
+- **M7** review and maintenance surface (~210 `GCRY_*` knobs).
+- **M8** no Boehm `GC_*` ecosystem ABI.
+- **m1–m9** `GC.disable` did not nest; `prof_stats` approximated; no
+  `Crystal.trace :gc`; `GC.free` raised into C callers;
+  `set_stackbottom(thread)` ignored the thread; no `GC.sig_suspend/resume`;
+  argv relied on Boehm's rounding; docs disagreed; `rbp` captured mangled.
 
 ---
 
@@ -280,7 +267,7 @@ top supersedes them.
 4. **B3 / M1: mostly done.**
    - Parallel mark is on by default, and the compiler's Parallel EC passes
      its suite.
-   - TLAB and `GCRY_PARALLEL_RELEASE` remain research arms.
+   - TLAB remains a research arm.
 5. **B4: done.** The compiler self-hosts with gcry. `crystal i` binds gcry's
    `GC_*` exports (`c_abi.cr`), so the interpreter does not need Boehm.
 6. **B6: proposed.** `docs/RFC-GC-BACKEND.md` covers `src/gc/gcry.cr`,
