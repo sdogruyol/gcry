@@ -160,7 +160,7 @@ median = keep[len(keep) // 2]
 q1 = keep[len(keep) // 4]
 q3 = keep[(3 * len(keep)) // 4]
 iqr = q3 - q1
-# `noise_ratio` is IQR over the median of what survived the min/max discard,
+# noise_ratio is IQR over the median of what survived the min/max discard,
 # and at BENCH_RUNS=3 exactly one sample survives — so it printed **0.0**, the
 # best possible reading, for the noisiest data this script has ever taken: the
 # first Darwin run's three samples were 54839, 75804 and 109267 req/s, a 2x

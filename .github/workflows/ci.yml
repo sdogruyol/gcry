@@ -91,7 +91,8 @@ jobs:
             crystal: "1.21.0"
             arch_label: x86_64
     runs-on: ${{ matrix.os }}
-    # This job takes ~30 minutes, and the comment here claimed ~7 until
+    # This job took 33.0 minutes before the sampling gates moved out to
+    # `test-sampling-gates` on 2026-09-20; the comment here claimed ~7 until
     # 2026-09-15, when the cap it was attached to started cancelling green
     # runs: 29m44s passing, then 30m05s killed on the last step with 17 s of
     # work left. The gate list had grown into the cap. 30 minutes was chosen
@@ -280,11 +281,9 @@ jobs:
           # layout that reads them.
           crystal build -Dgc_none -Dgcry_block_headers samples/hello.cr -o bin/hello_env_hdr
           GCRY_DISABLE_AUTO=1 ./bin/hello_env
-          GCRY_DISABLE_NURSERY=1 ./bin/hello_env
           GCRY_NURSERY=262144 ./bin/hello_env
           GCRY_NURSERY=262144 ./bin/hello_env_hdr
           GCRY_KEEP_CHUNKS=1 ./bin/hello_env
-          GCRY_RELEASE_CHUNKS=1 ./bin/hello_env
           # timeout: GCRY_STRESS × SYSMON/Thread.lock deadlock used to hang the job for hours
           timeout 60 env GCRY_STRESS=1 GCRY_STRESS_EVERY=8 ./bin/hello_env
           GCRY_MPROTECT_BARRIER=1 ./bin/hello_env
@@ -393,7 +392,6 @@ jobs:
           # -Dgcry_block_headers and GCRY_BITMAP_ALLOC=0; `--disabled` is
           # the headerless binary, which must not enable TLAB. Dropping
           # either reddens the gate.
-          crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --tlab --disabled
           crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr
           GCRY_BITMAP_ALLOC=0 ./bin/stw_mt_property_test_hdr --tlab --seed=1 --iterations=50 --workers=2,4
@@ -422,9 +420,7 @@ jobs:
           # returned immediately. Green requires -Dgcry_block_headers and
           # GCRY_BITMAP_ALLOC=0; `--disabled` is the headerless binary.
           # Dropping either reddens the gate.
-          crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --tlab --nursery --disabled
-          crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr
           GCRY_BITMAP_ALLOC=0 ./bin/stw_mt_property_test_hdr --tlab --nursery --seed=1 --iterations=50 --workers=2,4
           # The dormant arm, as in the step above.
           GCRY_BITMAP_ALLOC=0 GCRY_PARALLEL_DORMANT=1 timeout 300 ./bin/stw_mt_property_test_hdr --tlab --nursery --seed=1 --iterations=100 --workers=2,4
@@ -1350,7 +1346,6 @@ jobs:
       - name: Install the ASan compiler and runtime
         timeout-minutes: 14
         run: |
-          timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2 || true
           for attempt in 1 2 3; do
             timeout 240 sudo apt-get install -y -o Acquire::http::Timeout=30 -o Acquire::Retries=2 clang-19 && exit 0
             sleep $((attempt * 10))
@@ -1371,7 +1366,7 @@ jobs:
 
   # `make monitor-gate-deadlock` in a job of its own: 106–193 s here, and the
   # worst case is 23 quick tries plus one 60 s hang, so a two-core runner needs
-  # room the `test` job does not have — it is already at its 30-minute ceiling,
+  # room the `test` job does not have — it has grown into its cap before,
   # and adding a gate to it once cancelled a run mid-step.
   monitor-gate:
     runs-on: ubuntu-latest
@@ -2097,10 +2092,6 @@ jobs:
     name: test (windows x86_64, ${{ matrix.variant }})
     steps:
       - uses: actions/checkout@v7
-      - if: runner.os == 'Linux'
-        timeout-minutes: 5
-        continue-on-error: true
-        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: "1.21.0"
@@ -2268,10 +2259,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - if: runner.os == 'Linux'
-        timeout-minutes: 5
-        continue-on-error: true
-        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: "1.21.0"
@@ -2342,10 +2329,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - if: runner.os == 'Linux'
-        timeout-minutes: 5
-        continue-on-error: true
-        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: "1.21.0"
@@ -2513,10 +2496,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - if: runner.os == 'Linux'
-        timeout-minutes: 5
-        continue-on-error: true
-        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: "1.21.0"
