@@ -14,9 +14,8 @@ with every number at full width against a 352-byte buffer, and 349 on an
 ordinary mapped chunk — three bytes of margin — and the thread-list tripwire's
 index line is 295 against 288.
 
-The same question is asked of the two hand-rolled writers that predate
-`RawOut` — `EcQueueAudit` stops at 300 with 320-byte buffers, `StwWatchdog` at
-250 with 256 — because the invariant is about the pair, not about one module.
+The same question is asked of a file's own hand-rolled writer (`trace.cr` stops
+at 1023), because the invariant is about the pair, not about one module.
 
 Silent until it is not: a short line fits, and the buffer is only wrong for
 inputs nobody has printed yet. That is what makes it a gate.
@@ -33,7 +32,7 @@ ALIAS = re.compile(r"\b(\w+)\s*=\s*(\w+)\.to_unsafe\b")
 SHARED_WRITE = re.compile(r"RawOut\.(?:append\w*|flush)\(\s*(\w+)(?:\.to_unsafe)?\s*,")
 LOCAL_WRITE = re.compile(r"(?<![\w.])append\w*\(\s*(\w+)(?:\.to_unsafe)?\s*,")
 LOCAL_WRITER = re.compile(r"def self\.append\w*\(\s*\w+\s*:\s*UInt8\*")
-# `while i < n && len < 300` and `return len if len + n > 1023`: the two shapes
+# `while i < n && len < LIMIT` and `return len if len + n > 1023`: the two shapes
 # a hand-rolled writer states its bound in.
 LOCAL_BOUND = re.compile(r"len\s*<\s*(\d+)|len\s*\+\s*\w+\s*>\s*(\d+)")
 LIMIT_DECL = re.compile(r"^\s*LIMIT\s*=\s*(\d+)\s*$", re.M)
