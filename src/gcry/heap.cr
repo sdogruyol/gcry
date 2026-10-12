@@ -235,6 +235,26 @@ module Gcry
     # the STW × TLAB property test. This one is contended only by other
     # list mutations. Order is list → index; nothing goes the other way.
     @chunk_list_lock = Crystal::SpinLock.new
+    # The chunk `map_chunk` is publishing: on `@chunks` and not yet in the
+    # index. A stop can suspend the mapper between the two — inside
+    # `index_insert` most often, where a fresh radix leaf is mapped and first
+    # touched — and the chunk is then listed and unindexed for the whole
+    # collection. That is harmless: nothing in it is live yet, a bitmap chunk
+    # is born CURSOR and a large one with an all-zero header
+    # (`sweep_large_one`), and every unlink waits for `@chunk_list_lock`, which
+    # the mapper holds. `audit_chunk_list` excuses exactly this chunk, and
+    # only while its publisher (`@chunk_publisher`, the `Thread`'s address) is
+    # a thread the stop suspended; it counts what it excuses. In
+    # `make chunk-list-drift`'s window-free arm the idle thread's birth chunk
+    # was caught there in 38 of 1000 children, every one stopped inside
+    # `index_insert_locked` before its radix entries were written. A
+    # publisher the stop left running — an exempt thread, or one not on
+    # Crystal's list — is mutating the index under the collector's unlocked
+    # reads, and its chunk stays counted.
+    @chunk_publishing = Pointer(ChunkHeader).null
+    @chunk_publisher = 0_u64
+    # Listed-and-unindexed chunks `audit_chunk_list` excused as in flight.
+    getter chunk_list_publishing_excused : UInt64 = 0_u64
     @post_stw_mutex = uninitialized Gcry::OS::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
@@ -2536,7 +2556,6 @@ module Gcry
     # major freed instead of mapping and faulting in fresh ones (Linux).
     property large_recycle : Bool = false
     getter large_recycles : UInt64 = 0_u64
-    getter large_recycled_bytes : UInt64 = 0_u64
     # Resident bytes at the front of the mapping the last
     # `recycle_large_mapping` returned.
     @recycled_from = 0_u64
@@ -2672,7 +2691,6 @@ module Gcry
         @recycled_from = kept
         @recycled_written = clear ? large_written_bytes(dst, kept) : kept
         @large_recycles &+= 1
-        @large_recycled_bytes &+= kept
         dst
       {% else %}
         Pointer(Void).null
@@ -3373,6 +3391,11 @@ module Gcry
         # and stops losing. Free beside an mmap.
         @chunks_mapped &+= 1
         chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags, data_offset, bitmap_words)
+        # In flight from here until the index has it, and whose
+        # (`@chunk_publishing`). The publisher first: the release store
+        # publishes it with the chunk.
+        @chunk_publisher = (t = Thread.current?) ? t.object_id : 0_u64
+        Atomic::Ops.store(pointerof(@chunk_publishing), chunk, :release, true)
         # Release store: the in-STW sweep and `each_chunk` walk this list
         # unlocked, and a mutator can be suspended between these two stores.
         # Frozen in SOURCE order the new chunk is merely invisible (it holds
@@ -3382,6 +3405,9 @@ module Gcry
         # `next`. Same discipline as `index_insert_locked`'s count store.
         Atomic::Ops.store(pointerof(@chunks), chunk, :release, true)
         index_insert(chunk)
+        # Release: a reader that sees null sees the index entry with it.
+        Atomic::Ops.store(pointerof(@chunk_publishing), Pointer(ChunkHeader).null, :release, true)
+        @chunk_publisher = 0_u64
         true
       end
       unless published

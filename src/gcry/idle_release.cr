@@ -29,11 +29,12 @@
 #   * it has no scheduler or event loop, so its collections leave finalizers
 #     queued for the next ordinary collection (`Heap#idle_collect`);
 #   * it sleeps in `nanosleep`, not Crystal's `sleep`, for the same reason;
-#   * on Linux it is exempt from the suspend signal, like the Monitor: a stop
-#     does not wait for a thread that is asleep. Between collections it only
-#     reads (`Heap#allocation_activity`), and it waits out another thread's
-#     stop before it collects. Darwin suspends it with the rest (Mach
-#     `thread_suspend`, no signal round trip to save);
+#   * on Linux it is exempt from the suspend signal once it is born, like the
+#     Monitor: a stop does not wait for a thread that is asleep. From then on
+#     it only reads between collections (`Heap#allocation_activity`), and it
+#     waits out another thread's stop before it collects. Its birth is a
+#     mutator's and is stopped like one (`signal_exempt?`). Darwin suspends
+#     it with the rest (Mach `thread_suspend`, no signal round trip to save);
 #   * its stack **is** scanned, like every thread's. 0.27.0 skipped it on the
 #     grounds that it held no GC reference, and that was false: its own
 #     thread-entry frames are on it, and Darwin CI (run `35995083083`) freed a
@@ -80,6 +81,22 @@ module Gcry
       @@hold_masked.get
     end
 
+    # Research only, for `process_spec/regression/65_idle_birth_stopped_spec.cr`:
+    # hold the thread in its birth, before it is exempt from the suspend
+    # signal, counting as it spins. A stop that leaves it running sees the
+    # count move; one that stops it sees it stand still.
+    class_property? test_birth_hold : Bool = false
+    @@birth_spins = Atomic(UInt64).new(0_u64)
+    @@birth_released = Atomic(Int32).new(0)
+
+    def self.birth_spins : UInt64
+      @@birth_spins.get
+    end
+
+    def self.release_birth_hold : Nil
+      @@birth_released.set(1)
+    end
+
     # Is *fiber* the idle collector's? It runs only its thread's main fiber.
     # For the research skip below only.
     def self.fiber?(fiber : Fiber) : Bool
@@ -114,6 +131,19 @@ module Gcry
       end
     end
 
+    # The idle collector once its birth is over, stored by the thread itself
+    # (`loop_forever`). Until then it is a mutator to every stop.
+    @@exempt : Thread? = nil
+
+    # Does a stop leave *thread* unsignalled? `Heap#stw_signal_exempt?`.
+    def self.signal_exempt?(thread : Thread) : Bool
+      if t = @@exempt
+        t.same?(thread)
+      else
+        false
+      end
+    end
+
     # A forked child has only the thread that called `fork`; start again at
     # its first collection. The parent's `Thread` leaves Crystal's list with
     # every other dead one (`Platform.unlist_threads_after_fork`): forgetting
@@ -121,6 +151,7 @@ module Gcry
     # child's first stop waited on it for good.
     def self.after_fork_child : Nil
       @@thread = nil
+      @@exempt = nil
       @@started = false
     end
 
@@ -191,6 +222,28 @@ module Gcry
         @@hold_masked.set(block.address ^ HOLD_KEY)
         block = Pointer(UInt64).null
       end
+      while @@test_birth_hold && @@birth_released.get == 0
+        @@birth_spins.add(1)
+      end
+      # Exempt from the suspend signal from here on, and not before: until now
+      # this thread was a mutator. `Thread#start` allocates its main `Fiber`
+      # after pushing it onto Crystal's list, and an exempt thread allocating
+      # runs on through a stop, because `allocate`'s
+      # `wait_if_world_stopped_other_thread` is a check and not a handshake.
+      # Born at the end of one collection, the thread raced the next: the
+      # window-free arm of `make chunk-list-drift` found its new chunk listed
+      # and not yet indexed in 9 of 200 children and 0 of 300 with the thread
+      # off, and 79 of 100 with a 200 µs hold between the two stores — while
+      # the collector read the index unlocked.
+      #
+      # Under `Thread.lock`, which a stop holds from its first
+      # `stw_signal_exempt?` to its last resume, so every test in one stop gets
+      # the same answer: a thread signalled as a mutator is waited for and
+      # resumed as one. Nothing else is held here, so a stop that has the lock
+      # suspends this thread in the wait like any other mutator.
+      Thread.lock
+      @@exempt = Thread.current
+      Thread.unlock
       loop do
         scrub_dead_stack
         @@parked_sp.set(Roots.hardware_stack_pointer.address)

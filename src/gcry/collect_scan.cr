@@ -535,8 +535,36 @@ module Gcry
       end
 
       list_only = 0_u64
+      # A chunk whose mapper this stop suspended between `map_chunk`'s list
+      # publish and its index insert (`@chunk_publishing`) is in flight, not
+      # divergent: excused and counted, and no other chunk is. A publisher the
+      # stop left running — exempt from the signal, the collector itself, or
+      # not on Crystal's list at all — is inserting under the collector's
+      # unlocked index reads, and its chunk stays in `list_only`. Read once,
+      # with the world stopped.
+      publishing = Atomic::Ops.load(pointerof(@chunk_publishing), :acquire, true)
+      unless publishing.null?
+        publisher = @chunk_publisher
+        suspended = false
+        current = Thread.current
+        Thread.unsafe_each do |thread|
+          next unless thread.object_id == publisher
+          next if thread == current
+          {% unless flag?(:darwin) || flag?(:win32) %}
+            next if stw_signal_exempt?(thread)
+            next if suspend_abandoned?(thread.to_unsafe.unsafe_as(UInt64))
+          {% end %}
+          suspended = true
+        end
+        publishing = Pointer(ChunkHeader).null unless suspended
+      end
       each_chunk do |l|
-        list_only &+= 1 if chunk_containing(ChunkHeader.data_start(l).address).nil?
+        next unless chunk_containing(ChunkHeader.data_start(l).address).nil?
+        if l == publishing
+          @chunk_list_publishing_excused &+= 1
+        else
+          list_only &+= 1
+        end
       end
 
       @chunk_index_only &+= index_only

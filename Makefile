@@ -1838,7 +1838,11 @@ mark-clear-index: $(BIN)
 # flight, or its chunk goes back on the list in `kept` and is unmapped there —
 # the tree before faults in the first collection (`bitmap_pool_candidate?`),
 # this one declines 300 of 300 trims and ends with the list and the index
-# agreeing and the cache empty. ~10-35 s.
+# agreeing and the cache empty. A chunk whose mapper the stop suspended between
+# `map_chunk`'s list publish and its index insert is in flight, not divergent:
+# the audit excuses exactly that one and the arm prints how many (the idle
+# thread's birth chunk, 38 of 1000 children before it was excused); a mapper
+# the stop left running still counts. ~10-35 s.
 chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift

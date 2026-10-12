@@ -111,9 +111,12 @@ module Gcry
     # Linux ExecutionContext (`GCRY_STRESS` hang: main=`futex_do_wait`,
     # SYSMON=`sigsuspend`):
     # - Never call `Thread#wait_suspended` (`yield_current` parks on SYSMON).
-    # - Do not SIGPWR-suspend the Monitor (`SYSMON`): resume races leave it in
-    #   `sigsuspend` forever. Instead mark `@world_stopped` and make
-    #   allocate/lock_read spin until start_world (cooperative STW).
+    # - Do not SIGPWR-suspend the Monitor (`SYSMON`) once it runs its loop:
+    #   resume races leave it in `sigsuspend` forever. Instead mark
+    #   `@world_stopped` and make allocate/lock_read spin until start_world
+    #   (cooperative STW). During its birth, which allocates its main fiber
+    #   and can map a chunk, it is suspended like any thread
+    #   (`MonitorGate.signal_exempt?`); so is the idle collector's.
     # - Still signal-suspend other mutator threads; busy-wait `@suspended`.
     # - Hold `Thread.lock` for stop→start (Crystal list-mutex protocol).
     #
@@ -826,19 +829,22 @@ module Gcry
       RawOut.flush(p, len)
     end
 
-    # ExecutionContext Monitor — signal-exempt; cooperates via @world_stopped.
-    # Use `@name` (not `#name`) to avoid getter side effects under `-Dgc_none`.
+    # ExecutionContext Monitor — signal-exempt once it is in its loop
+    # (`MonitorGate.signal_exempt?`); cooperates via @world_stopped and the
+    # gate from then on.
     #
     # The idle collector too (src/gcry/idle_release.cr). Suspending it cost
     # every stop a signal round trip for a thread that is asleep: Kemal
     # `/json` pause p50 +19% (t=+6.8) with the knob on. It qualifies for the
-    # same cooperative protocol more strictly than the Monitor does — between
-    # collections it only reads (`Heap#allocation_activity`), and it waits out
-    # a stop before it collects (`Heap#idle_collect`).
+    # same cooperative protocol more strictly than the Monitor does — once
+    # born it only reads between collections (`Heap#allocation_activity`), and
+    # it waits out a stop before it collects (`Heap#idle_collect`).
+    #
+    # Neither is exempt during its birth: `Thread#start` allocates the
+    # thread's main `Fiber`, so until each has stored itself as exempt it is
+    # suspended like any mutator.
     private def stw_signal_exempt?(thread : Thread) : Bool
-      return true if IdleRelease.thread?(thread)
-      name = thread.@name
-      !name.nil? && name == "SYSMON"
+      IdleRelease.signal_exempt?(thread) || MonitorGate.signal_exempt?(thread)
     end
 
     # `thread_event_hook` once for each thread this stop suspends, or resumes:

@@ -1,8 +1,9 @@
 # Keep the EC Monitor out of the stopped world.
 #
-# `Heap#stop_world` does not signal-suspend the Monitor (SYSMON) — the recorded
-# reason is that resume races left it in `sigsuspend` forever — and instead
-# assumed it would cooperate by blocking in `allocate` / `lock_read`. Measured,
+# `Heap#stop_world` does not signal-suspend the Monitor (SYSMON) once it is in
+# its loop (`MonitorGate.settle`; its birth is suspended like any thread's) —
+# the recorded reason is that resume races left it in `sigsuspend` forever — and
+# instead assumed it would cooperate by blocking in `allocate` / `lock_read`. Measured,
 # it does not: through a 4 s stop the Monitor woke ~100 times a second, and it ran
 # `StackPool#collect` — `Crystal::System::Fiber.free_stack`, i.e. munmap — *inside*
 # the stop, while the collector was in its thread-stacks phase.
@@ -63,6 +64,43 @@ module Gcry
 
     def self.monitor_blocks : UInt64
       @@monitor_blocks
+    end
+
+    # The Monitor's thread once it is in its loop, stored by the thread itself
+    # (`settle`). Until then it is a mutator to every stop.
+    @@exempt : Thread? = nil
+
+    # Does a stop leave *thread* unsignalled? `Heap#stw_signal_exempt?`.
+    def self.signal_exempt?(thread : Thread) : Bool
+      if t = @@exempt
+        t.same?(thread)
+      else
+        false
+      end
+    end
+
+    # From the top of `Monitor#run_loop`, on the Monitor's thread: exempt from
+    # the suspend signal from here on, and not before. Its birth is a
+    # mutator's — `Thread#start` allocates the thread's main `Fiber` after
+    # pushing it onto Crystal's list — and nothing gates it: an exempt thread
+    # allocating runs on through a stop, because `allocate`'s
+    # `wait_if_world_stopped_other_thread` is a check and not a handshake.
+    # The first collection of a program can land on that birth: in the
+    # window-free child of `make chunk-list-drift` the Monitor inserted a
+    # chunk into the index during a stop in 3 of 1000 runs, and in 10 of 100
+    # with a 200 µs hold between `map_chunk`'s two stores, while the
+    # collector read the index unlocked.
+    #
+    # Under `Thread.lock`, which a stop holds from its first
+    # `stw_signal_exempt?` to its last resume, so every test in one stop gets
+    # the same answer. Nothing else is held here, and the birth before it
+    # holds nothing a stop waits for: the thread-list and fiber-list mutexes
+    # its `Thread#start` takes are taken by the stop *before* it signals, so
+    # the thread is never suspended inside them.
+    def self.settle : Nil
+      Thread.lock
+      @@exempt = Thread.current
+      Thread.unlock
     end
 
     # Collector side. Call *before* touching anything the Monitor could be
@@ -221,14 +259,21 @@ module Gcry
   end
 end
 
-# The three things `Monitor#run_loop` calls every ~10 ms. Each is wrapped rather
-# than the loop itself: `run_loop` never returns, so there is no point at which a
-# wrapper around it could check anything. No compiler fork — reopening the class
-# and calling `previous_def` is ordinary Crystal, verified to take effect.
+# The three things `Monitor#run_loop` calls every ~10 ms are each wrapped in the
+# gate: `run_loop` never returns, so a wrapper around the loop has no point at
+# which to check anything per pass. The loop itself gets a prologue only, which
+# ends the thread's birth as far as a stop is concerned (`MonitorGate.settle`).
+# No compiler fork — reopening the class and calling `previous_def` is ordinary
+# Crystal, verified to take effect.
 # Only for the process GC: a library heap never stops the world, so there is
 # nothing to shut the Monitor out of and no reason to reach into the stdlib.
 {% if flag?(:gc_none) && @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
   class Fiber::ExecutionContext::Monitor
+    private def run_loop : Nil
+      Gcry::MonitorGate.settle
+      previous_def
+    end
+
     private def transfer_schedulers_blocked_on_syscall
       Gcry::MonitorGate.enter(Gcry::MonitorGate::SITE_TRANSFER)
       begin
