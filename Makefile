@@ -898,7 +898,8 @@ raw-buf-check:
 # bitmap chunk, and the bitmap allocator is the default on both layouts. So
 # three cases each — warns headerless, warns on the header layout's default,
 # silent on `GCRY_BITMAP_ALLOC=0` where the walk runs (released 72 MB / 104 MB
-# on a sparse heap, 2026-09-23, against 0 on both defaults).
+# on a sparse heap, 2026-09-23, against 0 on both defaults). `GCRY_ALLOC_BATCH`
+# is the same shape: it batches freelist pops, so the bitmap allocator skips it.
 .PHONY: ignored-knob-warnings
 ignored-knob-warnings: $(BIN)
 	@$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/knob_hl --error-trace
@@ -936,6 +937,15 @@ ignored-knob-warnings: $(BIN)
 	if env GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "is ignored"; then \
 	  echo "  FAIL GCRY_PAGE_DONTNEED=1 warned beside GCRY_PAGE_RELEASE_BITMAP_WALK=1, which walks bitmap chunks"; fail=1; \
 	else echo "  ok   GCRY_PAGE_DONTNEED=1 is silent beside the research bitmap walk"; fi; \
+	if env GCRY_ALLOC_BATCH=8 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "GCRY_ALLOC_BATCH is ignored on the headerless layout"; then \
+	  echo "  ok   GCRY_ALLOC_BATCH=8 warns on the headerless default"; \
+	else echo "  FAIL GCRY_ALLOC_BATCH=8 is silently ignored on the headerless default"; fail=1; fi; \
+	if env GCRY_ALLOC_BATCH=8 $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "GCRY_ALLOC_BATCH is ignored on the bitmap allocator"; then \
+	  echo "  ok   GCRY_ALLOC_BATCH=8 warns on the header layout's bitmap default"; \
+	else echo "  FAIL GCRY_ALLOC_BATCH=8 is silently ignored on the header layout's bitmap default"; fail=1; fi; \
+	if env GCRY_ALLOC_BATCH=8 GCRY_BITMAP_ALLOC=0 $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "is ignored"; then \
+	  echo "  FAIL GCRY_ALLOC_BATCH=8 warned on the freelist, which batches"; fail=1; \
+	else echo "  ok   GCRY_ALLOC_BATCH=8 is silent on -Dgcry_block_headers GCRY_BITMAP_ALLOC=0"; fi; \
 	[ $$fail -eq 0 ] || exit 1
 	@echo "ok — every knob the compile default ignores says so, and only there"
 

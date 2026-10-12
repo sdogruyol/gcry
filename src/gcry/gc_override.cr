@@ -53,7 +53,8 @@ module GC
     # Process GC majors by default. Nursery needs a sound old→young remembered
     # set: Linux soft-dirty is probed later, but has false-negatives under WSL
     # release HTTP (Kemal Hash key UAF / SEGV at 0x0..0x11). Default OFF on all
-    # platforms; opt in with GCRY_NURSERY=1 once barriers are measured clean.
+    # platforms; opt in with GCRY_NURSERY=<bytes> (`-Dgcry_block_headers` only)
+    # once barriers are measured clean.
     heap.nursery_enabled = false
     heap.nursery_threshold = UInt64::MAX
     # Incremental majors likewise depend on the page-dirty barrier between
@@ -61,7 +62,7 @@ module GC
     # opt in via GCRY_INCREMENTAL=1.
     heap.incremental_auto = false
     # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
-    # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
+    # munmap excess). GCRY_KEEP_CHUNKS=1 forces off.
     heap.release_empty_chunks = true
     # Keep recently-freed chunks as dormant (MADV_DONTNEED-style page release)
     # up to 512 KiB on Darwin (macOS MADV_FREE_REUSABLE drops RSS efficiently
@@ -498,15 +499,14 @@ module GC
       heap.heap_counters_atomic_pinned = true
     end
 
-    if env_flag_one?("GCRY_DISABLE_NURSERY")
-      heap.nursery_enabled = false
-      heap.nursery_threshold = UInt64::MAX
-    elsif (nursery = env_u64("GCRY_NURSERY")) && {% if flag?(:gcry_block_headers) %} true {% else %} false {% end %}
+    # `GCRY_NURSERY=0` means unset (nursery off), as on the headerless branch
+    # below: `0` is truthy in Crystal, so testing only for presence enabled
+    # the barrier-less nursery for a value that asks for none.
+    if (nursery = env_u64("GCRY_NURSERY")) && nursery != 0 && {% if flag?(:gcry_block_headers) %} true {% else %} false {% end %}
       # (headerless, the default layout: GCRY_NURSERY is ignored — see Heap#nursery_enabled=)
       # Opt-in: nursery without barriers is expensive (old→young full scan).
       heap.nursery_enabled = true
-      heap.nursery_threshold = nursery unless nursery == 0
-      heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
+      heap.nursery_threshold = nursery
     end
 
     if env_flag_one?("GCRY_DISABLE_ADAPTIVE_NURSERY")
@@ -538,38 +538,23 @@ module GC
       heap.incremental_auto = true
     end
 
-    if env_flag_one?("GCRY_DISABLE_INCREMENTAL") || env_flag_one?("GCRY_NO_INCREMENTAL")
-      heap.incremental_auto = false
-    end
-
     if work = env_u64("GCRY_INCREMENTAL_WORK")
       heap.incremental_work = work.to_i32 if work > 0 && work <= Int32::MAX
     end
 
     # Adaptive empty-chunk release is process default (dormant + munmap excess).
-    # GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
+    # GCRY_KEEP_CHUNKS=1 forces off.
     # Parallel: reclaim off by default.
     #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded).
     #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy; thr↓).
-    #   GCRY_PARALLEL_RELEASE=1 — munmap excess (UNSUPPORTED; can hang).
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
-    elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
-      heap.release_empty_chunks = true
     end
     if env_flag_one?("GCRY_PARALLEL_DORMANT") || env_flag_one?("GCRY_PARALLEL_DORMANT_ALL")
       heap.parallel_empty_chunk_dormant = true
     end
     if env_flag_one?("GCRY_PARALLEL_DORMANT_ALL")
       heap.parallel_empty_chunk_dormant_all = true
-    end
-    if env_flag_one?("GCRY_PARALLEL_RELEASE")
-      warn_unsupported_env(
-        "gcry: WARNING: GCRY_PARALLEL_RELEASE=1 is unsupported (can hang / force in-STW sweep). " \
-        "Supported Parallel RSS opt-in is GCRY_PARALLEL_DORMANT=1. See docs/POLICY.md\n"
-      )
-      heap.parallel_empty_chunk_munmap = true
-      heap.parallel_empty_chunk_dormant = true
     end
 
     if env_flag_one?("GCRY_DISABLE_LAZY_SWEEP")
@@ -652,12 +637,9 @@ module GC
       # Tight small-heap growth: prefer newest-chunk freelist + sparse
       # GC-before-grow. Acik med3 ~103% thr @ ~0.92× RSS (vs ~1.56× control).
       # Opt-in until Kemal reconfirm; then consider Linux process default.
-      #   GCRY_TIGHT_GROW=1 / GCRY_DISABLE_TIGHT_GROW=1 / GCRY_DISABLE_TIGHT_GROW_GC=1
+      #   GCRY_TIGHT_GROW=1 / GCRY_DISABLE_TIGHT_GROW_GC=1
       if env_flag_one?("GCRY_TIGHT_GROW")
         heap.tight_grow = true
-      end
-      if env_flag_one?("GCRY_DISABLE_TIGHT_GROW")
-        heap.tight_grow = false
       end
       if env_flag_one?("GCRY_DISABLE_TIGHT_GROW_GC")
         heap.tight_grow_gc = false
@@ -665,7 +647,6 @@ module GC
       #
       # Mostly-empty (HOLED-less) is a separate research knob:
       #   GCRY_MOSTLY_EMPTY=1           — MADV_FREE free pages in ≤25%-live chunks
-      #   GCRY_MOSTLY_EMPTY_MODE=dontneed — unlink free-only runs + DONTNEED (churn risk)
       #   GCRY_MOSTLY_EMPTY_PCT / GCRY_MOSTLY_EMPTY_BUDGET
       # Ignored when PAGE_DONTNEED is on (HOLED owns the path).
       if env_flag_one?("GCRY_MOSTLY_EMPTY") && !heap.madvise_free_pages
@@ -679,21 +660,6 @@ module GC
         end
         if budget = env_u64("GCRY_MOSTLY_EMPTY_BUDGET")
           heap.mostly_empty_budget = budget
-        end
-        # Gcry::OS.getenv only — ENV[] allocates and can SEGV during GC.init.
-        mode = Gcry::OS.getenv("GCRY_MOSTLY_EMPTY_MODE")
-        unless mode.null?
-          # "dontneed" (case-sensitive ASCII); any other value keeps MADV_FREE.
-          # Measured REJECT on acik (COLLECT_HANG 2/3) — research only.
-          heap.mostly_empty_dontneed =
-            mode[0] == 'd'.ord.to_u8 && mode[1] == 'o'.ord.to_u8 &&
-              mode[2] == 'n'.ord.to_u8 && mode[3] == 't'.ord.to_u8 &&
-              mode[4] == 'n'.ord.to_u8 && mode[5] == 'e'.ord.to_u8 &&
-              mode[6] == 'e'.ord.to_u8 && mode[7] == 'd'.ord.to_u8 &&
-              mode[8] == 0
-          if heap.mostly_empty_dontneed
-            warn_unsupported_env("gcry: GCRY_MOSTLY_EMPTY_MODE=dontneed is research-only (COLLECT_HANG risk); not a product default\n")
-          end
         end
       end
     {% end %}
@@ -866,9 +832,28 @@ module GC
     heap.tlab_quiesce = false if env_flag_zero?("GCRY_TLAB_QUIESCE")
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
     # Amortizes lock vs lazy sweep. Clamped 1..64; ignored when TLAB is on.
+    # The batched pop is freelist-only (`alloc_old_small` skips it whenever
+    # `@bitmap_alloc`), so on either layout's default it changes nothing —
+    # warn, as for the free-page knobs above. `make ignored-knob-warnings`.
     if ab = env_u64("GCRY_ALLOC_BATCH")
       if ab >= 1 && ab <= 64
         heap.alloc_batch = ab.to_i32
+        if heap.bitmap_alloc?
+          {% if flag?(:gcry_block_headers) %}
+            warn_unsupported_env(
+              "gcry: GCRY_ALLOC_BATCH is ignored on the bitmap allocator (the default here " \
+              "too): it batches freelist pops, and this heap has no freelist. " \
+              "GCRY_BITMAP_ALLOC=0 selects one (docs/HARDENING.md)\n"
+            )
+          {% else %}
+            warn_unsupported_env(
+              "gcry: GCRY_ALLOC_BATCH is ignored on the headerless layout (the compile " \
+              "default): it batches freelist pops, and a headerless heap has no freelist. " \
+              "Rebuild with -Dgcry_block_headers and set GCRY_BITMAP_ALLOC=0 to run it " \
+              "(docs/HARDENING.md)\n"
+            )
+          {% end %}
+        end
       end
     end
     # Parallel mark is on by default since 2026-10-05, serial below 32 MiB
@@ -1430,7 +1415,6 @@ module GC
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.
-    heap.mostly_empty_unlink = true if env_flag_one?("GCRY_MOSTLY_EMPTY_UNLINK")
     # Research only: an unlocked walk of the runtime thread list before
     # `Thread.lock`. See src/gcry/thread_list_tripwire.cr for why it is off by
     # default.
@@ -1502,12 +1486,6 @@ module GC
       # Escape: GCRY_DISABLE_FIBER_FP_FILL=1 → leaf/maps only (no FP-frame fill).
       if env_flag_one?("GCRY_DISABLE_FIBER_FP_FILL")
         heap.precise_stack_fiber_fp_fill = false
-      end
-      # Research: GCRY_FIBER_FP_FILL_MISS_ONLY=1 → skip fill on map-hit frames.
-      # acik exclusivef UAF with this — map hit ≠ complete live set.
-      if env_flag_one?("GCRY_FIBER_FP_FILL_MISS_ONLY")
-        heap.precise_stack_fiber_fp_fill_miss_only = true
-        warn_unsupported_env("gcry: GCRY_FIBER_FP_FILL_MISS_ONLY=1 — research; UAF risk\n")
       end
       warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked full scan off; research\n")
     end

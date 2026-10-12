@@ -757,11 +757,6 @@ module Gcry
       scan_range_for_barrier_pointers(low, high, true)
     end
 
-    # Legacy name kept for destroy / docs; delegates to the page-barrier layer.
-    private def arm_soft_dirty_after_collect : Nil
-      arm_page_barrier_after_collect
-    end
-
     # Confirm the kernel sets soft-dirty after a store (broken on some WSL builds).
     # Uses a dedicated anonymous page — never touch the managed heap.
     protected def soft_dirty_tracks_writes? : Bool

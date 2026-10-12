@@ -58,7 +58,7 @@ Sticky newest-chunk freelist + sparse GC-before-grow (no HOLED / DONTNEED).
 | 9950X tip + `TIGHT_GROW` | `…/2026-08-04-acik-tight-grow-v2-med3/` | **~103%** | **~0.92×** |
 | 9950X tip control (same day) | `…/acik-mostly-empty-control-med3/` | **~100%** | **~1.56×** |
 
-Escape: `GCRY_DISABLE_TIGHT_GROW=1`, `GCRY_DISABLE_TIGHT_GROW_GC=1`. Prefer this
+Escape: unset `GCRY_TIGHT_GROW`, or keep it with `GCRY_DISABLE_TIGHT_GROW_GC=1`. Prefer this
 for fat HTTP on Linux tip when RSS under Boehm matters; keep default path for
 Kemal-class thr.
 

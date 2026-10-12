@@ -166,15 +166,11 @@ module Gcry
     # `GCRY_DYING_GREG_DUMP=1`.
     property dying_greg_dump : Bool = false
 
-    # Suspended threads that reported no registers at the stop the audit ran in.
-    getter greg_missing_threads : UInt64 = 0_u64
-
     private def report_dying_type_block(addr : UInt64, size : UInt64, watched : UInt32) : Nil
       greg_words = 0_u64
       in_registers = false
       threads_listed = 0_u64
       threads_with_gregs = 0_u64
-      current = Thread.current
       Thread.unsafe_each do |thread|
         threads_listed &+= 1
         before = greg_words
@@ -184,13 +180,6 @@ module Gcry
         end
         if greg_words > before
           threads_with_gregs &+= 1
-        elsif thread != current
-          # A suspended thread that contributed no registers is a hole in the
-          # root set that no stack scan closes: a value the compiler kept only
-          # in a callee-saved register of that thread is invisible. The
-          # collecting thread is expected here — it has no ucontext — so it is
-          # not counted against the total.
-          @greg_missing_threads &+= 1
         end
       end
       # `GCRY_DYING_GREG_DUMP=1`: print every captured register word for every

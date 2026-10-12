@@ -508,11 +508,6 @@ module Gcry
       bitmap_alloc || chunk_radix_from_env
     end
 
-    # `GCRY_RADIX_THP=1`. Research/A-B only; see `chunk_radix.cr`.
-    def self.radix_thp_from_env : Bool
-      env_is_one?("GCRY_RADIX_THP")
-    end
-
     private def self.env_is_one?(name : String) : Bool
       raw = Gcry::OS.getenv(name)
       return false if raw.null?

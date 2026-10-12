@@ -364,6 +364,7 @@ module Gcry
     end
 
     # "/proc/self/task/<tid><suffix>\0", built by hand: interpolation allocates.
+    # Also used by linux_proc_sp.cr (`/syscall`) from STW and audit paths.
     private def self.build_task_path(dst : UInt8*, tid : Int32, suffix : String) : Int32
       prefix = "/proc/self/task/"
       i = 0

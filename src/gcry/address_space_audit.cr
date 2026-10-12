@@ -49,8 +49,6 @@ module Gcry
 
     getter address_space_audits : UInt64 = 0_u64
     getter address_space_hits : UInt64 = 0_u64
-    # Audits that walked the whole space and found the value in no region.
-    getter address_space_absent : UInt64 = 0_u64
 
     # Stop after this much. A process with a gigabyte resident would otherwise
     # hold the world stopped for the length of a gigabyte memcmp.
@@ -147,7 +145,6 @@ module Gcry
         end
       {% end %}
       @address_space_hits &+= base_hits
-      @address_space_absent &+= 1 if walked && base_hits == 0
 
       buf = uninitialized UInt8[512]
       len = 0

@@ -400,8 +400,7 @@ Defaults tuned for process GC. Change after you measure:
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks (freelist-era knob: ~95% `/json` thr, ~3x RSS on the freelist) |
 | `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), floored at 8 MiB, capped at 64 MiB (`GCRY_THRESHOLD_MAX`) or a third of the bytes the mark scanned, and paced up to 3× while collections take more than a tenth of the mutator time (`GCRY_THRESHOLD_PACE`) |
 | `GCRY_THRESHOLD_PACE` | Most the adaptive threshold is paced up, % (default 300; 100 = off). Collection-bound phases get fewer majors (crystal-metric Primes −25%, JsonParsePure −22%, Binarytrees −9% wall, RSS under Boehm's); Kemal `/json` is not collection-bound and is unchanged |
-| `GCRY_AUTO_LAYOUTS=1` | Whole-program layout registration; no effect on the mark since 2026-10-04 |
-| `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
+| `GCRY_NURSERY=<bytes>` | Opt-in nursery with that minor threshold (e.g. `262144`; off by default, and unsound without a write barrier). Needs `-Dgcry_block_headers`; on the headerless default it warns and is ignored. `0` = off |
 | `GCRY_PARALLEL_MARK=N` | Mark workers (default `max(min(2, CPUs − 1), min(CPUs / 4 + 1, CPUs − 1, 8))` — two up to 7 CPUs, four at 12 — serial below 32 MiB live; `1` = serial) |
 | `GCRY_STRESS=1` | Collect every N allocs (debug) |
 
