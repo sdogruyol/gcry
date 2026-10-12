@@ -195,7 +195,7 @@ is under the noise floor. It licenses continuing; it is not a win.
       Wilcoxon, ANCOVA and DiD. Pause −3–4%.
 - [x] RSS +16–21% found, diagnosed as THP (2 MiB fault granularity, 160x the
       documented estimate), fixed with `MADV_NOHUGEPAGE` → +1.6%.
-      `GCRY_RADIX_THP=1` kept for the TLB A/B.
+      The `GCRY_RADIX_THP=1` arm of the TLB A/B below was removed once it answered.
 - [x] TLB A/B: does `MADV_NOHUGEPAGE` cost any of the mark win? **No** —
       pause per collection −1.40% with huge pages (t=−1.30, noise), RSS +3.27%
       (t=+12.45), on a 78%-GC workload, n=12 interleaved (2026-09-23). It could
@@ -693,7 +693,7 @@ away:
 
 ## PR #34 performance follow-through (2026-09-05–06)
 
-Plan: [PERFORMANCE_PLAN_PR34.md](../docs/PERFORMANCE_PLAN_PR34.md).
+Plan: `docs/PERFORMANCE_PLAN_PR34.md` (removed before 0.35.0; see git history).
 All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
 
 - [x] Measurement infrastructure: maintained runners/analyzer, committed alloc_ns,

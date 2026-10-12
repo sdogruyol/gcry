@@ -220,19 +220,21 @@ module WindowFree
 end
 
 record FreeReport, freed : UInt64, declined : UInt64, list_only : UInt64,
-  index_only : UInt64, cached : UInt64
+  index_only : UInt64, cached : UInt64, in_flight : UInt64
 
 # The window-free child: whether it exited cleanly, and its last `free` line —
 # frees made in the window, trims that declined, chunks listed and not indexed
-# and the reverse (summed over the audits), and the large cache's bytes.
+# and the reverse (summed over the audits), the large cache's bytes, and the
+# listed chunks the audits excused as mid-publication
+# (`Heap#chunk_list_publishing_excused`).
 def run_free_child(self_path : String) : {Bool, FreeReport?}
   sink = IO::Memory.new
   status = Process.run(self_path, ["--child", "--window-free"], output: sink, error: Process::Redirect::Close)
   report = nil
   sink.to_s.each_line do |line|
     f = line.split
-    next unless f.size == 6 && f[0] == "free"
-    report = FreeReport.new(f[1].to_u64, f[2].to_u64, f[3].to_u64, f[4].to_u64, f[5].to_u64)
+    next unless f.size == 7 && f[0] == "free"
+    report = FreeReport.new(f[1].to_u64, f[2].to_u64, f[3].to_u64, f[4].to_u64, f[5].to_u64, f[6].to_u64)
   end
   {status.success?, report}
 end
@@ -356,6 +358,7 @@ unless ARGV.includes?("--child")
   if r = free_report
     puts "  freed #{r.freed} in the window, #{r.declined} trim(s) declined; listed and not indexed #{r.list_only}, " \
          "indexed and not listed #{r.index_only}; large cache #{r.cached} B at the end#{free_ok ? "" : " — the child crashed"}"
+    puts "  excused: #{r.in_flight} listed chunk(s) whose mapper the stop caught between the list and the index"
   else
     puts "  no report — the child crashed before its first"
   end
@@ -401,6 +404,17 @@ unless ARGV.includes?("--child")
       failures << "the window-free arm's trims declined #{r.declined} time(s) (want at least #{WINDOW_MIN_PREPENDS}): " +
                   "its frees no longer reach the rebuild's window, so its clean exit means nothing"
     end
+    # Not counted here: a chunk whose mapper the stop *suspended* between
+    # `map_chunk`'s list publish and its index insert — in flight, harmless,
+    # and excused by the audit (`r.in_flight`, printed above). A mapper the
+    # stop left running still counts: it is inserting into the index under
+    # the collector's unlocked reads. This arm's one CI red (job 114713693560)
+    # came from that: the idle thread, born at the end of the first
+    # collection, mapped its first chunk as the second stopped the world, and
+    # was exempt from the stop signal from birth (now only once born, as the
+    # Monitor is only once in its loop). Suspended there instead, it is caught
+    # mid-publication in 38 of 1000 children, every time inside
+    # `index_insert_locked` before the radix entries were written.
     if r.list_only > 0 || r.index_only > 0
       failures << "the window-free arm left the list and the index disagreeing " +
                   "(#{r.list_only} listed and not indexed, #{r.index_only} indexed and not listed)"
@@ -469,7 +483,7 @@ if ARGV.includes?("--window-free")
     WindowFree.arm(GC.malloc_atomic(WINDOW_FREE_BYTES))
     GC.collect
     next unless (i + 1) % free_every == 0
-    puts "free #{WindowFree.freed} #{heap.relink_trims_declined} #{heap.chunk_list_only} #{heap.chunk_index_only} #{heap.large_free_bytes}"
+    puts "free #{WindowFree.freed} #{heap.relink_trims_declined} #{heap.chunk_list_only} #{heap.chunk_index_only} #{heap.large_free_bytes} #{heap.chunk_list_publishing_excused}"
     STDOUT.flush
   end
   exit 0

@@ -4,10 +4,10 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-**Release state.** Latest release **v0.26.0** (2026-09-15) — the headerless
-layout as the compile default, plus the main-thread TLS roots on all three
-platforms. The tip is the next candidate; `CHANGELOG.md`'s `[Unreleased]`
-section is what it holds.
+**Release state.** Latest release **v0.34.0** (2026-10-04). The tip is the
+next candidate; `CHANGELOG.md`'s `[Unreleased]` section is what it holds
+(parallel mark on by default, Boehm's `GC_*` C ABI, the default-path
+fixes of PR #47 and #48).
 
 The headings below carry **no version numbers on purpose**. They are work
 buckets, and every attempt to number them has rotted: v0.20.0 through v0.25.0
@@ -1822,7 +1822,7 @@ kept finding the rest.
       (`bench/counters_ab.sh`, 12 paired trials, warm-up discarded) is ±10% on
       this host and cannot see a few percent at all, which is worth recording:
       end-to-end RPS is the wrong instrument for an allocation-path question.
-      Then the loss: `GCRY_INVARIANT_COUNTER_LOSS=1` states the `live_objects`
+      Then the loss: `Invariant.force_counters` states the `live_objects`
       invariant even of a heap that may lose updates — the measurement the
       scope correction retired — and counts instead of raising, with the
       checker's double read still skipping a counter that *moves* between the
@@ -3889,9 +3889,6 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       CPUs: 1.1 s → 41 s). The harness yield is gone;
       `process_spec/regression/50_collector_lock_fairness_spec.cr` failed 20
       of 20 before and passes on one and two CPUs after.
-- [ ] **Attribute the residual per-rep spread** — open below. Until it closes it
-      bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp
-      on post-GC RSS, at 12 reps.
 - [ ] **Decide the RSS budget for large live sets (2026-10-03).** The
       adaptive threshold's cap now follows a third of the bytes the mark
       scanned (Primes −17%, peak RSS unchanged everywhere). Primes is still
@@ -3931,23 +3928,27 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       decision above; ~5-10% of mutator time is left, with the allocation fast
       path faster than Boehm's in isolation
       (`bench/log/macos/2026-10-03-binarytrees-mutator/`).
-- [ ] **Per-collection mark cost is ~2.6× Boehm's on a large pointer heap
-      (2026-10-03).** Same heap, same collection: Primes' largest mark 470 ms
+- [ ] **Per-collection mark cost on a large pointer heap (2026-10-03,
+      refreshed 2026-10-06).** One marker now costs about Boehm's single
+      marker on JsonParsePure and 1.3× on Primes, after inline candidate
+      resolution and whole-payload prefetch (`bench/log/linux/2026-10-06-mark-cost/`),
+      and parallel mark is on by default (`docs/DEFAULT-GC-READINESS.md` M1).
+      The history: Primes' largest mark was 470 ms
       against 178 ms for Boehm with one marker (`GC_MARKERS=1`) after the
       heap-span prefilter. Boehm's default is a marker per CPU, which takes
-      that collection to 46 ms on 12 vCPUs. gcry's opt-in parallel mark made
+      that collection to 46 ms on 12 vCPUs. gcry's parallel mark made
       these marks slower at every worker count until three shared writes were
       removed (2026-10-04); with 4 workers it is now −21% to −62% Σ mark on
       4-vCPU runners (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
-      Not default yet. Measured as a default on 2026-10-05
+      It is the default since 2026-10-05
       (`bench/log/linux/2026-10-05-parallel-mark-default/`): two workers with
       the 32 MiB floor gain 8–16 points of Boehm's speed on the GC-heavy rows
       on x86-64, arm64 and macOS; four beat two only on arm64 and cost up to
-      2× the CPU elsewhere — a default would be `min(2, CPUs − 1)`.
-      `GCRY_PARALLEL_MARK_MIN_LIVE` (serial below a live-set
-      floor) and the helpers' idle backoff leave Kemal at its one-worker
-      throughput with four workers and a 32 MiB floor; a default would choose
-      the worker count from the CPUs and needs a campaign on it. A SIGPROF profile
+      2× the CPU elsewhere. The shipped count is `min(2, CPUs − 1)` up to 7
+      CPUs, then `CPUs / 4 + 1`, at most 8; `GCRY_PARALLEL_MARK_MIN_LIVE`
+      (serial below a live-set floor) and the helpers' idle backoff (since
+      replaced by parking) left Kemal at its one-worker throughput with four
+      workers. Before the 2026-10-06 inline resolution, a SIGPROF profile
       puts it in candidate resolution (radix → chunk header → occupancy and
       mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
       instruction-level trims have stopped paying on this host
@@ -4023,9 +4024,9 @@ SIGSEGV), the leaderboard, and per-release write-ups.
 
 Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 
-- [ ] **Compiler stack maps** — precise roots (Darwin acik ~18×; Linux tip ~1–1.6× via
-      finalizer + retain=0, freelist residual); spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md)
-- [ ] **Write barrier** — sound concurrent / incremental GC backend
+- [ ] **Compiler stack maps** and **write barrier** — tracked under "After that — lift the
+      ceiling" above (Darwin acik ~18×; Linux tip ~1–1.6× via finalizer + retain=0,
+      freelist residual; spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md))
 - [x] **Windows x86_64 + ARM64 process GC** — native backend + unit/process/sample CI
 - [x] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows x86_64 + ARM64
 - [x] **Benchmark regression alerts** — comparator gating against a measured baseline since 2026-09-13 (Linux; Darwin needs a baseline of its own)
@@ -4445,14 +4446,13 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `GCRY INVARIANT FAILURE … actual=1 reported=2` line in that log is
       `spec/invariant_spec.cr:211` planting a +1 drift and expecting the raise.
       `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
-- [ ] **Parallel mark** — multi-thread mark without throughput regression
+- [x] **Parallel mark** — on by default above 32 MiB live since 2026-10-05 (`CHANGELOG.md` `[Unreleased]`)
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
 - [x] **Benchmark leaderboard** — per-release transparent perf tracking in `bench/leaderboard.md`
       (2026-09-25: `bench/perf_leaderboard.py`, from CI's perf-smoke summaries, median and
       IQR over each release's development window; covers v0.26.0 on, older artifacts expired)
-- [ ] **gcry vs Boehm comparison page** — readable feature matrix (readable source,
-      Crystal debug, integrated metrics vs C library)
+- [x] **gcry vs Boehm comparison page** — [docs/COMPARISON.md](docs/COMPARISON.md)
 - [ ] **Release blog posts** — every minor release: what changed, perf numbers,
       one interesting engineering story
 - [ ] **"Made with gcry" wall** — list of production users (social proof snowball)

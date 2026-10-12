@@ -323,7 +323,7 @@ escapes). Soft soak **0/40**. Quiet cut:
 
 Same-host follow-ups often land **~83–88%** (Boehm noise). Stretch ~80%
 closed as accepted. **Unsupported** (stderr warn; not product):
-`GCRY_TLAB=1`, Parallel empty munmap (`GCRY_PARALLEL_RELEASE`). Hub:
+`GCRY_TLAB=1`, Parallel empty munmap (its `GCRY_PARALLEL_RELEASE` knob was removed before 0.35.0). Hub:
 `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`. Its TLAB numbers,
 and every TLAB number before 2026-09-27, were taken with all threads sharing
 one TLAB slot that no collection flushed

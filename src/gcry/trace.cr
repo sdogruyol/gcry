@@ -7,9 +7,10 @@
 # Under `-Dgc_none` we must avoid:
 #   - `require "json"` (JSON::Builder ↔ GC.malloc cycle)
 #   - writing through abstract `IO` (pulls OpenSSL::SSL::Socket into codegen)
-# Emit with Gcry::OS.write into a stack buffer + reentrancy guard.
+# Emit with `RawOut` into a stack buffer + reentrancy guard.
 
 require "./platform/os"
+require "./raw_out"
 
 module Gcry
   module Trace
@@ -159,108 +160,75 @@ module Gcry
       return if @@emitting
       @@emitting = true
       begin
-        buf = StaticArray(UInt8, 1024).new(0_u8)
-        len = 0
-        len = append_raw(buf.to_unsafe, len, "{\"event\":\"")
-        len = append_raw(buf.to_unsafe, len, event)
-        len = append_raw(buf.to_unsafe, len, "\",\"ts_ns\":")
-        len = append_i64_value(buf.to_unsafe, len, Clock.monotonic_ns.to_i64!)
+        # A `collect_end` line is 337 bytes with every number zero, 481 with
+        # nine-digit values and 680 at full width, so it does not fit
+        # `RawOut::LIMIT`. Each field first calls `room`, which writes out the
+        # line so far when the field might not fit: a long line leaves in
+        # several `write`s with the same bytes, and `@@emitting` stays set
+        # across them so no other event lands in between.
+        buf = uninitialized UInt8[RawOut::LIMIT]
+        len = RawOut.append(buf.to_unsafe, 0, "{\"event\":\"")
+        len = RawOut.append(buf.to_unsafe, len, event)
+        len = RawOut.append(buf.to_unsafe, len, "\",\"ts_ns\":")
+        ts = Clock.monotonic_ns.to_i64!
+        if ts < 0
+          len = RawOut.append(buf.to_unsafe, len, "-")
+          len = RawOut.append_u64(buf.to_unsafe, len, (-ts).to_u64)
+        else
+          len = RawOut.append_u64(buf.to_unsafe, len, ts.to_u64)
+        end
         len = yield buf.to_unsafe, len
-        len = append_raw(buf.to_unsafe, len, "}\n")
-        Gcry::OS.write(@@fd, buf.to_unsafe, LibC::SizeT.new(len)) if len > 0
+        len = room(buf.to_unsafe, len, 2)
+        len = RawOut.append(buf.to_unsafe, len, "}\n")
+        RawOut.flush(buf.to_unsafe, len, @@fd)
       ensure
         @@emitting = false
       end
     end
 
-    private def self.append_raw(buf : UInt8*, len : Int32, s : String) : Int32
-      bytes = s.to_slice
-      n = bytes.size
-      return len if len + n > 1023
-      n.times { |i| buf[len + i] = bytes[i] }
-      len + n
+    # Writes out the line so far if *need* more bytes might not fit.
+    private def self.room(buf : UInt8*, len : Int32, need : Int32) : Int32
+      return len if len + need <= RawOut::LIMIT
+      RawOut.flush(buf, len, @@fd)
+      0
     end
 
     private def self.append_ptr(buf : UInt8*, len : Int32, ptr : Void*) : Int32
-      len = append_raw(buf, len, ",\"ptr\":\"0x")
-      len = append_hex(buf, len, ptr.address)
-      append_raw(buf, len, "\"")
+      len = room(buf, len, 27)
+      len = RawOut.append(buf, len, ",\"ptr\":\"0x")
+      len = RawOut.append_hex(buf, len, ptr.address)
+      RawOut.append(buf, len, "\"")
     end
 
     private def self.append_str(buf : UInt8*, len : Int32, key : String, value : String) : Int32
-      len = append_raw(buf, len, ",\"")
-      len = append_raw(buf, len, key)
-      len = append_raw(buf, len, "\":\"")
-      len = append_raw(buf, len, value)
-      append_raw(buf, len, "\"")
+      len = room(buf, len, key.bytesize + value.bytesize + 6)
+      len = RawOut.append(buf, len, ",\"")
+      len = RawOut.append(buf, len, key)
+      len = RawOut.append(buf, len, "\":\"")
+      len = RawOut.append(buf, len, value)
+      RawOut.append(buf, len, "\"")
     end
 
     private def self.append_u64(buf : UInt8*, len : Int32, key : String, value : UInt64) : Int32
-      len = append_raw(buf, len, ",\"")
-      len = append_raw(buf, len, key)
-      len = append_raw(buf, len, "\":")
-      append_u64_value(buf, len, value)
+      len = room(buf, len, key.bytesize + 24)
+      len = RawOut.append(buf, len, ",\"")
+      len = RawOut.append(buf, len, key)
+      len = RawOut.append(buf, len, "\":")
+      RawOut.append_u64(buf, len, value)
     end
 
     private def self.append_bool(buf : UInt8*, len : Int32, key : String, value : Bool) : Int32
-      len = append_raw(buf, len, ",\"")
-      len = append_raw(buf, len, key)
-      len = append_raw(buf, len, "\":")
-      append_raw(buf, len, value ? "true" : "false")
-    end
-
-    private def self.append_u64_value(buf : UInt8*, len : Int32, value : UInt64) : Int32
-      if value == 0
-        return append_raw(buf, len, "0")
-      end
-      tmp = StaticArray(UInt8, 20).new(0_u8)
-      i = 0
-      v = value
-      while v != 0 && i < 20
-        tmp[i] = ('0'.ord + (v % 10)).to_u8
-        v //= 10
-        i += 1
-      end
-      return len if len + i > 1023
-      while i > 0
-        i -= 1
-        buf[len] = tmp[i]
-        len += 1
-      end
-      len
-    end
-
-    private def self.append_i64_value(buf : UInt8*, len : Int32, value : Int64) : Int32
-      if value < 0
-        len = append_raw(buf, len, "-")
-        append_u64_value(buf, len, (-value).to_u64)
-      else
-        append_u64_value(buf, len, value.to_u64)
-      end
-    end
-
-    private def self.append_hex(buf : UInt8*, len : Int32, value : UInt64) : Int32
-      if value == 0
-        return append_raw(buf, len, "0")
-      end
-      tmp = StaticArray(UInt8, 16).new(0_u8)
-      i = 0
-      v = value
-      while v != 0 && i < 16
-        nibble = (v & 0xf).to_u8
-        tmp[i] = nibble < 10 ? ('0'.ord + nibble).to_u8 : ('a'.ord + nibble - 10).to_u8
-        v >>= 4
-        i += 1
-      end
-      return len if len + i > 1023
-      while i > 0
-        i -= 1
-        buf[len] = tmp[i]
-        len += 1
-      end
-      len
+      len = room(buf, len, key.bytesize + 9)
+      len = RawOut.append(buf, len, ",\"")
+      len = RawOut.append(buf, len, key)
+      len = RawOut.append(buf, len, "\":")
+      RawOut.append(buf, len, value ? "true" : "false")
     end
   end
 end
 
+# At require time, not in `GC.init` with the other knobs: enabled there, the
+# first traced allocation (`Thread.init`'s) reads `@@alloc_tick` through
+# `__crystal_once` before `Crystal::Once.init`, which allocates again and
+# deadlocks on its own spin lock (measured 2026-10-12).
 Gcry::Trace.init_from_env

@@ -1,0 +1,14 @@
+name: apt-update
+description: Refresh the runner's apt index, bounded at 240 s.
+# The runner image's apt index goes stale: on 2026-09-30 the mirror served a
+# newer libevent and 404'd the one the image listed, and install-crystal, which
+# does not refresh it, failed every Linux job. Bounded, and the call site sets
+# `continue-on-error: true`: a mirror that hung the refresh held a job for
+# 46 minutes on 2026-09-30, and a stale index only matters once the mirror has
+# moved on. The `runner.os == 'Linux'` guard and `timeout-minutes: 5` stay at
+# the call site, because composite steps cannot take `timeout-minutes`.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2

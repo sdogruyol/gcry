@@ -2,9 +2,8 @@
 # running inside the stopped world.
 #
 # `write(2)` into a caller-owned stack buffer, no `String` interpolation, no
-# `IO`. Three copies of these helpers had accumulated (`StwWatchdog`,
-# `EcQueueAudit`, and the SIGSEGV report) before this existed; the watchdog keeps
-# its own for now because it is older than this module and works.
+# `IO`. `StwWatchdog`, `EcQueueAudit` and the SIGSEGV report each carried
+# their own copy of these helpers before this existed; all now share it.
 module Gcry
   module RawOut
     # Where every append stops — and therefore the smallest buffer any caller
@@ -89,8 +88,9 @@ module Gcry
       len
     end
 
-    def self.flush(buf : UInt8*, len : Int32) : Nil
-      Gcry::OS.write(2, buf, LibC::SizeT.new(len))
+    # *fd* is stderr except for `Trace`, whose lines go to `GCRY_TRACE_FILE`.
+    def self.flush(buf : UInt8*, len : Int32, fd : Int32 = 2) : Nil
+      Gcry::OS.write(fd, buf, LibC::SizeT.new(len))
     end
   end
 end

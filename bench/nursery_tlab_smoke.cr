@@ -51,7 +51,7 @@ heap.gc_threshold = UInt64::MAX
 heap.adaptive_nursery = false
 
 unless heap.nursery_enabled
-  STDERR.puts "nursery did not enable (headerless compile default, or GCRY_DISABLE_NURSERY). Build with -Dgcry_block_headers."
+  STDERR.puts "nursery did not enable (headerless compile default, or GCRY_NURSERY=0). Build with -Dgcry_block_headers."
   exit 64
 end
 unless heap.tlab_enabled?

@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.25.0**, process GC runs on **Linux, macOS and Windows** (Crystal ≥ 1.21, no compiler fork) — Windows shipped in v0.25.0, native x86_64 (MSVC) and ARM64 (GNU), with no throughput numbers yet. Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**98%** thr @ ~**0.97×** RSS at n=9 (2026-08-14 re-cut; was ~**18×** at v0.17, and the ~**0.63×** carried before does not reproduce) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
+As of **v0.34.0**, process GC runs on **Linux, macOS and Windows** (Crystal ≥ 1.21, no compiler fork) — Windows shipped in v0.25.0, native x86_64 (MSVC) and ARM64 (GNU); x86_64 is measured in a 12-vCPU VM (crystal-metric 87–114% of Boehm, Kemal `/json` 106.5%), ARM64 unmeasured ([docs/WINDOWS.md](docs/WINDOWS.md)). Kemal `/json` on Linux **101.8%** of Boehm thr at 1.43× peak RSS, 0.88× after `GC.collect` (2026-10-06); macOS **101.9%** at 1.50× peak footprint ([docs/COMPARISON.md](docs/COMPARISON.md)). Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**98%** thr @ ~**0.97×** RSS at n=9 (2026-08-14 re-cut; was ~**18×** at v0.17, and the ~**0.63×** carried before does not reproduce) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
 
 ## Goals
 
@@ -111,8 +111,8 @@ Full surface vs Boehm: [docs/INTEGRATION.md](docs/INTEGRATION.md). Comparison ch
 
 1. **STW** (process GC): signal-suspend other OS threads; library heaps can skip.
 2. Optional **stack scrub** (opt-in): wipe unused words below SP / parked fiber SP — Boehm-style hygiene, not stack maps.
-3. Push roots; **mark** (worklist outside the GC heap). Layout tables scan known offsets precisely where registered.
-4. Optional **parallel mark** (experimental): STW-exempt pthreads steal grey objects — measure thr before enabling.
+3. Push roots; **mark** (worklist outside the GC heap). Every non-atomic block is scanned conservatively; the mark reads no layout table since 2026-10-04 (`CHANGELOG.md` `[Unreleased]`, union-buffer entry).
+4. **Parallel mark** (default above 32 MiB live; `min(2, CPUs−1)` workers up to 7 CPUs, then `CPUs/4+1`, at most 8): STW-exempt pthreads steal grey objects; idle markers park on one word (`bench/log/linux/2026-10-05-parallel-mark-default/`).
 5. **Sweep** unmarked → freelists; release empty chunks; run finalizers after the world resumes.
 
 Incremental / nursery paths exist behind env flags; process HTTP defaults stay **full STW major** (dirty heaps punish soft-dirty minors — measured).
@@ -178,7 +178,7 @@ sweep stays a **supported opt-in**. Default path: EC parallelism **1**,
 |------|--------|
 | Process GC via shard | ✅ `-Dgc_none` (stock Crystal ≥ 1.21) |
 | Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64; **dying-fiber stack rooted** (v0.20) |
-| Thread birth window | ⚠️ `GCRY_STAGED_WAIT` **default-on** — the collector waits for a thread `pthread_create` has returned but Crystal has not published (crashes 6/60 → 0/60, census gaps 3/30 → 0/30, ~1.4% of collections wait at all); `thread_birth_root.cr` roots the `Thread` object across the same window. The second UAF that motivated both is **open** |
+| Thread birth window | ✅ `GCRY_STAGED_WAIT` **default-on** — the collector waits for a thread `pthread_create` has returned but Crystal has not published (crashes 6/60 → 0/60, census gaps 3/30 → 0/30, ~1.4% of collections wait at all); `thread_birth_root.cr` roots the `Thread` object across the same window, and since 2026-10-05 holds a dying one until proof it is done. The second UAF that motivated both is closed ([readiness B2](docs/DEFAULT-GC-READINESS.md); the arm race behind it, `process_spec/regression/52_*`) |
 | Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (v0.16 carry); fat-app tip ~**1–1.6×** |
 | Layout / type_id / blacklist | ✅ defaults + escapes |
 | Barriers (soft-dirty / mprotect) | ✅; nursery **opt-in** (default off); soft-dirty Linux-only |
@@ -188,15 +188,15 @@ sweep stays a **supported opt-in**. Default path: EC parallelism **1**,
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack / fiber scrub | ⚠️ fiber scrub **opt-in** (`GCRY_SCRUB_FIBERS=1`; EC1 **4 KiB** blind, Parallel 512 B + safe) — it wipes below another fiber's *estimated* SP and no measurement supports the default it used to have; margin measured at **zero** on both ABIs (x86_64 clean through 56 B, aarch64 through 64 B); `GCRY_CLEAR_STACK` also opt-in |
 | Parallel EC (TLAB-off + lazy) | ✅ **supported opt-in** — EC4 `/json` ~**79%** Boehm; TLAB-on / munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
-| Parallel mark | ⚠️ experimental — HTTP thr often regresses |
-| Test suite | ✅ invariants, property tests, process-STW MT (± TLAB ± nursery), ASan / Valgrind, musl, 5 h soak, nightly fuzz, and **12 purpose-broken `make` gates** across 9 CI jobs (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
+| Parallel mark | ✅ **default** above 32 MiB live; +8–16 points of Boehm's speed on GC-heavy rows at two workers (`bench/log/linux/2026-10-05-parallel-mark-default/`); `GCRY_PARALLEL_MARK=1` is serial |
+| Test suite | ✅ invariants, property tests, process-STW MT (± TLAB ± nursery), ASan / Valgrind, musl, 5 h soak, nightly fuzz, and purpose-broken `make` gates whose red arms must fail (see [TEST_PLAN.md](docs/TEST_PLAN.md) and the `Makefile`) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |
 | Compiler stack maps | ⚠️ machinery shipped **dormant** — not product default; see [STACK_MAPS.md](docs/STACK_MAPS.md) |
 
-**Kemal Linux (v0.16.0 carry):** `/` ~**82%**, `/json` ~**87%**, post-GC RSS
-~**0.80×** — [PERF.md](docs/PERF.md). The tip default-path re-cut (fiber scrub
-off) lands `/json` **81.4%** @ **0.77×**, inside the ~80–85% band this host has
-carried since v0.16, so **the headline does not move on three trials**.
+**Kemal Linux (2026-10-06):** `/json` **101.8%** of Boehm thr at 1.43× peak
+RSS, 0.88× after `GC.collect` — [COMPARISON.md](docs/COMPARISON.md). The
+older v0.16.0 carry (`/` ~82%, `/json` ~87%, post-GC RSS ~0.80×,
+[PERF.md](docs/PERF.md)) predates the headerless default.
 
 **Kemal macOS (tip):** `/` ~**91%**, `/json` ~**84%**, post-GC RSS
 ~**0.95–1.01×** — [PERF-macos.md](docs/PERF-macos.md).
@@ -223,7 +223,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 
 | Track | Why it matters |
 |-------|----------------|
-| **The thread family — second UAF** | gcry reads a `Thread`'s `@system_handle` out of a block it has already freed, inside `stop_world`. The mechanism is named — the birth window, with the pre-stop wait *giving up* — and `thread_birth_root.cr` roots the object `GC.pthread_create` is already handed, changing nothing about the stopped world. The local gate is deterministic (20/20, window held open with a raw pthread); the CI rate is **not** decisive yet (9 green aarch64 reruns, Fisher p ≈ 0.2 against a 3/10 control on a bursty fleet). Open until CI has the runs to say so |
+| **The thread family — second UAF** | gcry read a `Thread`'s `@system_handle` out of a block it had already freed, inside `stop_world`. **Closed**: a dying `Thread` is held until proof its thread is done, on every platform (readiness B2, `make thread-death-window`), and a birth now claims its root before `pthread_create`, so a thread that ends before its creator arms the root can no longer free another thread's (`process_spec/regression/52_*`) |
 | **Stack maps / precise roots** | The only lever left for EC1 `/json` ≥95% @ ≤1.0× RSS — shard-only levers are **exhausted** (i3 + 9950X hunt MISS). Should end in a **decision** rather than an implementation: either precise roots pay measurably, or `GCRY_PRECISE_STACK` stays research and the target is restated — spike [docs/STACK_MAPS.md](docs/STACK_MAPS.md) |
 | **Darwin low-water skip** | Linux took EC4 pause **8.06 → 3.60 ms** from it and Darwin takes none. Blocked on the `mach_vm_page_query` disposition bits, not on code: 4 of 5 arms hold on a Darwin host, and the one the soundness argument turns on — a page that leaves residency with its contents *intact* — is still INCONCLUSIVE because the runner will not compress |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental — the precondition for nursery + incremental on by default |

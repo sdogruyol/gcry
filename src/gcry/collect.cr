@@ -212,7 +212,7 @@ module Gcry
     # (lacks soft-dirty — incremental would crash under pointer churn).
     # The property default is always false; gc_override.cr sets the platform
     # default at process-GC boot. Override via `heap.incremental_auto = true`
-    # or `GCRY_INCREMENTAL` / `GCRY_DISABLE_INCREMENTAL` env vars.
+    # or `GCRY_INCREMENTAL` env var.
     property incremental_auto : Bool = false
     # When true, fully free size-class chunks beyond empty_chunk_retain are
     # munmap'd (excess) or kept dormant with MADV_DONTNEED (within retain).
@@ -235,8 +235,6 @@ module Gcry
     property mostly_empty_max_live_pct : UInt32 = 25_u32
     # Max free-page bytes advised per major (0 = unlimited).
     property mostly_empty_budget : UInt64 = 0_u64
-    # false = MADV_FREE (preserve content / freelist); true = unlink + DONTNEED.
-    property mostly_empty_dontneed : Bool = false
     getter mostly_empty_bytes : UInt64 = 0_u64
     getter mostly_empty_chunks : UInt64 = 0_u64
     # Tight small-heap growth (alloc locality): prefer newest chunk's freelist
@@ -351,24 +349,6 @@ module Gcry
     LAYOUT_SCAN_SLOTS  = 17
     LAYOUT_SCAN_STRIDE =  8                                   # UInt64s per slot: one 64-byte line
     @layout_scan_counts = StaticArray(UInt64, 272).new(0_u64) # 2 x 17 x 8
-
-    @[AlwaysInline]
-    private def layout_scan_slot : Int32
-      w = Heap.mark_worker
-      w < 0 || w >= LAYOUT_SCAN_SLOTS ? 0 : w
-    end
-
-    @[AlwaysInline]
-    private def count_layout_precise_scan : Nil
-      i = layout_scan_slot &* LAYOUT_SCAN_STRIDE
-      @layout_scan_counts.to_unsafe[i] &+= 1
-    end
-
-    @[AlwaysInline]
-    private def count_layout_conservative_scan : Nil
-      i = LAYOUT_SCAN_SLOTS &* LAYOUT_SCAN_STRIDE &+ layout_scan_slot &* LAYOUT_SCAN_STRIDE
-      @layout_scan_counts.to_unsafe[i] &+= 1
-    end
 
     def layout_precise_scans : UInt64
       sum = 0_u64
@@ -491,15 +471,9 @@ module Gcry
     # When fibers_exclusive: also word-scan each FP-chain frame body
     # (additive with LEAF). Default on for exclusivef research.
     property precise_stack_fiber_fp_fill : Bool = true
-    # When true: skip FP-fill on frames with a non-empty stackmap. Research —
-    # acik UAF (map hit ≠ complete lives). Default false = fill every frame.
-    # See GCRY_FIBER_FP_FILL_MISS_ONLY.
-    property precise_stack_fiber_fp_fill_miss_only : Bool = false
     getter precise_stack_roots_marked : UInt64 = 0_u64
     getter parked_fp_fill_frames : UInt64 = 0_u64
     getter parked_fp_fill_bytes : UInt64 = 0_u64
-    getter parked_fp_fill_skipped_frames : UInt64 = 0_u64
-    getter parked_fp_fill_skipped_bytes : UInt64 = 0_u64
     # Research: first-mark attribution by root source (GCRY_LIVE_ATTR=1).
     # Stack/Static/Thread/Precise = ambient seeds; Heap = edge closure.
     property live_attr_roots : Bool = false
@@ -764,12 +738,6 @@ module Gcry
     # between building the free-page mask and the release syscalls, so the
     # window a mutator can allocate into becomes wide enough to measure.
     property page_release_test_stall_ms : UInt64 = 0_u64
-
-    # `GCRY_MOSTLY_EMPTY_UNLINK=1` — research arm: unlink the free-only runs
-    # from the class freelist while keeping `MADV_FREE`, so the unlink can be
-    # measured apart from the syscall change `MOSTLY_EMPTY_MODE=dontneed`
-    # makes at the same time.
-    property mostly_empty_unlink : Bool = false
 
     # Research only: hold the **suspend** phase, which is a different one and the
     # only one the aarch64 hang has ever been seen in. `stw_test_stall_ms`
@@ -3497,8 +3465,6 @@ module Gcry
       @precise_stack_roots_marked = 0_u64
       @parked_fp_fill_frames = 0_u64
       @parked_fp_fill_bytes = 0_u64
-      @parked_fp_fill_skipped_frames = 0_u64
-      @parked_fp_fill_skipped_bytes = 0_u64
       @first_mark_stack_objects = 0_u64
       @first_mark_stack_bytes = 0_u64
       @first_mark_stack_atomic_bytes = 0_u64

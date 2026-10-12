@@ -490,10 +490,11 @@ module Gcry
     #
     # The count, not a flag — `with_thread_gregs` hands the raw row and its
     # length to `StackMaps`, which resolves DWARF register locations by index.
-    # A history worth keeping: an earlier version wrote through
-    # `@@stw_gregs[slot][i] = …`, and `StaticArray` is a value type, so the
-    # inner subscript returned a **copy** of the row, the assignment landed in
-    # the copy and the copy was discarded. The table stayed zero and the mark
+    # A history worth keeping: an earlier version kept the rows in a
+    # `StaticArray` of `StaticArray`s and wrote `table[slot][i] = …`.
+    # `StaticArray` is a value type, so the inner subscript returned a
+    # **copy** of the row, the assignment landed in the copy and the copy was
+    # discarded. The table stayed zero and the mark
     # was handed 23 zero words per thread — a register was never a root on this
     # path, so any value LLVM kept only in a callee-saved register was
     # collected. Found by dumping every thread's captured registers at the

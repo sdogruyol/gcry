@@ -898,7 +898,8 @@ raw-buf-check:
 # bitmap chunk, and the bitmap allocator is the default on both layouts. So
 # three cases each — warns headerless, warns on the header layout's default,
 # silent on `GCRY_BITMAP_ALLOC=0` where the walk runs (released 72 MB / 104 MB
-# on a sparse heap, 2026-09-23, against 0 on both defaults).
+# on a sparse heap, 2026-09-23, against 0 on both defaults). `GCRY_ALLOC_BATCH`
+# is the same shape: it batches freelist pops, so the bitmap allocator skips it.
 .PHONY: ignored-knob-warnings
 ignored-knob-warnings: $(BIN)
 	@$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/knob_hl --error-trace
@@ -936,6 +937,18 @@ ignored-knob-warnings: $(BIN)
 	if env GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "is ignored"; then \
 	  echo "  FAIL GCRY_PAGE_DONTNEED=1 warned beside GCRY_PAGE_RELEASE_BITMAP_WALK=1, which walks bitmap chunks"; fail=1; \
 	else echo "  ok   GCRY_PAGE_DONTNEED=1 is silent beside the research bitmap walk"; fi; \
+	for knob in GCRY_ALLOC_BATCH=8; do \
+	  name=$${knob%%=*}; \
+	  if env $$knob $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "$$name is ignored on the headerless layout"; then \
+	    echo "  ok   $$knob warns on the headerless default"; \
+	  else echo "  FAIL $$knob is silently ignored on the headerless default"; fail=1; fi; \
+	  if env $$knob $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "$$name is ignored on the bitmap allocator"; then \
+	    echo "  ok   $$knob warns on the header layout's bitmap default"; \
+	  else echo "  FAIL $$knob is silently ignored on the header layout's bitmap default"; fail=1; fi; \
+	  if env $$knob GCRY_BITMAP_ALLOC=0 $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "is ignored"; then \
+	    echo "  FAIL $$knob warned on the freelist, which batches"; fail=1; \
+	  else echo "  ok   $$knob is silent on -Dgcry_block_headers GCRY_BITMAP_ALLOC=0"; fi; \
+	done; \
 	[ $$fail -eq 0 ] || exit 1
 	@echo "ok — every knob the compile default ignores says so, and only there"
 
@@ -1825,7 +1838,11 @@ mark-clear-index: $(BIN)
 # flight, or its chunk goes back on the list in `kept` and is unmapped there —
 # the tree before faults in the first collection (`bitmap_pool_candidate?`),
 # this one declines 300 of 300 trims and ends with the list and the index
-# agreeing and the cache empty. ~10-35 s.
+# agreeing and the cache empty. A chunk whose mapper the stop suspended between
+# `map_chunk`'s list publish and its index insert is in flight, not divergent:
+# the audit excuses exactly that one and the arm prints how many (the idle
+# thread's birth chunk, 38 of 1000 children before it was excused); a mapper
+# the stop left running still counts. ~10-35 s.
 chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift
@@ -1836,8 +1853,8 @@ chunk-list-drift: $(BIN)
 # one below the walk in 3 runs of 40, in a program whose only threads were main
 # and the monitor. That flake was fixed as a *scope* correction — the invariant
 # is stated only of a heap that keeps its counter — which made the checker
-# honest and retired the measurement. `GCRY_INVARIANT_COUNTER_LOSS=1` states it
-# anyway and counts. Three arms: atomic and plain must both come out at zero
+# honest and retired the measurement. The harness states it anyway
+# (`Invariant.enable` + `Invariant.force_counters`) and counts. Three arms: atomic and plain must both come out at zero
 # (measured, 4.6 M forced comparisons across three shapes — the loss does not
 # reproduce on this tree, so the plain default stays and the atomic path stays
 # an escape), and `--inject` drops one increment through

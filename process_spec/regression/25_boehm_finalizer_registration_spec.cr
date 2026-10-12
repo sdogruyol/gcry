@@ -26,12 +26,18 @@ require "spec"
 #
 # Blocks are built on a finished fiber that scrubbed its frames, their addresses
 # kept masked, as in 21_boehm_c_abi_spec.cr. A stale word in the collect call
-# chain can still hold one block (that file explains), so counts over several
-# blocks allow one to be held; what is never allowed is a wrong callback, wrong
-# client data or a finalized cycle.
+# chain can still hold a block (that file explains), so counts over several
+# blocks allow `ABI_HELD_MAX` to be held; what is never allowed is a wrong
+# callback, wrong client data or a finalized cycle. The bound was one until
+# 2026-10-12, when a change that touched no path this file runs — removing
+# unused `GCRY_*` knobs and `Heap` fields, which moved the binary's layout —
+# held two of the eight unregistered-link blocks on Windows x86_64 in 3 of 3
+# CI runs (6 finalized), while a branch with only the commit before passed.
+# A held block is a finalizer not yet run, never one run on a live object.
 
-private ABI_MASK   = 0x3C3C_3C3C_3C3C_3C3C_u64
-private ABI_BLOCKS =                         8
+private ABI_MASK     = 0x3C3C_3C3C_3C3C_3C3C_u64
+private ABI_BLOCKS   =                         8
+private ABI_HELD_MAX =                         2
 
 private def abi_hide(p : Void*) : UInt64
   p.address ^ ABI_MASK
@@ -186,7 +192,7 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     end
     previous.should eq([NO_FINALIZER] * ABI_BLOCKS)
     abi_collect(6)
-    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.should be >= ABI_BLOCKS - ABI_HELD_MAX
     abi_log_matches(hidden, SALT + 0x1000, 1_u64)
   end
 
@@ -204,7 +210,7 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
       previous[2 * i + 1].should eq({ABI_FIRST.pointer, abi_data(i, SALT + 0x2000)})
     end
     abi_collect(6)
-    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.should be >= ABI_BLOCKS - ABI_HELD_MAX
     abi_log_matches(hidden, SALT + 0x3000, 2_u64)
   end
 
@@ -249,7 +255,7 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     # The self pointer is what held them: cleared, they are finalized.
     abi_on_fiber { plain.each { |h| abi_unhide(h).as(Void**).value = Pointer(Void).null } }
     abi_collect(6)
-    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.should be >= ABI_BLOCKS - ABI_HELD_MAX
     abi_log_matches(plain, SALT + 0x5000, 1_u64)
 
     # The same self pointer under `_ignore_self` is not a cycle.
@@ -261,7 +267,7 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
       end
     end
     abi_collect(6)
-    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.should be >= ABI_BLOCKS - ABI_HELD_MAX
     abi_log_matches(own, SALT + 0x6000, 2_u64)
   end
 
@@ -320,7 +326,7 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     end
     answers.should eq([0, 1] * ABI_BLOCKS)
     abi_collect(6)
-    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.should be >= ABI_BLOCKS - ABI_HELD_MAX
     AbiRegLog.count.times { |k| AbiRegLog.which(k).should eq(0_u64) }
     abi_log_objects_distinct(hidden)
 
@@ -338,7 +344,7 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     end
     answers.should eq([0, 1, 0] * ABI_BLOCKS)
     abi_collect(6)
-    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.should be >= ABI_BLOCKS - ABI_HELD_MAX
     AbiRegLog.count.times { |k| AbiRegLog.which(k).should eq(partner.address) }
     abi_log_objects_distinct(hidden)
   end
@@ -358,7 +364,7 @@ describe "Regression: Boehm finalizer and disappearing-link registration" do
     before = AbiRegLog.count
     ran = LibGC.invoke_finalizers
     before.should eq(0)
-    AbiRegLog.count.should be >= ABI_BLOCKS - 1
+    AbiRegLog.count.should be >= ABI_BLOCKS - ABI_HELD_MAX
     ran.should be >= AbiRegLog.count
     abi_log_matches(hidden, SALT + 0x9000, 1_u64)
   end

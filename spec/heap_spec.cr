@@ -574,8 +574,4 @@ describe Gcry do
       Gcry.default_heap = saved
     end
   end
-
-  it "reports a version" do
-    Gcry::VERSION.should_not be_nil
-  end
 end

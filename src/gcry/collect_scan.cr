@@ -535,8 +535,36 @@ module Gcry
       end
 
       list_only = 0_u64
+      # A chunk whose mapper this stop suspended between `map_chunk`'s list
+      # publish and its index insert (`@chunk_publishing`) is in flight, not
+      # divergent: excused and counted, and no other chunk is. A publisher the
+      # stop left running — exempt from the signal, the collector itself, or
+      # not on Crystal's list at all — is inserting under the collector's
+      # unlocked index reads, and its chunk stays in `list_only`. Read once,
+      # with the world stopped.
+      publishing = Atomic::Ops.load(pointerof(@chunk_publishing), :acquire, true)
+      unless publishing.null?
+        publisher = @chunk_publisher
+        suspended = false
+        current = Thread.current
+        Thread.unsafe_each do |thread|
+          next unless thread.object_id == publisher
+          next if thread == current
+          {% unless flag?(:darwin) || flag?(:win32) %}
+            next if stw_signal_exempt?(thread)
+            next if suspend_abandoned?(thread.to_unsafe.unsafe_as(UInt64))
+          {% end %}
+          suspended = true
+        end
+        publishing = Pointer(ChunkHeader).null unless suspended
+      end
       each_chunk do |l|
-        list_only &+= 1 if chunk_containing(ChunkHeader.data_start(l).address).nil?
+        next unless chunk_containing(ChunkHeader.data_start(l).address).nil?
+        if l == publishing
+          @chunk_list_publishing_excused &+= 1
+        else
+          list_only &+= 1
+        end
       end
 
       @chunk_index_only &+= index_only
@@ -954,8 +982,9 @@ module Gcry
     # - Parallel default: no empty reclaim (munmap amplified soft realloc;
     #   dormant-all cuts RSS ~3× but thr ~25%). Opt in:
     #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded);
-    #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy RSS max);
-    #   GCRY_PARALLEL_RELEASE=1 — unsupported munmap excess (can hang/soft).
+    #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy RSS max).
+    # `parallel_empty_chunk_munmap` (munmap excess under Parallel) is a
+    # library/spec property only: it forces the in-STW sweep and could hang.
     property parallel_empty_chunk_dormant : Bool = false
     property parallel_empty_chunk_dormant_all : Bool = false
     property parallel_empty_chunk_munmap : Bool = false
@@ -1647,26 +1676,19 @@ module Gcry
       end
     end
 
-    # Word-scan parked FP-chain frame bodies. Additive safety net with LEAF.
-    # Default: every frame. Opt-in miss-only (GCRY_FIBER_FP_FILL_MISS_ONLY=1)
-    # skips nonempty map hits — acik UAF. Returns true when the FP chain was
-    # walkable (at least one frame yielded).
+    # Word-scan parked FP-chain frame bodies. Additive safety net with LEAF;
+    # every frame is filled. Returns true when the FP chain was walkable (at
+    # least one frame yielded).
     private def scan_exclusive_parked_fp_fill(fiber : Fiber, guard : UInt64, bottom : UInt64) : Bool
       {% if flag?(:x86_64) || flag?(:aarch64) %}
         top = fiber.@context.stack_top.address
         min_spill = {% if flag?(:aarch64) %} StackMaps::PARKED_AARCH64_SPILL_WORDS * 8 {% else %} 64 {% end %}
         return false unless top >= guard && (top &+ min_spill) <= bottom
         max_frames = StackMaps::MAX_FP_FRAMES
-        miss_only = @precise_stack_fiber_fp_fill_miss_only
         saw = false
-        StackMaps.each_parked_fp_frame_range(top, guard, bottom, max_frames, miss_only) do |lo, hi, do_fill|
+        StackMaps.each_parked_fp_frame_range(top, guard, bottom, max_frames) do |lo, hi|
           saw = true
           span = hi - lo
-          unless do_fill
-            @parked_fp_fill_skipped_frames += 1
-            @parked_fp_fill_skipped_bytes += span
-            next
-          end
           @parked_fp_fill_frames += 1
           @parked_fp_fill_bytes += span
           Roots.scan_range(Pointer(Void).new(lo), Pointer(Void).new(hi), safe: true) do |candidate|

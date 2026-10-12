@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The idle collector's thread and the Monitor (`SYSMON`) are stopped
+  like any thread until they reach their loops (Linux).** Both were exempt
+  from the suspend signal from the moment they existed, but their births
+  allocate a main fiber, and an allocation already past its stopped-world
+  check ran on through the stop. The idle thread is born at the end of the
+  first collection and runs into the second, so it mapped a chunk and
+  wrote the chunk index while the collector read the index unlocked: in
+  69 of 100 runs of `chunk-list-drift`'s window-free child, 0 of 1 000
+  after. SYSMON did the same in 14 of 100 runs with the window widened,
+  0 of 200 after. Each is exempt now only once it has entered its loop
+  (`65_*`).
+
+- **`GCRY_NURSERY=0` turns the nursery off under `-Dgcry_block_headers`.**
+  `0` passed the "is it set" test there, so asking for no nursery enabled
+  the barrier-less one, while the headerless build read `0` as unset. It is
+  off now on both, and with `GCRY_DISABLE_NURSERY` gone it is the way to
+  say so (`64_*`).
+
+- **The stop-the-world watchdog's stall report is printed whole.** Its own
+  writer stopped at 250 bytes, and the `@index_lock` report runs to about
+  310, so that line always lost its end and its newline. The watchdog and
+  `GCRY_EC_QUEUE_AUDIT` now write through `RawOut`, as the SIGSEGV report
+  does; `make index-lock-wedge` checks the ending too.
+
 - **A collection no longer calls the C heap while other threads are
   suspended (Windows, macOS).** Both platforms suspend a thread wherever
   it is. A thread frozen inside `malloc` or `free` holds the C heap's
@@ -81,14 +105,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `heap_size` and free-byte accounting its queueing had taken, which had
   drifted on each refusal (`63_*`).
 
-- **The Windows ARM64 CI jobs install a fixed MSYS2 toolchain.** They took
-  whatever `pacman -S` resolved, and when MSYS2 moved clang, lld, libc++,
-  libunwind and llvm-libs from 22.1.8 to 23.1.3 on 2026-10-10, the pinned
-  Crystal 1.21.0 compiler crashed with "Missing hash key for value: 104" in
-  every arm64 job, master's included, with no gcry change between green and
-  red. `ci/windows-arm64-msys2.sh` installs the last green run's packages by
-  version.
-
 - **A thread's `Thread` keeps its birth root until the thread is done with
   it, whatever order its creator and its end come in.** The root was armed
   after `pthread_create` returned, so a thread could end first: its death
@@ -104,8 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then reclaim only a record of a thread that is done with its object; a
   join or a foreign detach waits for births in flight. After the fix
   `deaths_unmatched` is 0 in the same churn, and a dying thread waits for
-  nobody's `arm`, which a first version did and which left Darwin's churn
-  at 22–44 roots held against a bound of 17. A dying thread finds its record
+  nobody's `arm` (waiting for it held Darwin's churn at 22–44 roots
+  against a bound of 17). A dying thread finds its record
   by its own `Thread` before it looks by handle: a detached thread's record,
   never stamped, under the same handle was stamped instead, and the
   creator's `arm` then un-rooted the running thread holding that handle
@@ -180,81 +196,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   136 KiB for 16 dead threads where `GCRY_STACK_LOW_WATER=0` made it
   139 MiB (`57_fork_child_collects_spec.cr`).
 
-- **`GC_invoke_finalizers` runs the queued finalizers and answers how many
-  ran, as Boehm.** It answered 0 whatever was queued; an idle collection
-  leaves its finalizers for a mutator, and a C caller asking for them got
-  none (`25_boehm_finalizer_registration_spec.cr`). Called from a finalizer
-  it answers 0 and leaves the queue to the drain already running, as a
-  finalizer that collects does.
-
-- **`GC_remove_roots` does not return while a collection still scans the
-  range.** It stored the entry's end down and returned at once; the roots
-  hook had already read the old bounds, so a thread gcry does not stop that
-  removed a range and unmapped it crashed the collector mid-scan (Windows:
-  `C0000005` in `push_root_range`, 10 of 10 runs). Boehm takes its lock
-  there. The hook now holds an epoch odd while it reads and scans the table,
-  and `remove_roots`, after unlocking, waits out an odd epoch it observes. A
-  stopped thread never sees one, and the collector runs no other code while
-  it is odd (`process_spec/regression/51_remove_roots_waits_for_scan_spec.cr`:
-  29 of 29 after).
-
-- **A parked marker's wake is counted by the wait's result, not its time.**
-  `parallel_mark_wakes` counted a wait only if the word moved within the
-  nap, but `WaitOnAddress` rounds its timeout up to milliseconds and the
-  timer tick, so real wakes after the nap went uncounted and spec 45 failed
-  1–7% of runs on Windows. Linux counts a futex 0, Darwin a `__ulock_wait`
-  ≥ 0; Windows counts TRUE inside the milliseconds it was given, since a
-  shared-address TRUE can also arrive unwoken at the tick. Spec 45: 200 of
-  200 standalone and 240 of 240 with 8 copies at once; 89 of 100 still fail
-  with the wake call removed.
-
-- **Spec 48 fails on the duplicate runs it guards against again.** Its loop
-  stopped once nearly every object had run `#finalize` once, before a
-  second or third row could run, so it passed on master. It now collects
-  once per extra registration before the `<= 1` checks: master fails it 3 of
-  3.
-
-- **Spec 50 bounds the mean wait of a `GC.collect` call, not the worst.** A
-  caller the OS leaves off the CPU — frozen by a stop before it queues, or
-  not yet run after a macOS or Windows resume — sees every collection that
-  runs meanwhile, and one call on macOS x86_64 CI saw 11 against a bound of
-  8. The mean over all 120 calls was 2.5–3.6 before the fix and is
-  1.06–1.36 after, two CPUs beside four busy loops included; it must stay at
-  or under 2. The root thread keeps a worst-case bound, 30, for the
-  starvation the Windows runner showed.
-
-- **Spec 21's `GC_stackbottom` example stands down off the initial thread.**
-  Crystal 1.21's execution-context monitor can move the main fiber to a
-  pool thread, and on one there the main thread's `GC_stackbottom` is above
-  the stack and a bottom set does not move it, as Boehm's would not; Linux
-  CI ran the example there once. It now reports pending in that case, as
-  `spec/stack_bounds_snapshot_spec.cr` does.
-
-- **`GC_add_roots` ranges longer than 64 MiB are scanned.** The roots hook
-  pushed each registered range through the stack scan, whose 64 MiB valve
-  refuses a longer range whole: an object held only from a 65 MiB range was
-  swept on the first collection, and only `Roots.oversize_skips` said so.
-  Boehm scans a registered range whatever its length. Registered ranges and
-  `GC_push_all_eager` now go through `Heap#push_root_range`, which splits
-  them as the static roots are split
-  (`process_spec/regression/41_gc_add_roots_concurrent_spec.cr`).
-
-- **`GC_add_roots` rounds a range inward to whole words, as Boehm.** It kept
-  the bounds as given, so `GC_add_roots(p + 1, q + 5)` was not taken back by
-  `GC_remove_roots(p + 8, q)` and stayed scanned, and a range holding no
-  whole word took an entry (`41_gc_add_roots_concurrent_spec.cr`).
-
-- **Disappearing-link registration follows Boehm's argument rules.** A null
-  or misaligned link is Boehm's "Bad arg" abort rather than a registration a
-  collection later writes a split word through; unregistering a misaligned
-  link answers 0; no memory for the registration answers `GC_NO_MEMORY`
-  instead of raising out of the C function (`src/gcry/c_abi.cr`).
-
-- **`GC_get_suspend_signal` and `GC_get_thr_restart_signal` answer -1 on
-  macOS, as Boehm.** gcry stops threads there with Mach `thread_suspend`, as
-  Boehm does, and answered Crystal's pair, which nothing sends
-  (`21_boehm_c_abi_spec.cr`).
-
 - **Roots marked before the cursor settle are no longer swept.** A
   collection's root phase zeroes the mark bits of every chunk the previous
   cycle pinned (a thread frozen mid-allocation), in
@@ -266,17 +207,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   900–2 600 of 3 200 objects held only by registered ranges were freed and
   reused, every run. The settle now runs first, in full and sliced cycles
   alike (`process_spec/regression/49_roots_before_settle_spec.cr`).
-
-- **A stale resume signal no longer ends the next stop early (Linux).**
-  `start_world` resends a resume to a thread slow to acknowledge, so a thread
-  can be left one it never took. One that keeps `SIG_RESUME` blocked — a C
-  thread under `GC_register_my_thread`, from a pool that blocks every
-  signal — held it pending until the next stop's `sigsuspend` unblocked it,
-  and then ran through the stopped world: an 8-thread register/allocate loop
-  next to `GC.collect` wedged on a lock such a thread took. The suspend
-  handler now waits until its stop's epoch is closed, as Boehm's waits for
-  `GC_stop_count` to move (`47_stale_resume_signal_spec.cr`: the thread's
-  counter moved 3.3 M times inside a stop before, 0 after).
 
 - **`GC.add_finalizer` twice on one object runs `#finalize` once.** Under
   Boehm it is `GC_register_finalizer_ignore_self`, which replaces the first
@@ -304,38 +234,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an object that has a link. A randomized spec checks every index against a
   brute-force model, with the index working and given up
   (`spec/finalizer_index_spec.cr`).
-
-- **Parked mark helpers on macOS and Windows are woken.** Since idle
-  markers began parking inside a mark (2026-10-06) only Linux waited on the
-  `@mark_wake` word with a wake; on macOS and Windows the park was a
-  `nanosleep` of its 100 µs–1 ms timeout, rounded up on Windows to
-  `Sleep(1)`, about 15.6 ms. The master did not park there either, so it
-  kept the work and parallel mark, on by default, was serial plus a poller:
-  `make parallel-mark-process` stole 1–5 k per run on darwin x86_64 (380 k
-  before), 0.7–5.6 k on Windows x86_64 (330 k) and 0 on darwin arm64,
-  against 165–369 k on Linux. Both now wait on the same word with the same
-  protocol, through `__ulock_wait`/`__ulock_wake` and
-  `WaitOnAddress`/`WakeByAddress*` (`Synchronization.lib`), and the master
-  parks on every platform. The gate is back to two collections (8b3372c had
-  loosened it to "any steal in 20"), the new `parallel_mark_wakes` counts
-  waits a wake ended (`45_parked_markers_woken_spec.cr`: fails with the wake
-  disabled), and `33_idle_mark_helpers_park_spec` holds every platform to
-  1.6 cores. Linux is unchanged: 1.12 cores per second of collecting on a
-  3 M-node list, 26 ms pauses.
-
-- **A recycled large chunk clears only the pages the old block wrote.** A
-  block the program `GC.free`d stays cached, and an allocation of another
-  size takes its pages through the recycler, which reported every byte as
-  written: `GC.malloc` zeroed all of it and faulted in each page the old
-  block never touched. A loop freeing blocks of 16 sizes from 256 KiB to
-  1.7 MiB, writing one byte of each, took 629 ms and 878 000 minor faults
-  for 20 000 iterations (Boehm 227 ms). `mincore` now finds the last
-  resident page and `MADV_DONTNEED` drops the rest, which also zeroes
-  written pages that were swapped out: 106 ms, 4 700 faults. A loop that
-  writes every block through is within 2% of before (Boehm 578 ms against
-  1 027), and exact-size reuse — zlib's — is unchanged and clears its whole
-  payload, where asking the kernel cost 5% for nothing
-  (`46_large_recycle_untouched_pages_spec.cr`).
 
 - **A page barrier no longer outlives the sliced majors or nursery that
   armed it.** The barrier is armed after each collection for the next one
@@ -396,9 +294,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@roots_lock` (`Gcry::RootsLock`) lets the mutators already waiting when
   a stop arrives have it first: the stop yields the CPU until that many
   acquisitions have happened, for 50 ms at most, then competes. Mutators
-  keep a plain test-and-set among themselves. A FIFO ticket lock tried
-  first convoyed every slow `realloc` (its pin takes this lock twice) once
-  threads outnumbered CPUs — 16 threads growing arrays on 4 CPUs went from
+  keep a plain test-and-set among themselves. A FIFO ticket lock
+  convoys every slow `realloc` (its pin takes this lock twice) once
+  threads outnumbered CPUs — 16 threads growing arrays on 4 CPUs go from
   1.1 s to 41 s — and this one runs that at master's pace (0.38–0.45 s
   against 0.39–0.47). `thread_birth_fiber` collects back to back again,
   without the yield that hid this, and
@@ -407,15 +305,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collections) and passes on one and two CPUs after; its roots-lock
   example lets the stop back in first in 81–100 of 100 rounds on the old
   spin lock.
-
-- **Specs.** `21_boehm_c_abi_spec`'s `GC_add_roots` example failed every
-  standalone run on Linux x86_64, master included, on one conservatively
-  held control block; it now holds to eight blocks with one allowed.
-  `31_alloc_size_edges_spec` expects `Gcry::OutOfMemoryError` for an
-  oversize request rather than any exception. `make
-  parallel-mark-termination` bounds each arm's child at 120 s: its red arm
-  corrupts the mark on purpose, and once on Windows CI it hung on that
-  until the 30-minute job timeout instead of failing.
 
 - **`-Dpreview_mt` without `-Dexecution_context` stops the build with the
   reason.** Crystal's deprecated scheduler is not one the process GC
@@ -448,36 +337,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a thread-local fallback only where no fiber is current
   (`44_finalizer_suspend_drain_spec.cr`: 0 of 200 ran before, ≥ 192 after).
 
-- **`GC_add_roots` no longer installs its root hook mid-call.** The first
-  call installed the hook (`GC.before_collect`, an allocation) while
-  `@@ranges_lock` was held, so a collection there could run a finalizer that
-  called `GC_add_roots` and spun on the same lock forever. A once-state
-  outside the lock still let such a re-entrant call add a range before the
-  hook existed, and stayed stuck if the install raised. `GC.init` now
-  installs the hook, before any user code, and `@@ranges_lock` covers only
-  the table update. Spec 41 also keeps each block reachable until its range
-  is added.
-
-- **A finalizer that calls `GC.collect` no longer runs the rest of the
-  queue nested inside itself.** Since `run_pending` takes one node at a time
-  (queued objects stay roots until they run), the collection a finalizer
-  started ended in a second `run_pending`, which ran the next finalizer one
-  frame deeper: nesting as deep as the queue. 200 such objects nested 199
-  deep and 5 000 overflowed the stack on Windows; master nested 1 deep, and
-  Boehm bounds the same recursion (`GC_check_finalizer_nested`). A nested
-  `run_pending` on the same thread now returns at once (a `@[ThreadLocal]`
-  flag) and the outer loop drains what the inner collection queued.
-  `process_spec/regression/37_nested_finalizer_collect_spec.cr`: depth
-  2 000 before, 1 after, all 2 000 finalized.
-
-- **Parallel mark is serial under `-Dwithout_mt` off Windows.** Its mark
-  stack is guarded by `Crystal::SpinLock`, which compiles to nothing there,
-  yet parallel mark was on by default: helpers pushed and popped the stack
-  unlocked, could lose entries, and the sweep could free live objects.
-  `Heap#parallel_mark_workers=` now stores 1 in that build and
-  `GCRY_PARALLEL_MARK>1` is ignored with a warning, as `GCRY_IDLE_RELEASE_MS`
-  already is (`38_without_mt_serial_mark_spec.cr`).
-
 - **An allocation no mapping can hold fails as out of memory.**
   `GC_malloc(SIZE_MAX)`, `GC_malloc_atomic` and `GC_realloc` near `SIZE_MAX`
   overflowed the rounding in `SizeClasses.fit` / `alloc_large` (the latter
@@ -487,98 +346,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Boehm does, and `GC.malloc` raises `OutOfMemoryError`
   (`39_c_abi_oversize_null_spec.cr`: failed 3 of 3 before).
 
-- **`GC_pthread_create` registers the thread it starts, as Boehm does.** It
-  called `pthread_create` with the caller's routine as it was, so the thread
-  was never on Crystal's list: no stop suspended it, nothing scanned its
-  stack, and blocks it held only there were swept under it. The thread now
-  starts on a trampoline (record in libc memory, the caller's `arg` rooted
-  for its life) that registers it with its own stack, runs the routine and
-  unregisters. A registered thread that leaves through `pthread_exit`, or
-  without `GC_unregister_my_thread`, is taken off the list by a pthread-key
-  destructor. Linux and macOS; elsewhere unchanged
-  (`40_gc_pthread_create_registers_spec.cr`).
-
-- **`GC_add_roots` is locked and keeps one entry per range.** It copied the
-  table one entry longer and published it with no lock: 16 threads adding at
-  once kept 2 to 5 of their 16 ranges (20 of 20 runs), and the collector
-  stopped scanning the rest. Every call also appended duplicates and left
-  the previous table behind (about 8·n² bytes). Writers now take an atomic
-  lock (not `Crystal::SpinLock`); a range inside an existing one is a no-op
-  and a same-start range extends it, as in Boehm's `GC_add_roots_inner`. The
-  table grows by doubling, so the tables left behind come to less than the
-  live one (`41_gc_add_roots_concurrent_spec.cr`).
-
-- **A library loaded since the last collection is a root even when the
-  collection finds the loader mid-`dlopen`/`dlclose`.** `sync_loaded_objects`
-  added a missing `link_map` entry only while the namespace read
-  `RT_CONSISTENT`, so a collection that stopped the world while another
-  thread was in `dlopen` or `dlclose` skipped every library loaded since the
-  previous one, and a GC pointer in their globals was not a root. A missing
-  entry is now taken in any state once its program headers read back (each
-  page probed first), and retried next collection otherwise
-  (`42_library_sync_during_dlopen_spec.cr`).
-
-- **Spec 35 no longer counts older threads' roots as the workers'.** With
-  300 workers alive it required `baseline + 300` roots outstanding, but a
-  collection during the 300 `Thread.new` can release roots of threads from
-  before the baseline: darwin CI read 302 against a baseline of 5. It now
-  checks that all 300 were armed and that no more than the baseline were
-  released meanwhile; the fixed 256-slot table still fails it (253 armed).
-
-- **Spec 35 no longer fails at random on Windows.** It joined 300 threads
-  and then expected their birth roots back after exactly three collections.
-  In Crystal 1.21, a thread that finishes before it is joined detaches
-  itself, and `Thread#join` then skips `WaitForSingleObject`. Windows ends a
-  birth root only once gcry's handle on the thread signals. So three
-  collections could still find threads that were exiting: 5–121 roots, in 11
-  of 20 standalone runs and 12 of 60 suite runs on a 12-vCPU Windows VM. The
-  roots always drained one or two collections later. The spec now collects
-  until they are back, under a 5 s deadline: 0 failures in 40 runs. The fixed
-  256-slot table (`GCRY_THREAD_BIRTH_NOGROW=1`) still fails it
-  (`bench/log/windows/2026-10-06-vm-validation/`).
-
-- **`ci/windows.ps1` says it needs PowerShell 7.** Under Windows PowerShell
-  5.1 it failed half-way through the first step with "`[System.IO.Path]` does
-  not contain a method named `GetRelativePath`". It now carries
-  `#Requires -Version 7`, and `docs/WINDOWS.md` names `pwsh`.
-
-- **`bench/kemal` builds on Windows.** The `EXTRA_THREADS` block called
-  `LibC.pipe`, which is not bound there (`undefined fun 'pipe' for LibC`).
-  On Windows those threads now sleep with `Sleep(INFINITE)`; other platforms
-  are unchanged.
-
-- **`make thread-death-window` no longer polls the thread list with it held.**
-  While waiting for its victims to leave Crystal's list, the harness held the
-  list's mutex for a threads × victims compare and re-took it after a bare
-  `Thread.yield`. Every victim needs that mutex once to leave. `--concurrent`
-  timed out once on aarch64 CI ("threads did not leave Crystal's list within
-  30 s"). Starvation by the poller is the suspected cause. The ids are now
-  copied out under the mutex and compared outside it, the poll sleeps
-  100 µs, and the timeout reports how many victims are still listed.
-
-- **`make idle-rss-after-burst` reruns a run that measured nothing.**
-  - **What failed:** the bench gives up when its dropped 200 MB chain is
-    still live 20 majors later, and that "tests nothing" run failed the job.
-    It happened once on x86_64 CI (run 37583613942).
-  - **The red arm was weak too:** its `!` counted that same exit as the
-    uncapped arm failing as designed.
-  - **Now:** an inconclusive run exits 2 and is repeated, up to three times.
-    The shipped arm must exit 0 and the red arm must exit 1.
-  - **Still open:** the retention itself. On Windows it happens 2–7 runs in
-    100, on master as well. The pinned node, always one node of the chain,
-    is not held by anything the holders search walks: stacks, live heap
-    blocks, static and TLS roots, explicit roots.
-
-- **Unloading a shared library is no longer reported as a static-root
-  collapse.** The collapse diagnostic compares each collection's scanned
-  static bytes against the most any collection scanned, and a `dlclose`d
-  library's ranges leaving the scan read as globals going missing: "gcry:
-  static roots collapsed to 92400 bytes from 67201328" on stderr and
-  `static_scanned_drops` + 1 after unloading a library with a 64 MiB `.bss`.
-  The baseline now drops by what the library table lost; ranges that vanish
-  while their library stays loaded still count.
-  `process_spec/regression/34_dlclose_static_roots_spec.cr` fails on the old
-  tree (drops 0 → 1) and holds the still-counts direction.
+- **A C thread that allocates while gcry collects no longer wedges the
+  process.** The wait for a stop called the `Thread.current` that creates a
+  `Thread` — allocating, inside the stop. A C thread that allocates, through `GC_malloc` or a Crystal
+  callback, no longer waits on itself: one calling `GC_malloc` in
+  a loop beside 200 `GC.collect`s hung the
+  old tree 3 of 3 (killed at 60 s)
+  and finishes 3 of 3 now (`29_boehm_foreign_thread_spec.cr`).
 
 - **The thread birth table grows, so a process with more than 256 live
   threads no longer leaks their roots.** Every `Thread` is rooted from
@@ -593,126 +367,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `make thread-birth-root`'s burst arms use it to reach the overflow path.
   `process_spec/regression/35_thread_birth_table_growth_spec.cr` (fails on
   the old tree: overflows 46, expected 0).
-
-- **`make nursery-tlab-smoke` requires the released chunk on Linux again.**
-  Since 2026-10-05 it accepted a kept chunk everywhere, so a Linux major that
-  stopped releasing the probe's chunk would have passed with the stale-node
-  arm checking lists that could not dangle. Linux now fails on a kept chunk;
-  macOS keeps its kept-chunk path. With `GCRY_EMPTY_CHUNK_RETAIN=1073741824`
-  the gate fails where it used to pass, and with `0c5db2e`'s fix reverted it
-  still reports the stale node 3/3.
-
-- **Unsupported targets name the right remedy.** The compile-time refusal on
-  32-bit, Android and non-Linux/macOS/Windows targets told every program to
-  "build without -Dgc_none", including those already built without it that
-  `require "gcry"` as a library. It still refuses both, because the library
-  heap cannot run there either: the mark steps a `UInt64*` per
-  `sizeof(Void*)` (`scan_payload`, `Roots.scan_range`), the allocator keeps a
-  `@[ThreadLocal]` cursor, and the other systems have no platform layer. The
-  message now says to drop `require "gcry"` (and `-Dgc_none` under the process
-  GC). Master compiled an i386 library heap; checked with
-  `crystal build --cross-compile --target i386-linux-gnu`, with and without
-  `-Dgc_none`, and the same for `aarch64-linux-android28` and
-  `x86_64-unknown-freebsd`.
-
-- **A program that links libgc too builds with `-Dgcry_no_boehm_abi`.** gcry
-  defines Boehm's `GC_*` C ABI for `crystal i`, and with a static libgc in the
-  link — Crystal's distribution ships `lib/crystal/libgc.a` — every one of
-  those names was a "multiple definition" link error, where master linked the
-  same program. The flag leaves the C ABI and `LibGC` out; the default keeps
-  them. Weak definitions were measured and rejected: against an archive, which
-  collector serves a name would depend on which members the link pulls in.
-  With a shared libgc the default links but splits calls between the two
-  collectors, so the flag is for any program that links libgc. On Linux libgc
-  must also move off `SIGPWR`/`SIGXCPU`, Crystal's stop signals, or gcry's
-  first multi-threaded stop faults (SIGSEGV at `0x18`).
-  - **Evidence:** `make boehm-abi-optout` (`bench/boehm_abi_optout.cr`): built
-    without the flag the link fails on `GC_malloc`; with it, it links and runs
-    20 gcry collections across threads beside libgc 8.2.8's own; with Boehm
-    left on `SIGPWR` the same binary faults. docs/INTEGRATION.md § Boehm's C
-    ABI.
-
-- **`GC_collect_a_little` answers as Boehm's does.** It returned 1 when a
-  cycle *finished*, started a new sliced cycle on every call, and ran with
-  collection disabled, so `while (GC_collect_a_little()) {}` stopped at once,
-  and a loop until 0 never ended (10 001 calls answered 1 when nothing was
-  due). It now does what an allocation would do at that point — the next
-  slice of a cycle in progress, or the collection the debt is owed — and
-  returns 1 only while a sliced cycle is in progress; 0 when there is nothing
-  to do and while disabled. `Gcry.collect_a_little` keeps the slice-on-demand
-  meaning, and `bench/incremental_mt_stress.cr`'s `INC=1` arm uses it.
-  - **Evidence:** `process_spec/regression/27_boehm_collect_parity_spec.cr`,
-    4 examples: red 4 of 4 on the unfixed tree, green after.
-
-- **Boehm's callbacks are called.** `GC_set_start_callback` and
-  `GC_set_warn_proc` recorded their procedure and never called it;
-  `GC_set_on_collection_event`, `GC_set_on_thread_event` and
-  `GC_set_on_heap_resize` aborted. The start callback now runs at the start of
-  every collection, before the stop; collection events, per-thread
-  suspend/resume events and heap growth are reported where Boehm reports them.
-  The warn procedure receives Boehm's out-of-memory warning: out of memory,
-  `GC_malloc`, `GC_malloc_atomic` and `GC_realloc` warn and return null, where
-  they raised an `OutOfMemoryError` that cannot leave a C entry point — the
-  caller's `rescue` never ran and the process died with "Unhandled exception".
-  - **Evidence:** `process_spec/regression/28_boehm_callbacks_spec.cr`: before,
-    the start callback ran 0 times in 3 collections, each event setter aborted
-    ("gcry emits no Boehm collection events"), and the out-of-memory example
-    died unhandled; after, 6 of 6 green, including a start callback that
-    allocates, as `crystal i`'s interpreted one does.
-
-- **A thread C created can register with the collector.**
-  `GC_register_my_thread`, `GC_unregister_my_thread`, `GC_thread_is_registered`,
-  `GC_get_stack_base` and `GC_allow_register_threads` were undefined, so a C
-  library's own threads could not make their stacks roots. Registration puts
-  the thread on Crystal's thread list, which is what gcry stops and scans,
-  behind a gate every collection takes before it stops the world, so the new
-  `Thread` cannot be swept and the thread cannot allocate through a stop
-  before it is listed. Linux and macOS; elsewhere `GC_UNIMPLEMENTED`. The
-  same change stops an unregistered C thread that allocates while gcry
-  collects from wedging the process: the wait for a stop called the
-  `Thread.current` that creates a `Thread` (allocating, inside the stop). A
-  C thread calling `GC_malloc` in a loop beside 200 `GC.collect`s hung the
-  unfixed tree 3 of 3 (killed at 60 s) and finishes 3 of 3 now.
-  - **Evidence:** `process_spec/regression/29_boehm_foreign_thread_spec.cr`
-    did not link before; after, a `pthread_create`d thread registers, is on
-    the list while it holds 8 blocks on its stack through 5 collections with
-    churn, keeps all 8, and is off the list after it unregisters and exits;
-    unregistered, the same thread keeps 0 of 8 (8 of 8 runs). 20 of 20 runs
-    green.
-
-- **Idle parallel-mark workers park instead of polling, and one long list
-  marks in parallel as fast as serially.**
-  - **The bug:** parallel mark is the process default above 32 MiB live,
-    and a helper with nothing to take polled the empty shared stack for the
-    whole mark. On one long linked list, which has nothing to divide, four
-    workers burned 4.0 cores per second of collecting against 1.05 serial.
-    The pause was longer too: 40.1 ms against 31.6 on 3 M nodes. Most of
-    that was the parallel scan path itself, 54 instructions per object more
-    than the serial drain. It made two thread-local reads per object, each
-    an out-of-line call in Crystal, plus a `memcpy` call per node.
-  - **The fix:** after 50 µs without work a marker parks. On Linux it waits
-    on the futex the cycle start already uses. A publisher wakes sleepers
-    when the shared stack holds more than one pop's worth, or when it pushes
-    the rest of a large payload. The end of the cycle wakes them, and so
-    does the batch end that leaves no work, for a parked master. Elsewhere
-    a helper sleeps 100 µs–1 ms and the master keeps polling. Termination
-    detection is unchanged. The scan path is now handed the worker's shard,
-    so it makes no thread-local reads.
-  - **Evidence:** with 4 workers, 1.11 cores and a 31.1 ms pause; serial
-    is 30.3 ms on the same build (`bench/mark_list_heap.cr`,
-    `bench/log/linux/2026-10-06-mark-idle/`). Callgrind: 2 workers now cost
-    0.35% more instructions than serial, and serial is 1.5% cheaper than
-    before. `process_spec/regression/33_idle_mark_helpers_park_spec.cr`
-    reads a CPU/wall ratio of 4.0 against a bound of 1.6 before the fix.
-    `make parallel-mark-termination` stays red in its unlocked arm.
-    crystal-metric, 9 interleaved trials against readiness (`ab-cm-2.txt`):
-    JsonParsePure −3.9%, JsonGenerate −0.4%, Revcomp −0.6%, and the other
-    rows within ±1%, except Primes. Primes was +8.7% at the default two
-    workers in that run and +2.6% in the first, with overlapping ranges,
-    and +2.5% / +1.1% at four. It is not settled.
-  - `10_monitor_wait_cpu_spec` now marks serially. Its `workers + 0.4`
-    bound assumed every worker spins for the whole pause. With parked
-    helpers, a spinning Monitor passed that bound (measured).
 
 - **A promoted block freed in a nursery chunk goes on the nursery list, so
   releasing the chunk leaves no node behind.**
@@ -746,14 +400,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Evidence:** `spec/barrier_spec.cr` "claims only the faults it caused"
     fails on the old handler.
 
-- **A parallel mark counts the bytes it scans, so the adaptive threshold's
-  cap grows on large heaps again.** The cap follows `mark_scanned_bytes`, a
-  third of it times the factor (2026-10-03). A parallel cycle counted
-  nothing, which held the cap at its 64 MiB floor. With parallel mark on by
-  default above 32 MiB live, that hit exactly the heaps the cap exists for.
-  Helpers now count into their own cache line, and the master folds the
-  totals in after the cycle. `spec/mt_spec.cr` got 0 against 96 064 before.
-
 - **Atomic blocks get Boehm's byte of slack, so stdlib overruns stay in
   their own block.** Boehm adds a byte to every request, and Crystal's
   stdlib writes past byte buffers that only that byte absorbed:
@@ -776,16 +422,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for. `realloc(NULL, n)` is still `malloc(n)`. `Heap#realloc` does the
   same on library heaps. `process_spec/regression/31_alloc_size_edges_spec.cr`
   fails on the old path.
-
-- **`crystal i` runs in a compiler built with gcry.** Under the interpreter,
-  stdlib's Boehm prelude reads Boehm's `GC_stackbottom` variable for the
-  main fiber. Crystal cannot define a C-named variable, so every run stopped
-  at ``undefined reference to `GC_stackbottom'``. `c_abi.cr` now emits it
-  from inline assembly on Linux and macOS. As in Boehm, it holds the main
-  thread's stack bottom from `GC.init` on and follows `GC_set_stackbottom` /
-  `GC.set_stackbottom` on the main thread. Windows still fails loudly. The
-  three `ci/compiler-interp` programs print the same as under a Boehm-built
-  compiler. `process_spec/regression/21_boehm_c_abi_spec.cr`.
 
 - **The Crystal compiler builds with gcry, and what it compiles links.**
   - **The bug is in Crystal's stdlib.** `String::Builder#to_s` writes its
@@ -880,55 +516,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The fix:** every collection marks each queued object and its client
     data until its finalizer runs, as Boehm roots `finalize_now`.
     `run_pending` takes one node at a time, so the rest stay queued and
-    rooted while a finalizer runs.
+    rooted while a finalizer runs. A finalizer that calls `GC.collect` does
+    not nest the rest of the queue inside itself: a nested `run_pending` on
+    the same thread returns at once and the outer loop drains what the inner
+    collection queued, as Boehm's `GC_check_finalizer_nested` bounds it
+    (`37_nested_finalizer_collect_spec.cr`: depth 2 000 before, 1 after).
   - **Evidence:** `process_spec/regression/26_pending_finalizer_root_spec.cr`
     runs three idle collections and then `GC.collect`. The old code ran the
     pair `[2, 1]`; it now runs `[1, 2]`, both intact.
-
-- **`GC_register_finalizer` no longer reads object data as a header flag, and
-  replaces or removes a finalizer as Boehm does.**
-  - **The bug:** it checked for an existing finalizer with
-    `BlockHeader.finalizer?`. Under the default headerless layout that is bit
-    5 of the object's own bytes 4..7. A block whose second 32-bit word is 32
-    aborted with "the object already has a finalizer". Under `crystal i`, a
-    finalizable class whose first `Int32` ivar has bit 5 set killed the
-    interpreter. The bit was never set there either, so a real second
-    registration ran both finalizers, and a null `fn` removed nothing.
-  - **The fix:** the finalizer registry answers. A second registration
-    replaces the finalizer and a null `fn` removes it. The old C function and
-    client data come back through `ofn` / `ocd`, as from Boehm's
-    `GC_register_finalizer_inner`. The C callback and its client data are
-    stored directly, with no Crystal closure allocated per registration. The
-    dead header bits `FINALIZER` / `DISAPPEARING` are gone.
-  - **Evidence:** `process_spec/regression/25_boehm_finalizer_registration_spec.cr`.
-    The old code aborted (exit 134) on the first example and returned null
-    `ofn` / `ocd` on replacement and removal. Under `-Dgcry_block_headers` a
-    second `_ignore_self` registration aborted.
-
-- **Plain `GC_register_finalizer` keeps Boehm's normal ordering.**
-  - **The bug:** it went through the same path as `_ignore_self`, so an
-    object holding a pointer to itself was finalized.
-  - **The fix:** each registration records its ordering. Under Boehm's normal
-    ordering, marking from an object follows a pointer to itself too, so such
-    an object is on a cycle and never finalized. `_ignore_self`, which
-    `GC.add_finalizer` uses, is unchanged.
-    `GC_register_finalizer_no_order` / `_unreachable` stay undefined: stdlib
-    binds neither, and gcry has no unordered finalization.
-  - **Evidence:** spec 25 builds eight self-pointing blocks per call. The old
-    code finalized all 8 registered with `GC_register_finalizer` (header
-    layout; headerless aborted). Now none run, and they run once the self
-    pointer is cleared.
-
-- **Re-registering a disappearing link answers `GC_DUPLICATE` and follows the
-  new object.**
-  - **The bug:** the link got a second row and the call returned 0. When the
-    first target died, the link was cleared even though its new target was
-    alive.
-  - **The fix:** one row per link location, found through an index keyed by
-    location. Registering it again moves the row to the new object and returns
-    1, as Boehm's `GC_register_disappearing_link_inner` does.
-  - **Evidence:** spec 25. The old code answered `[0, 0]` for the two
-    registrations.
 
 - **The `GC` API behaves like `gc/boehm.cr`.**
   - **`GC.disable` nests.** `disable; disable; enable` used to turn
@@ -958,7 +553,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own globals had the object swept.
   - **Linux:** at `GC.init` gcry records every object's writable `PT_LOAD`
     minus RELRO. On each collection it walks `r_debug` without taking a lock,
-    to follow `dlopen` and `dlclose`.
+    to follow `dlopen` and `dlclose`, and takes an entry found mid-`dlopen`
+    or mid-`dlclose` once its program headers read back
+    (`42_library_sync_during_dlopen_spec.cr`).
   - **macOS:** dyld's add/remove-image callbacks.
   - **Windows:** writable `MEM_IMAGE` regions, walked again on DLL
     notifications.
@@ -968,6 +565,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Cost:** on a program linking OpenSSL, libyaml and pcre2, +105 KB of
     roots and +40 µs of pause per collection, the price of scanning what
     Boehm scans.
+  - **Diagnostics:** unloading a library lowers the static-root collapse
+    baseline by what the library table lost, so a `dlclose` is not reported
+    as a collapse (`34_dlclose_static_roots_spec.cr`).
 
 - **Linux x86_64: a pointer held only in `rbp` on the collecting thread is a
   root again.** The collector captures its own registers with glibc
@@ -1040,6 +640,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Knobs that did nothing, and finished experiments, are gone.**
+  `GCRY_RELEASE_CHUNKS`, `GCRY_DISABLE_INCREMENTAL` / `GCRY_NO_INCREMENTAL`,
+  `GCRY_DISABLE_NURSERY` and `GCRY_DISABLE_TIGHT_GROW` only set the
+  default; `GCRY_RADIX_THP` (no win, +3.27% RSS), `GCRY_PARALLEL_RELEASE`
+  (unsupported, could hang), `GCRY_MOSTLY_EMPTY_MODE` /
+  `GCRY_MOSTLY_EMPTY_UNLINK` (rejected) and `GCRY_FIBER_FP_FILL_MISS_ONLY`
+  (a use-after-free arm) had answered what they were for, and
+  `GCRY_INVARIANT_COUNTER_LOSS` crashed at startup (it enabled the checker
+  inside `GC.init`, before the runtime's first `Thread`; `make
+  counter-loss` calls the API instead). Setting one now does nothing.
+  `/gc-stats` loses the fields that reported them:
+  `mostly_empty_dontneed`, `precise_stack_fiber_fp_fill_miss_only`,
+  `parked_fp_fill_skipped_frames`, `parked_fp_fill_skipped_bytes`.
+  `GCRY_ALLOC_BATCH` warns that it is ignored on the bitmap allocator, as
+  the other inert knobs do. About 250 lines of code with no caller went
+  with them.
+
 - **Docs say what is Boehm-compatible and what is not, and what Windows
   covers.** `docs/INTEGRATION.md` has a Boehm parity table: what matches,
   what differs (`GC.add_finalizer` twice, atomic-only slack,
@@ -1092,13 +709,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **A block the program frees itself** (`GC.free`, which zlib and GMP
     call) stays cached between majors up to what the exact-size cache keeps
     (the large-cache retain plus 2 MiB), and the next allocation of its size
-    takes it in place, as without recycling. At first the cache between
-    majors held only what the last major left, nothing in a loop that does
-    not collect, so each such free unmapped its chunk at once: a
-    20 000-iteration gzip loop ran 752 ms against 310 ms with
-    `GCRY_LARGE_RECYCLE=0` (Boehm 745 ms), unmapping 5.4 GB. Kept but handed
-    out through the fresh mapping it still ran 615 ms; taken in place, 305
-    ms and 1.8 MiB unmapped (`bench/gzip_free_loop.cr`, 4 CPUs).
+    takes it in place, as without recycling. Caching only what the last
+    major left unmaps each such free at once: a 20 000-iteration gzip loop
+    ran 752 ms against 310 ms with `GCRY_LARGE_RECYCLE=0` (Boehm 745 ms),
+    unmapping 5.4 GB. Kept but handed out through the fresh mapping it ran
+    615 ms; taken in place, 305 ms and 1.8 MiB unmapped (`bench/gzip_free_loop.cr`, 4 CPUs).
     `process_spec/regression/32_large_free_reuse_spec.cr` and
     `make gzip-free-reuse` fail without it.
   - **Evidence:** crystal-metric, one binary against `GCRY_LARGE_RECYCLE=0`,
@@ -1111,6 +726,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     off (4 of 54 per arm). They come from stale words whose low half a
     32-bit store overwrote, and those hit whatever chunk straddles a 4 GiB
     boundary. Source: `bench/log/linux/2026-10-06-large-recycle/`.
+  - **Recycling clears only the pages the old block wrote.** `mincore` finds
+    the last resident page and `MADV_DONTNEED` drops the rest (which also
+    zeroes written pages that were swapped out): a loop freeing blocks of 16
+    sizes from 256 KiB to 1.7 MiB, writing one byte of each, went from 629 ms
+    and 878 000 minor faults to 106 ms and 4 700 for 20 000 iterations
+    (Boehm 227 ms); writing every block through is within 2%, and exact-size
+    reuse clears its whole payload
+    (`46_large_recycle_untouched_pages_spec.cr`).
 
 - **The adaptive threshold is paced: while collections take more than a
   tenth of the mutator time between them, the next threshold grows up to
@@ -1237,16 +860,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Small heaps:** −12% mark per collection.
   - Source: `bench/log/linux/2026-10-05-alloc-storm-mark/`.
 
-- **Idle Linux mark helpers wake on a futex, and the default worker count
-  grows with the CPUs.**
-  - **Wake-up:** helpers used to join each mark up to 5 ms late, finishing a
-    `nanosleep`. Now the master wakes them when a cycle starts. At 4 workers,
-    JsonParsePure's mark went from 265 to 218 ms with no extra CPU.
-  - **Worker count:** `min(2, CPUs − 1)` up to 7 CPUs, then `CPUs / 4 + 1`,
-    at most 8. On 12 CPUs, Primes goes from 60% to 77% of Boehm's speed and
-    JsonParsePure from 62% to 79%, with peak RSS unchanged (0.90× and 0.79×)
-    and CPU +2–8%. 3- and 4-CPU machines keep two workers.
-
 - **Linux pre-faults a fresh size-class chunk with one
   `MADV_POPULATE_WRITE` once the heap passes 32 MiB.** Its cursor is about to
   write every block anyway. As shipped (the 32 MiB floor, size classes
@@ -1256,20 +869,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   populating large objects too cost 11–15% RSS. Kernels before 5.14 answer
   EINVAL and fault pages as before.
 
-- **Parallel mark is on by default, serial below 32 MiB live.** The worker
-  count was `min(2, CPUs − 1)` here and is now `max(min(2, CPUs − 1),
-  min(CPUs / 4 + 1, CPUs − 1, 8))` (see the futex entry above). CPUs are
-  counted by affinity, as Crystal's
-  `default_workers_count` does. On CI runners, in crystal-metric `--release`
-  with 5 interleaved reps, two workers gained 8–16 points of Boehm's speed
-  on every GC-heavy row (x86-64, arm64, macOS) for 2–42% more CPU. Four
-  were no better than two except on arm64, at up to twice the CPU. Heaps
-  below the floor moved ±3 points
-  (`bench/log/linux/2026-10-05-parallel-mark-default/`). One CPU is left to
-  the mutator, so a 2-CPU machine stays serial. `GCRY_PARALLEL_MARK=1` is
-  serial. Stress: process_spec, `make parallel-mark-process` and
-  `parallel-mark-stress`, plus the whole of `spec/std` with the floor at 0
-  so every collection runs parallel; all green.
+- **Parallel mark is on by default, serial below 32 MiB live.**
+  - **Worker count:** `max(min(2, CPUs − 1), min(CPUs / 4 + 1, CPUs − 1,
+    8))`: two up to 7 CPUs, then `CPUs / 4 + 1`, at most 8. CPUs are counted
+    by affinity, as Crystal's `default_workers_count` does, and one is left
+    to the mutator, so a 2-CPU machine stays serial. `GCRY_PARALLEL_MARK=1`
+    is serial. On CI runners, in crystal-metric `--release` with 5
+    interleaved reps, two workers gained 8–16 points of Boehm's speed on
+    every GC-heavy row (x86-64, arm64, macOS) for 2–42% more CPU. Four were
+    no better than two except on arm64, at up to twice the CPU. Heaps below
+    the floor moved ±3 points
+    (`bench/log/linux/2026-10-05-parallel-mark-default/`). On 12 CPUs the
+    wider count takes Primes from 60% to 77% of Boehm's speed and
+    JsonParsePure from 62% to 79%, with peak RSS unchanged (0.90× and 0.79×)
+    and CPU +2–8%.
+  - **Idle markers park.** The master wakes helpers when a cycle starts
+    (they used to join up to 5 ms late, finishing a `nanosleep`; at 4
+    workers JsonParsePure's mark went from 265 to 218 ms with no extra CPU).
+    After 50 µs without work a marker, the master included, waits on one
+    word: a futex on Linux, `__ulock_wait`/`__ulock_wake` on macOS,
+    `WaitOnAddress`/`WakeByAddress*` on Windows (`Synchronization.lib`). A
+    publisher wakes sleepers when the shared stack holds more than one pop's
+    worth or it pushes the rest of a large payload, and the end of the cycle
+    wakes them. The scan path is handed the worker's shard, so it makes no
+    thread-local reads. On one long linked list, which has nothing to
+    divide, four workers now cost 1.11 cores per second of collecting and a
+    31.1 ms pause on 3 M nodes, against 30.3 ms serial; a polling helper had
+    cost 4.0 cores and 40.1 ms (`bench/mark_list_heap.cr`,
+    `bench/log/linux/2026-10-06-mark-idle/`). Callgrind: 2 workers cost
+    0.35% more instructions than serial. `make parallel-mark-process` steals
+    work on every platform (sleep-polling helpers stole 1–5 k per run on
+    darwin x86_64 and 0.7–5.6 k on Windows x86_64, against 165–369 k on
+    Linux); `parallel_mark_wakes` counts waits a wake ended
+    (`33_idle_mark_helpers_park_spec`, `45_parked_markers_woken_spec.cr`).
+    crystal-metric, 9 interleaved trials: JsonParsePure −3.9%, the other rows
+    within ±1% except Primes (+1.1% to +8.7% across runs, overlapping
+    ranges; not settled).
+  - **The adaptive threshold's cap sees parallel marks.** Helpers count
+    scanned bytes into their own cache line and the master folds them in, so
+    the cap follows `mark_scanned_bytes` on the large heaps it exists for
+    (`spec/mt_spec.cr`).
+  - **`-Dwithout_mt` off Windows marks serially**, because the mark stack's
+    `Crystal::SpinLock` compiles to nothing there; `GCRY_PARALLEL_MARK>1` is
+    ignored with a warning (`38_without_mt_serial_mark_spec.cr`).
+  - **Stress:** process_spec, `make parallel-mark-process` and
+    `parallel-mark-stress`, plus the whole of `spec/std` with the floor at 0
+    so every collection runs parallel; all green.
 
 - **Marking is faster without the layouts, a third faster on JSON.** The
   `Hash` walk waited on a cache miss for every small `Hash`'s entries, and
@@ -1284,38 +929,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`GC_remove_roots`, `GC_register_disappearing_link` and
   `GC_unregister_disappearing_link`** (`src/gcry/c_abi.cr`), as Boehm's.
-  `GC_remove_roots` drops every registered range wholly inside its bounds;
-  the hook sees a range whole or empty, and the next range added takes a
-  removed entry over in place, so add/remove churn copies no table
+  `GC_remove_roots` drops every registered range wholly inside its bounds
+  and returns only once no collection still scans it (the roots hook holds
+  an epoch odd while it reads the table, and the call waits out an odd
+  epoch; `51_remove_roots_waits_for_scan_spec.cr`). The hook sees a range
+  whole or empty, and the next range added takes a removed entry over in
+  place, so add/remove churn copies no table
   (`41_gc_add_roots_concurrent_spec.cr`). `GC_register_disappearing_link`'s
   link is a field of a heap object, cleared when the object holding it —
   `GC_base(link)` — dies, before its finalizer runs: Boehm's
-  cycle-breaking idiom; a link outside the heap aborts with "Bad arg", as
-  Boehm's. `GC_unregister_disappearing_link` leaves the word alone and
-  answers 1 if there was a registration (`25_*`).
+  cycle-breaking idiom. A null, misaligned or out-of-heap link aborts with
+  "Bad arg", no memory answers `GC_NO_MEMORY`, and re-registering a link
+  moves it to the new object and answers `GC_DUPLICATE`, through an index
+  keyed by location. `GC_unregister_disappearing_link` leaves the word alone
+  and answers 1 if there was a registration, 0 for a misaligned link
+  (`25_*`).
 
-- **`GC_register_my_thread` and `GC_beginthreadex` on Windows.** A thread C
-  created registers as on Linux and macOS: it goes on Crystal's thread list,
-  is suspended and scanned, and comes off again on `GC_unregister_my_thread`
-  or, if it exits still registered, through an FLS callback. It answered
-  `GC_UNIMPLEMENTED` before (`29_boehm_foreign_thread_spec.cr`, now one
-  scenario on every platform, an exit without unregistering included).
-  `GC_beginthreadex`, which aborted, starts its thread suspended, roots the
-  argument for the thread's life (a birth root on a duplicate of the
-  handle), and the thread registers itself before the routine runs and
-  unregisters after, as Boehm's `GC_win32_start_inner`
-  (`40_gc_pthread_create_registers_spec.cr`, now with a Windows arm).
-
-- **Loaded-DLL roots have a Windows regression**
-  (`process_spec/regression/36_windows_dll_static_roots_spec.cr`). The
-  roots shipped on 2026-10-05, but specs 16 and 34 are Linux-only, so
-  nothing exercised the Windows walk. The spec builds a DLL whose global is
-  the only reference to an object, loads it after `GC.init`, and checks the
-  object survives five collections. With `Gcry::Platform.shared_lib_roots =
-  false` (the scan before 2026-10-05) the object is collected; 20 of 20 runs
-  of each. The DLL is built with `cl` found through vswhere (no developer
-  shell needed), or with `cc`/`clang` on the GNU target. Without a compiler
-  the examples are pending.
+- **Threads C created can register with the collector**:
+  `GC_register_my_thread`, `GC_unregister_my_thread`,
+  `GC_thread_is_registered`, `GC_get_stack_base`, `GC_allow_register_threads`,
+  `GC_pthread_create` (Linux, macOS) and `GC_beginthreadex` (Windows).
+  Registration puts the thread on Crystal's thread list, which is what gcry
+  stops and scans, behind a gate every collection takes before it stops the
+  world, so the new `Thread` cannot be swept and the thread cannot allocate
+  through a stop before it is listed. A thread that exits still registered
+  comes off the list through a pthread-key destructor (an FLS callback on
+  Windows). `GC_pthread_create` and `GC_beginthreadex` start the routine on
+  a trampoline that roots the caller's `arg` for the thread's life and
+  registers the thread with its own stack, as Boehm's
+  `GC_win32_start_inner` does. Linux's suspend handler waits until its
+  stop's epoch is closed, as Boehm's waits for `GC_stop_count`, so a stale
+  resume left pending on a thread that blocks `SIG_RESUME` cannot end the
+  next stop early (`47_stale_resume_signal_spec.cr`). A registered thread
+  holding 8 blocks only on its stack keeps all 8 through 5 collections with
+  churn; unregistered it keeps 0 of 8
+  (`29_boehm_foreign_thread_spec.cr`, `40_gc_pthread_create_registers_spec.cr`,
+  both on every platform).
 
 - **Windows workload numbers**
   (`bench/log/windows/2026-10-06-vm-validation/`), from a 12-vCPU Windows 11
@@ -1338,8 +987,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The signatures match stdlib's `gc/boehm.cr`. A function gcry cannot honour
   aborts with a message rather than silently doing nothing:
   `GC_set_max_heap_size`. `GC_gc_no`, `GC_bytes_found` and
-  `GC_current_warn_proc` are variables, which Crystal cannot export.
-  `process_spec/regression/21_boehm_c_abi_spec.cr`.
+  `GC_current_warn_proc` are variables, which Crystal cannot export;
+  `GC_stackbottom`, which `crystal i`'s Boehm prelude reads, is emitted from
+  inline assembly on Linux and macOS and follows `GC_set_stackbottom` /
+  `GC.set_stackbottom` on the main thread (Windows fails loudly).
+  `process_spec/regression/21_boehm_c_abi_spec.cr`. Behaviour follows Boehm's:
+  - **`GC_add_roots`** is locked, keeps one entry per range (a range inside
+    an existing one is a no-op, a same-start range extends it, as
+    `GC_add_roots_inner`), rounds a range inward to whole words, and scans a
+    range of any length in 64 MiB pieces through `Heap#push_root_range`, as
+    `GC_push_all_eager` does. Its hook is installed by `GC.init`, not inside
+    the first call (`41_gc_add_roots_concurrent_spec.cr`).
+  - **Finalizers:** `GC_register_finalizer*` asks the finalizer registry,
+    not a header bit; a second registration replaces, a null `fn` removes,
+    and `ofn` / `ocd` return the old pair, as `GC_register_finalizer_inner`.
+    Plain `GC_register_finalizer` keeps normal ordering, so a self-pointing
+    object is on a cycle and not finalized; `_no_order` / `_unreachable`
+    stay undefined. `GC_invoke_finalizers` runs the queued finalizers and
+    answers how many ran (0 from inside a finalizer)
+    (`25_boehm_finalizer_registration_spec.cr`).
+  - **`GC_collect_a_little`** does what an allocation would at that point
+    and returns 1 only while a sliced cycle is in progress, 0 when there is
+    nothing to do and while disabled; `Gcry.collect_a_little` keeps the
+    slice-on-demand meaning (`27_boehm_collect_parity_spec.cr`).
+  - **Callbacks:** `GC_set_start_callback` runs at the start of every
+    collection, before the stop; `GC_set_on_collection_event`,
+    `GC_set_on_thread_event` and `GC_set_on_heap_resize` report where Boehm
+    reports; out of memory, `GC_malloc`, `GC_malloc_atomic` and `GC_realloc`
+    call the `GC_set_warn_proc` procedure and return null
+    (`28_boehm_callbacks_spec.cr`).
+  - **`GC_get_suspend_signal` / `GC_get_thr_restart_signal`** answer -1 on
+    macOS, where gcry stops threads with Mach `thread_suspend`, as Boehm.
+  - **Programs that also link libgc** build with `-Dgcry_no_boehm_abi`, which
+    leaves the C ABI and `LibGC` out; with a static libgc in the link
+    (Crystal's distribution ships `lib/crystal/libgc.a`) every `GC_*` name
+    is otherwise a "multiple definition" error. Weak definitions were
+    rejected: against an archive, which collector serves a name would depend
+    on which members the link pulls in. With a shared libgc the default
+    links but splits calls between the two collectors, so the flag is for
+    any program that links libgc. On Linux libgc must also move off
+    `SIGPWR`/`SIGXCPU`, Crystal's stop signals, or gcry's first
+    multi-threaded stop faults (SIGSEGV at `0x18`). `make boehm-abi-optout`
+    (`bench/boehm_abi_optout.cr`) runs 20 gcry collections across threads
+    beside libgc 8.2.8's own; docs/INTEGRATION.md § Boehm's C ABI.
 
 - **`Gcry.usable_size(ptr)` / `Heap#usable_size`**, Boehm's `GC_size`: the
   usable size of the live block containing `ptr` — its base or an interior
@@ -1360,7 +1050,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a collector that could not work there. On those targets there is no
   platform layer, the root scan reads 8-byte words, and STW captures
   registers for x86_64 and aarch64 only. `src/gcry/platform/os.cr` now
-  raises at compile time and says to keep Crystal's default GC.
+  raises at compile time and says to drop `require "gcry"` (and
+  `-Dgc_none` under the process GC): the library heap cannot run there
+  either, since the mark steps a `UInt64*` per `sizeof(Void*)` and the
+  allocator keeps a `@[ThreadLocal]` cursor. Checked with `crystal build
+  --cross-compile` for `i386-linux-gnu`, `aarch64-linux-android28` and
+  `x86_64-unknown-freebsd`, with and without `-Dgc_none`.
 
 - **Windows has a stack low-water probe (`VirtualQuery`).** All three
   platforms now take the low-water skip through the same code path. The
@@ -1371,6 +1066,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GCRY_STACK_LOW_WATER=0` now mean something on Windows. It does not change
   pauses: the guard-start scan already skipped the 8 MiB reserve with one
   query (`roots.cr` `scan_range_safe`, `Platform.each_readable_region`).
+
+### Testing
+
+- `bench/perf_smoke.sh` no longer runs a word of a Python comment as a
+  shell command (`noise_ratio: command not found`, four times a run).
+- CI drops four apt-get steps that could not run on their runners, two
+  rebuilds of `stw_mt_property_test`, and a repeated `apt-get update`; the
+  other twenty refreshes go through one composite action.
+- CI runs on pushes to master and on pull requests, not on every branch
+  push: each PR commit ran the whole workflow twice. A newer commit on a PR
+  cancels its older run.
+- `make chunk-list-drift` excuses a chunk only while its mapper is
+  suspended between the list and index stores, and prints how many it
+  excused; a mapper the stop left running still counts.
+- `GCRY_TRACE` lines go through `RawOut` (byte-identical output), and the
+  page-release harnesses set `GCRY_DISABLE_MADVISE`, which Linux reads,
+  instead of `GCRY_DISABLE_PAGE_RELEASE`, which it does not.
+- Windows ARM64 CI installs a pinned MSYS2 toolchain
+  (`ci/windows-arm64-msys2.sh`): MSYS2's LLVM 23.1.3 update of 2026-10-10
+  crashed the pinned Crystal 1.21.0 compiler in every arm64 job.
+- `ci/windows.ps1` carries `#Requires -Version 7`; Windows PowerShell 5.1
+  failed half-way through its first step.
+- `bench/kemal` builds on Windows (its `EXTRA_THREADS` block used
+  `LibC.pipe`, unbound there).
+- Spec 21's `GC_add_roots` example holds to eight control blocks with one
+  allowed (one conservatively held block failed it on Linux x86_64), and
+  its `GC_stackbottom` example is pending when the main fiber runs on a pool
+  thread.
+- Spec 31 expects `Gcry::OutOfMemoryError` for an oversize request.
+- Spec 35 checks that all 300 workers were armed and that no more than the
+  baseline were released meanwhile, and collects until the birth roots are
+  back under a 5 s deadline (11 of 20 Windows runs failed on exactly three
+  collections); the fixed 256-slot table still fails it.
+- Spec 41 keeps each block reachable until its range is added.
+- Spec 45 counts a parked marker's wake by the wait's result, not its time
+  (`WaitOnAddress` rounds its timeout up): 200 of 200 standalone, 240 of 240
+  with 8 copies at once; 89 of 100 still fail with the wake call removed.
+- Spec 48 collects once per extra registration before its `<= 1` checks, so
+  the old tree fails it 3 of 3.
+- Spec 50 bounds the mean `GC.collect` wait (at most 2; 1.06–1.36 measured)
+  rather than the worst, plus a worst-case 30 on the root thread.
+- `10_monitor_wait_cpu_spec` marks serially: its `workers + 0.4` bound
+  assumed every worker spins for the whole pause.
+- `process_spec/regression/36_windows_dll_static_roots_spec.cr` exercises
+  the Windows loaded-DLL root walk: a DLL global as the only reference
+  survives five collections, and is collected with
+  `Gcry::Platform.shared_lib_roots = false` (20 of 20 each).
+- `make parallel-mark-termination` bounds each arm's child at 120 s.
+- `make thread-death-window` copies the thread ids out under the list mutex
+  and polls outside it, every 100 µs.
+- `make idle-rss-after-burst` reruns an inconclusive run (exit 2) up to three
+  times; the shipped arm must exit 0 and the red arm 1. The retention behind
+  it (2–7 runs in 100 on Windows, master too) is still open.
+- `make nursery-tlab-smoke` requires the released chunk on Linux again, and
+  gained a released-chunk arm.
 
 ## [0.34.0] - 2026-10-04
 
@@ -7237,7 +6987,7 @@ now measured (not estimated).
 - **macOS stubs:** `platform/darwin_stubs.cr` so the shard type-checks on Darwin; process GC still raises at init until Mach STW + dyld roots land.
 - **Collector split:** `collect.cr` reopened into `collect_stw` / `collect_scan` / `collect_mark` / `collect_sweep` for contributors.
 - **Observability:** `Gcry.metrics`, `Gcry.prometheus_text`, `Gcry::Observability.json_stats`; Kemal `/metrics` + richer `/gc-stats`.
-- **Ameba** lint in CI (`make lint`); [docs/API.md](docs/API.md); README gcry-vs-Boehm table; [docs/ANNOUNCE.md](docs/ANNOUNCE.md) draft.
+- **Ameba** lint in CI (`make lint`); [docs/API.md](docs/API.md); README gcry-vs-Boehm table; `docs/ANNOUNCE.md` draft (removed before 0.35.0).
 
 ### Fixed
 

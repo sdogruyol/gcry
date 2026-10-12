@@ -104,7 +104,7 @@ module Gcry
     # Raw syscalls into stack buffers: no allocation, callable under STW.
     private def self.read_thread_sp_from_proc(tid : Int32) : UInt64?
       path = uninitialized UInt8[64]
-      len = build_syscall_path(path.to_unsafe, tid)
+      len = build_task_path(path.to_unsafe, tid, "/syscall")
       return nil if len == 0
 
       fd = LibC.open(path.to_unsafe.as(LibC::Char*), 0) # O_RDONLY
@@ -128,7 +128,7 @@ module Gcry
     # name alone cannot go further.
     def self.thread_syscall_site(tid : Int32) : {Int64, UInt64, UInt64}?
       path = uninitialized UInt8[64]
-      len = build_syscall_path(path.to_unsafe, tid)
+      len = build_task_path(path.to_unsafe, tid, "/syscall")
       return nil if len == 0
 
       fd = LibC.open(path.to_unsafe.as(LibC::Char*), 0) # O_RDONLY
@@ -185,33 +185,6 @@ module Gcry
       start += 1
       return nil if start > last
       parse_hex(buf, start, last + 1)
-    end
-
-    # "/proc/self/task/<tid>/syscall\0" without String#% or interpolation.
-    private def self.build_syscall_path(dst : UInt8*, tid : Int32) : Int32
-      prefix = "/proc/self/task/"
-      suffix = "/syscall"
-      i = 0
-      prefix.each_byte { |b| dst[i] = b; i += 1 }
-
-      return 0 if tid <= 0
-      digits = uninitialized UInt8[12]
-      d = 0
-      v = tid
-      while v > 0
-        digits[d] = ('0'.ord + (v % 10)).to_u8
-        d += 1
-        v //= 10
-      end
-      while d > 0
-        d -= 1
-        dst[i] = digits[d]
-        i += 1
-      end
-
-      suffix.each_byte { |b| dst[i] = b; i += 1 }
-      dst[i] = 0_u8
-      i
     end
 
     # Second-to-last whitespace-separated field, parsed as 0x-prefixed hex.

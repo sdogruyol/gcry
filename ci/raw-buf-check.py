@@ -14,10 +14,6 @@ with every number at full width against a 352-byte buffer, and 349 on an
 ordinary mapped chunk — three bytes of margin — and the thread-list tripwire's
 index line is 295 against 288.
 
-The same question is asked of the two hand-rolled writers that predate
-`RawOut` — `EcQueueAudit` stops at 300 with 320-byte buffers, `StwWatchdog` at
-250 with 256 — because the invariant is about the pair, not about one module.
-
 Silent until it is not: a short line fits, and the buffer is only wrong for
 inputs nobody has printed yet. That is what makes it a gate.
 """
@@ -32,10 +28,7 @@ DECL = re.compile(r"\b(\w+)\s*=\s*uninitialized\s+UInt8\[([\w:]+)\]")
 ALIAS = re.compile(r"\b(\w+)\s*=\s*(\w+)\.to_unsafe\b")
 SHARED_WRITE = re.compile(r"RawOut\.(?:append\w*|flush)\(\s*(\w+)(?:\.to_unsafe)?\s*,")
 LOCAL_WRITE = re.compile(r"(?<![\w.])append\w*\(\s*(\w+)(?:\.to_unsafe)?\s*,")
-LOCAL_WRITER = re.compile(r"def self\.append\w*\(\s*\w+\s*:\s*UInt8\*")
-# `while i < n && len < 300` and `return len if len + n > 1023`: the two shapes
-# a hand-rolled writer states its bound in.
-LOCAL_BOUND = re.compile(r"len\s*<\s*(\d+)|len\s*\+\s*\w+\s*>\s*(\d+)")
+RAW_OUT = "src/gcry/raw_out.cr"
 LIMIT_DECL = re.compile(r"^\s*LIMIT\s*=\s*(\d+)\s*$", re.M)
 CONST = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)\s*$", re.M)
 
@@ -62,13 +55,9 @@ def size_of(spec: str, cap: int, consts: dict[str, int]) -> int | None:
     return consts.get(name)
 
 
-def local_bound(text: str, cap: int) -> int | None:
-    """How far this file's own writer will write, or None if it has none."""
-    if not LOCAL_WRITER.search(text):
-        return None
-    found = [int(g) for m in LOCAL_BOUND.finditer(text) for g in m.groups() if g]
-    # A writer whose bound is `LIMIT` rather than a literal is `RawOut` itself.
-    return max(found) if found else cap
+def own_writer(path: pathlib.Path) -> bool:
+    """`raw_out.cr` calls its own writers unqualified, so `RawOut.` misses them."""
+    return str(path.relative_to(ROOT)) == RAW_OUT
 
 
 def main() -> int:
@@ -78,8 +67,8 @@ def main() -> int:
     unknown: list[str] = []
     for path in sorted(ROOT.glob("src/**/*.cr")) + sorted(ROOT.glob("bench/**/*.cr")):
         text = path.read_text()
-        mine = local_bound(text, cap)
-        if "RawOut." not in text and mine is None:
+        mine = own_writer(path)
+        if "RawOut." not in text and not mine:
             continue
         # Every declaration, not the last one per name: a file reuses `buf` in
         # method after method, and the one that overflows is whichever line is
@@ -97,8 +86,8 @@ def main() -> int:
         alias = {m.group(1): m.group(2) for m in ALIAS.finditer(text)}
         written: list[tuple[str, int]] = [
             (m.group(1), cap) for m in SHARED_WRITE.finditer(text)]
-        if mine is not None:
-            written += [(m.group(1), mine) for m in LOCAL_WRITE.finditer(text)]
+        if mine:
+            written += [(m.group(1), cap) for m in LOCAL_WRITE.finditer(text)]
         for name, bound in sorted(set(written)):
             for backing in sorted({name, alias.get(name, name)}):
                 for spec, line in decls.get(backing, ()):

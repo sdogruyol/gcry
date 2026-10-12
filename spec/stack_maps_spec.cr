@@ -232,39 +232,14 @@ describe Gcry::StackMaps do
       lo = base
       hi = base &+ (32 * 8)
 
-      ranges = [] of {UInt64, UInt64, Bool}
-      Gcry::StackMaps.each_parked_fp_frame_range(top, lo, hi, 8) do |a, b, fill|
-        ranges << {a, b, fill}
+      ranges = [] of {UInt64, UInt64}
+      Gcry::StackMaps.each_parked_fp_frame_range(top, lo, hi, 8) do |a, b|
+        ranges << {a, b}
       end
       ranges.size.should be >= 1
-      # First range: rsp=top+64 to fp1; no maps loaded → fill
+      # First range: rsp=top+64 to fp1
       ranges[0][0].should eq(top &+ 64)
       ranges[0][1].should eq(fp1)
-      ranges[0][2].should be_true
-    end
-
-    it "each_parked_fp_frame_range miss_only skips nonempty map hits" do
-      Gcry::StackMaps.reset_for_testing
-      Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
-      # Map at 0x1020; park leaf RIP there so first frame is a hit → do_fill=false.
-      mem = StaticArray(UInt64, 32).new(0_u64)
-      base = mem.to_unsafe.address
-      fp1 = base &+ (12 * 8)
-      Pointer(UInt64).new(fp1).value = 0_u64
-      Pointer(UInt64).new(fp1 &+ 8).value = 0x9999_u64
-      top = base
-      Pointer(UInt64).new(top &+ 32).value = fp1
-      Pointer(UInt64).new(top &+ 56).value = 0x1020_u64 # rip = map PC
-      lo = base
-      hi = base &+ (32 * 8)
-      fills = [] of Bool
-      Gcry::StackMaps.each_parked_fp_frame_range(top, lo, hi, 8, miss_only: true) do |_a, _b, fill|
-        fills << fill
-      end
-      fills.size.should be >= 1
-      fills[0].should be_false
-    ensure
-      Gcry::StackMaps.reset_for_testing
     end
   {% end %}
 end

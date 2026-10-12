@@ -989,9 +989,9 @@ module Gcry
     # (`bench/log/linux/2026-08-26-stw-sweep-hang/FINDINGS.md`).
     #
     # The unlink runs under the class's freelist lock; the syscall does not.
-    # The machinery already existed for `@mostly_empty_dontneed` and was simply
-    # never applied to the HOLED walk, which is the one `GCRY_PAGE_DONTNEED=1`
-    # turns on.
+    # The machinery existed for the mostly-empty flush's former `dontneed`
+    # mode and was simply never applied to the HOLED walk, which is the one
+    # `GCRY_PAGE_DONTNEED=1` turns on.
     # Unlink a chunk's free-only page runs and release them in one critical
     # section that excludes every small allocation of the class — see
     # `with_small_allocation_excluded` for why the syscall must sit inside it.
@@ -1080,15 +1080,13 @@ module Gcry
     end
 
     # Mostly-empty flush: free pages in SPARSE chunks, no HOLED freelist rebuild.
-    # Default MADV_FREE keeps freelist words valid. Opt-in dontneed mode unlinks
-    # freelist nodes in free-only page runs then MADV_DONTNEED (churn risk).
+    # MADV_FREE keeps freelist words valid, so nothing is unlinked.
     private def flush_pending_mostly_empty_chunks : Nil
       return unless @mostly_empty_release
       return if @madvise_free_pages
 
       budget = @mostly_empty_budget
       budget_left = budget == 0 ? UInt64::MAX : budget
-      preserve = !@mostly_empty_dontneed
 
       each_chunk do |chunk|
         next unless ChunkHeader.sparse?(chunk)
@@ -1102,18 +1100,7 @@ module Gcry
         payload = SizeClasses.payload(class_index)
         nursery = ChunkHeader.nursery?(chunk)
         before = @dontneed_bytes
-        # `GCRY_MOSTLY_EMPTY_UNLINK=1` separates the two things
-        # `GCRY_MOSTLY_EMPTY_MODE=dontneed` changes at once. That mode both
-        # unlinks the free-only runs *and* switches the syscall from `MADV_FREE`
-        # to `MADV_DONTNEED`, so its 7 of 30 says nothing about which half
-        # matters. This arm unlinks and keeps `MADV_FREE`.
-        #
-        # Research only: unlinked blocks do not come back without a freelist
-        # rebuild, and the SPARSE path deliberately does not ask for one — the
-        # whole point of the mode is to avoid it. If this arm turns out to be
-        # the fix, the rebuild is the price and that is a separate decision.
-        if release_chunk_pages_excluded(chunk, class_index, preserve_content: preserve,
-             unlink: @mostly_empty_dontneed || @mostly_empty_unlink)
+        if release_chunk_pages_excluded(chunk, class_index, preserve_content: true, unlink: false)
           gained = @dontneed_bytes - before
           if gained > budget_left
             # Counters already include full run; budget is best-effort cap on

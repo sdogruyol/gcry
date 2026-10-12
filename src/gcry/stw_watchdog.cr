@@ -245,39 +245,39 @@ module Gcry
     end
 
     private def self.report(id : Int32, elapsed_ns : UInt64) : Nil
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
-      len = append(buf.to_unsafe, len, "gcry: STOP-THE-WORLD STALLED ")
-      len = append_u64(buf.to_unsafe, len, elapsed_ns // 1_000_000_u64)
-      len = append(buf.to_unsafe, len, " ms in phase=")
-      len = append(buf.to_unsafe, len, phase_name(id))
-      len = append(buf.to_unsafe, len, " — every mutator is frozen and the collector is not\n")
+      len = RawOut.append(buf.to_unsafe, len, "gcry: STOP-THE-WORLD STALLED ")
+      len = RawOut.append_u64(buf.to_unsafe, len, elapsed_ns // 1_000_000_u64)
+      len = RawOut.append(buf.to_unsafe, len, " ms in phase=")
+      len = RawOut.append(buf.to_unsafe, len, phase_name(id))
+      len = RawOut.append(buf.to_unsafe, len, " — every mutator is frozen and the collector is not\n")
       if id == PHASE_SUSPEND && @@suspend_waiting_id == SUSPEND_UNSET
-        len = append(buf.to_unsafe, len, "gcry: the stop never reached the suspend wait — ")
-        len = append(buf.to_unsafe, len, step_name(@@suspend_step))
-        len = append(buf.to_unsafe, len, ". Reported once per stop\n")
+        len = RawOut.append(buf.to_unsafe, len, "gcry: the stop never reached the suspend wait — ")
+        len = RawOut.append(buf.to_unsafe, len, step_name(@@suspend_step))
+        len = RawOut.append(buf.to_unsafe, len, ". Reported once per stop\n")
       elsif id == PHASE_SUSPEND && @@suspend_waiting_id == 0_u64
         # The wait loop clears the breadcrumb when it finishes, so a zero here
         # does not mean "waiting on thread 0" — it means the loop is done and
         # the stall is after it, before the phase advances. Saying otherwise
         # sent a reader looking at thread handles for a stall that was not
         # there (CI run 32638359761, aarch64).
-        len = append(buf.to_unsafe, len, "gcry: every thread acknowledged (")
-        len = append_u64(buf.to_unsafe, len, @@suspend_acked.to_u64)
-        len = append(buf.to_unsafe, len, " of ")
-        len = append_u64(buf.to_unsafe, len, @@suspend_expected.to_u64)
-        len = append(buf.to_unsafe, len, "); the stall is after the wait loop, " \
-                                         "not in it. Reported once per stop\n")
+        len = RawOut.append(buf.to_unsafe, len, "gcry: every thread acknowledged (")
+        len = RawOut.append_u64(buf.to_unsafe, len, @@suspend_acked.to_u64)
+        len = RawOut.append(buf.to_unsafe, len, " of ")
+        len = RawOut.append_u64(buf.to_unsafe, len, @@suspend_expected.to_u64)
+        len = RawOut.append(buf.to_unsafe, len, "); the stall is after the wait loop, " \
+                                                "not in it. Reported once per stop\n")
       elsif id == PHASE_SUSPEND
         # This phase does not wait on a lock — it waits for a thread to
         # acknowledge its suspend signal. Naming it is the whole point.
-        len = append(buf.to_unsafe, len, "gcry: waiting for thread 0x")
-        len = append_hex(buf.to_unsafe, len, @@suspend_waiting_id)
-        len = append(buf.to_unsafe, len, " to acknowledge its suspend signal; ")
-        len = append_u64(buf.to_unsafe, len, @@suspend_acked.to_u64)
-        len = append(buf.to_unsafe, len, " of ")
-        len = append_u64(buf.to_unsafe, len, @@suspend_expected.to_u64)
-        len = append(buf.to_unsafe, len, " already have. Reported once per stop\n")
+        len = RawOut.append(buf.to_unsafe, len, "gcry: waiting for thread 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, @@suspend_waiting_id)
+        len = RawOut.append(buf.to_unsafe, len, " to acknowledge its suspend signal; ")
+        len = RawOut.append_u64(buf.to_unsafe, len, @@suspend_acked.to_u64)
+        len = RawOut.append(buf.to_unsafe, len, " of ")
+        len = RawOut.append_u64(buf.to_unsafe, len, @@suspend_expected.to_u64)
+        len = RawOut.append(buf.to_unsafe, len, " already have. Reported once per stop\n")
       elsif @@index_lock_for != 0_u64
         # The one wedge this collector has no defence against, and until now no
         # words for either: `chunk_containing` holds `@index_lock` for the
@@ -286,76 +286,16 @@ module Gcry
         # mutator frozen holding it stalls the sweep forever, because nobody is
         # resumed until the sweep finishes. "phase=sweep" was as much as this
         # report could say; the chunk address says which section it is in.
-        len = append(buf.to_unsafe, len, "gcry: it is taking @index_lock for chunk 0x")
-        len = append_hex(buf.to_unsafe, len, @@index_lock_for)
-        len = append(buf.to_unsafe, len, " — a mutator suspended while holding that lock stalls this " \
-                                         "forever, since nothing is resumed until the phase ends. " \
-                                         "Reported once per stop\n")
+        len = RawOut.append(buf.to_unsafe, len, "gcry: it is taking @index_lock for chunk 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, @@index_lock_for)
+        len = RawOut.append(buf.to_unsafe, len, " — a mutator suspended while holding that lock stalls this " \
+                                                "forever, since nothing is resumed until the phase ends. " \
+                                                "Reported once per stop\n")
       else
-        len = append(buf.to_unsafe, len, "gcry: it is waiting on something a suspended thread holds; " \
-                                         "reported once per stop\n")
+        len = RawOut.append(buf.to_unsafe, len, "gcry: it is waiting on something a suspended thread holds; " \
+                                                "reported once per stop\n")
       end
-      Gcry::OS.write(2, buf.to_unsafe, LibC::SizeT.new(len))
-    end
-
-    private def self.append(buf : UInt8*, len : Int32, str : String) : Int32
-      i = 0
-      n = str.bytesize
-      src = str.to_unsafe
-      while i < n && len < 250
-        buf[len] = src[i]
-        len += 1
-        i += 1
-      end
-      len
-    end
-
-    # A `pthread_t` is only useful in the form the rest of gcry prints it in.
-    private def self.append_hex(buf : UInt8*, len : Int32, value : UInt64) : Int32
-      digits = uninitialized UInt8[16]
-      count = 0
-      v = value
-      if v == 0
-        digits[0] = '0'.ord.to_u8
-        count = 1
-      else
-        while v > 0 && count < 16
-          nib = (v & 0xf).to_u8
-          digits[count] = nib < 10 ? ('0'.ord.to_u8 + nib) : ('a'.ord.to_u8 + (nib - 10))
-          v >>= 4
-          count += 1
-        end
-      end
-      i = count - 1
-      while i >= 0 && len < 250
-        buf[len] = digits[i]
-        len += 1
-        i -= 1
-      end
-      len
-    end
-
-    private def self.append_u64(buf : UInt8*, len : Int32, value : UInt64) : Int32
-      digits = uninitialized UInt8[20]
-      count = 0
-      v = value
-      if v == 0
-        digits[0] = '0'.ord.to_u8
-        count = 1
-      else
-        while v > 0 && count < 20
-          digits[count] = ('0'.ord.to_u8 + (v % 10).to_u8)
-          v //= 10
-          count += 1
-        end
-      end
-      i = count - 1
-      while i >= 0 && len < 250
-        buf[len] = digits[i]
-        len += 1
-        i -= 1
-      end
-      len
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     private def self.write_str(str : String) : Nil

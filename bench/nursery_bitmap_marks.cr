@@ -67,7 +67,7 @@ def run(arm : Arm) : Outcome | String
 
   begin
     unless heap.nursery_enabled
-      return "nursery did not enable (headerless compile default, or GCRY_DISABLE_NURSERY). Build with -Dgcry_block_headers."
+      return "nursery did not enable (headerless compile default, or GCRY_NURSERY=0). Build with -Dgcry_block_headers."
     end
     if DISABLED && !heap.nursery_marks_global
       return "--disabled needs GCRY_NURSERY_MARKS_GLOBAL=1: the property is off, so the per-chunk clear is still running."

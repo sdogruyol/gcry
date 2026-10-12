@@ -42,7 +42,7 @@ the async handler — allocating there is the normal mutator path. That does
 | Mode | Support |
 |------|---------|
 | ExecutionContext, parallelism **1** | **Supported** — STW + fiber / Monitor stacks |
-| Extra parallel contexts | **Supported opt-in:** EC>1 + TLAB **off** + lazy (~79% `/json`); RSS stretch `GCRY_PARALLEL_DORMANT=1` (~75% @ ~4×). `GCRY_TLAB=1` / `GCRY_PARALLEL_RELEASE=1` are **unsupported** (stderr warn; research/A/B only — hang/SEGV risk). Parallel *mark* is separate and on by default: `min(2, CPUs − 1)` workers up to 7 CPUs, `CPUs / 4 + 1` (at most 8) above, serial below 32 MiB live (`GCRY_PARALLEL_MARK=1` for serial) |
+| Extra parallel contexts | **Supported opt-in:** EC>1 + TLAB **off** + lazy (~79% `/json`); RSS stretch `GCRY_PARALLEL_DORMANT=1` (~75% @ ~4×). `GCRY_TLAB=1` is **unsupported** (stderr warn; research/A/B only — hang/SEGV risk). Parallel *mark* is separate and on by default: `min(2, CPUs − 1)` workers up to 7 CPUs, `CPUs / 4 + 1` (at most 8) above, serial below 32 MiB live (`GCRY_PARALLEL_MARK=1` for serial) |
 | `-Dpreview_mt` | Alone: unsupported (deprecated scheduler); the build stops with the reason. With `-Dexecution_context`: the execution-context modes above |
 | `-Dwithout_mt` | API works; prefer 1.21 default |
 
@@ -54,8 +54,8 @@ Process GC: `stop_the_world = true`. Library `Gcry::Heap` under Boehm: STW off.
 |------|----------------|
 | Large | Freelist + trim (`GCRY_LARGE_CACHE`; Linux default retain **0**) |
 | Size-class chunks | Empty → **munmap** (Linux retain **0**; Darwin dormant **512 KiB**); `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` / warm retain escapes |
-| Sparse pages | `GCRY_PAGE_DONTNEED=1` (Linux opt-in; Darwin default-on) |
-| Fat-app freelist residual | `GCRY_TIGHT_GROW=1` (opt-in; acik ~0.92×; Kemal thr soft — not default) |
+| Sparse pages | `GCRY_PAGE_DONTNEED=1` (opt-in on Linux and Darwin; freelist allocator only — ignored with a warning on the bitmap default) |
+| Fat-app freelist residual | `GCRY_TIGHT_GROW=1` (freelist allocator only, `-Dgcry_block_headers GCRY_BITMAP_ALLOC=0`; acik ~0.92×; Kemal thr soft — not default). On the bitmap default it reclaims nothing and only turns off the inline allocation fast path |
 
 ## Root completeness
 

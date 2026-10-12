@@ -76,7 +76,7 @@ begin
   HEAP.soft_dirty_max_pct = 0 # force scan_object_for_nursery fallback
 
   unless HEAP.nursery_enabled
-    STDERR.puts "nursery_headers: nursery did not enable (headerless compile default, or GCRY_DISABLE_NURSERY). Build with -Dgcry_block_headers."
+    STDERR.puts "nursery_headers: nursery did not enable (headerless compile default, or GCRY_NURSERY=0). Build with -Dgcry_block_headers."
     exit 64
   end
 

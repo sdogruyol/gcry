@@ -12,7 +12,7 @@
 # That flake was fixed as a *scope* correction: the invariant is now stated only
 # of a heap that keeps its counter (`Heap#counters_may_lose_updates?`), which
 # made the checker honest without making the counter right. So this harness
-# states it anyway (`GCRY_INVARIANT_COUNTER_LOSS=1`) and counts, which is the
+# states it anyway (`Invariant.force_counters`, below) and counts, which is the
 # measurement the correction retired:
 #
 #   bin/counter_loss            # counters atomic: no loss may be counted

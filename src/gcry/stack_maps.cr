@@ -757,32 +757,21 @@ module Gcry
     PARKED_FP_FILL_MAX_FRAME = 64_u64 * 1024
     PARKED_FP_FILL_MAX_TOTAL = 256_u64 * 1024
 
-    # True when a non-empty stackmap sits within near_delta at-or-below *pc*.
-    def self.nonempty_map_near?(pc : UInt64) : Bool
-      idx = find_index_near(pc)
-      return false if idx < 0
-      @@loc_n[idx] > 0
-    end
-
     # Yield each parked swapcontext frame body `[rsp, fp)` for conservative fill.
     # Covers map-missed slots in frames the FP chain can see — denser than leaf
     # window, cheaper/safer than full top→bottom (exclusivef research path).
     # No-op when RBP not on-stack (makecontext). Oversized frames are skipped.
-    #
-    # When *miss_only*: skip frames that already have a non-empty stackmap.
-    # Default false (fill every frame) — map hit ≠ complete lives on acik.
-    # Opt-in via GCRY_FIBER_FP_FILL_MISS_ONLY=1. Block: lo, hi, do_fill.
+    # Every frame is filled: a map hit is not a complete live set (skipping
+    # hit frames was a measured UAF on acik). Block: lo, hi.
     def self.each_parked_fp_frame_range(stack_top : UInt64,
                                         stack_lo : UInt64, stack_hi : UInt64,
                                         max_frames : Int32 = MAX_FP_FRAMES,
-                                        miss_only : Bool = false,
-                                        & : UInt64, UInt64, Bool ->) : Nil
+                                        & : UInt64, UInt64 ->) : Nil
       {% unless flag?(:x86_64) || flag?(:aarch64) %}
         return
       {% end %}
       rbp = 0_u64
       rsp = 0_u64
-      rip = 0_u64
       {% if flag?(:aarch64) %}
         spill_bytes = PARKED_AARCH64_SPILL_WORDS * 8
         return unless stack_top >= stack_lo && (stack_top &+ spill_bytes) <= stack_hi
@@ -790,14 +779,12 @@ module Gcry
         fill_parked_aarch64_gregs(stack_top, gregs_a64.to_unsafe)
         rbp = gregs_a64[29]
         rsp = gregs_a64[31]
-        rip = gregs_a64[30]
       {% else %}
         return unless stack_top >= stack_lo && (stack_top &+ 64) <= stack_hi
         gregs_x64 = StaticArray(UInt64, PARKED_SYSV_NGREGS).new(0_u64)
         fill_parked_sysv_gregs(stack_top, gregs_x64.to_unsafe)
         rbp = gregs_x64[10]
         rsp = gregs_x64[15]
-        rip = gregs_x64[16]
       {% end %}
       return unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
       return unless rsp >= stack_lo && rsp <= stack_hi
@@ -807,20 +794,13 @@ module Gcry
       fp = rbp
       guard = 0
       total = 0_u64
-      first = true
       limit = max_frames > 0 ? max_frames : MAX_FP_FRAMES
       while frame_pointer_on_stack?(fp, stack_lo, stack_hi) && guard < limit
         if rsp < fp
           span = fp - rsp
           if span <= PARKED_FP_FILL_MAX_FRAME && total &+ span <= PARKED_FP_FILL_MAX_TOTAL
-            do_fill = true
-            if miss_only
-              # Leaf body ↔ parked RIP; older frames ↔ ret at fp+8 (same as FP walk).
-              pc = first ? rip : Pointer(UInt64).new(fp &+ 8).value
-              do_fill = !nonempty_map_near?(pc)
-            end
-            yield rsp, fp, do_fill
-            total &+= span if do_fill
+            yield rsp, fp
+            total &+= span
           elsif span > PARKED_FP_FILL_MAX_FRAME
             # Broken/stale chain — stop rather than scan megabytes.
             break
@@ -828,7 +808,6 @@ module Gcry
             break # hit total budget
           end
         end
-        first = false
         next_fp = Pointer(UInt64).new(fp).value
         break if next_fp <= fp
         break unless frame_pointer_on_stack?(next_fp, stack_lo, stack_hi)

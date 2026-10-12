@@ -70,14 +70,12 @@ module Gcry
     #
     # So the tables are `MADV_NOHUGEPAGE`d, the same policy and the same reason
     # as `map_chunk` (heap.cr): base pages keep RSS proportional to what is
-    # actually touched. `GCRY_RADIX_THP=1` opts back in, because the huge page
-    # also gives the whole table one TLB entry and some of the mark win may be
-    # paid for by exactly the pages this gives up — that A/B is the knob's
-    # reason to exist. **Answered 2026-09-23**, on a workload that is 78% GC
-    # (`gc_phases --survival=0.5 --fanout=6 --shuffle`, 237 M radix lookups in
-    # 3 s, n=12 interleaved): pause per collection −1.40% with huge pages
-    # (t=−1.30, inside the noise), post-run RSS +3.27% (t=+12.45). The TLB entry
-    # buys nothing this benchmark can see; the page costs 2 MiB it always can.
+    # actually touched. The huge page's one TLB entry was A/B'd on 2026-09-23,
+    # on a workload that is 78% GC (`gc_phases --survival=0.5 --fanout=6
+    # --shuffle`, 237 M radix lookups in 3 s, n=12 interleaved): pause per
+    # collection −1.40% with huge pages (t=−1.30, inside the noise), post-run
+    # RSS +3.27% (t=+12.45). The TLB entry buys nothing this benchmark can see;
+    # the page costs 2 MiB it always can, so the opt-in arm was removed.
     # `bench/log/linux/2026-09-23-radix-thp-ab/FINDINGS.md`
     #
     # ## Lifetime, which is the whole safety argument
@@ -115,9 +113,6 @@ module Gcry
     # the right price.
     RADIX_MAX_GRANULES = 1024
 
-    # `GCRY_RADIX_THP=1`: leave the tables eligible for transparent huge pages.
-    # Off by default — see the cost note above.
-    @radix_thp : Bool = false
     @radix_l1 : Pointer(Pointer(ChunkHeader*)) = Pointer(Pointer(ChunkHeader*)).null
     @radix_granule_shift : Int32 = 0
     @radix_l2_mask : UInt64 = 0_u64
@@ -149,7 +144,6 @@ module Gcry
 
     protected def radix_init : Nil
       return unless @radix_l1.null?
-      @radix_thp = Heap.radix_thp_from_env
       # Direct sysconf: `Platform.host_page_size` is a `once`-initialised
       # constant and this can run inside GC.init. See the note above.
       raw = Gcry::OS.sysconf(Gcry::OS::SC_PAGESIZE)
@@ -286,18 +280,8 @@ module Gcry
       return Pointer(Void).null if Gcry.mmap_failed?(ptr)
       # See the cost note above: one touched entry otherwise faults a whole
       # 2 MiB huge page and the table's RSS stops tracking the live heap.
-      #
-      # The arm has to *ask* for huge pages, not merely stop forbidding them.
-      # Until 2026-09-23 `GCRY_RADIX_THP=1` only skipped `MADV_NOHUGEPAGE`,
-      # which is enough under THP `always` (where the RSS cost was found) and
-      # does nothing under `madvise` — Ubuntu's default and the GitHub runners',
-      # where only an explicit `MADV_HUGEPAGE` region gets one. Measured on a
-      # `madvise` host with the radix live (16 163 fast hits): **0 kB** of
-      # `AnonHugePages` with the knob off and **0 kB** with it on, so the A/B
-      # this knob exists for could not be taken on either host that runs it.
       {% if flag?(:linux) %}
-        LibC.madvise(ptr, LibC::SizeT.new(bytes),
-          @radix_thp ? Platform::MADV_HUGEPAGE : Platform::MADV_NOHUGEPAGE)
+        LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_NOHUGEPAGE)
       {% end %}
       ptr
     end

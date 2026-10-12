@@ -78,7 +78,7 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
 | `GCRY_PRECISE_STACK=2` | Exclusive **mutator** (16 KiB spill + FP). Other threads under STW still word-scanned. Parked fibers full word-scanned unless `PRECISE_FIBERS`. Research. |
-| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. Default **LEAF=8 KiB** + FP-frame fill. `LEAF=0` = maps+fill only (fiber smoke SEGV / acik UAF). `GCRY_FIBER_FP_FILL_MISS_ONLY=1` skips map-hit frames (UAF). `GCRY_DISABLE_FIBER_FP_FILL=1` = leaf/maps only. |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. Default **LEAF=8 KiB** + FP-frame fill. `LEAF=0` = maps+fill only (fiber smoke SEGV / acik UAF). Skipping map-hit frames was a use-after-free arm, removed before 0.35.0. `GCRY_DISABLE_FIBER_FP_FILL=1` = leaf/maps only. |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.

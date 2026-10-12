@@ -145,33 +145,6 @@ module Gcry
       # `GCRY_STW_BOUNDED_RESUME=1`, and fixed at what shipped.
       STW_BOUNDED_RESUME_SLOTS = 64
 
-      # PROBE ONLY. The exact declarations the growable table removed, back in
-      # their original module, types and order — the same-size pad round did not
-      # reproduce them byte for byte. Kept alive by `legacy_touch` so the linker
-      # cannot drop them. Green here means the Darwin crash follows the missing
-      # statics (layout), not the table's code.
-      MAX_STW_SP_SLOTS = 64
-      @@stw_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STW_SP_SLOTS)
-      @@stw_sps = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
-      {% if flag?(:aarch64) %}
-        @@stw_gregs = uninitialized StaticArray(UInt64, 1984)
-      {% elsif flag?(:x86_64) %}
-        @@stw_gregs = uninitialized StaticArray(UInt64, 1024)
-      {% else %}
-        @@stw_gregs = uninitialized StaticArray(UInt64, 64)
-      {% end %}
-      @@stw_greg_ok = uninitialized StaticArray(Bool, MAX_STW_SP_SLOTS)
-      @@stw_claimed = uninitialized Atomic(UInt64)
-
-      def self.legacy_touch : UInt64
-        @@stw_ids[0] = LibC.pthread_self
-        @@stw_sps[0] = @@stw_sps[0] &+ 1
-        @@stw_gregs[0] = @@stw_gregs[0] &+ 1
-        @@stw_greg_ok[0] = true
-        @@stw_claimed.set(0_u64)
-        @@stw_sps[0]
-      end
-
       @@stw_booted = false
       @@stw_enabled = true
       @@stw_installed = false

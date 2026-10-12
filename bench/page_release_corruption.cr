@@ -24,10 +24,11 @@
 #            free inside an otherwise-live chunk, which is what HOLED means
 #   verify   re-check every survivor each round
 #
-#   default                      must be clean
-#   GCRY_DISABLE_PAGE_RELEASE=1  must also be clean — if it is not, the walk is
-#                                not what is doing the damage and this harness
-#                                is measuring something else
+#   GCRY_PAGE_DONTNEED=1    the HOLED walk          must be clean
+#   GCRY_MOSTLY_EMPTY=1     the mostly-empty walk   must be clean
+#   GCRY_DISABLE_MADVISE=1  control, no walk        must also be clean — if it
+#                           is not, the walk is not what is doing the damage
+#                           and this harness is measuring something else
 #
 # The verifier itself was checked by zeroing a held object on purpose: it
 # reported 40 corrupt, 40 of them entirely zero. A checksum gate that cannot be
@@ -208,9 +209,9 @@ def arm_line(label : String, bad : Int32, hung : Int32, attempts : Int32,
   "released #{dn} B, unlinked #{ul}#{note ? "\n     #{note.strip}" : ""}"
 end
 
-# Linux keeps the HOLED walk opt-in, so the arm that exercises it has to ask
-# for it. Darwin turns it on in `GC.init` and walks every chunk, not just the
-# HOLED ones — the same code, reached without a knob.
+# The HOLED walk is opt-in on both platforms, so the arm that exercises it has
+# to ask for it. On Darwin the same knob walks every kept chunk, not just the
+# HOLED ones.
 # Every arm pins GCRY_BITMAP_ALLOC=0. The free-page release walks are freelist-
 # shaped and not ported to the bitmap allocator — they stand down on bitmap
 # chunks — so an inherited GCRY_BITMAP_ALLOC=1 leaves nothing for the walk to
@@ -219,12 +220,14 @@ end
 holed_bad, holed_hung, holed_note, holed_dn, holed_ul = run(exe, {"GCRY_PAGE_DONTNEED" => "1", "GCRY_BITMAP_ALLOC" => "0"}, attempts)
 puts arm_line("GCRY_PAGE_DONTNEED=1:    ", holed_bad, holed_hung, attempts, holed_dn, holed_ul, holed_note)
 
-# `GCRY_MOSTLY_EMPTY` is ignored while `madvise_free_pages` is on, and Darwin
-# turns that on in `GC.init`. Without disabling it here the arm would quietly
-# measure the HOLED walk a second time and still report bytes released, which
-# is the shape of a gate that says "both walks ran" when only one did.
+# `GCRY_MOSTLY_EMPTY` is ignored while `madvise_free_pages` is on, and an
+# inherited `GCRY_PAGE_DONTNEED=1` (children get the parent's environment) turns
+# it on. Without clearing it here the arm would quietly measure the HOLED walk a
+# second time and still report bytes released, which is the shape of a gate
+# that says "both walks ran" when only one did. `GCRY_DISABLE_MADVISE` clears
+# it on both platforms; `GCRY_DISABLE_PAGE_RELEASE` is read only on Darwin.
 empty_bad, empty_hung, empty_note, empty_dn, empty_ul = run(exe,
-  {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1", "GCRY_BITMAP_ALLOC" => "0"}, attempts)
+  {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_MADVISE" => "1", "GCRY_BITMAP_ALLOC" => "0"}, attempts)
 puts arm_line("GCRY_MOSTLY_EMPTY=1:     ", empty_bad, empty_hung, attempts, empty_dn, empty_ul, empty_note)
 
 off_bad, off_hung, off_note, off_dn, off_ul = run(exe, {"GCRY_DISABLE_MADVISE" => "1", "GCRY_BITMAP_ALLOC" => "0"}, attempts)

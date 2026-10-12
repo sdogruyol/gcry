@@ -159,7 +159,10 @@ end
 text = captured.to_s
 
 stalled = text.includes?("STOP-THE-WORLD STALLED")
-named = text.includes?("taking @index_lock for chunk 0x")
+# The ending too, newline included: the line used to be cut short by a
+# 250-byte buffer and lose its tail, which a prefix match cannot see.
+named = text.includes?("taking @index_lock for chunk 0x") &&
+        text.includes?("until the phase ends. Reported once per stop\n")
 counts = text.lines.select(&.starts_with?("sections=")).last?
 in_stw = counts.try(&.split("in_stw=").last.to_u64?) || 0_u64
 sections = counts.try(&.split(' ').first.split('=').last.to_u64?) || 0_u64
