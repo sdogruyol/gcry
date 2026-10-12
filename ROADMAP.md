@@ -4,10 +4,10 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-**Release state.** Latest release **v0.34.0** (2026-10-04). The tip is the
-next candidate; `CHANGELOG.md`'s `[Unreleased]` section is what it holds
-(parallel mark on by default, Boehm's `GC_*` C ABI, the default-path
-fixes of PR #47 and #48).
+**Release state.** Latest release **v0.35.0** (2026-10-12): parallel mark
+on by default, Boehm's `GC_*` C ABI, and the default-path fixes of PR #47,
+#48 and #49. The tip is the next candidate; `CHANGELOG.md`'s
+`[Unreleased]` section is what it holds.
 
 The headings below carry **no version numbers on purpose**. They are work
 buckets, and every attempt to number them has rotted: v0.20.0 through v0.25.0
