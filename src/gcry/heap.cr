@@ -463,6 +463,9 @@ module Gcry
         # the whole region, and the next `nxt` read faulted — Windows CI run
         # `36109015597`, `spec/oom_reserve_spec.cr`.
         unless ChunkHeader.reserve?(chunk)
+          # A live large block's room goes first: its unmap below covers
+          # only its mapping (`release_large_reservation`).
+          release_large_reservation(chunk) if ChunkHeader.large?(chunk)
           Gcry.os_unmap(chunk.as(Void*), chunk.value.mapped_bytes.to_u64)
         end
         chunk = nxt
@@ -489,6 +492,7 @@ module Gcry
       @bytes_since_gc.set(0_u64)
       @large_free_bytes = 0_u64
       @large_mapped_bytes = 0_u64
+      @large_reserved_bytes = 0_u64
       @live_objects.set(0_u64)
       @nursery_alloc_bytes.set(0_u64)
       @tlab_hits.set(0_u64)
@@ -732,6 +736,14 @@ module Gcry
         (pointer.as(UInt8*) + new_size).clear(old_size &- new_size) unless atomic
         return pointer
       end
+      # A large block grows where it stands when its mapping has room: the
+      # rest of its last page, or the address space reserved past it when
+      # `realloc` made it (`grow_large`). The old pointer is the new one, so
+      # nothing the caller still reads through it changes.
+      if new_size > old_size && @realloc_in_place && ChunkHeader.large?(rchunk) &&
+         grow_large(rchunk, header, pointer, old_size, new_size, atomic)
+        return pointer
+      end
       # What the new block takes from the old: all of it on a grow, the kept
       # prefix on a moving shrink.
       copy_size = shrink_move ? new_size : old_size
@@ -798,7 +810,9 @@ module Gcry
           # recycled chunk's would be thrown away.
           recycle = !(@realloc_move && ChunkHeader.large?(rchunk) &&
                       rchunk.value.mapped_bytes >= Platform.host_page_size &+ REALLOC_MOVE_MIN)
-          fresh = allocate(new_size, atomic: atomic, clear: !atomic, recycle: recycle)
+          # A growth reserves room past a large block for the next one to
+          # take in place (`large_reserve_extent`); a moving shrink does not.
+          fresh = allocate(new_size, atomic: atomic, clear: !atomic, recycle: recycle, reserve: !shrink_move)
         ensure
           @suppress_collect.sub(1)
         end
@@ -829,14 +843,248 @@ module Gcry
     # (`bench/log/linux/2026-10-06-realloc-page-move/`).
     REALLOC_MOVE_MIN = 262144_u64
 
-    # `realloc` of a large block moves its pages (Linux). Off by default,
-    # every growth copies; `GCRY_REALLOC_MOVE=1` turns it on. Unsafe for a
-    # program that reads a buffer after growing it, and Crystal's stdlib is
-    # one (`move_large_contents`).
+    # `realloc` of a large block moves its pages (Linux). Off by default: a
+    # growth that cannot take place where the block stands (`grow_large`)
+    # copies; `GCRY_REALLOC_MOVE=1` turns it on. Unsafe for a program that
+    # reads a buffer after growing it, and Crystal's stdlib is one
+    # (`move_large_contents`).
     property realloc_move : Bool = false
     # Moves done, and the bytes they did not copy.
     getter realloc_moves : UInt64 = 0_u64
     getter realloc_moved_bytes : UInt64 = 0_u64
+
+    # `realloc` grows a large block where it stands when its mapping has room
+    # (`grow_large`), and a growth that has to copy reserves room past the
+    # block it copies into (`large_reserve_extent`). `GCRY_REALLOC_IN_PLACE=0`
+    # turns both off: every growth copies, as before 2026-10-14.
+    property realloc_in_place : Bool = true
+    # Growths done in place, and the bytes they did not copy.
+    getter realloc_in_place_grows : UInt64 = 0_u64
+    getter realloc_in_place_bytes : UInt64 = 0_u64
+    # Chunks mapped with room reserved past them, and the reserved bytes
+    # still past the live ones (committed bytes leave it as they are taken).
+    getter large_reservations : UInt64 = 0_u64
+    getter large_reserved_bytes : UInt64 = 0_u64
+    # Reservations the system refused, each a fresh mapping without room.
+    getter large_reserve_failures : UInt64 = 0_u64
+
+    # Smallest mapping `realloc` reserves room past, and how many doublings
+    # of it the room holds (`large_reserve_extent`).
+    #
+    # One doubling. Against copying every growth (one binary,
+    # `GCRY_REALLOC_IN_PLACE=0`, 5 interleaved trials): peak RSS −6% on
+    # Revcomp and −17% on JsonParseSerializable and JsonParsePull, minor
+    # faults −7%, −26% and −24%, and the largest address space the process
+    # held (VmPeak) unchanged or smaller, 843 / 739 / 747 MiB against 842 /
+    # 821 / 823. Three doublings took 0-6% fewer faults, the same time and
+    # peak RSS on those rows, and 1.5-1.9× the address space (Revcomp
+    # 1 611 MiB); only JsonGenerate, whose last 256 MiB copy they avoid, ran
+    # 4% faster for it, at 2 433 MiB against 1 673. Two lost Revcomp's RSS
+    # gain, its last copy falling at 128 MiB. The minimum from 64 KiB to
+    # 1 MiB moved no row past its noise
+    # (`bench/log/linux/2026-10-14-realloc-in-place/`).
+    LARGE_RESERVE_MIN       = 262144_u64
+    LARGE_RESERVE_DOUBLINGS =          1
+    property large_reserve_min : UInt64 = LARGE_RESERVE_MIN
+    property large_reserve_doublings : Int32 = LARGE_RESERVE_DOUBLINGS
+
+    # Address space to reserve from the base of a `mapped`-byte large chunk
+    # that `realloc` is growing into, or 0 for none: its first page, and
+    # past it the rest rounded up to a power of two and doubled
+    # `large_reserve_doublings` times (`ChunkHeader.grow_extent_log`).
+    # `IO::Memory` and `String::Builder` grow to powers of two, which the
+    # chunk and block headers (and an atomic block's extra byte) carry one
+    # page past: so a doubling buffer grows that many times in place before
+    # it copies again, and an `Array` (a quarter each step) about three times
+    # as many. Rounding the whole mapping up instead held one doubling fewer
+    # in the same address space: at one doubling, the same faults and peak
+    # RSS for 130-518 MiB more of it (Revcomp 1 099 MiB against 843).
+    #
+    # Only for a growth: `realloc` is how Crystal grows every `Array`,
+    # `IO::Memory` and `String::Builder`, and a block it grew once is one it
+    # tends to grow again, where a block `malloc` sized is most often done.
+    # Only from `large_reserve_min` up: each reservation costs two system
+    # calls more than a mapping (the `mprotect` that commits its front, the
+    # `munmap` of the room it did not use) and a second kernel mapping (Linux
+    # `vm.max_map_count`), which large growths can pay and a stream of small
+    # buffers need not. None under a finite `RLIMIT_AS`: address space is the
+    # budget there, and a reservation would spend it on memory nobody uses.
+    private def large_reserve_extent(mapped : UInt64) : UInt64
+      return 0_u64 unless @realloc_in_place && mapped >= @large_reserve_min
+      doublings = @large_reserve_doublings
+      return 0_u64 if doublings <= 0 || doublings > 16
+      page = Platform.host_page_size
+      return 0_u64 if mapped <= page
+      # log2 of the data pages rounded up to a power of two, then doubled,
+      # within 2^47 (`BlockHeader::LARGE_SIZE_LIMIT` is 2^48).
+      log = 64 - (mapped &- page &- 1).leading_zeros_count + doublings
+      return 0_u64 if log > 47
+      return 0_u64 unless address_space_unlimited?
+      (1_u64 << log) &+ page
+    end
+
+    # Bytes of address space reserved for a large chunk from its base, what
+    # its block may grow to where it stands; 0 when nothing is reserved.
+    # Public for the specs.
+    def large_grow_extent(chunk : ChunkHeader*) : UInt64
+      log = ChunkHeader.grow_extent_log(chunk)
+      log == 0 ? 0_u64 : (1_u64 << log) &+ Platform.host_page_size
+    end
+
+    # No `RLIMIT_AS` on this process (Linux; elsewhere address space is not
+    # limited that way). Asked at each reservation, which already costs a
+    # mapping, so a limit set after start-up is honoured.
+    private def address_space_unlimited? : Bool
+      {% if flag?(:linux) %}
+        rl = uninitialized LibC::Rlimit
+        # 9 is `RLIMIT_AS` on every Linux architecture gcry builds for.
+        return true unless LibC.getrlimit(9, pointerof(rl)) == 0
+        rl.rlim_cur == LibC::RlimT::MAX
+      {% else %}
+        true
+      {% end %}
+    end
+
+    # Address space of *extent* bytes for a large chunk, its first *mapped*
+    # usable (`Gcry.os_reserve`). Null when the system refuses; the caller
+    # maps without room instead.
+    private def reserve_large_mapping(extent : UInt64, mapped : UInt64) : Void*
+      at = Gcry.os_reserve(extent, mapped)
+      if Gcry.mmap_failed?(at)
+        @large_reserve_failures &+= 1
+        return Pointer(Void).null
+      end
+      # The advice `map_chunk` gives the mapped part, over the whole of it,
+      # so the pages `grow_large` commits keep it and join that mapping
+      # instead of starting one of their own.
+      {% if flag?(:linux) %}
+        LibC.madvise(at, LibC::SizeT.new(extent),
+          @hugepages ? Platform::MADV_HUGEPAGE : Platform::MADV_NOHUGEPAGE)
+      {% end %}
+      at
+    end
+
+    # Gives back the room reserved past *chunk* that it never grew into, when
+    # its block dies (`link_free_large`) or the heap goes (`destroy`). From
+    # then on the chunk is as long as it is mapped, so every path that trims,
+    # recycles, guards, quarantines or unmaps a cached chunk releases exactly
+    # `mapped_bytes`, as it did before reservations existed. On Windows the
+    # room cannot go back on its own; it goes with the chunk's release, which
+    # releases a reservation whole.
+    protected def release_large_reservation(chunk : ChunkHeader*) : Nil
+      extent = large_grow_extent(chunk)
+      return if extent == 0_u64
+      mapped = chunk.value.mapped_bytes
+      if extent > mapped
+        Gcry.os_release_reserved(Pointer(Void).new(chunk.address &+ mapped), extent &- mapped)
+        @large_reserved_bytes = sat_sub(@large_reserved_bytes, extent &- mapped)
+      end
+      ChunkHeader.clear_grow_extent(chunk)
+    end
+
+    # Grow the large block at *user*, which `realloc` owns, from *old_size*
+    # to *new_size* where it stands: into the rest of its last page, or into
+    # the room reserved past its mapping, committed now. True when it grew;
+    # false, with the block as it was, when it cannot, and the caller copies.
+    #
+    # This is what `realloc` growth costs without moving anything: no copy,
+    # no fault of fresh pages for the copy to land in, no old block left for
+    # the next sweep, and the pointer the caller still holds is the result.
+    # Revcomp's buffers double from 32 KiB to 126 MiB three times, and each
+    # step mapped, faulted and copied a fresh chunk
+    # (`bench/log/linux/2026-10-04-revcomp-large-realloc/`).
+    #
+    # Concurrency. The chunk's base, its index slot and its list link do not
+    # change, only its extent and the block's size. The growth commits the
+    # pages first, then publishes the extent under `@index_lock`, where
+    # `map_chunk` publishes a chunk (`publish_large_growth`), then the size;
+    # all under `@alloc_lock`, which the after-world sweep holds when it
+    # rewrites a large header. A stopped world can find this thread anywhere
+    # in between: every reader bounds the size by the extent
+    # (`block_payload`), and until `realloc` returns nothing points into the
+    # new bytes, so either answer is right for them. Not on a thread the stop
+    # does not suspend, nor with the world stopped or a write barrier or an
+    # incremental mark running (as `move_large_contents`): a mark would then
+    # run beside the growth, or miss writes to pages the barrier never saw.
+    private def grow_large(chunk : ChunkHeader*, header : BlockHeader*, user : Void*,
+                           old_size : UInt64, new_size : UInt64, atomic : Bool) : Bool
+      return false unless @barrier_backend.none?
+      return false if @incremental_marking || @world_stopped
+      return false if new_size >= BlockHeader::LARGE_SIZE_LIMIT
+      thread = Thread.current?
+      return false if thread.nil? || stw_signal_exempt?(thread)
+      data = ChunkHeader.large_data_offset.to_u64
+      need = align_up(data &+ new_size, Platform.host_page_size)
+      # Neither moves under the owner: only it grows the block, and the room
+      # goes back only when the block is dead.
+      old_mapped = chunk.value.mapped_bytes
+      return false if need > old_mapped && need > large_grow_extent(chunk)
+      # The bytes past the block that its mapping already held may be a
+      # previous object's (a cached chunk) or a shrink's (atomic blocks keep
+      # what a shrink cut off). Fresh pages read zeroes. Atomic growth is
+      # not cleared, as `realloc` into a fresh block does not clear it.
+      unless atomic
+        stale = old_mapped &- data
+        stale = new_size if new_size < stale
+        (user.as(UInt8*) + old_size).clear(stale &- old_size) if stale > old_size
+      end
+      with_alloc_lock do
+        if need > old_mapped
+          grown = need &- old_mapped
+          return false unless Gcry.os_commit(Pointer(Void).new(chunk.address &+ old_mapped), grown)
+          publish_large_growth(chunk, old_mapped, need)
+          @heap_size &+= grown
+          @large_mapped_bytes &+= grown
+          @large_reserved_bytes = sat_sub(@large_reserved_bytes, grown)
+          # Fresh pages, as a fresh mapping's: they spend the recycling
+          # budget (`map_chunk`) and count toward what a major may keep.
+          @large_recycle_budget = sat_sub(@large_recycle_budget, grown)
+          @large_alloc_since_major &+= grown
+          CrystalTrace.heap_resize(self, @heap_size)
+          if hook = @heap_resize_hook
+            hook.call(@heap_size)
+          end
+        end
+        BlockHeader.grow_large_size(header, new_size)
+        trace_large_grow(chunk, old_mapped, new_size) if @trace_large
+      end
+      note_grow_bytes(new_size &- old_size)
+      @realloc_in_place_grows &+= 1
+      @realloc_in_place_bytes &+= old_size
+      true
+    end
+
+    # Publish a large chunk's new extent, *new_mapped* bytes from its base,
+    # its pages already committed: the same `@index_lock` section and the
+    # same readers as `map_chunk`'s `index_insert` and `note_mapped`. The
+    # index stays sorted, since the base does not move and the room is this
+    # chunk's own address space. The extent first: an entry or a bound for an
+    # address past it is a miss until it lands, which nothing can ask about
+    # before `realloc` returns.
+    private def publish_large_growth(chunk : ChunkHeader*, old_mapped : UInt64, new_mapped : UInt64) : Nil
+      note_index_lock_section
+      StwWatchdog.note_index_lock_wait(chunk.address)
+      @index_lock.sync do
+        invalidate_chunk_cache
+        Atomic::Ops.store(pointerof(chunk.value.@mapped_bytes), new_mapped, :release, true)
+        radix_grow(chunk, old_mapped)
+        finish = chunk.address &+ new_mapped
+        @heap_max = finish if finish > @heap_max
+        @heap_span_hi = finish if finish > @heap_span_hi
+      end
+      StwWatchdog.note_index_lock_done
+    end
+
+    # `note_alloc_bytes` for bytes a block grew by: no new object.
+    private def note_grow_bytes(bytes : UInt64) : Nil
+      if counters_atomic?
+        @total_bytes.add(bytes)
+        @bytes_since_gc.add(bytes)
+      else
+        @total_bytes.lazy_set(@total_bytes.lazy_get &+ bytes)
+        @bytes_since_gc.lazy_set(@bytes_since_gc.lazy_get &+ bytes)
+      end
+    end
 
     # Grow a large block by handing the old block's pages to the new one
     # instead of copying them (Linux `mremap`, `Platform.move_pages`). True
@@ -1200,9 +1448,10 @@ module Gcry
     # `alloc_large`. One slot suffices: large allocation is under `@alloc_lock`.
     @large_alloc_in_flight = Pointer(Void).null
 
-    private def alloc_large_counted(rounded : UInt64, flags : UInt32, recycle : Bool, clear : Bool) : {Void*, UInt64}
+    private def alloc_large_counted(rounded : UInt64, flags : UInt32, recycle : Bool, clear : Bool,
+                                    reserve : Bool) : {Void*, UInt64}
       with_alloc_lock do
-        u, fc = alloc_large(rounded, flags, recycle, clear)
+        u, fc = alloc_large(rounded, flags, recycle, clear, reserve)
         # From here `u` is in the caller's registers or frame, which the scan
         # accepts; the collector's copy is no longer needed.
         @large_alloc_in_flight = Pointer(Void).null
@@ -1333,7 +1582,10 @@ module Gcry
       end
     end
 
-    private def allocate(size : UInt64, atomic : Bool, clear : Bool, recycle : Bool = true) : Void*
+    # *reserve*: a large block gets room past it to grow into
+    # (`large_reserve_extent`); `realloc` asks for it when it grows a block.
+    private def allocate(size : UInt64, atomic : Bool, clear : Bool, recycle : Bool = true,
+                         reserve : Bool = false) : Void*
       refresh_fast_path
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
       # No mapping can hold it, and the rounding below (a word, the large
@@ -1365,13 +1617,13 @@ module Gcry
       needs_clear = clear
       clear_bytes = rounded
       if class_index < 0
-        user, dirty = alloc_large_counted(rounded, flags, recycle, clear)
+        user, dirty = alloc_large_counted(rounded, flags, recycle, clear, reserve)
         if user.null?
           # `map_chunk` returned null rather than raising under `@alloc_lock`;
           # the lock is gone by now, so the collection and the error both
           # belong here.
           oom!("mmap failed") unless retry_after_emergency_collect?
-          user, dirty = alloc_large_counted(rounded, flags, recycle, clear)
+          user, dirty = alloc_large_counted(rounded, flags, recycle, clear, reserve)
           oom!("mmap failed") if user.null?
         end
         # Only the bytes a previous object wrote: past them a large chunk is
@@ -2476,7 +2728,10 @@ module Gcry
     # without it they are not looked for. An exact fit taken in place clears
     # all of its payload, as it always did: zlib's blocks there are written
     # through, and asking the kernel cost the gzip loop 5% for nothing.
-    private def alloc_large(payload : UInt64, flags : UInt32, recycle : Bool, clear : Bool) : {Void*, UInt64}
+    # *reserve*: map with room past the chunk for `grow_large`
+    # (`large_reserve_extent`). A cached chunk taken in place has none.
+    private def alloc_large(payload : UInt64, flags : UInt32, recycle : Bool, clear : Bool,
+                            reserve : Bool = false) : {Void*, UInt64}
       # Past what a large header records, and past what any mapping can hold:
       # the mmap failure it would otherwise be.
       return {Pointer(Void).null, 0_u64} if payload >= BlockHeader::LARGE_SIZE_LIMIT
@@ -2520,26 +2775,44 @@ module Gcry
 
       reused = 0_u64
       written = 0_u64
-      at = recycle ? recycle_large_mapping(mapped, clear) : Pointer(Void).null
-      unless at.null?
+      extent = reserve ? large_reserve_extent(mapped) : 0_u64
+      fresh_room = false
+      at = recycle ? recycle_large_mapping(mapped, clear, extent) : Pointer(Void).null
+      if !at.null?
         reused = @recycled_from
         written = @recycled_written
+        extent = @recycled_extent
         # The old chunk's block header is FREE with a stale link. A fresh
         # mapping publishes zeroes there, which the sweep reads as an
         # allocation not yet filled in (`sweep_large_one`).
         (at.as(UInt8*) + ChunkHeader::SIZE).clear(BlockHeader::LARGE_HEADER_BYTES)
+      elsif extent > mapped
+        at = reserve_large_mapping(extent, mapped)
+        fresh_room = !at.null?
+        extent = 0_u64 unless fresh_room
+      else
+        extent = 0_u64
       end
-      chunk = map_chunk(mapped, UInt32::MAX, 0_u32, at)
+      room = extent == 0_u64 ? 0_u32 : ChunkHeader.grow_extent_flags((extent &- Platform.host_page_size).trailing_zeros_count.to_i32)
+      chunk = map_chunk(mapped, UInt32::MAX, room, at)
       if chunk.null?
-        # A recycled mapping is off every list, and `map_chunk` leaves it to
-        # its caller; the old chunk's pages it carried leave the heap with it.
+        # A recycled or reserved mapping is off every list, and `map_chunk`
+        # leaves it to its caller; the old chunk's pages it carried leave the
+        # heap with it.
         unless at.null?
+          Gcry.os_release_reserved(Pointer(Void).new(at.address &+ mapped), extent &- mapped) if extent > mapped
           Gcry.os_unmap(at, mapped)
           @unmapped_bytes += reused
         end
         return {Pointer(Void).null, 0_u64}
       end
-      trace_large_map(chunk, mapped, payload, reused) if @trace_large
+      # `map_chunk` spends the recycling budget only on a mapping it made.
+      @large_recycle_budget = sat_sub(@large_recycle_budget, mapped) if fresh_room
+      if extent > mapped
+        @large_reservations &+= 1
+        @large_reserved_bytes &+= extent &- mapped
+      end
+      trace_large_map(chunk, mapped, payload, reused, extent) if @trace_large
       header = ChunkHeader.large_header(chunk)
       @large_alloc_in_flight = ChunkHeader.large_user(chunk)
       BlockHeader.set_used_large(header, payload, flags | BlockHeader::Flags::LARGE)
@@ -2563,6 +2836,8 @@ module Gcry
     # Of those, the front that may hold what the old chunk's objects wrote;
     # the rest reads zeroes (`large_written_bytes`).
     @recycled_written = 0_u64
+    # Bytes of address space reserved from its base, or 0 (`large_grow_extent`).
+    @recycled_extent = 0_u64
     # Cached large bytes recycling may keep: what the last major left in the
     # cache, less every byte mapped fresh since. Without recycling those
     # bytes would have gone back at the sweep, so a cache that gives back
@@ -2631,8 +2906,11 @@ module Gcry
     #
     # *clear*: the allocation zeroes what the old chunk wrote, so
     # `@recycled_written` is that much (`large_written_bytes`), not all it
-    # kept.
-    private def recycle_large_mapping(mapped : UInt64, clear : Bool) : Void*
+    # kept. *extent*: the pages go into a mapping with that much room
+    # reserved (`large_reserve_extent`), or a plain one when the room cannot
+    # be had; `@recycled_extent` says which. A cached chunk has no room of its
+    # own to bring (`release_large_reservation`).
+    private def recycle_large_mapping(mapped : UInt64, clear : Bool, extent : UInt64 = 0_u64) : Void*
       {% if flag?(:linux) %}
         return Pointer(Void).null unless @large_recycle && @large_free_bytes != 0_u64
         # Walks of `@chunks` with the world running read chunk headers without
@@ -2655,7 +2933,12 @@ module Gcry
         @large_mapped_bytes = sat_sub(@large_mapped_bytes, old_mapped)
         unlink_chunk(old)
         kept = old_mapped < mapped ? old_mapped : mapped
-        dst = Gcry.os_map(mapped)
+        dst = extent > mapped ? reserve_large_mapping(extent, mapped) : Pointer(Void).null
+        if dst.null?
+          extent = 0_u64
+          dst = Gcry.os_map(mapped)
+        end
+        @recycled_extent = extent
         moved, dst_kept = Gcry.mmap_failed?(dst) ? {false, false} : Gcry.os_move(old.as(Void*), kept, dst, mapped)
         unless moved
           Gcry.os_unmap(old.as(Void*), old_mapped)
@@ -2663,7 +2946,12 @@ module Gcry
           update_heap_bounds_after_unmap
           @recycled_from = 0_u64
           @recycled_written = 0_u64
-          return Pointer(Void).null unless dst_kept
+          unless dst_kept
+            # The front went with the refusal (`Gcry.os_move`); the room past
+            # it is still this heap's.
+            Gcry.os_release_reserved(Pointer(Void).new(dst.address &+ mapped), extent &- mapped) if extent > mapped
+            return Pointer(Void).null
+          end
           @large_recycle_budget = sat_sub(@large_recycle_budget, mapped)
           return dst
         end
@@ -2783,8 +3071,11 @@ module Gcry
     end
 
     # Mark `chunk`'s block FREE and append it to its bucket. Caller holds
-    # `@alloc_lock`.
+    # `@alloc_lock`. The block is dead, so nothing grows it again: the room
+    # reserved past it goes back first, and a cached chunk is only ever its
+    # mapping (`release_large_reservation`).
     private def link_free_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      release_large_reservation(chunk)
       mapped = chunk.value.mapped_bytes
       ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_IN)
       payload = BlockHeader.large_size(header)
@@ -2966,7 +3257,9 @@ module Gcry
     # `GCRY_TRACE_LARGE=1`. Raw `write(2)`: this runs on the allocation path and
     # must not allocate.
     # *recycled*: mapped bytes of the cached chunk resized into this one.
-    private def trace_large_map(chunk : ChunkHeader*, mapped : UInt64, payload : UInt64, recycled : UInt64) : Nil
+    # *reserved*: the address space reserved from its base, if any.
+    private def trace_large_map(chunk : ChunkHeader*, mapped : UInt64, payload : UInt64, recycled : UInt64,
+                                reserved : UInt64 = 0_u64) : Nil
       return if chunk.null?
       buf = uninitialized UInt8[RawOut::LIMIT]
       p = buf.to_unsafe
@@ -2982,6 +3275,29 @@ module Gcry
         len = RawOut.append(p, len, " recycled=")
         len = RawOut.append_u64(p, len, recycled)
       end
+      if reserved > 0_u64
+        len = RawOut.append(p, len, " reserved=")
+        len = RawOut.append_u64(p, len, reserved)
+      end
+      len = RawOut.append(p, len, "\n")
+      RawOut.flush(p, len)
+    end
+
+    # `GCRY_TRACE_LARGE=1` for a block `grow_large` grew where it stands: its
+    # extent before and after, and the size it grew to.
+    private def trace_large_grow(chunk : ChunkHeader*, old_mapped : UInt64, payload : UInt64) : Nil
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      p = buf.to_unsafe
+      len = RawOut.append(p, 0, "gcry: large grow base=0x")
+      len = RawOut.append_hex(p, len, chunk.as(Void*).address)
+      len = RawOut.append(p, len, " mapped=")
+      len = RawOut.append_u64(p, len, old_mapped)
+      len = RawOut.append(p, len, "->")
+      len = RawOut.append_u64(p, len, chunk.value.mapped_bytes)
+      len = RawOut.append(p, len, " payload=")
+      len = RawOut.append_u64(p, len, payload)
+      len = RawOut.append(p, len, " coll=")
+      len = RawOut.append_u64(p, len, @collections)
       len = RawOut.append(p, len, "\n")
       RawOut.flush(p, len)
     end

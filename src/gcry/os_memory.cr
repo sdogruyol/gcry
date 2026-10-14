@@ -48,6 +48,75 @@ module Gcry
     ptr
   end
 
+  # Address space for *extent* bytes, the first *commit* of them readable and
+  # writable as `os_map` would leave them and the rest reserved: no access, no
+  # page and no charge against the commit limit until `os_commit` makes it
+  # usable, so a large block can grow where it stands (`Heap#grow_large`).
+  # Only *commit* counts as mapped. Null or `MAP_FAILED` on failure, with
+  # nothing kept.
+  #
+  # POSIX reserves with `PROT_NONE` and without `MAP_NORESERVE`: Linux
+  # charges a private mapping against the commit limit only while it is
+  # writable, so the reserve is free as it is, and each `os_commit` is
+  # charged when it is made, where a refusal (`vm.overcommit_memory=2`)
+  # fails the `mprotect` and the growth copies instead. `MAP_NORESERVE`
+  # would add nothing, and under the default heuristic it would leave the
+  # committed pages out of the count (`Committed_AS`). Windows reserves with
+  # `MEM_RESERVE` and commits with `MEM_COMMIT`.
+  def self.os_reserve(extent : UInt64, commit : UInt64) : Void*
+    ptr = os_reserve_pages(extent, commit)
+    unless ptr.null?
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@os_mapped_bytes), commit,
+        LLVM::AtomicOrdering::Monotonic, false)
+    end
+    ptr
+  end
+
+  # `os_reserve` without the count; null on failure.
+  private def self.os_reserve_pages(extent : UInt64, commit : UInt64) : Void*
+    {% if flag?(:win32) %}
+      # 0x01 is `PAGE_NOACCESS`, which Crystal's bindings do not name.
+      ptr = LibC.VirtualAlloc(Pointer(Void).null, LibC::SizeT.new(extent), LibC::MEM_RESERVE, 0x01_u32)
+      return ptr if ptr.null?
+      return ptr unless LibC.VirtualAlloc(ptr, LibC::SizeT.new(commit), LibC::MEM_COMMIT, LibC::PAGE_READWRITE).null?
+      LibC.VirtualFree(ptr, LibC::SizeT.new(0), LibC::MEM_RELEASE)
+      Pointer(Void).null
+    {% else %}
+      ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(extent), Gcry::OS::PROT_NONE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+      return Pointer(Void).null if mmap_failed?(ptr)
+      return ptr if Gcry::OS.mprotect(ptr, LibC::SizeT.new(commit), Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE) == 0
+      Gcry::OS.munmap(ptr, LibC::SizeT.new(extent))
+      Pointer(Void).null
+    {% end %}
+  end
+
+  # Makes `[ptr, ptr + bytes)`, reserved by `os_reserve` and not yet
+  # committed, readable and writable; it reads zeroes, as a fresh mapping
+  # does. False, and nothing changed, when the system refuses.
+  def self.os_commit(ptr : Void*, bytes : UInt64) : Bool
+    {% if flag?(:win32) %}
+      return false if LibC.VirtualAlloc(ptr, LibC::SizeT.new(bytes), LibC::MEM_COMMIT, LibC::PAGE_READWRITE).null?
+    {% else %}
+      return false unless Gcry::OS.mprotect(ptr, LibC::SizeT.new(bytes), Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE) == 0
+    {% end %}
+    Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@os_mapped_bytes), bytes,
+      LLVM::AtomicOrdering::Monotonic, false)
+    true
+  end
+
+  # Gives back `[ptr, ptr + bytes)`, the uncommitted end of an `os_reserve`
+  # reservation, leaving its front mapped. False on Windows, which releases a
+  # reservation only whole: there the end goes when `os_unmap` releases the
+  # base.
+  def self.os_release_reserved(ptr : Void*, bytes : UInt64) : Bool
+    {% if flag?(:win32) %}
+      false
+    {% else %}
+      Gcry::OS.munmap(ptr, LibC::SizeT.new(bytes)) == 0
+    {% end %}
+  end
+
   {% if flag?(:linux) %}
     # Moves the pages of `[src, src + len)` onto `dst`, a mapping of *dst_len*
     # (`>= len`) bytes `os_map` returned, by page table: nothing is copied or

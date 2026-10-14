@@ -375,6 +375,31 @@ module Gcry
       header.value = h
     end
 
+    # Raises a large block's recorded size to *size*, which is larger, for a
+    # block that grew where it stands (`Heap#grow_large`). Not `large` and a
+    # header store: the mark is a read-modify-write of the flags word, and the
+    # after-world sweep's `clear_mark_large` and a stopped world's
+    # `set_mark_large` both rewrite the whole header, so a header written from
+    # a copy taken before a stop drops the mark that stop made, and a live
+    # block reads as dead. The high size bits go in by compare-and-swap, which
+    # a mark in between fails; the low word by one store, which a whole-header
+    # write in between leaves alone, since it carries the old low word back.
+    # High bits first: in between, the size reads larger than *size*, which
+    # the mapping bounds (`Heap#block_payload`); low first, it would read
+    # smaller than the block was, and a scan would stop short of what the
+    # program had already written.
+    def self.grow_large_size(header : BlockHeader*, size : UInt64) : Nil
+      hi = (size >> 32).to_u32! << Flags::SIZE_HI_SHIFT
+      flags = pointerof(header.value.@flags)
+      loop do
+        old = Atomic::Ops.load(flags, :monotonic, false)
+        break if (old & Flags::SIZE_HI_MASK) == hi
+        _, swapped = Atomic::Ops.cmpxchg(flags, old, (old & ~Flags::SIZE_HI_MASK) | hi, :sequentially_consistent, :monotonic)
+        break if swapped
+      end
+      Atomic::Ops.store(pointerof(header.value.@size), size.to_u32!, :release, true)
+    end
+
     def self.set_used(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
       {% if !flag?(:gcry_block_headers) %}
         # Nothing to write. Occupancy is `occ`, size is the chunk's size class,
@@ -469,6 +494,14 @@ module Gcry
       # through the recycler's fresh mapping (`Heap#take_large_free`).
       # Cleared when taken.
       FREED = 2048_u32
+      # Bits 16–21 of a large chunk's flags: the address space reserved for
+      # it from its base, mapped or not (`Heap#grow_large`), as log2 of what
+      # it holds past its first page: the extent is that power of two plus
+      # one host page (`Heap#large_grow_extent`). 0 when it has none. Six bits
+      # hold any extent a 64-bit target can map. Written at map time, cleared
+      # when the room goes back (`Heap#release_large_reservation`).
+      GROW_EXTENT_SHIFT =              16
+      GROW_EXTENT_MASK  = 0x003F_0000_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -668,6 +701,21 @@ module Gcry
 
     def self.set_sparse(chunk : ChunkHeader*, value : Bool) : Nil
       update_flag(chunk, Flags::SPARSE, value)
+    end
+
+    # The chunk flags that record a reservation of `2^log` bytes past the
+    # chunk's first page (`Flags::GROW_EXTENT_SHIFT`).
+    def self.grow_extent_flags(log : Int32) : UInt32
+      log.to_u32 << Flags::GROW_EXTENT_SHIFT
+    end
+
+    # That log2, or 0 when nothing is reserved.
+    def self.grow_extent_log(chunk : ChunkHeader*) : Int32
+      ((chunk.value.flags & Flags::GROW_EXTENT_MASK) >> Flags::GROW_EXTENT_SHIFT).to_i32
+    end
+
+    def self.clear_grow_extent(chunk : ChunkHeader*) : Nil
+      update_flag(chunk, Flags::GROW_EXTENT_MASK, false)
     end
   end
 

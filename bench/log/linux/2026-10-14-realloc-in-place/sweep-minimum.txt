@@ -1,0 +1,14 @@
+# Reservation minimum at one doubling, same binary and harness as sweep-doublings.txt, 5 interleaved trials, medians.
+bench                  arm             bench s      (min-max)  wall s   user    sys  RSS MiB   minflt VmPeak MiB
+Revcomp                d1min64k         0.5810  (0.576-0.584)    2.02   1.88   0.18    526.9   266182      843.2
+Revcomp                d1min256k        0.5760  (0.563-0.577)    2.02   1.88   0.18    526.9   264665      843.2
+Revcomp                d1min1m          0.5750  (0.568-0.582)    2.02   1.88   0.19    526.9   264569      843.2
+JsonParseSerializable  d1min64k         0.2900  (0.286-0.294)    0.83   0.84   0.09    408.8   135767      738.2
+JsonParseSerializable  d1min256k        0.2920  (0.289-0.302)    0.84   0.84   0.10    409.4   137602      741.1
+JsonParseSerializable  d1min1m          0.2890  (0.287-0.292)    0.83   0.81   0.11    418.1   140783      742.3
+JsonParsePull          d1min64k         0.2830  (0.281-0.296)    0.82   0.83   0.08    409.3   131363      738.6
+JsonParsePull          d1min256k        0.2820  (0.278-0.288)    0.82   0.84   0.08    409.4   131000      738.7
+JsonParsePull          d1min1m          0.2850  (0.280-0.293)    0.82   0.86   0.08    409.2   132347      746.1
+JsonGenerate           d1min64k         0.5910  (0.584-0.593)    1.47   1.71   0.19    771.9   293003     1665.1
+JsonGenerate           d1min256k        0.5880  (0.580-0.601)    1.47   1.67   0.18    771.9   293701     1665.1
+JsonGenerate           d1min1m          0.5860  (0.580-0.590)    1.47   1.65   0.20    772.1   293997     1665.1

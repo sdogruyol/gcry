@@ -720,6 +720,11 @@ module GC
       end
     {% end %}
 
+    # `realloc` grows a large block where it stands, into room reserved past
+    # it when an earlier growth had to copy (`Heap#grow_large`). `0` copies
+    # every growth, as before 2026-10-14.
+    heap.realloc_in_place = false if env_flag_zero?("GCRY_REALLOC_IN_PLACE")
+
     # Large blocks reuse the resident pages of large blocks the last major
     # freed (Linux; `Heap#recycle_large_mapping`). Off: a large block maps
     # fresh unless a cached chunk has its exact size.
