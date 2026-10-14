@@ -1797,24 +1797,26 @@ chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift
 
-# Do the process heap's counters lose updates? `note_alloc_bytes` and its
-# siblings use plain `set(get + 1)` unless `heap_counters_atomic` is set, and
-# ROADMAP has carried the counter-argument since v0.20.0: `live_objects` read
-# one below the walk in 3 runs of 40, in a program whose only threads were main
-# and the monitor. That flake was fixed as a *scope* correction — the invariant
-# is stated only of a heap that keeps its counter — which made the checker
-# honest and retired the measurement. The harness states it anyway
-# (`Invariant.enable` + `Invariant.force_counters`) and counts. Three arms: atomic and plain must both come out at zero
-# (measured, 4.6 M forced comparisons across three shapes — the loss does not
-# reproduce on this tree, so the plain default stays and the atomic path stays
-# an escape), and `--inject` drops one increment through
-# `debug_drift_live_objects` and must be caught, because without it two zeros
-# cannot be told from a comparison that never looks. ~35 s.
+# Do the process heap's counters lose updates? A lost update is the one
+# counter error that never comes back, so the harness compares `live_objects`
+# with a walk of the heap only at quiescent points — every spawned thread
+# joined, the reading the same twice 10 ms apart — and judges the drift left
+# at the end. Each round, main allocates alone, then 80 threads (16 past the
+# cursor-set table, on the shared fallback set) allocate and free three of
+# every four blocks. The shipped arm must end exact (27 of 27 runs on 12 CPUs,
+# 6 of 6 on 3); it lost 3 to 10 decrements in 10 of 10 runs on 12 CPUs before
+# `live_objects_sub` stopped saturating at zero (that bug's own gate is
+# process_spec/regression/76). `--plain` forces the plain `set(get + n)`
+# branch (`Heap#debug_plain_counters`) and must lose: 40 096 to 95 197 per run
+# on 12 CPUs, 223 to 17 560 on 3.
+# Until 2026-10-14 the arms were "atomic" and "plain" and the same code on the
+# bitmap layout, and the one failure they produced (macos-15-intel, 1 in
+# 983 361 per-allocation comparisons) was a runtime thread's birth allocation
+# in flight, not a loss (`Heap#concurrent_mutators?`). ~10 s.
 counter-loss: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/counter_loss.cr -o $(BIN)/counter_loss --error-trace
-	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss
-	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --control
-	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --inject
+	$(BIN)/counter_loss
+	$(BIN)/counter_loss --plain
 
 # What a fault outside gcry's span actually *is*. The three readings there say
 # what it is not — not a gcry allocation, and whether a swept object is

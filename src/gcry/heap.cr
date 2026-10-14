@@ -223,7 +223,12 @@ module Gcry
     # what the comment claimed either — on x86_64 `set` compiles to `xchg`,
     # which is locked whether you ask or not, so the plain path was already
     # paying for a locked instruction per counter and losing updates for it.
-    # `GCRY_HEAP_COUNTERS_ATOMIC=0/1` runs the arms side by side.
+    # `GCRY_HEAP_COUNTERS_ATOMIC=0/1` runs the arms side by side — on the header
+    # layout only. The bitmap allocator implies atomic counters
+    # (`counters_atomic?`), so on the default layout this flag decides nothing
+    # but the checker's scope (`counters_may_lose_updates?`), and a "plain" arm
+    # that clears it measures the atomic path twice: `make counter-loss` did,
+    # from the headerless default until 2026-10-14.
     property heap_counters_atomic : Bool = false
 
     # Set when `GCRY_HEAP_COUNTERS_ATOMIC` names a value: an explicit arm must
@@ -231,6 +236,13 @@ module Gcry
     # arms cannot be run side by side and the "plain path loses updates" half of
     # the gate can never be shown.
     property heap_counters_atomic_pinned : Bool = false
+
+    # Research only, and no knob: take the plain `set(get + n)` branch of every
+    # counter update even where the layout implies atomics, so `make
+    # counter-loss` has a red arm that is plain on the default layout. Read on
+    # the locked and free paths only (`counters_atomic?`); the hit path keeps
+    # its own per-set counters and never asks.
+    property debug_plain_counters : Bool = false
     @index_lock = Crystal::SpinLock.new
     # `@chunks` surgery only. Separate from `@index_lock` on purpose: the
     # unlink walks the list to find a predecessor, and holding the index
@@ -1423,7 +1435,7 @@ module Gcry
       # The bitmap sweep settles a chunk with one batched subtraction, which
       # needs atomics against other mutators — not against itself: with one
       # mutator the sweep runs on that thread.
-      @heap_counters_atomic || @bitmap_alloc
+      (@heap_counters_atomic || @bitmap_alloc) && !@debug_plain_counters
     end
 
     # Parallel: Atomic RMW. EC1: plain get/set (no LOCK on the alloc hot path).
