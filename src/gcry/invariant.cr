@@ -128,13 +128,13 @@ module Gcry
     def self.check_live_objects(heap : Heap) : Nil
       return unless enabled?
       return if @@checking
-      # `concurrent_mutators?` is `multi_mutator_threads?`: a count of Crystal's
-      # thread list against a small constant. It answers a question about the
-      # *process*, and for a heap no other thread can reach — a spec's own
-      # `Gcry::Heap.new` — it answers the wrong one. A heap that says it has a
-      # single mutator is taken at its word here; the two-instant race the skip
-      # exists for is still caught below, where a `reported != after` mismatch
-      # skips rather than reports.
+      # `concurrent_mutators?` is `multi_mutator_threads?` — a count of Crystal's
+      # thread list against a small constant — plus any runtime thread still in
+      # its birth. It answers a question about the *process*, and for a heap no
+      # other thread can reach — a spec's own `Gcry::Heap.new` — it answers the
+      # wrong one. A heap that says it has a single mutator is taken at its word
+      # here; the two-instant race the skip exists for is still caught below,
+      # where a `reported != after` mismatch skips rather than reports.
       #
       # This replaces waiting for the thread list to drain, which is what
       # `spec/invariant_spec.cr` did between 06fb325 and this: `Thread#join`

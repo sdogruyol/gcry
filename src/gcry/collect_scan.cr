@@ -953,7 +953,39 @@ module Gcry
       # nothing clears it when the thread dies — so "staged and not in the list"
       # covers the birth window and every dead thread since, and a check that
       # skips forever is worse than one that races.
-      multi_mutator_threads?
+      return true if multi_mutator_threads?
+      # The Monitor and the idle collector are not mutators once they are in
+      # their loops, which is why `multi_mutator_threads?` allows the one and
+      # skips the other. Each allocates in its birth, though — `Thread#start`
+      # pushes the thread onto Crystal's list and then allocates its main
+      # `Fiber` — and a walk taken while one sat between setting an occupancy
+      # bit and crediting the counter read one block more than the counter,
+      # stably, for as long as that thread was off the CPU. That is the "lost
+      # increment" `make counter-loss` counted once on macos-15-intel, and on
+      # Linux under CPU contention: 11 of 3 840 runs counted 1 to 239 such
+      # mismatches, in the first round (the Monitor's birth) or the second (the
+      # idle thread's, born at the end of the first collection), none of them
+      # still there 50 ms later; with the Monitor settled before the first
+      # walk and the idle thread off, 0 of 2 400. So a runtime thread is a
+      # mutator here until it has stored itself as exempt: the same
+      # per-allocation comparison then counted 0 in 1 440 runs, against 2 in
+      # 1 440 without this, interleaved (process_spec/regression/77). Process
+      # GC only: neither allocates from any other heap.
+      {% if flag?(:gc_none) %}
+        Thread.unsafe_each do |thread|
+          return true if runtime_thread_in_birth?(thread)
+        end
+      {% end %}
+      false
+    end
+
+    # The Monitor or the idle collector, before it has stored itself as exempt
+    # (`MonitorGate.settle`, `IdleRelease.loop_forever`). By `@name`, as
+    # `monitor_thread?` asks, so the walk allocates nothing.
+    private def runtime_thread_in_birth?(thread : Thread) : Bool
+      return !IdleRelease.signal_exempt?(thread) if IdleRelease.thread?(thread)
+      name = thread.@name
+      !name.nil? && name == "SYSMON" && !MonitorGate.signal_exempt?(thread)
     end
 
     # Can this heap's counters lose an update outright? `note_alloc_bytes` uses
