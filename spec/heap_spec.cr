@@ -20,22 +20,42 @@ end
 {% end %}
 
 module ReservationSpec
-  # Is every page of `[addr, addr + len)` mapped (accessible or not)? `mincore`
-  # refuses an unmapped page (`ENOMEM`). A page at a time into a byte on the
-  # stack: an allocation here could map memory into a hole just released.
-  # Nil on Windows, where the room goes with the chunk's release instead.
+  # Is every page of `[addr, addr + len)` mapped (accessible or not)? Linux
+  # `mincore` refuses an unmapped page (`ENOMEM`); Darwin's answers 0 for one:
+  # on macOS CI it called the first page of a chunk `Heap#destroy` had just
+  # unmapped mapped (2026-10-14, arm64 and x86_64). So on Darwin the region
+  # `mach_vm_region` reports at or after each page must start at or below it.
+  # A page at a time into stack storage: an allocation here could map memory
+  # into a hole just released. Nil on Windows, where the room goes with the
+  # chunk's release instead.
   def self.mapped?(addr : UInt64, len : UInt64) : Bool?
     {% if flag?(:win32) %}
       nil
     {% else %}
       page = Gcry::Platform.host_page_size
-      vec = 0_u8
       at = addr
       while at < addr + len
-        return false unless LibC.mincore(Pointer(Void).new(at), LibC::SizeT.new(page), pointerof(vec)) == 0
+        return false unless page_mapped?(at)
         at += page
       end
       true
+    {% end %}
+  end
+
+  private def self.page_mapped?(at : UInt64) : Bool
+    {% if flag?(:darwin) %}
+      address = at
+      size = 0_u64
+      info = uninitialized Int32[16]
+      count = Gcry::Platform::VM_REGION_BASIC_INFO_COUNT_64
+      object_name = 0_u32
+      kr = Gcry::Platform::LibMachVM.mach_vm_region(Gcry::Platform::LibMachVM.mach_task_self_,
+        pointerof(address), pointerof(size), Gcry::Platform::VM_REGION_BASIC_INFO_64,
+        info.to_unsafe, pointerof(count), pointerof(object_name))
+      kr == 0 && address <= at && at < address &+ size
+    {% else %}
+      vec = 0_u8
+      LibC.mincore(Pointer(Void).new(at), LibC::SizeT.new(Gcry::Platform.host_page_size), pointerof(vec)) == 0
     {% end %}
   end
 
