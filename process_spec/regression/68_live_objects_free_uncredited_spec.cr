@@ -38,6 +38,10 @@ describe "Regression: a free never loses its live_objects decrement" do
     heap = Gcry::Heap.new
     heap.nursery_enabled = false
     heap.gc_threshold = UInt64::MAX
+    # Implied by the bitmap allocator; the header allocator's library heap
+    # counts plainly until told, and `GC.pthread_create` tells only the
+    # process heap. Eight threads share this one.
+    heap.heap_counters_atomic = true
     begin
       go = Atomic(Int32).new(0)
       threads = Array(Thread).new(UNCREDITED_THREADS) do |t|
