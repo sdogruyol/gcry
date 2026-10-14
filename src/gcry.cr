@@ -243,6 +243,10 @@ end
   require "./gcry/crystal_process_compat"
   require "./gcry/crystal_raises_compat"
   require "./gcry/crystal_string_builder_compat"
+  require "./gcry/crash_guard"
+  # Here, at the top level, so it runs after the prelude's
+  # `Exception::CallStack.setup_crash_handler` and is called before it.
+  Gcry::CrashGuard.install
   # Boehm's `GC_*` entry points, which `crystal i` and code bound to
   # `gc/boehm.cr`'s `LibGC` call. `-Dgcry_no_boehm_abi` leaves them out, for a
   # program that also links libgc itself: Crystal's distribution ships

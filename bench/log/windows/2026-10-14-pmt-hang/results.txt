@@ -1,0 +1,53 @@
+Windows parallel_mark_termination hang, 2026-10-14. Branch diag/windows-termination-hang.
+probe.ps1 loops the bench (or its red child alone) with a 90 s bound per run and, on a hang,
+takes `cdb` stacks of every thread twice 5 s apart plus a full dump; crash-child.ps1 does
+the same for spec 70's crash children. stacks.txt has the two kinds of hang, trimmed.
+
+Run 38564157456 (master b18d5c8, and 5e9c365, the commit of the 2026-10-08 hang), windows-latest x86_64
+  job                           runs  hangs  others
+  b18d5c8 parent 1                14      3  11 unlocked: exit=nil (an exception status, not
+                                             the report's exit 1)
+  b18d5c8 parent 2                14      3   8 exit=nil, 2 exit=1, 1 damage=
+  b18d5c8 parent 3                30      3  27 exit=nil
+  b18d5c8 red child alone          7      3   4 Invalid memory access (C0000005)
+  5e9c365 parent 5                 8      3   5 exit=nil
+  5e9c365 parent 6                 8      3   5 exit=nil
+  total                           81     18  (each job stopped at its third hang)
+  Every hung child: main thread and SYSMON each burning a core (~10 s CPU per 5 s wall
+  between the two snapshots), the mark workers in WaitOnAddress, gc-idle in SleepEx.
+  14 of 18: SYSMON overflowed its stack inside the allocator under a freelist lock and its
+  overflow report spins on that lock; the main thread spins behind it on the same lock.
+  4 of 18: SYSMON overflowed inside Crystal::Once's spin lock and its overflow report spins
+  on it; the main thread spins on it too.
+  Both: SYSMON recursing scheduler -> raise -> CallStack.new -> load_debug_info ->
+  wait_initializer -> Fiber.suspend -> scheduler, on the `once` the main thread's report holds.
+  windows-11-arm (aarch64-windows-gnu, b18d5c8) in the same run: 735 runs of the bench and
+  2 313 of the red child alone, 0 hangs, every child exit 1, often two reports interleaved.
+  The GNU handler prints through dladdr and allocates nothing, so two at once are harmless.
+
+Run 38567822241 (b18d5c8 + src/gcry/crash_guard.cr), windows-latest x86_64 unless noted
+  bench, parent                315 + 301 + 307 runs   0 hangs   unlocked arm exit=1 every run
+  red child alone             6509 runs              0 hangs   exit=1 every run
+  spec 70 crash children, against origin/master's src (spec file copied in):
+    crash-in-allocator         10 runs   10 hangs (main thread in alloc_old_small's lock,
+                                         called from sym_from_addr in Crystal's report,
+                                         inside map_chunk's GC_on_heap_resize callback)
+    crash-pair                 20 runs    1 hang (the Once recursion above, 2 threads)
+                                         19 exit 0xC0000005
+    spec70 -v                  2 failures
+  spec 70 crash children, with the guard:
+    crash-in-allocator         10 runs   10 exit=1
+    crash-pair                 20 runs   20 exit=1, the second thread parked with
+                                         "gcry: thread 0x.. faulted while thread 0x.. reports one"
+    spec70 -v                  4 examples, 0 failures
+  ci/windows.ps1 -Variant default -Suite specs: 294 and 152 examples, 0 failures
+  windows-11-arm (aarch64-windows-gnu): spec 70 passed its allocator example; the pair
+  example's report finished before the second fault (the GNU handler does not load
+  DbgHelp), which the first version of the spec asserted against and the final one does not.
+
+Run 38573497007 (the final spec 70, which asserts exit code 1 on Windows)
+  x86_64, origin/master's src:  crash-in-allocator 10 of 10 hung; crash-pair 1 of 20 hung,
+                                19 exit 0xC0000005; spec70 -v: 2 failures (hang; exit_code nil)
+  x86_64, with the guard:       10 of 10 and 20 of 20 exit 1; spec70 -v: 4 examples, 0 failures
+  aarch64-windows-gnu, guard:   spec70 -v: 4 examples, 0 failures; bench 18 runs, 0 hangs
+  ci/windows.ps1 -Variant default -Suite specs with the guard: green

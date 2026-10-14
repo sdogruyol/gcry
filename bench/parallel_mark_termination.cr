@@ -96,9 +96,13 @@ unless ARGV.includes?("--child")
     captured = IO::Memory.new
     child = Process.new(exe, args, env: env, output: captured, error: captured)
     # A bounded wait. The red arm loses live objects on purpose, and what that
-    # does next is up to the memory it corrupts: it reports damage, dies of
-    # it, or — seen once on Windows x86_64 CI, 2026-10-08 — spins on a
-    # corrupted word until the job's timeout killed it 29 minutes later.
+    # does next is up to the memory it corrupts: it reports damage or dies of
+    # it. On Windows x86_64 it also hung, until the job's timeout killed it 29
+    # minutes later (CI, 2026-10-08), and in 18 of 81 runs on 2026-10-14. That
+    # was not the heap spinning but two threads faulting at once and Crystal's
+    # crash report deadlocking on gcry's allocator and on its own `once`
+    # (src/gcry/crash_guard.cr, bench/log/windows/2026-10-14-pmt-hang/): 0 in
+    # 923 since. The bound stays, so a hang is a red result and not a timeout.
     hung = Atomic(Int32).new(0)
     done = Atomic(Int32).new(0)
     # A thread, not a fiber: `Process#wait` may block this one. It reads only

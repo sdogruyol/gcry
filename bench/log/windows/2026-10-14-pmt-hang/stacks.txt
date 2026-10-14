@@ -1,0 +1,123 @@
+# cdb on hung GCRY_MARK_BUSY_UNLOCKED=1 parallel_mark_termination children, windows-latest x86_64,
+# run 38564157456 (2026-10-14, master b18d5c8 + probe workflow). Main thread and SYSMON only; the
+# mark workers sat in WaitOnAddress, IOCP in GetQueuedCompletionStatusEx, gc-idle in SleepEx.
+# 18 hangs in 81 runs over 6 jobs (5e9c365 and b18d5c8 alike); 14 look like the first, 4 like the second.
+
+## pmt-x64-head-child-4 hang1 — SYSMON overflows under the size-class lock, then re-enters it
+## stderr: Invalid memory access (C0000005) at address 0x1701cb001c0 | Invalid memory access (C0000005) at address 0x24 | Stack overflow
+ User Mode Time
+  Thread       Time
+    2:360      0 days 0:01:40.031
+    0:36c      0 days 0:01:39.843
+    4:1124     0 days 0:00:00.062
+    3:17e8     0 days 0:00:00.046
+    5:20a0     0 days 0:00:00.031
+    7:620      0 days 0:00:00.000
+    6:3bc      0 days 0:00:00.000
+    1:20a4     0 days 0:00:00.000
+   0  Id: 1744.36c Suspend: 1 Teb: 0000004e`af9d8000 Unfrozen
+*** WARNING: Unable to verify checksum for bin\parallel_mark_termination.exe
+ # Child-SP          RetAddr               Call Site
+00 parallel_mark_termination!lock+0x45 [crystal\spin_lock.cr @ 11]
+01 parallel_mark_termination!alloc_old_small+0x450 [src\gcry\tlab.cr @ 141]
+02 parallel_mark_termination!allocate:atomic:clear+0x764 [src\gcry\heap.cr @ 1393]
+03 parallel_mark_termination!malloc+0x7f [src\gcry\heap.cr @ 597]
+04 parallel_mark_termination!malloc+0x5d [src\gcry\gc_override.cr @ 1563]
+05 parallel_mark_termination!__crystal_malloc64+0x11 [gc.cr @ 24]
+06 parallel_mark_termination!new+0x16 [exception.cr @ 162]
+07 parallel_mark_termination!execution_context+0x35 [fiber.cr @ 77]
+08 parallel_mark_termination!enqueue+0xe [fiber.cr @ 263]
+09 parallel_mark_termination!enqueue+0xd [fiber\pointer_linked_list_node.cr @ 12]
+0a parallel_mark_termination!resume_all+0x7e [crystal\once.cr @ 32]
+0b parallel_mark_termination!load_debug_info+0x24b [crystal\once.cr @ 96]
+0c parallel_mark_termination!print_backtrace+0x32 [exception\call_stack\stackwalk.cr @ 134]
+0d parallel_mark_termination!->+0x61 [crystal\system\win32\signal.cr @ 32]
+0e ntdll!RtlpCallVectoredHandlers+0xd6
+0f ntdll!RtlDispatchException+0x206
+10 ntdll!KiUserExceptionDispatch+0x2e
+11 parallel_mark_termination![]+0x9 [pointer.cr @ 133]
+12 parallel_mark_termination!unsafe_fetch+0xd [array.cr @ 665]
+13 parallel_mark_termination![]+0xb8 [indexable.cr @ 57]
+14 parallel_mark_termination!check+0x1e2 [bench\parallel_mark_termination.cr @ 79]
+15 parallel_mark_termination!__crystal_main+0x14d9 [bench\parallel_mark_termination.cr @ 171]
+16 parallel_mark_termination!main_user_code+0x9 [crystal\main.cr @ 129]
+   2  Id: 1744.360 Suspend: 1 Teb: 0000004e`af9e2000 Unfrozen "SYSMON"
+ # Child-SP          RetAddr               Call Site
+00 parallel_mark_termination!lock+0x45 [crystal\spin_lock.cr @ 11]
+01 parallel_mark_termination!alloc_old_small+0x450 [src\gcry\tlab.cr @ 141]
+02 parallel_mark_termination!allocate:atomic:clear+0x764 [src\gcry\heap.cr @ 1393]
+03 parallel_mark_termination!malloc+0x7f [src\gcry\heap.cr @ 597]
+04 parallel_mark_termination!malloc+0x5d [src\gcry\gc_override.cr @ 1563]
+05 parallel_mark_termination!__crystal_malloc64+0x11 [gc.cr @ 24]
+06 parallel_mark_termination!new+0x16 [exception.cr @ 162]
+07 parallel_mark_termination!scheduler+0x35 [crystal\system\thread.cr @ 82]
+08 parallel_mark_termination!current+0x11 [fiber\execution_context\scheduler.cr @ 6]
+09 parallel_mark_termination!reschedule+0x9 [fiber\execution_context.cr @ 183]
+0a parallel_mark_termination!suspend+0x9 [fiber.cr @ 354]
+0b parallel_mark_termination!wait_initializer+0x66 [crystal\once.cr @ 81]
+0c parallel_mark_termination!load_debug_info+0xd7 [crystal\once.cr @ 51]
+0d parallel_mark_termination!print_backtrace+0x32 [exception\call_stack\stackwalk.cr @ 134]
+0e parallel_mark_termination!->+0x9a [crystal\system\win32\signal.cr @ 41]
+0f ntdll!RtlpCallVectoredHandlers+0xd6
+10 ntdll!RtlDispatchException+0x206
+11 ntdll!KiUserExceptionDispatch+0x2e
+12 parallel_mark_termination!cursor_set+0x1c [src\gcry\bitmap_alloc.cr @ 252]
+13 parallel_mark_termination!bitmap_alloc_locked+0x106 [src\gcry\bitmap_alloc.cr @ 650]
+14 parallel_mark_termination!alloc_old_small_locked+0x3f [src\gcry\heap.cr @ 1634]
+15 parallel_mark_termination!alloc_old_small+0x464 [src\gcry\heap.cr @ 1599]
+16 parallel_mark_termination!allocate:atomic:clear+0x764 [src\gcry\heap.cr @ 1393]
+17 parallel_mark_termination!malloc+0x7f [src\gcry\heap.cr @ 597]
+   ... SYSMON frames 26-7f repeat scheduler -> raise -> CallStack.new -> unwind -> load_debug_info -> wait_initializer -> suspend -> reschedule ...
+
+## pmt-x64-head-parent-1 hang2 — SYSMON overflows inside Crystal::Once's spin lock, then re-enters it
+   0  Id: 2384.1548 Suspend: 1 Teb: 00000057`3de11000 Unfrozen
+*** WARNING: Unable to verify checksum for bin\parallel_mark_termination.exe
+ # Child-SP          RetAddr               Call Site
+00 parallel_mark_termination!pause+0x2 [intrinsics.cr @ 191]
+01 parallel_mark_termination!lock+0x45 [crystal\spin_lock.cr @ 11]
+02 parallel_mark_termination!load_debug_info+0x21f [crystal\once.cr @ 91]
+03 parallel_mark_termination!print_backtrace+0x32 [exception\call_stack\stackwalk.cr @ 134]
+04 parallel_mark_termination!->+0x61 [crystal\system\win32\signal.cr @ 32]
+05 ntdll!RtlpCallVectoredHandlers+0xd6
+06 ntdll!RtlDispatchException+0x206
+07 ntdll!KiUserExceptionDispatch+0x2e
+08 parallel_mark_termination![]+0x9 [pointer.cr @ 133]
+09 parallel_mark_termination!unsafe_fetch+0xd [array.cr @ 665]
+0a parallel_mark_termination![]+0xb8 [indexable.cr @ 57]
+0b parallel_mark_termination!check+0x1e2 [bench\parallel_mark_termination.cr @ 79]
+0c parallel_mark_termination!__crystal_main+0x14d9 [bench\parallel_mark_termination.cr @ 171]
+0d parallel_mark_termination!main_user_code+0x9 [crystal\main.cr @ 129]
+0e parallel_mark_termination!main+0x3f [crystal\main.cr @ 115]
+0f parallel_mark_termination!main+0x9 [crystal\main.cr @ 133]
+10 parallel_mark_termination!wmain+0x113 [crystal\system\win32\wmain.cr @ 36]
+11 (Inline Function) --------`--------     parallel_mark_termination!invoke_main+0x22 [D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl @ 90]
+12 parallel_mark_termination!__scrt_common_main_seh+0x10f [D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\exe_common.inl @ 288]
+13 KERNEL32!BaseThreadInitThunk+0x17
+14 ntdll!RtlUserThreadStart+0x2c
+
+   2  Id: 2384.2500 Suspend: 1 Teb: 00000057`3de1b000 Unfrozen "SYSMON"
+ # Child-SP          RetAddr               Call Site
+00 parallel_mark_termination!lock+0x2c [crystal\spin_lock.cr @ 11]
+01 parallel_mark_termination!load_debug_info+0x47 [crystal\once.cr @ 47]
+02 parallel_mark_termination!print_backtrace+0x32 [exception\call_stack\stackwalk.cr @ 134]
+03 parallel_mark_termination!->+0x9a [crystal\system\win32\signal.cr @ 41]
+04 ntdll!RtlpCallVectoredHandlers+0xd6
+05 ntdll!RtlDispatchException+0x206
+06 ntdll!KiUserExceptionDispatch+0x2e
+07 parallel_mark_termination!insert_impl+0x16 [crystal\pointer_linked_list.cr @ 23]
+08 parallel_mark_termination!push+0x71 [crystal\pointer_linked_list.cr @ 58]
+09 parallel_mark_termination!add_waiter+0xd [crystal\once.cr @ 28]
+0a parallel_mark_termination!wait_initializer+0x55 [crystal\once.cr @ 80]
+0b parallel_mark_termination!load_debug_info+0xd7 [crystal\once.cr @ 51]
+0c parallel_mark_termination!unwind+0x18 [exception\call_stack\stackwalk.cr @ 37]
+0d parallel_mark_termination!initialize+0xe [exception\call_stack.cr @ 39]
+0e parallel_mark_termination!new+0x2a [exception\call_stack.cr @ 39]
+0f parallel_mark_termination!raise+0x44 [raise.cr @ 242]
+10 parallel_mark_termination!scheduler+0x3d [crystal\system\thread.cr @ 82]
+11 parallel_mark_termination!current+0x11 [fiber\execution_context\scheduler.cr @ 6]
+12 parallel_mark_termination!reschedule+0x9 [fiber\execution_context.cr @ 183]
+13 parallel_mark_termination!suspend+0x9 [fiber.cr @ 354]
+14 parallel_mark_termination!wait_initializer+0x66 [crystal\once.cr @ 81]
+15 parallel_mark_termination!load_debug_info+0xd7 [crystal\once.cr @ 51]
+16 parallel_mark_termination!unwind+0x18 [exception\call_stack\stackwalk.cr @ 37]
+17 parallel_mark_termination!initialize+0xe [exception\call_stack.cr @ 39]

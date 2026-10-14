@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fatal exception on Windows ends the process instead of hanging in
+  Crystal's crash report.** Crystal's MSVC handler for an access violation
+  or a stack overflow allocates through the GC while it prints the
+  backtrace. A thread that faulted inside gcry's allocator spun forever on
+  the size-class lock it already held. A second thread faulting during a
+  report (SYSMON, in practice) waited on the report's `Crystal.once`,
+  raised, waited again, and overflowed its stack inside a lock it then spun
+  on. This was the hang of `make parallel-mark-termination`'s red arm on
+  Windows x86_64 CI: 18 of 81 runs on 2026-10-14, with `cdb` stacks of every
+  hung child in `bench/log/windows/2026-10-14-pmt-hang/`. 0.35.0 hangs the
+  same way, which refutes the C-heap-in-the-stop suspicion 0.35.0 recorded
+  for that bench. A vectored handler now runs ahead of Crystal's
+  (`Gcry::CrashGuard`): the reporting thread allocates from the C heap, and
+  any other thread that faults during the report parks until the report
+  exits. After: 0 hangs in 923 runs of the bench and 6 509 of its red child
+  alone. A fault inside a `GC_set_on_heap_resize` callback hung 10 of 10
+  runs before and exits 1 in 10 of 10 after; two threads faulting at once
+  hung 1 in 20 and died with 0xC0000005 in the other 19 before, and exit 1
+  in 20 of 20 after (`70_crash_report_exits_spec.cr`). The aarch64 Windows
+  (GNU) and Linux handlers do not allocate and were never affected.
+
 ### Removed
 
 - **`Gcry::Layout` and its registration API.** The mark has read no layout

@@ -1466,7 +1466,9 @@ module GC
   def self.malloc(size : LibC::SizeT) : Void*
     Crystal.trace :gc, "malloc", size: size do
       check_fork_poison!
-      if @@gcry_ready
+      # The thread whose fatal exception is being reported allocates from libc
+      # (`Gcry::CrashGuard`): it may have faulted holding a heap lock.
+      if @@gcry_ready && !Gcry::CrashGuard.reporting?
         Gcry.default_heap.malloc(size)
       else
         bootstrap_malloc(size, clear: true)
@@ -1478,7 +1480,7 @@ module GC
   def self.malloc_atomic(size : LibC::SizeT) : Void*
     Crystal.trace :gc, "malloc", size: size, atomic: 1 do
       check_fork_poison!
-      if @@gcry_ready
+      if @@gcry_ready && !Gcry::CrashGuard.reporting?
         Gcry.default_heap.malloc_atomic(size)
       else
         bootstrap_malloc(size, clear: false)
@@ -1503,6 +1505,7 @@ module GC
       free(pointer)
       return Pointer(Void).null
     end
+    return crash_report_realloc(pointer, size) if Gcry::CrashGuard.reporting?
     if @@gcry_ready
       # One lookup for the whole call: the heap answers null for a pointer it
       # does not own, which is the LibC bootstrap era's.
@@ -1527,6 +1530,18 @@ module GC
     else
       bootstrap_realloc(pointer, size)
     end
+  end
+
+  # `realloc` for the thread being reported (`Gcry::CrashGuard`), which never
+  # enters the allocator: a gcry block is copied into a libc one and left where
+  # it is, and the report's own libc blocks resize in libc. The size lookup is
+  # the one heap call left; it takes no allocation lock.
+  private def self.crash_report_realloc(pointer : Void*, size : LibC::SizeT) : Void*
+    old = @@gcry_ready ? Gcry.default_heap.usable_size(pointer) : 0_u64
+    return bootstrap_realloc(pointer, size) if old == 0
+    fresh = bootstrap_malloc(size, clear: true)
+    fresh.as(UInt8*).copy_from(pointer.as(UInt8*), Math.min(old, size.to_u64))
+    fresh
   end
 
   # Refused while collection is disabled, as Boehm's `GC_gcollect` returns at
@@ -1622,6 +1637,12 @@ module GC
 
   private def self.free_impl(pointer : Void*) : Nil
     return if pointer.null?
+    if Gcry::CrashGuard.reporting?
+      # A gcry block stays where it is (freeing takes its class lock); only
+      # the report's own libc blocks go back.
+      bootstrap_free(pointer) unless @@gcry_ready && Gcry.default_heap.usable_size(pointer) != 0
+      return
+    end
     if @@gcry_ready
       heap = Gcry.default_heap
       result = heap.free_result(pointer)
