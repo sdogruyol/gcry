@@ -52,6 +52,12 @@ module Gcry
     # live set growing to 550 MiB was collected every 64 MiB, nine majors
     # between 100 and 550 MiB where Boehm's free-space divisor takes five,
     # and its mark work summed to quadratic in the live set.
+    #
+    # The budget the floor is held to is peak RSS within 1.1× Boehm's on
+    # every crystal-metric row. Raising it buys nothing since pacing: the
+    # paced threshold already reaches 3× the cap, Primes and JsonParsePure
+    # run at Boehm's speed with 64 MiB, and 256 MiB puts RegexDna at 1.24×
+    # Boehm's peak (`bench/log/linux/2026-10-14-rss-budget-recheck/`).
     property adaptive_threshold_max : UInt64 = ADAPTIVE_THRESHOLD_MAX
     # Bytes the last major's mark scanned: every reached object that is not
     # atomic, small or large, counted by `scan_object` as it reads it. It is

@@ -3889,7 +3889,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       CPUs: 1.1 s → 41 s). The harness yield is gone;
       `process_spec/regression/50_collector_lock_fairness_spec.cr` failed 20
       of 20 before and passes on one and two CPUs after.
-- [ ] **Decide the RSS budget for large live sets (2026-10-03).** The
+- [x] **Decide the RSS budget for large live sets (2026-10-03) — decided
+      2026-10-14: within 1.1× Boehm's peak, cap floor stays 64 MiB.** The
       adaptive threshold's cap now follows a third of the bytes the mark
       scanned (Primes −17%, peak RSS unchanged everywhere). Primes is still
       2.1× and JsonParsePure 2.3× Boehm's process time, and the rest of that
@@ -3905,6 +3906,15 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       23 (macOS) points of Boehm's speed, JsonParsePure 9 and 11. A budget
       stated against Boehm ("within 10%") rather than against gcry's own
       default admits it.
+      **Re-measured on 0.35.0** (`b18d5c8`,
+      `bench/log/linux/2026-10-14-rss-budget-recheck/`): pacing and the
+      parallel mark default had already taken Primes to 103–107% of Boehm's
+      speed and JsonParsePure to 99–101%, at 0.94× and 0.83× its peak. Since
+      the paced threshold reaches 3× the cap, 256 MiB now puts RegexDna at
+      1.24× Boehm's peak, past the budget, and 128 / 192 MiB buy nothing
+      outside the noise while Revcomp goes 0.63× → 0.87×. Knuckeotide (47 MB
+      under Boehm) is the one row over 1.1×, at every cap: its peak is the
+      threshold floor and warm budget, not the cap.
 - [ ] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04).** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
