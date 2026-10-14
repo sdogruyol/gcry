@@ -1,0 +1,36 @@
+diff --git a/spec/std/string_builder_spec.cr b/spec/std/string_builder_spec.cr
+index 250a4b0..60c8c16 100644
+--- a/spec/std/string_builder_spec.cr
++++ b/spec/std/string_builder_spec.cr
+@@ -41,6 +41,17 @@ describe String::Builder do
+     end
+   end
+ 
++  it "keeps room for the trailing zero byte when it grows" do
++    # `to_s` writes a zero byte after the content. A buffer grown to exactly
++    # header + content (12 + 116 = 128 bytes) has no room for it, and the
++    # store lands one byte past the allocation.
++    (0..300).each do |size|
++      builder = String::Builder.new
++      size.times { builder << 'x' }
++      builder.capacity.should be > String::HEADER_SIZE + builder.bytesize
++    end
++  end
++
+   it "raises EOFError" do
+     builder = String::Builder.new
+     initial_capacity = builder.capacity
+diff --git a/src/string/builder.cr b/src/string/builder.cr
+index a06644b..85e482c 100644
+--- a/src/string/builder.cr
++++ b/src/string/builder.cr
+@@ -123,7 +123,8 @@ class String::Builder < IO
+   private def increase_capacity_by(count)
+     raise IO::EOFError.new if count >= Int32::MAX - real_bytesize
+ 
+-    new_bytesize = real_bytesize + count
++    # One more byte for the terminator `to_s` writes after the content.
++    new_bytesize = real_bytesize + count + 1
+     return if new_bytesize <= @capacity
+ 
+     new_capacity = calculate_new_capacity(new_bytesize)
