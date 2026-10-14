@@ -3851,20 +3851,25 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       parallel-mark-stress` in every job that runs the parallel-mark gates
       (`bench/log/linux/2026-10-01-parallel-mark-late-pop/`). Parallel mark
       stays experimental.
-- [ ] **Plain heap counters lost an increment on Intel macOS (2026-10-01).**
-      `make counter-loss`'s plain arm, which is the shipped default, counted 1
-      lost increment in 983 361 comparisons on macos-15-intel CI (run
-      36867713756), with no spawned thread: main and the monitor. That is the
-      v0.20.0 sighting's shape, and the 2026-09-13 item above says the gate is
-      what will notice if it returns. It is not seen on Linux or macOS arm64.
-      Open: which thread writes the counters concurrently on Darwin, and whether
-      Darwin should default to `GCRY_HEAP_COUNTERS_ATOMIC=1`. That cost was not
-      resolvable on Linux. Until then the gate is not run in the Darwin gates
-      job. The loss only skews GC timing (`bytes_since_gc`, `live_objects`); it
-      does not reclaim anything. A probe the same day ran 12 runs each of the
-      plain arm, the plain arm with `GCRY_IDLE_RELEASE_MS=0`, and the atomic
-      arm on macos-15-intel. All 36 counted 0, so it is too rare to bisect at
-      that budget.
+- [x] **Plain heap counters lost an increment on Intel macOS (2026-10-01) —
+      closed 2026-10-14.** `make counter-loss`'s plain arm counted 1 lost
+      increment in 983 361 comparisons on macos-15-intel CI (run
+      36867713756). Not a lost increment: a lost increment is counted at every
+      comparison after it, and this one was counted once. It was the
+      Monitor's or the idle thread's birth allocation, caught by the
+      per-allocation walk between setting an occupancy bit and crediting the
+      counter. Reproduced on Linux under CPU contention in 11 of 3 840 runs,
+      and in 0 of 2 400 with both births kept out of the way. The checker now
+      counts those threads as mutators until their births are over
+      (`process_spec/regression/77`). The gate's two arms had been the same
+      code on the bitmap layout. It was rebuilt: quiescent comparisons only,
+      80 threads with 16 on the fallback cursor set, and a `--plain` red arm
+      that loses 223 to 95 197 per run. It found a real loss in the shipped
+      path: `live_objects_sub` saturated at zero when two frees beat their
+      allocations' credit (`process_spec/regression/76`). Fixed; back in the
+      Darwin gates job. Not covered by it: `bytes_since_gc_sub` and
+      `free_bytes_sub` still saturate the same way; `bytes_since_gc` resets
+      every collection, `free_bytes` could drift [INFERENCE, unmeasured].
 - [x] **Two collector locks are unfair to a waiter under back-to-back
       collections (Windows, 2026-09-30).** Both were found with `cdb` on
       hung CI probes, and both are livelocks: the collector was still

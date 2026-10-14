@@ -30,6 +30,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in 20 of 20 after (`70_crash_report_exits_spec.cr`). The aarch64 Windows
   (GNU) and Linux handlers do not allocate and were never affected.
 
+- **A `free` no longer loses its `live_objects` decrement.** An allocation
+  on the hit path reaches the heap-wide counter only when its thread's
+  cursor set is credited, while a free subtracts at once, so the counter can
+  stand below the blocks that are live. The subtraction saturated at zero,
+  and the credit it took first when the counter read low covered one
+  thread, not two: two frees that both read 1 both skipped it, and the
+  second found 0. Each such decrement was lost for good, leaving
+  `live_objects` permanently above the heap. It needed two threads freeing
+  at once: 8 threads each freeing 51 200 blocks lost 21 to 68 decrements on
+  2 CPUs and 569 to 796 on 12, in 10 of 10 runs, and none after. The
+  subtraction now wraps, and the reader shows a counter briefly below zero
+  as 0 (`76_live_objects_free_uncredited_spec.cr`). `malloc`/`free` pairs
+  on one thread: 38.4 → 37.9 ns.
+
+- **`make counter-loss` measures something, and runs on macOS again.** Its
+  "atomic" and "plain" arms were the same code on every default build,
+  because the bitmap allocator implies atomic counters whatever
+  `heap_counters_atomic` says. Its one failure, 1 "lost increment" in
+  983 361 comparisons on macos-15-intel, was not a loss either: a lost
+  increment is counted at every comparison after it (884 952 of 983 286
+  when one is dropped on purpose), and this one was counted once. It was the
+  Monitor or the idle thread allocating in its birth, caught by the
+  per-allocation walk between setting an occupancy bit and crediting the
+  counter. The invariant checker now treats either thread as a mutator
+  until its birth is over (`77_runtime_thread_birth_mutator_spec.cr`). The
+  gate compares the counter with a walk only when every thread has joined
+  and the reading holds still: each round 80 threads, 16 of them on the
+  shared fallback cursor set, allocate and free. The shipped arm ended exact
+  in 27 of 27 runs on 12 CPUs and 6 of 6 on 3; built against the old
+  subtraction it failed 10 of 10 on 12 CPUs. `--plain` forces the plain
+  branch (`Heap#debug_plain_counters`) and loses 223 to 95 197 per run. The
+  gate takes about 12 s, down from about 35 s. `--control`, `--inject`,
+  `Invariant.force_counters` and `Invariant.counter_losses` are gone with
+  the old harness.
+
 ### Removed
 
 - **`Gcry::Layout` and its registration API.** The mark has read no layout
