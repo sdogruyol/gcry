@@ -1052,9 +1052,11 @@ oom-no-hang: $(BIN)
 # Does a stop that lands inside a `realloc` page move still mark everything the
 # moved pages reach? Between the two `mremap` calls of `Platform.move_pages`
 # the contents are in no chunk, and the stop signal is blocked across them.
-# The move is opt-in (`GCRY_REALLOC_MOVE=1`) and both arms turn it on. The
-# control (`GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200`) unblocks the signal and
-# holds the window open, and has to fail or the moving arm proves nothing.
+# The move is opt-in (`GCRY_REALLOC_MOVE=1`) and both move arms turn it on,
+# and growth in place off (`GCRY_REALLOC_IN_PLACE=0`). The control
+# (`GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200`) unblocks the signal and holds the
+# window open, and has to fail or the moving arm proves nothing. A third arm
+# runs the default, growth in place (`Heap#grow_large`), under the same stops.
 .PHONY: realloc-move-stress
 realloc-move-stress: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/realloc_move_stress.cr -o $(BIN)/realloc_move_stress --error-trace
