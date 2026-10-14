@@ -3764,8 +3764,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       fault. Campaign-036's two
       stalls were captures of the harness parent only, not release faults.
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
-- [ ] **Freeing a large object costs O(live large chunks), so freeing many is
-      quadratic (diagnosed 2026-10-01).** Measured with
+- [x] **Freeing a large object costs O(live large chunks), so freeing many is
+      quadratic (diagnosed 2026-10-01) — closed 2026-10-14.** Measured with
       `bench/log/linux/2026-10-01-large-free-quadratic/largefree_scale.cr`:
       4.5 µs per free with 2 500 large chunks alive, 19 µs with 10 000 and
       88 µs with 40 000. That is 3.5 s to free 40 000 64 KiB objects. On Linux
@@ -3801,10 +3801,24 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       5 000 dying). Explicit `GC.free` trims only once the cache is 2 MiB past
       the retain: 81.6 µs to 10.9 µs per free at 40 000. Post-collection RSS
       is unchanged, since the collector still trims to the retain.
-      Open: a free of a block bigger than the slack is still one O(n) unlink.
-      O(1) removal needs a doubly linked list, and that does not fit:
-      `ChunkHeader` is 32 bytes and full, and a `prev` field breaks a large
-      payload's 16-byte alignment.
+      **2026-10-14: closed.** A free of a block bigger than the slack was
+      still one O(n) unlink, and so, under large-object recycling (the Linux
+      default since 2026-10-06), was nearly every large free once the cache
+      held the recycling floor: 2 470 of 2 500 64 KiB frees. A large chunk
+      now carries a back-link to the chunk in front of it, in 16 bytes
+      between its chunk header and its block header (the object starts at
+      64 instead of 48, still 16-aligned; `ChunkHeader` and small chunks are
+      unchanged). Every list store keeps it, `publish_relinked_chunks`
+      rewrites the one the after-world rebuild races, and `unlink_chunk`
+      checks it against the index before following it, walking as before
+      when it cannot. Per free with 2 500, 10 000 and 40 000 large chunks
+      alive (medians of three): a 4 MiB block 9.6 → 4.1, 35.4 → 4.8 and
+      186 → 7.7 µs; `largefree_scale.cr`'s 64 KiB frees 2.9 → 1.6, 7.9 → 1.3
+      and 41.7 → 1.5 µs (one run). The rest that grows is the sorted index's
+      shift on removal, 3.8 µs at 40 000 and 0.3 at 2 500; it would need an
+      index that is not a sorted array, and is not worth one at these sizes.
+      `process_spec/regression/71_*` walked 283 steps before, 0 after
+      (`bench/log/linux/2026-10-14-large-free-unlink/`).
 - [x] **`make parallel-dormant` failed on Linux and macOS CI — diagnosed
       2026-09-30.** Seven sightings, two failure modes, both of the harness
       and neither of the release. (1) Budget timing, macOS 8 of 300 runs

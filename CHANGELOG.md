@@ -137,6 +137,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `make realloc-move-stress` gains an in-place arm under concurrent
     collections.
 
+- **Freeing a large object no longer walks the chunk list.** A `GC.free`
+  that trims one large chunk took it off the list by a walk from the list
+  head to the chunk in front of it: as many steps as the chunk sat deep.
+  That is a free of a block past the 2 MiB cache slack with nothing else
+  cached, and, under large-object recycling (the Linux default), nearly
+  every large free once the cache is full: 2 470 of 2 500 64 KiB frees. A
+  large chunk now carries a back-link to that chunk, in 16 bytes between
+  its chunk header and its block header, kept by every list store and
+  checked against the index before the unlink follows it. Per free with
+  2 500, 10 000 and 40 000 large chunks alive, medians of three runs: a
+  4 MiB block 9.6 → 4.1 µs, 35.4 → 4.8 µs and 186 → 7.7 µs; a 64 KiB
+  block (`largefree_scale.cr`, one run) 2.9 → 1.6 µs, 7.9 → 1.3 µs and
+  41.7 → 1.5 µs (`bench/log/linux/2026-10-14-large-free-unlink/`). What
+  still grows is the sorted index's shift on removal, 3.8 µs of the 4 MiB
+  free at 40 000. A large object now starts 64 bytes into its mapping
+  instead of 48, still 16-aligned; a mapping grows by a page only for a
+  payload in the 16 bytes below a page multiple minus 48.
+  `process_spec/regression/71_*` walked 283 steps before (bound 16) and 0
+  after. `make chunk-list-drift`'s window arm audits the links after each
+  collection: a wrong one in 293 of 300 collections without the rewrite at
+  the after-world store, none with it.
+
 - **The RSS budget is set: peak RSS within 1.1× Boehm's on every
   crystal-metric row.** The adaptive threshold's cap floor stays at 64 MiB:
   re-measured on 0.35.0, pacing and the parallel mark default already run
