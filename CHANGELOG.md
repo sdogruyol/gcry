@@ -31,6 +31,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tested registration itself. Callers of the registration API fail to
   compile: delete the calls. −2 200 lines.
 
+- **Research arms and defect-restoring switches that no gate, spec or CI
+  job sets any more are gone.** `GCRY_BIRTH_GRACE` and its controls
+  `GCRY_BIRTH_GRACE_MIN` / `_MAX` / `_NOROOT` / `_DUMMY` / `_TOUCH`, with
+  `GCRY_POST_MARK_SPIN`; the unowned-stack arms `GCRY_POOLED_STACK_ROOTS` /
+  `_NOROOT`, `GCRY_MAPS_INFLIGHT_ROOTS` / `_NOROOT` and
+  `GCRY_UNOWNED_COVERAGE_AUDIT`; `GCRY_RELEASE_HOLDERS`,
+  `GCRY_SWEEP_OCC_AUDIT` (and `bench/sweep_occ_race.cr`, which no target
+  ran), `GCRY_FULL_SUSPENDED_STACK`, `GCRY_ALWAYS_CLEAR`,
+  `GCRY_ALLOC_FAST_PATH`, `GCRY_PAGE_RELEASE_TEST_STALL_MS` and
+  `GCRY_DYING_REGISTER_AUDIT` had answered what they were for, and
+  `GCRY_EMPTY_FLUSH_UNLOCKED`, `GCRY_MADVISE_UNCHECKED`,
+  `GCRY_TLAB_QUIESCE=0` and `GCRY_FINALIZER_NO_RESURRECT` only put back a
+  defect that has since been fixed. The defaults are unchanged: every
+  removed path was off unless its variable was set. The dying-register audit
+  still runs under `GCRY_ADDRESS_SPACE_AUDIT=1`, and
+  `Heap#finalizer_resurrect = false` stays for `make finalizer-complex
+  --broken`. Setting one of the variables now does nothing. `/gc-stats`
+  loses the fields that reported them: `birth_grace_rooted`,
+  `birth_grace_saved`, `birth_grace_overflows`, `sweep_occ_in_flight`,
+  `sweep_occ_audit_words`, `release_holders_searches`,
+  `release_live_holders`, `release_live_frame_holders`. About 970 lines of
+  code went with them.
+
 ## [0.35.0] - 2026-10-12
 
 ### Fixed

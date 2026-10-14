@@ -795,7 +795,6 @@ module GC
       {% end %}
       heap.tlab_enabled = true
     end
-    heap.tlab_quiesce = false if env_flag_zero?("GCRY_TLAB_QUIESCE")
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
     # Amortizes lock vs lazy sweep. Clamped 1..64; ignored when TLAB is on.
     # The batched pop is freelist-only (`alloc_old_small` skips it whenever
@@ -912,11 +911,6 @@ module GC
     if csb = env_u64("GCRY_CLEAR_STACK_BYTES")
       heap.clear_stack_bytes = csb if csb >= 64 && csb <= 1024_u64 * 1024
     end
-    # `GCRY_ALLOC_FAST_PATH=0`: every small allocation takes the locked path
-    # (diagnosis and A/B only).
-    if (v = Gcry::OS.getenv("GCRY_ALLOC_FAST_PATH")) && !v.null? && v.value == 0x30_u8 && (v + 1).value == 0_u8
-      heap.fast_path_enabled = false
-    end
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
       heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
     end
@@ -1014,7 +1008,6 @@ module GC
     # After mark, before sweep: does any marked object point at a block the
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
-    heap.always_clear = true if env_flag_one?("GCRY_ALWAYS_CLEAR")
     if q = env_u64("GCRY_RELEASE_QUARANTINE")
       heap.release_quarantine = q
     end
@@ -1028,25 +1021,12 @@ module GC
     if v = env_u64("GCRY_MARK_TEST_SHORT_TID")
       heap.mark_test_short_tid = v.to_i32
     end
-    if env_flag_one?("GCRY_DYING_REGISTER_AUDIT")
-      heap.mark_audit = true
-      heap.dying_register_audit = true
-    end
-    # Which unowned stack does the crash need — the pooled one or the one in
-    # flight? (src/gcry/unowned_stack_roots.cr). Each window has a rooting arm
-    # and a walk-but-offer-nothing arm, because an arm that roots more can take
-    # a crash rate to zero without being the mechanism.
-    heap.pooled_stack_roots = true if env_flag_one?("GCRY_POOLED_STACK_ROOTS")
-    heap.pooled_stack_noroot = true if env_flag_one?("GCRY_POOLED_STACK_NOROOT")
     # The fix: root the stack a thread is holding for a fiber that is
     # terminating (src/gcry/unowned_stack_roots.cr). **On** by default — it
     # closes a use-after-free, and a root source that ships off is the shape of
     # both defects v0.19.0 had to go back for.
     heap.dead_stack_roots = false if env_flag_zero?("GCRY_DEAD_STACK_ROOTS")
     heap.dead_stack_noroot = true if env_flag_one?("GCRY_DEAD_STACK_NOROOT")
-    heap.maps_inflight_roots = true if env_flag_one?("GCRY_MAPS_INFLIGHT_ROOTS")
-    heap.maps_inflight_noroot = true if env_flag_one?("GCRY_MAPS_INFLIGHT_NOROOT")
-    heap.unowned_coverage_audit = true if env_flag_one?("GCRY_UNOWNED_COVERAGE_AUDIT")
     # Where in the address space does a dying block's value actually live?
     # (src/gcry/address_space_audit.cr). Implies the dying audit: it is that
     # audit's unreferenced branch that asks the question. Off by default and
@@ -1117,9 +1097,6 @@ module GC
     # what the maps parser did before 2026-08-22 and what
     # `make static-bss-roots` uses to show the block dying.
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
-    # Research only: per dead word, ask every cursor set whether it is
-    # mid-allocation inside a block the after-world sweep just called dead.
-    heap.sweep_occ_audit = true if env_flag_one?("GCRY_SWEEP_OCC_AUDIT")
     # Research only: does `@chunk_index` agree with the `@chunks` list? A chunk
     # in one and not the other is never swept and never has its marks cleared.
     heap.chunk_list_audit = true if env_flag_one?("GCRY_CHUNK_LIST_AUDIT")
@@ -1133,11 +1110,6 @@ module GC
     # instead of latching it in the stop. The trigger half of
     # `make mark-clear-index` and `make thread-churn-uaf`.
     heap.sweep_mutator_latch = false if env_flag_zero?("GCRY_SWEEP_MUTATOR_LATCH")
-    # Research only: run the holders search at every large release, so a live
-    # block being let go names its holder then instead of a hundred
-    # collections later at the fault. Walks the heap and every stack per
-    # release, with the world up.
-    heap.release_holders = true if env_flag_one?("GCRY_RELEASE_HOLDERS")
     # The main thread's thread-local storage is a root (Linux 2026-09-12,
     # Darwin and Windows 2026-09-15). Off is the pre-fix behaviour, which
     # `make tls-roots` needs as its red arm. Locating the live block is
@@ -1189,7 +1161,6 @@ module GC
     # what it did before 2026-08-23 (src/gcry/heap.cr `trim_large_cache`).
     heap.trim_unlocked = true if env_flag_one?("GCRY_TRIM_UNLOCKED")
     heap.trim_immediate = true if env_flag_one?("GCRY_TRIM_IMMEDIATE")
-    heap.madvise_unchecked = true if env_flag_one?("GCRY_MADVISE_UNCHECKED")
     heap.large_release_from_base = true if env_flag_one?("GCRY_LARGE_RELEASE_FROM_BASE")
     heap.mark_prefetch = false if env_flag_zero?("GCRY_PREFETCH")
     if pfw = env_u64("GCRY_ALLOC_PFW")
@@ -1199,7 +1170,6 @@ module GC
     heap.release_ledger = true if env_flag_one?("GCRY_RELEASE_LEDGER")
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")
-    heap.empty_flush_unlocked = true if env_flag_one?("GCRY_EMPTY_FLUSH_UNLOCKED")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: let the Darwin free-page walk visit bitmap-allocated
@@ -1300,24 +1270,6 @@ module GC
     # never been shown to share this window — can only be answered where the
     # defect appears. `GCRY_STAGED_WAIT=0` turns it back off.
     heap.staged_wait = false if env_flag_zero?("GCRY_STAGED_WAIT")
-    # EXPERIMENT: root every block for the collection after its birth
-    # (src/gcry/birth_grace.cr). A measurement, not a fix.
-    # Size window for the grace, so it can be aimed at one block shape at a
-    # time (`GCRY_BIRTH_GRACE_MIN` / `_MAX`, payload bytes). Unset means every
-    # size, which is what the 20/48 → 0/48 arm measured.
-    if mn = env_u64("GCRY_BIRTH_GRACE_MIN")
-      heap.birth_size_min = mn.to_u32
-    end
-    if mx = env_u64("GCRY_BIRTH_GRACE_MAX")
-      heap.birth_size_max = mx.to_u32
-    end
-    heap.birth_grace_noroot = true if env_flag_one?("GCRY_BIRTH_GRACE_NOROOT")
-    heap.birth_grace_dummy = true if env_flag_one?("GCRY_BIRTH_GRACE_DUMMY")
-    heap.birth_grace_touch = true if env_flag_one?("GCRY_BIRTH_GRACE_TOUCH")
-    if sp = env_u64("GCRY_POST_MARK_SPIN")
-      heap.post_mark_spin = sp
-    end
-    heap.birth_grace = true if env_flag_one?("GCRY_BIRTH_GRACE")
     # `GCRY_POISON_HOLDERS=1` — after a use-after-free names the block it read
     # out of, search the root set, the live heap and the fiber stacks for
     # whatever still points into it (src/gcry/poison_holders.cr). It implies the
@@ -1341,9 +1293,6 @@ module GC
     # that window on a library heap through `Heap#post_stw_hook`; this is the
     # same control for a process heap.
     heap.release_occupied_anyway = true if env_flag_one?("GCRY_RELEASE_OCCUPIED")
-    # Research only, restores a defect: queue an unreachable finalizable
-    # object without resurrecting it, so its callback runs on a swept block.
-    heap.finalizer_resurrect = false if env_flag_one?("GCRY_FINALIZER_NO_RESURRECT")
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says. The positive control for the kept-chunk ledger and the
     # crash-report line that names it, on a host where the real window does
@@ -1380,15 +1329,11 @@ module GC
     heap.dying_greg_dump = true if env_flag_one?("GCRY_DYING_GREG_DUMP")
     heap.disable_greg_roots = true if env_flag_one?("GCRY_DISABLE_GREG_ROOTS")
     heap.disable_ec_pins = true if env_flag_one?("GCRY_DISABLE_EC_PINS")
-    heap.full_suspended_stack = true if env_flag_one?("GCRY_FULL_SUSPENDED_STACK")
     if sl = env_u64("GCRY_SUSPENDED_SP_SLACK")
       heap.suspended_sp_slack = sl
     end
     if lim = env_u64("GCRY_ADDRESS_SPACE_REPORT_LIMIT")
       heap.address_space_report_limit = lim.to_i32
-    end
-    if st = env_u64("GCRY_PAGE_RELEASE_TEST_STALL_MS")
-      heap.page_release_test_stall_ms = st
     end
     heap.fiber_list_unlocked = true if env_flag_one?("GCRY_FIBER_LIST_UNLOCKED")
     if d = env_u64("GCRY_FIBER_WALK_TEST_DELAY_US")

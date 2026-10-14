@@ -1082,10 +1082,9 @@ module Gcry
           # Its fields were marked above; only its own mark is missing, so
           # set it rather than push the object to be scanned a second time.
           #
-          # Research only (`finalizer_resurrect = false`,
-          # `GCRY_FINALIZER_NO_RESURRECT=1`): skip the object's own
-          # resurrection, so the sweep reclaims its block and the callback
-          # runs on freed memory — the pre-Boehm-rule behaviour.
+          # Research only (`finalizer_resurrect = false`, library heaps): skip
+          # the object's own resurrection, so the sweep reclaims its block and
+          # the callback runs on freed memory — the pre-Boehm-rule behaviour.
           # `make finalizer-complex --broken` requires the callback to find
           # its object gone.
           if @finalizer_resurrect

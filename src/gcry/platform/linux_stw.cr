@@ -550,7 +550,7 @@ module Gcry
     # releases anything there is no record of what the mark phase read. A word
     # pointing at a released block matters only if it sits in `[recorded SP,
     # bottom)`, and every other hit is dead stack space the collector is right
-    # to ignore (`GCRY_RELEASE_HOLDERS`).
+    # to ignore (`PoisonHolders.scanned_windows_report`).
     #
     # The SP this thread was stopped at during the most recent stop, or nil.
     # Valid through the post-STW section; after that it describes a stop that

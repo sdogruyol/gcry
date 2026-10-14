@@ -72,9 +72,9 @@ module Gcry
     # stopped world.
     MARK_AUDIT_REPORT_LIMIT = 4
 
-    # `GCRY_DYING_REGISTER_AUDIT=1`: for each block the sweep is about to free,
-    # ask whether its address sits in a **suspended thread's captured GP
-    # registers**.
+    # The dying-register audit (implied by `GCRY_ADDRESS_SPACE_AUDIT=1`): for
+    # each block the sweep is about to free, ask whether its address sits in a
+    # **suspended thread's captured GP registers**.
     #
     # This is the last place not yet looked. The all-parents audit showed that
     # when the buffer dies, nothing in the used heap points at it; the crash
@@ -98,7 +98,7 @@ module Gcry
 
     # Addresses the mutator-stack scan handed to `mark_root_candidate` that
     # resolve to a block base of at least `DYING_AUDIT_MIN_SIZE`. Recorded only
-    # under `GCRY_DYING_REGISTER_AUDIT=1`, and only for that size band, so the
+    # under the dying-register audit, and only for that size band, so the
     # table stays small: the question is narrow — was the dying buffer ever
     # offered to the mark by the scan that is supposed to see it?
     MUTATOR_SEEN_SLOTS = 512

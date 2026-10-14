@@ -258,10 +258,6 @@ module Gcry
     @post_stw_mutex = uninitialized Gcry::OS::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
-    # `GCRY_TLAB_QUIESCE=0` stops the world without first waiting out the TLAB
-    # slots' critical sections, as before 2026-09-27: the A/B arm for
-    # `Heap#lock_tlab_slots_for_stop`.
-    property tlab_quiesce : Bool = true
     # Threads past `MAX_TLABS` that share a TLAB / alloc-batch slot by key.
     @tlab_slots_shared = 0_u64
     @alloc_batch_slots_shared = 0_u64
@@ -1305,11 +1301,8 @@ module Gcry
     @fit_index = uninitialized StaticArray(UInt8, 257)
     @fit_payload = uninitialized StaticArray(UInt32, 257)
 
-    property fast_path_enabled : Bool = true
-
     private def refresh_fast_path : Nil
-      @fast_path = @bitmap_alloc && @fast_path_enabled && !@nursery_enabled && !@destroyed &&
-                   !@birth_grace && !@always_clear &&
+      @fast_path = @bitmap_alloc && !@nursery_enabled && !@destroyed &&
                    !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc) &&
                    !(@oom_test_exhausted && @oom_seen)
     end
@@ -1401,22 +1394,7 @@ module Gcry
         trim_large_cache(keep, cap: UInt64::MAX) if @large_free_bytes > keep
       end
 
-      # `GCRY_ALWAYS_CLEAR=1` — research arm. Every skip above is a claim that
-      # the bytes are already zero: `MAP_ANONYMOUS` for a fresh chunk,
-      # `@freelist_clean` for a refill that came straight off one. Crystal
-      # relies on that: `Reference.allocate` zeroes nothing itself, so an ivar
-      # the initializer does not assign reads whatever the previous occupant
-      # left. A stale pointer arriving that way is the one story that fits the
-      # acikturkiye crash — nothing referenced the block when it died, and the
-      # mutator writes into it afterwards through a field it never set.
-      if @always_clear && !user.null?
-        needs_clear = true
-        clear_bytes = rounded
-      end
       clear_block(user, clear_bytes) if needs_clear
-      # EXPERIMENT (GCRY_BIRTH_GRACE=1, src/gcry/birth_grace.cr): a block is
-      # unreachable to the collector between here and the caller's store.
-      note_birth(user) if @birth_grace
       user
     end
 
@@ -2599,7 +2577,7 @@ module Gcry
     # go through `guard_release`, and off Linux.
     private def large_written_bytes(base : Void*, len : UInt64) : UInt64
       {% if flag?(:linux) %}
-        return len if @release_quarantine != 0 || @release_ledger || @unmap_guard || @release_holders
+        return len if @release_quarantine != 0 || @release_ledger || @unmap_guard
         meta = align_up(ChunkHeader.large_data_offset.to_u64, Platform.host_page_size)
         return len if len <= meta
         meta &+ Gcry.os_written_prefix(base + meta, len &- meta)
@@ -2640,7 +2618,7 @@ module Gcry
         return Pointer(Void).null if @live_chunk_walk || @world_stopped || @collecting || @incremental_marking
         return Pointer(Void).null unless @barrier_backend.none?
         # The release audits want every release to go through `guard_release`.
-        return Pointer(Void).null if @release_quarantine != 0 || @release_ledger || @unmap_guard || @release_holders
+        return Pointer(Void).null if @release_quarantine != 0 || @release_ledger || @unmap_guard
         # A thread the stop does not signal could be resizing while the
         # collector walks the list.
         thread = Thread.current?
@@ -3957,7 +3935,7 @@ module Gcry
     # live objects.
 
     # Union read for callers holding only a header: diagnostics, finalizer
-    # liveness, birth-grace, the audits. Pays a chunk lookup, which is why no
+    # liveness, the audits. Pays a chunk lookup, which is why no
     # hot path uses it — `sweep_small_blocks` counts ordinals, and
     # `mark_impl_unlocked` gets its chunk from `find_block_with_chunk`.
     @[AlwaysInline]

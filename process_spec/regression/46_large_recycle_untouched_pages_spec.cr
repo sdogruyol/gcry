@@ -61,7 +61,7 @@ private def recycle_state(heap : Gcry::Heap) : String
   "live_chunk_walk=#{heap.@live_chunk_walk} world_stopped=#{heap.@world_stopped} " \
   "collecting=#{heap.@collecting} incremental_marking=#{heap.@incremental_marking} " \
   "barrier=#{heap.@barrier_backend} quarantine=#{heap.@release_quarantine} " \
-  "ledger=#{heap.@release_ledger} unmap_guard=#{heap.@unmap_guard} holders=#{heap.@release_holders} " \
+  "ledger=#{heap.@release_ledger} unmap_guard=#{heap.@unmap_guard} " \
   "thread=#{thread} " \
   "recycle_budget=#{heap.large_recycle_budget} cache_hits=#{heap.large_cache_hits}"
 end

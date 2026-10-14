@@ -1125,23 +1125,6 @@ module Gcry
     # and can miss a deeper pointer.
     property stw_multi_pthread_lag : UInt64 = 0_u64
 
-    # Lowest scan address from a suspended thread SP on *fiber*, or nil.
-    # `GCRY_FULL_SUSPENDED_STACK=1`: decline the SP clamp so a running fiber's
-    # stack is scanned from the guard page instead of from the suspended SP.
-    #
-    # This is the question the `0x18` hunt ends on. The holders of the dying
-    # object all sat *below* the suspended SP — dead slots by the ABI, which a
-    # collector is right to skip — while Boehm, whose per-thread stack pointer
-    # is taken inside its signal handler and is therefore deeper, keeps the
-    # object. If scanning the whole stack saves it, the difference between the
-    # two collectors is over-retention on Boehm's side and not a missed root on
-    # gcry's, and that is worth knowing before anything else is changed.
-    #
-    # Runtime, not a rebuild: in this bench a recompile moves where the value
-    # lives, so a two-build A/B measures the compiler
-    # (`bench/log/linux/2026-08-26-debug-build-own-stack-root/FINDINGS.md`).
-    property full_suspended_stack : Bool = false
-
     # Set on every call to `fiber_stack_sp_scan_low`. False means the walk met
     # a thread whose SP the stop did not record, so a nil return says "no
     # thread was *found* on this stack", not "no thread is on it". That
@@ -1181,9 +1164,9 @@ module Gcry
       nil
     end
 
+    # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
       @fiber_sp_all_known = false
-      return nil if @full_suspended_stack
       return nil unless @world_stopped
 
       stack = fiber.@stack
@@ -1906,7 +1889,7 @@ module Gcry
     #     0 (the old bound)     9 objects lost of 264
     #
     # Fisher p ≈ 0.004. 4096 is the value that was measured; a full guard→bottom
-    # scan fixes it too and costs far more (`full_suspended_stack`).
+    # scan fixes it too and costs far more.
     #
     # That is Linux, where the suspend is a signal. macOS (`thread_suspend`)
     # and Windows (`SuspendThread`) write nothing on the thread's stack: the

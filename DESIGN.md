@@ -137,7 +137,7 @@ src/gcry/
   finalizer.cr · metrics.cr · observability.cr · trace.cr · heap_dump.cr
   gc_override.cr            # module GC reopen
   thread_birth_root.cr      # root a Thread from pthread_create until it publishes
-  unowned_stack_roots.cr · birth_grace.cr   # root arms, each with a no-op twin
+  unowned_stack_roots.cr    # dying-fiber stack roots, with a no-op twin
   invariant.cr · mark_audit.cr · thread_block_audit.cr
   address_space_audit.cr · poison_holders.cr · ec_queue_audit.cr
   segv_report.cr · raw_out.cr · stw_watchdog.cr · monitor_gate.cr
