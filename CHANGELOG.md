@@ -119,7 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-measured on 0.35.0, pacing and the parallel mark default already run
   Primes at 103–107% and JsonParsePure at 99–101% of Boehm's speed with it,
   at 0.94× and 0.83× Boehm's peak, while 256 MiB now puts RegexDna at 1.24×
-  (`bench/log/linux/2026-10-14-rss-budget-recheck/`).
+  (`bench/log/linux/2026-10-14-rss-budget-recheck/`). One row is over it at
+  every cap: Knuckeotide, a 40–47 MB process whose peak is the 8 MiB
+  threshold floor and the warm budget, at 1.3–1.6× Boehm's.
 
 ### Removed
 
