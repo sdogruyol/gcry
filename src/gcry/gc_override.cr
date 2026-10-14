@@ -1327,10 +1327,6 @@ module GC
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.
-    # Research only: an unlocked walk of the runtime thread list before
-    # `Thread.lock`. See src/gcry/thread_list_tripwire.cr for why it is off by
-    # default.
-    heap.thread_list_tripwire = true if env_flag_one?("GCRY_THREAD_LIST_TRIPWIRE")
     heap.dying_greg_dump = true if env_flag_one?("GCRY_DYING_GREG_DUMP")
     heap.disable_greg_roots = true if env_flag_one?("GCRY_DISABLE_GREG_ROOTS")
     heap.disable_ec_pins = true if env_flag_one?("GCRY_DISABLE_EC_PINS")

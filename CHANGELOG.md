@@ -193,6 +193,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `release_live_holders`, `release_live_frame_holders`. About 970 lines of
   code went with them.
 
+- **`GCRY_THREAD_LIST_TRIPWIRE` and the `ThreadListWatch` instruments it
+  armed.** The family walked the `0x18` crash in `Thread.lock` to
+  `index_insert_locked` publishing the index count after the shift, fixed
+  on 2026-08-27 (`bench/log/linux/2026-08-27-thread-list-tripwire/`). Since
+  then only `bench/tlw_batch.sh` set the variable, and no target, CI job or
+  script ran that. Gone: `src/gcry/thread_list_tripwire.cr`, the unlocked
+  walk of the runtime thread list before `Thread.lock`, the range checks on
+  block `set_free`/`set_used`, the large cache, large header and link
+  writes, releases, `madvise` and index removes, the phase-boundary header
+  probes, the mark-offer reject reporter, the per-operation chunk-index
+  verifier, `Heap#thread_list_tripwire`, `#thread_list_seen_max`,
+  `#thread_list_empty`, `#thread_list_hdr_bad`, and `bench/tlw_batch.sh`.
+  `make dormant-flush-race`'s child line loses `tl_max`, `tl_empty` and
+  `tlw_hits`. Every hook returned at once unless the variable was set, so
+  the default path is unchanged. Setting it now does nothing. About 530
+  lines.
+
 ## [0.35.0] - 2026-10-12
 
 ### Fixed

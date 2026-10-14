@@ -2031,9 +2031,6 @@ module Gcry
     end
 
     private def link_small_to_freelist(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32, class_index : Int32) : Nil
-      if ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64 &+ payload, ThreadListWatch::SITE_SWEEP, header.value.flags)
-        report_thread_list_sweep(header)
-      end
       user = BlockHeader.user_from(header)
       # The chunk's list, as `Heap#free` explains: rebuilds file it there.
       nursery = ChunkHeader.nursery?(chunk)

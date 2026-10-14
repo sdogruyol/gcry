@@ -344,10 +344,8 @@ if ARGV.includes?("--child")
        "rel_double #{heap.release_double}, rel_remapped #{heap.release_remapped}, " \
        "dying_walked #{heap.dying_type_walked}, dying_live #{heap.dying_type_live}, " \
        "dying_deaths #{heap.dying_type_deaths}, " \
-       "tl_max #{heap.thread_list_seen_max}, tl_empty #{heap.thread_list_empty}, " \
        "lg_twice #{heap.large_cached_twice}, lg_taken_used #{heap.large_taken_used}, " \
        "lg_by_sweep #{heap.large_cached_by_sweep}, " \
-       "tlw_hits #{Gcry::ThreadListWatch.hits}, " \
        "bss_lost #{Gcry::Platform.static_root_bss_lost}, " \
        "stash_damaged #{stash_damaged}, ballast_seen #{ballast_seen}, " \
        "greg_candidates #{heap.thread_greg_candidates}, greg_total #{heap.thread_greg_words_total}, " \

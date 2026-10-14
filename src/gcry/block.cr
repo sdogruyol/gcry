@@ -289,7 +289,6 @@ module Gcry
         # headerless requires). Reaching here would corrupt an object.
         return
       {% end %}
-      Gcry::ThreadListWatch.check(header.address, SIZE.to_u64 &+ header.value.size, Gcry::ThreadListWatch::SITE_SET_FREE, header.value.flags)
       h = header.value
       h.flags |= Flags::FREE
       h.next_free = next_free
@@ -407,13 +406,6 @@ module Gcry
         # Writing here would land on the object's own first 16 bytes.
         return
       {% end %}
-      if Gcry::ThreadListWatch.check(header.address, SIZE.to_u64 &+ size, Gcry::ThreadListWatch::SITE_SET_USED, header.value.flags)
-        # The one caller identity that matters, taken at the corrupting
-        # hand-out itself rather than at the crash that follows it. The crash
-        # handler's own printer: no allocation, so no reentry into the
-        # allocator this runs inside of.
-        Gcry::RawOut.print_backtrace
-      end
       header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
     end
   end

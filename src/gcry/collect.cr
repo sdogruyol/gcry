@@ -1423,7 +1423,6 @@ module Gcry
     end
 
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
-      ThreadListWatch.check(base, len, ThreadListWatch::SITE_RELEASE)
       note_release_base(base, kind) if @release_ledger || @unmap_guard
       unless @unmap_guard
         return false unless @release_ledger
@@ -2792,19 +2791,13 @@ module Gcry
           stw_reported = true
           collection_event(CollectionEvent::PostStopWorld)
           @last_phase_stw_stop_ns = monotonic_ns - t0
-          @thread_list_last_major = major
-          ThreadListWatch.new_cycle
-          probe_thread_list_header("the suspension")
           StwWatchdog.enter(StwWatchdog::PHASE_FLUSH)
           flush_all_tlabs
-          probe_thread_list_header("the TLAB flush")
           # TLAB-off USED stash → freelist before mark (unscanned thread locals).
           flush_all_alloc_batches
-          probe_thread_list_header("the alloc-batch flush")
           # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
           # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
           scrub_freelists
-          probe_thread_list_header("the freelist scrub")
           note_collection_begin
           StwWatchdog.enter(StwWatchdog::PHASE_CLEAR)
           @mark_stack.clear
@@ -2913,13 +2906,11 @@ module Gcry
           @last_phase_mark_ns = monotonic_ns - t0
           CrystalTrace.finish("collect:mark", trace_mark)
           collection_event(CollectionEvent::MarkEnd)
-          probe_thread_list_header("the mark", expect_marked: true)
           StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
           # Claiming FREE mid-alloc blocks during mark can leave USED-on-freelist;
           # drop them before sweep / empty-chunk unlink.
           scrub_freelists
-          probe_thread_list_header("the post-mark freelist scrub", expect_marked: true)
 
           # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
           enqueue_unreachable_finalizers

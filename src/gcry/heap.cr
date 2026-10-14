@@ -1166,7 +1166,6 @@ module Gcry
 
         len = old_mapped &- page
         src = old_chunk.address &+ page
-        ThreadListWatch.check(src, len, ThreadListWatch::SITE_DONTNEED)
         return false unless Platform.move_pages(src, len, new_chunk.address &+ page, new_mapped &- page, @hugepages)
         head = page &- off
         head = old_size if old_size < head
@@ -1585,13 +1584,13 @@ module Gcry
       s.value.in_flight = Pointer(Void).null
       user
     end
+
     # The hit path's threshold test for a raw *debt* already at or above the
     # threshold: true unless it is a wrapped counter, which reads as zero.
     @[NoInline]
     private def debt_at_threshold?(debt : UInt64) : Bool
       Heap.wrapped_as_zero(debt) >= @gc_threshold
     end
-
 
     FAST_PATH_MAX = 32768_u64
     @fast_path = false
@@ -1768,6 +1767,7 @@ module Gcry
         @free_bytes.lazy_set(cur >= n ? cur - n : 0_u64)
       end
     end
+
     # Never saturates, for the reason `live_objects_sub` gives: an allocation
     # on the hit path reaches `@bytes_since_gc` only when its cursor set is
     # credited, and a free subtracts at once. Saturating at zero dropped the
@@ -1784,7 +1784,6 @@ module Gcry
     # net allocation since the collection. It always was while above zero:
     # a free was never told apart by the age of its block. Readers see a
     # wrapped value as zero (`bytes_since_gc_now`).
-
     private def bytes_since_gc_sub(n : UInt64) : Nil
       if counters_atomic?
         @bytes_since_gc.sub(n)
@@ -2835,7 +2834,6 @@ module Gcry
         # `header`/`chunk`, which `base_only` rejects, and the sweep would take
         # the USED, unmarked block for dead (`dormant-flush-race`, 2026-09-04).
         @large_alloc_in_flight = user
-        ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
         BlockHeader.set_used_large(header, payload, flags | BlockHeader::Flags::LARGE)
         heap_set_mark_allocating(header) if @incremental_marking || @collecting
         return {user, payload}
@@ -2998,7 +2996,6 @@ module Gcry
         return Pointer(Void).null unless user
         old = (BlockHeader.large_header_from_user(user).as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         old_mapped = old.value.mapped_bytes
-        ThreadListWatch.check(old.address, old_mapped, ThreadListWatch::SITE_CACHE_OUT)
         @heap_size = sat_sub(@heap_size, old_mapped)
         @large_mapped_bytes = sat_sub(@large_mapped_bytes, old_mapped)
         unlink_chunk(old)
@@ -3147,7 +3144,6 @@ module Gcry
     private def link_free_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       release_large_reservation(chunk)
       mapped = chunk.value.mapped_bytes
-      ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_IN)
       payload = BlockHeader.large_size(header)
       bucket = self.class.large_bucket(mapped)
       user = BlockHeader.large_user_from_header(header)
@@ -3167,12 +3163,10 @@ module Gcry
         report_large_bucket_cycle(bucket, user, limit) if steps > limit
       end
       poison_payload(user, payload) if @poison_freed
-      ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
       header.value = BlockHeader.large(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE)
       if tail.null?
         @large_freelists[bucket] = user
       else
-        ThreadListWatch.check(BlockHeader.large_header_from_user(tail).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
         th = BlockHeader.large_header_from_user(tail)
         tv = th.value
         tv.next_free = user
@@ -3284,14 +3278,12 @@ module Gcry
           if prev.null?
             @large_freelists[b] = nxt
           else
-            ThreadListWatch.check(BlockHeader.large_header_from_user(prev).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
             ph = BlockHeader.large_header_from_user(prev)
             pv = ph.value
             pv.next_free = nxt
             ph.value = pv
           end
           mapped = chunk.value.mapped_bytes
-          ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_OUT)
           free_bytes_sub(mapped)
           @large_free_bytes = sat_sub(@large_free_bytes, mapped)
           @large_cache_hits += 1
@@ -3378,7 +3370,6 @@ module Gcry
         header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
-        ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
         hv = header.value
         hv.next_free = @pending_large_release
         header.value = hv
@@ -3912,11 +3903,6 @@ module Gcry
             header = BlockHeader.large_header_from_user(user)
             chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
             radix_remove(chunk)
-            if ThreadListWatch.check(chunk.address, chunk.value.mapped_bytes, ThreadListWatch::SITE_INDEX_REMOVE) ||
-               (ThreadListWatch.chunk_base != 0 && chunk.address == ThreadListWatch.chunk_base &&
-               ThreadListWatch.check(chunk.address, UInt64::MAX - chunk.address, ThreadListWatch::SITE_INDEX_REMOVE))
-              Gcry::RawOut.print_backtrace
-            end
             user = header.value.next_free
           end
           kept = 0
@@ -3931,7 +3917,6 @@ module Gcry
             i += 1
           end
           @chunk_index_count = kept
-          verify_thread_list_indexed("an index_remove")
         end
         StwWatchdog.note_index_lock_done
 
@@ -5019,7 +5004,6 @@ module Gcry
         end
         (@chunk_index + pos).value = chunk
       end
-      verify_thread_list_indexed("an index_insert")
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
@@ -5046,14 +5030,6 @@ module Gcry
         radix_remove(chunk)
         # No cursor drop here. A chunk under a cursor is pinned live by the
         # sweep and never reaches this path — see `bitmap_cursor_on?`.
-        # Range test AND base identity: the hook exists because the entry
-        # vanishes, and a defect that has already rewritten `mapped_bytes`
-        # would blind a range-only test while the base still names the chunk.
-        if ThreadListWatch.check(chunk.address, chunk.value.mapped_bytes, ThreadListWatch::SITE_INDEX_REMOVE) ||
-           (ThreadListWatch.chunk_base != 0 && chunk.address == ThreadListWatch.chunk_base &&
-           ThreadListWatch.check(chunk.address, UInt64::MAX - chunk.address, ThreadListWatch::SITE_INDEX_REMOVE))
-          Gcry::RawOut.print_backtrace
-        end
         pos = index_lower_bound(chunk.address)
         unless pos >= @chunk_index_count || (@chunk_index + pos).value != chunk
           i = pos
@@ -5064,7 +5040,6 @@ module Gcry
           end
           @chunk_index_count -= 1
         end
-        verify_thread_list_indexed("an index_remove")
       end
     end
 
