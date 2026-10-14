@@ -1808,7 +1808,7 @@ chunk-list-drift: $(BIN)
 # every four blocks. The shipped arm must end exact (27 of 27 runs on 12 CPUs,
 # 6 of 6 on 3); it lost 3 to 10 decrements in 10 of 10 runs on 12 CPUs before
 # `live_objects_sub` stopped saturating at zero (that bug's own gate is
-# process_spec/regression/76). `--plain` forces the plain `set(get + n)`
+# process_spec/regression/68). `--plain` forces the plain `set(get + n)`
 # branch (`Heap#debug_plain_counters`) and must lose: 40 096 to 95 197 per run
 # on 12 CPUs, 223 to 17 560 on 3.
 # Until 2026-10-14 the arms were "atomic" and "plain" and the same code on the

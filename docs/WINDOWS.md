@@ -86,6 +86,9 @@ scrubbing dead stack. Conservative root scans include that red zone.
 - The large-object recycler and the `realloc` page move are Linux-only:
   `GCRY_LARGE_RECYCLE` and `GCRY_REALLOC_MOVE` have no effect on Windows
   (`bench/log/windows/2026-10-06-vm-validation/FINDINGS.md`, specs 30 and 32).
+  In-place large `realloc` growth is not: it reserves with `MEM_RESERVE` and
+  commits with `MEM_COMMIT`, and the unused room goes when the chunk's base
+  is released, since Windows releases a reservation only whole.
 - Crystal's own suites (`spec/std`, `compiler_spec`) are not run on Windows;
   their CI jobs are Linux-only.
 - Workload numbers so far come from one 12-vCPU Windows 11 QEMU/KVM VM, not

@@ -1752,7 +1752,7 @@ module Gcry
     # exactly the number of subtractions that had saturated; 8 threads, each
     # freeing 51 200 blocks of a class of its own, lost 21 to 68 decrements on
     # 2 CPUs and 569 to 796 on 12, in 10 of 10 runs each
-    # (process_spec/regression/76). A wrapped counter is transient, and the
+    # (process_spec/regression/68). A wrapped counter is transient, and the
     # public reader reads it as zero.
     private def live_objects_sub(n : UInt64) : Nil
       return if n == 0

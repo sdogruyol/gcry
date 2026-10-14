@@ -1,4 +1,4 @@
-# Runs one crash child of process_spec/regression/70_crash_report_exits_spec.cr
+# Runs one crash child of process_spec/regression/67_crash_report_exits_spec.cr
 # -Runs times, each bounded at -Limit seconds; on a hang, two cdb stack
 # snapshots of every thread, then kill. Tallies exit codes and the first line
 # of output into $Out\summary.txt.

@@ -3861,12 +3861,12 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       counter. Reproduced on Linux under CPU contention in 11 of 3 840 runs,
       and in 0 of 2 400 with both births kept out of the way. The checker now
       counts those threads as mutators until their births are over
-      (`process_spec/regression/77`). The gate's two arms had been the same
+      (`process_spec/regression/69`). The gate's two arms had been the same
       code on the bitmap layout. It was rebuilt: quiescent comparisons only,
       80 threads with 16 on the fallback cursor set, and a `--plain` red arm
       that loses 223 to 95 197 per run. It found a real loss in the shipped
       path: `live_objects_sub` saturated at zero when two frees beat their
-      allocations' credit (`process_spec/regression/76`). Fixed; back in the
+      allocations' credit (`process_spec/regression/68`). Fixed; back in the
       Darwin gates job. Not covered by it: `bytes_since_gc_sub` and
       `free_bytes_sub` still saturate the same way; `bytes_since_gc` resets
       every collection, `free_bytes` could drift [INFERENCE, unmeasured].
@@ -3920,8 +3920,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       outside the noise while Revcomp goes 0.63× → 0.87×. Knuckeotide (47 MB
       under Boehm) is the one row over 1.1×, at every cap: its peak is the
       threshold floor and warm budget, not the cap.
-- [ ] **Large `realloc` growth maps, faults and copies every step
-      (2026-10-04).** Revcomp's buffers double from 64 KiB to 126 MiB three
+- [x] **Large `realloc` growth maps, faults and copies every step
+      (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
       of its speed locally and 73% on the CI runner (peak RSS 0.65×). In-place
       growth needs free address space above the chunk; moving breaks the
@@ -3935,6 +3935,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the index, the radix and `@heap_max` under the locks `map_chunk` takes.
       Every large unmap, trim, guard and quarantine path must then release
       the reservation, not `mapped_bytes`.
+      **Done as sketched** (`bench/log/linux/2026-10-14-realloc-in-place/`):
+      a copying growth reserves one page plus its data rounded to a power of
+      two, doubled once, and the next growth commits there and returns the
+      same pointer (`process_spec/regression/66`). Peak RSS −17% and faults
+      −24% on the JSON parse rows, now fewer faults than Boehm; Revcomp −6% /
+      −7%. Revcomp's remaining ~55k faults over Boehm come from fresh large
+      `String` allocations, not realloc chains.
 - [ ] **macOS: Binarytrees runs at ~80% of Boehm (2026-10-03, narrowed
       2026-10-05).** User CPU equals wall time and system time is the same as
       Boehm's, so nothing blocks; parallel mark does not help (four workers

@@ -223,7 +223,7 @@ Process GC runs on Windows x86_64 (Crystal's MSVC distribution) and ARM64
 | `VirtualAlloc` / `VirtualFree` arena mapping | In gcry |
 | Win32 thread suspend / resume STW | In gcry (`SuspendThread` + `GetThreadContext`, FP/SIMD included) |
 | Soft-dirty / mprotect barrier | Not available; full collections only |
-| Large-object recycler, `realloc` page move | Linux-only; `GCRY_LARGE_RECYCLE` / `GCRY_REALLOC_MOVE` have no effect |
+| Large-object recycler, `realloc` page move | Linux-only; `GCRY_LARGE_RECYCLE` / `GCRY_REALLOC_MOVE` have no effect. In-place large `realloc` growth (`GCRY_REALLOC_IN_PLACE`) runs on every platform |
 | Boehm C ABI | As on Linux and macOS, thread registration and `GC_beginthreadex` included; the signal getters answer -1, as Boehm's (§ Boehm parity) |
 | Windows CI | x86_64 and native ARM64: specs, samples, and the Linux gates that hold there; not Crystal's `spec/std` or `compiler_spec` |
 | Workload numbers | x86_64 on a 12-vCPU QEMU/KVM VM only; ARM64 unmeasured ([WINDOWS.md](WINDOWS.md)) |

@@ -229,7 +229,7 @@ Allocation storms, crystal-metric (process-fresh, 11 interleaved trials, 12 CPUs
 | Revcomp | 84% (82%) | 0.64× |
 | RegexDna | 99% (100%) | 0.53× |
 
-The `realloc` page move (`GCRY_REALLOC_MOVE=1`, opt-in, unsafe for programs that read a buffer after growing it — the stdlib does) gives JsonGenerate 112%, and part of JsonParseSerializable and Revcomp back.
+The `realloc` page move (`GCRY_REALLOC_MOVE=1`, opt-in, unsafe for programs that read a buffer after growing it — the stdlib does) gives JsonGenerate 112%, and part of JsonParseSerializable and Revcomp back. Since 0.36.0 a large `realloc` growth grows in place by default instead, keeping the old pointer valid: −17% peak RSS and −24% faults on the JSON parse rows (`bench/log/linux/2026-10-14-realloc-in-place/`); the table above predates it.
 
 ### macOS (Apple Silicon)
 

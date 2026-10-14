@@ -969,7 +969,7 @@ module Gcry
       # walk and the idle thread off, 0 of 2 400. So a runtime thread is a
       # mutator here until it has stored itself as exempt: the same
       # per-allocation comparison then counted 0 in 1 440 runs, against 2 in
-      # 1 440 without this, interleaved (process_spec/regression/77). Process
+      # 1 440 without this, interleaved (process_spec/regression/69). Process
       # GC only: neither allocates from any other heap.
       {% if flag?(:gc_none) %}
         Thread.unsafe_each do |thread|

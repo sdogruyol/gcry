@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alone. A fault inside a `GC_set_on_heap_resize` callback hung 10 of 10
   runs before and exits 1 in 10 of 10 after; two threads faulting at once
   hung 1 in 20 and died with 0xC0000005 in the other 19 before, and exit 1
-  in 20 of 20 after (`70_crash_report_exits_spec.cr`). The aarch64 Windows
+  in 20 of 20 after (`67_crash_report_exits_spec.cr`). The aarch64 Windows
   (GNU) and Linux handlers do not allocate and were never affected.
 
 - **A `free` no longer loses its `live_objects` decrement.** An allocation
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at once: 8 threads each freeing 51 200 blocks lost 21 to 68 decrements on
   2 CPUs and 569 to 796 on 12, in 10 of 10 runs, and none after. The
   subtraction now wraps, and the reader shows a counter briefly below zero
-  as 0 (`76_live_objects_free_uncredited_spec.cr`). `malloc`/`free` pairs
+  as 0 (`68_live_objects_free_uncredited_spec.cr`). `malloc`/`free` pairs
   on one thread: 38.4 → 37.9 ns.
 
 - **`make counter-loss` measures something, and runs on macOS again.** Its
@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Monitor or the idle thread allocating in its birth, caught by the
   per-allocation walk between setting an occupancy bit and crediting the
   counter. The invariant checker now treats either thread as a mutator
-  until its birth is over (`77_runtime_thread_birth_mutator_spec.cr`). The
+  until its birth is over (`69_runtime_thread_birth_mutator_spec.cr`). The
   gate compares the counter with a walk only when every thread has joined
   and the reading holds still: each round 80 threads, 16 of them on the
   shared fallback cursor set, allocate and free. The shipped arm ended exact
@@ -64,6 +64,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate takes about 12 s, down from about 35 s. `--control`, `--inject`,
   `Invariant.force_counters` and `Invariant.counter_losses` are gone with
   the old harness.
+
+### Changed
+
+- **`realloc` grows a large block where it stands.** A growth that has to
+  copy now reserves address space past the block it copies into: its first
+  page, then its data rounded up to a power of two and doubled once. The
+  reservation is `PROT_NONE`, or `MEM_RESERVE` on Windows, so it costs
+  neither RSS nor commit charge until used. The next growth commits pages
+  there instead of mapping, faulting and copying a fresh chunk. The old
+  pointer *is* the grown block, so `io.write(io.to_slice)` and the other
+  stdlib reads of a buffer after it grew still work (`30_*`), which the
+  opt-in page move cannot offer. A doubling `IO::Memory` or
+  `String::Builder` now copies every other step instead of every step, and
+  an `Array` about one step in four. The room goes back when the block dies.
+  Only mappings of 256 KiB and up reserve, and none under a finite
+  `RLIMIT_AS`. `GCRY_REALLOC_IN_PLACE=0` copies every growth as before.
+  crystal-metric, one binary against `GCRY_REALLOC_IN_PLACE=0`, 5
+  interleaved trials (`bench/log/linux/2026-10-14-realloc-in-place/`):
+  - Peak RSS: Revcomp 560 → 527 MiB, JsonParseSerializable 496 → 412,
+    JsonParsePull 496 → 410, JsonGenerate 856 → 772 (Boehm 824 / 573 / 524 /
+    1 247).
+  - Minor faults: 287k → 266k, 184k → 139k, 173k → 131k, 362k → 293k (Boehm
+    211k / 146k / 134k / 319k). The JSON rows now take fewer than Boehm.
+  - Largest address space: unchanged on Revcomp (843 MiB) and lower on the
+    JSON parse rows (823 → 746 / 737); JsonGenerate +444 MiB, to Boehm's
+    1.6 GB.
+  - Benchmark time moves within its spread: Revcomp −1.7%,
+    JsonParseSerializable −2%, JsonParsePull +1%. Whole-process wall on the
+    JSON rows is −4%, since their setup builds the input through
+    `IO::Memory`.
+  - `process_spec/regression/66_*` fails 3 of 3 on 0.35.0.
+    `make realloc-move-stress` gains an in-place arm under concurrent
+    collections.
+
+- **The RSS budget is set: peak RSS within 1.1× Boehm's on every
+  crystal-metric row.** The adaptive threshold's cap floor stays at 64 MiB:
+  re-measured on 0.35.0, pacing and the parallel mark default already run
+  Primes at 103–107% and JsonParsePure at 99–101% of Boehm's speed with it,
+  at 0.94× and 0.83× Boehm's peak, while 256 MiB now puts RegexDna at 1.24×
+  (`bench/log/linux/2026-10-14-rss-budget-recheck/`).
 
 ### Removed
 

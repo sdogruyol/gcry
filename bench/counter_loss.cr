@@ -32,7 +32,7 @@
 # down to zero, which is where the shipped arm lost decrements until
 # 2026-10-14 (`Heap#live_objects_sub`): the counter 3 to 10 above the walk at
 # the end of 10 of 10 runs on 12 CPUs, and 1 or 2 above in 2 of 6 on 3. That
-# bug's own gate is process_spec/regression/76; this arm's job is to stay
+# bug's own gate is process_spec/regression/68; this arm's job is to stay
 # exact.
 
 require "../src/gcry"
