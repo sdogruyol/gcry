@@ -1582,10 +1582,29 @@ module Gcry
       end
     end
 
+    {% if flag?(:win32) && flag?(:gc_none) %}
+      # Never freed: the process exits once the report is printed.
+      @[NoInline]
+      private def crash_report_alloc(size : UInt64, clear : Bool) : Void*
+        ptr = LibC.malloc(size)
+        LibC._exit(1) if ptr.null?
+        ptr.as(UInt8*).clear(size) if clear
+        ptr
+      end
+    {% end %}
+
     # *reserve*: a large block gets room past it to grow into
     # (`large_reserve_extent`); `realloc` asks for it when it grows a block.
     private def allocate(size : UInt64, atomic : Bool, clear : Bool, recycle : Bool = true,
                          reserve : Bool = false) : Void*
+      {% if flag?(:win32) && flag?(:gc_none) %}
+        # The thread whose fatal exception is being reported allocates from
+        # the C heap (`Gcry::CrashGuard`): it may have faulted holding the lock
+        # this path takes, and a report must not start a collection. Here and
+        # not in `GC.malloc`, where the check stopped `GC.malloc` being inlined
+        # into allocation sites; the hit path takes no lock.
+        return crash_report_alloc(size, clear) if CrashGuard.reporting?
+      {% end %}
       refresh_fast_path
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
       # No mapping can hold it, and the rounding below (a word, the large

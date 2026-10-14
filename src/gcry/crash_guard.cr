@@ -27,10 +27,11 @@
 #
 # Two rules, both in a vectored handler that runs ahead of Crystal's:
 #
-#   - The thread being reported allocates from the C heap (`GC.malloc` and the
-#     rest route there while `reporting?`), so a crash report never takes a
-#     gcry lock or starts a collection. Nothing it allocates is freed: the
-#     process is about to exit.
+#   - The thread being reported allocates from the C heap wherever gcry would
+#     take a lock: `Heap#allocate`, the path every allocation the hit path
+#     cannot serve takes, and `GC.realloc` / `GC.free` while `reporting?`. A
+#     crash report never takes a gcry lock or starts a collection. Nothing it
+#     allocates is freed: the process is about to exit.
 #   - One report at a time. A second thread that faults while a report is
 #     running prints one line and waits for that report to `_exit`, instead
 #     of running Crystal's handler beside it.
@@ -50,6 +51,15 @@ module Gcry
       # third is a report that cannot finish, and gets one line and an exit.
       @@entries = 0_u32
       @@installed = false
+      # Set on the reporting thread only, by the handler, which runs on the
+      # faulting thread. A thread-local byte so `reporting?` is one TLS load
+      # and no call: with `GetCurrentThreadId` in it, `GC.malloc` stopped being
+      # inlined into allocation sites, which reshaped whole programs' code —
+      # `bench/interior_only_buffer.cr`'s base-only arm began keeping its
+      # buffer on Windows x86_64 CI (2026-10-14). A literal, so no
+      # `__crystal_once`.
+      @[ThreadLocal]
+      @@reporting_here = 0_u8
 
       # Must run after Crystal's `setup_crash_handler`, since the last handler
       # added first is the first called. `src/gcry.cr` calls this from its top
@@ -60,12 +70,10 @@ module Gcry
         LibC.AddVectoredExceptionHandler(1, ->(info : LibC::EXCEPTION_POINTERS*) { CrashGuard.on_exception(info) })
       end
 
-      # Whether the calling thread is the one being reported. Reads one word
-      # while no report is running.
+      # Whether the calling thread is the one being reported.
       @[AlwaysInline]
       def self.reporting? : Bool
-        owner = Atomic::Ops.load(pointerof(@@owner), LLVM::AtomicOrdering::Monotonic, false)
-        owner != 0_u32 && owner == LibC.GetCurrentThreadId
+        @@reporting_here != 0_u8
       end
 
       protected def self.on_exception(info : LibC::EXCEPTION_POINTERS*) : LibC::LONG
@@ -78,6 +86,7 @@ module Gcry
         owner, won = Atomic::Ops.cmpxchg(pointerof(@@owner), 0_u32, me,
           LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::SequentiallyConsistent)
         if won || owner == me
+          @@reporting_here = 1_u8
           @@entries &+= 1
           return LibC::EXCEPTION_CONTINUE_SEARCH if @@entries <= 2
           say(me, code, record, "faulted a third time while reporting its fault; exiting without the report\n", owner)

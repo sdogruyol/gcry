@@ -1471,9 +1471,7 @@ module GC
   def self.malloc(size : LibC::SizeT) : Void*
     Crystal.trace :gc, "malloc", size: size do
       check_fork_poison!
-      # The thread whose fatal exception is being reported allocates from libc
-      # (`Gcry::CrashGuard`): it may have faulted holding a heap lock.
-      if @@gcry_ready && !Gcry::CrashGuard.reporting?
+      if @@gcry_ready
         Gcry.default_heap.malloc(size)
       else
         bootstrap_malloc(size, clear: true)
@@ -1485,7 +1483,7 @@ module GC
   def self.malloc_atomic(size : LibC::SizeT) : Void*
     Crystal.trace :gc, "malloc", size: size, atomic: 1 do
       check_fork_poison!
-      if @@gcry_ready && !Gcry::CrashGuard.reporting?
+      if @@gcry_ready
         Gcry.default_heap.malloc_atomic(size)
       else
         bootstrap_malloc(size, clear: false)
