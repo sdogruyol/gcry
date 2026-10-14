@@ -3867,9 +3867,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       that loses 223 to 95 197 per run. It found a real loss in the shipped
       path: `live_objects_sub` saturated at zero when two frees beat their
       allocations' credit (`process_spec/regression/68`). Fixed; back in the
-      Darwin gates job. Not covered by it: `bytes_since_gc_sub` and
-      `free_bytes_sub` still saturate the same way; `bytes_since_gc` resets
-      every collection, `free_bytes` could drift [INFERENCE, unmeasured].
+      Darwin gates job. The other two saturating counters, checked the same
+      day: `free_bytes` cannot drift from the race (a lagging credit leaves
+      it high), but on the bitmap layout it never received a fresh chunk's
+      capacity and read ~0 with MBs free; fixed (`process_spec/regression/70`).
+      `bytes_since_gc_sub` loses subtractions even on one thread (819 200
+      bytes of net-zero churn left 253 968), which only brings a collection
+      forward and resets at every major; left as is.
 - [x] **Two collector locks are unfair to a waiter under back-to-back
       collections (Windows, 2026-09-30).** Both were found with `cdb` on
       hung CI probes, and both are livelocks: the collector was still

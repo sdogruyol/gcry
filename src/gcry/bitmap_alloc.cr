@@ -912,7 +912,7 @@ module Gcry
     # the default layout every block from a fresh chunk was subtracted from
     # capacity never added, the subtraction saturated, and `free_bytes` read
     # 0 on a quiet heap with 2 199 744 bytes free
-    # (process_spec/regression/78). Dormant chunks keep their capacity, as
+    # (process_spec/regression/70). Dormant chunks keep their capacity, as
     # header chunks do, and revival adds none.
     protected def bitmap_credit_capacity(chunk : ChunkHeader*) : Nil
       return if chunk.null?

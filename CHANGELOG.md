@@ -44,6 +44,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as 0 (`68_live_objects_free_uncredited_spec.cr`). `malloc`/`free` pairs
   on one thread: 38.4 → 37.9 ns.
 
+- **`free_bytes` says how much of the heap is free on the default layout.**
+  A size-class chunk's capacity was added to the counter only by the header
+  allocator. The bitmap allocator mapped its chunks without it, so every
+  allocation from a fresh chunk was taken from capacity never counted, the
+  subtraction stopped at zero, and `GC.stats.free_bytes`,
+  `GC_get_heap_usage_safe`, `GC_get_prof_stats` and `/gc-stats` read about
+  0. A quiet heap with 2 199 744 bytes free reported 0. The capacity is now
+  credited when the chunk is mapped. The counter agrees with a walk of the
+  chunks through allocation, frees racing their credit, the large cache,
+  dormant release, revival and unmapping, on both layouts
+  (`70_free_bytes_capacity_spec.cr`, 5 of 5 failing before). It also agrees
+  on a process heap whose frees race the sweep, where 18 of 18 readings had
+  been 4.3 to 5.1 MB short. Dashboards that baselined the old values will
+  move. `GCRY_TIGHT_GROW`'s collect-before-grow, which reads it, stays
+  freelist-only.
+
 - **`make counter-loss` measures something, and runs on macOS again.** Its
   "atomic" and "plain" arms were the same code on every default build,
   because the bitmap allocator implies atomic counters whatever
