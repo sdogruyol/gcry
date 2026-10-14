@@ -76,6 +76,48 @@ module Gcry
       actual.to_i64 &- reported.to_i64
     end
 
+    # `free_bytes` against a walk of the chunk list, in the same form: walk
+    # minus counter, nil when the counter moved across the walk. Free means
+    # what the counter has meant on the header layout since it existed: every
+    # block of a size-class chunk nothing occupies, a dormant chunk's whole
+    # capacity (its pages are released, its mapping and its place in
+    # `heap_size` are not), and every cached large chunk's mapping. Memory
+    # that left the heap is in neither.
+    def self.free_bytes_drift(heap : Heap) : Int64?
+      reported = heap.free_bytes
+      actual = count_free_bytes(heap)
+      return nil unless heap.free_bytes == reported
+      actual.to_i64 &- reported.to_i64
+    end
+
+    private def self.count_free_bytes(heap : Heap) : UInt64
+      total = 0_u64
+      heap.each_chunk do |chunk|
+        if ChunkHeader.large?(chunk)
+          total &+= chunk.value.mapped_bytes if BlockHeader.free_large?(ChunkHeader.large_header(chunk))
+          next
+        end
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        payload = SizeClasses.payload(class_index).to_u64
+        block_bytes = BlockHeader::SIZE.to_u64 + payload
+        nblocks = Heap.chunk_block_count(block_bytes, chunk.value.mapped_bytes, chunk.value.data_offset)
+        if ChunkHeader.dormant?(chunk)
+          total &+= nblocks &* payload
+        elsif heap.bitmap_alloc_chunk_public?(chunk)
+          total &+= (nblocks &- heap.chunk_occupied_count(chunk)) &* payload
+        else
+          cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+          limit = ChunkHeader.data_end(chunk).as(UInt8*)
+          while (cursor + block_bytes) <= limit
+            total &+= payload if BlockHeader.free?(cursor.as(BlockHeader*))
+            cursor += block_bytes
+          end
+        end
+      end
+      total
+    end
+
     # Verify that `live_objects` matches the actual number of live (non-free)
     # blocks in the heap. This is the most important invariant: if the counter
     # drifts, every GC decision based on it is suspect.

@@ -898,8 +898,27 @@ module Gcry
         # was suspended. Its newer version must invalidate this result.
         @bitmap_empty_versions[slot] = version unless refused
       end
-      map_chunk(@small_chunk_bytes, index.to_u32,
+      chunk = map_chunk(@small_chunk_bytes, index.to_u32,
         ChunkHeader::Flags::CURSOR | (atomic ? ChunkHeader::Flags::ATOMIC : 0_u32))
+      bitmap_credit_capacity(chunk)
+      chunk
+    end
+
+    # A fresh bitmap chunk's blocks are free capacity, and `free_bytes` is
+    # where capacity is kept: everything after this subtracts from it (an
+    # allocation, its credit, the sweep's unmap of an empty chunk) or adds
+    # back to it (a free, the sweep's reclaim). `refill_size_class` does the
+    # same for a header chunk. Until 2026-10-14 nothing did it here, so on
+    # the default layout every block from a fresh chunk was subtracted from
+    # capacity never added, the subtraction saturated, and `free_bytes` read
+    # 0 on a quiet heap with 2 199 744 bytes free
+    # (process_spec/regression/78). Dormant chunks keep their capacity, as
+    # header chunks do, and revival adds none.
+    protected def bitmap_credit_capacity(chunk : ChunkHeader*) : Nil
+      return if chunk.null?
+      class_index = chunk.value.size_class.to_i32
+      return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      free_bytes_add(chunk_block_count(chunk) &* SizeClasses.payload(class_index).to_u64)
     end
 
     # The public containment lookup deliberately excludes chunk metadata.

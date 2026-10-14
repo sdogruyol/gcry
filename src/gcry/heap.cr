@@ -1828,7 +1828,15 @@ module Gcry
 
       # Tight-grow: never collect under the freelist lock (STW vs lock deadlock).
       # If both prefer+global are empty, GC once outside the lock, then refill.
-      if @tight_grow && @tight_grow_gc && !@collecting && @enabled && !@tlab_enabled
+      #
+      # Freelist allocator only. A bitmap heap has no freelist, so `empty`
+      # would be true at every locked allocation; what kept this from
+      # collecting there was `small_free_bytes` reading about 0 on that layout
+      # until 2026-10-14 (`bitmap_credit_capacity`). With the capacity counted
+      # it reads what is free, and the check would fire a collection per
+      # `min_bsg` allocated under `GCRY_TIGHT_GROW=1`, a knob calibrated on the
+      # header allocator and never measured on this one.
+      if @tight_grow && @tight_grow_gc && !@bitmap_alloc && !@collecting && @enabled && !@tlab_enabled
         empty = with_freelist_lock(index, false) do
           @prefer_freelists[index].null? && @freelists[index].null?
         end
