@@ -76,7 +76,11 @@ module Gcry
 
     def live_objects : UInt64
       credit_all_cursor_sets
-      @live_objects.get
+      n = @live_objects.get
+      # Wrapped below zero only while a free has been subtracted ahead of the
+      # credit for the allocation it pairs with (`live_objects_sub`); zero
+      # until that credit lands.
+      n > Int64::MAX.to_u64 ? 0_u64 : n
     end
 
     # Hold `@index_lock` for `ms` milliseconds, so a test can produce the one
@@ -1471,20 +1475,27 @@ module Gcry
       live_objects_sub(1_u64)
     end
 
+    # Never saturates. An allocation on the hit path reaches `@live_objects`
+    # only when its cursor set is credited (a refill, a stop, a reader), and a
+    # free subtracts at once, so the counter can stand below the blocks that
+    # are live — below the very decrement being applied — and is right again
+    # once the credit lands. Saturating at zero dropped that decrement for
+    # good instead, and the counter stayed that many above the walk. The
+    # credit taken first when the counter read below `n` covered one thread,
+    # not two: both read 1, both skipped it, and the second subtraction found
+    # 0. `make counter-loss` measured the counter 3 to 7 above the walk after
+    # six rounds of 40 threads freeing a quarter of what they allocate,
+    # exactly the number of subtractions that had saturated; 8 threads, each
+    # freeing 51 200 blocks of a class of its own, lost 21 to 68 decrements on
+    # 2 CPUs and 569 to 796 on 12, in 10 of 10 runs each
+    # (process_spec/regression/76). A wrapped counter is transient, and the
+    # public reader reads it as zero.
     private def live_objects_sub(n : UInt64) : Nil
       return if n == 0
-      # A block allocated on a hit path and not yet credited would make this
-      # saturate at zero and lose the decrement for good.
-      credit_all_cursor_sets if @live_objects.get < n
       if @world_stopped || !counters_atomic?
-        cur = @live_objects.get
-        @live_objects.set(cur > n ? cur - n : 0_u64)
-        return
-      end
-      loop do
-        cur = @live_objects.get
-        nxt = cur > n ? cur - n : 0_u64
-        break if @live_objects.compare_and_set(cur, nxt)[1]
+        @live_objects.set(@live_objects.get &- n)
+      else
+        @live_objects.sub(n)
       end
     end
 
