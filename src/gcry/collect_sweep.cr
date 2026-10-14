@@ -105,6 +105,9 @@ module Gcry
       # Kept for the store at the end: whatever `map_chunk` prepends while this
       # walks lands in front of it (`publish_relinked_chunks`).
       walk_head = @chunks
+      # The chunk the rebuild links to *walk_head*, for its back-link
+      # (`publish_relinked_chunks`).
+      walk_head_pred = Pointer(ChunkHeader).null
       chunk = walk_head
       while chunk
         nxt = chunk.value.next
@@ -123,7 +126,8 @@ module Gcry
             note_chunk_fill(0_u64, 1_u64)
           end
           if relink_once ? relink : sweep_relink_now?(after_world)
-            ChunkHeader.set_next(chunk, kept)
+            walk_head_pred = chunk if kept == walk_head
+            ChunkHeader.link(chunk, kept)
             kept = chunk
           end
           chunk = nxt
@@ -381,7 +385,8 @@ module Gcry
           # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
           # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
           if relink_once ? relink : sweep_relink_now?(after_world)
-            ChunkHeader.set_next(chunk, kept)
+            walk_head_pred = chunk if kept == walk_head
+            ChunkHeader.link(chunk, kept)
             kept = chunk
           end
         end
@@ -423,9 +428,10 @@ module Gcry
           if hook = @post_stw_hook
             hook.call(:before_relink_store)
           end
-          @chunk_list_lock.sync { publish_relinked_chunks(walk_head, kept) }
+          @chunk_list_lock.sync { publish_relinked_chunks(walk_head, kept, walk_head_pred) }
         else
           @chunks = kept
+          ChunkHeader.set_back_link(kept, Pointer(ChunkHeader).null)
         end
       end
       with_alloc_lock { @relink_walk = false } if relink_walk
@@ -515,9 +521,23 @@ module Gcry
     #   the shape holds; otherwise this falls back to the plain store, which
     #   loses the prefix exactly as before.
     #
+    # Back-links (`ChunkHeader.large_prev`): *kept* gets the chunk it now
+    # follows, the prefix's last or none. And *walk_head* gets its rebuilt
+    # predecessor, *walk_head_pred*, again: the rebuild wrote it without this
+    # lock, while `map_chunk` and an unlink write the back-link of whatever
+    # heads the list under it, and until the first prepend that was
+    # *walk_head*. The link is rewritten only while *walk_head* is still
+    # indexed, by the argument above: a chunk unlinked during the walk may
+    # already be unmapped.
+    #
     # Allocates nothing. Takes `@index_lock` under this one — list then index,
     # the order `map_chunk` and `unlink_chunk` already use.
-    private def publish_relinked_chunks(walk_head : ChunkHeader*, kept : ChunkHeader*) : Nil
+    private def publish_relinked_chunks(walk_head : ChunkHeader*, kept : ChunkHeader*,
+                                        walk_head_pred : ChunkHeader*) : Nil
+      unless walk_head_pred.null?
+        indexed = @index_lock.sync { indexed_locked?(walk_head) }
+        ChunkHeader.set_back_link(walk_head, walk_head_pred) if indexed
+      end
       head = @chunks
       if head != walk_head && @chunk_list_splice
         # The list was empty when the walk began: everything on it now was
@@ -535,6 +555,7 @@ module Gcry
               # Release, as `map_chunk` publishes: walkers that do not take
               # this lock follow the link into *kept*'s rewritten `next`s.
               Atomic::Ops.store(pointerof(tail.value.@next), kept, :release, true)
+              ChunkHeader.set_back_link(kept, tail)
               return
             end
             tail = nxt
@@ -543,6 +564,7 @@ module Gcry
         end
       end
       Atomic::Ops.store(pointerof(@chunks), kept, :release, true)
+      ChunkHeader.set_back_link(kept, Pointer(ChunkHeader).null)
     end
 
     private def sweep_large_one(chunk : ChunkHeader*, major : Bool, after_world : Bool) : Nil
@@ -618,7 +640,7 @@ module Gcry
         @pending_large_cache = Pointer(Void).null
         while user
           header = BlockHeader.large_header_from_user(user)
-          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          chunk = ChunkHeader.from_large_header(header)
           nxt = header.value.next_free
           cache_large_chunk(chunk, header)
           user = nxt
@@ -857,7 +879,9 @@ module Gcry
       # chunk the sweep will visit again.
       while keep
         nxt = keep.value.next
-        ChunkHeader.set_next(keep, @chunks)
+        # `link` gives the old head its back-link; *keep* is a size-class
+        # chunk and keeps none.
+        ChunkHeader.link(keep, @chunks)
         Atomic::Ops.store(pointerof(@chunks), keep, :release, true)
         keep = nxt
       end
@@ -1206,7 +1230,7 @@ module Gcry
           user = @large_freelists[b]
           while user
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             next_user = header.value.next_free
             # Rounds up from `data_start`, not from the chunk base: the base is
             # already page-aligned, so rounding up from it is a no-op and the

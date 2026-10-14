@@ -423,6 +423,51 @@ describe Gcry::Heap do
     end
   end
 
+  # One chunk leaves the list by its back-link (`ChunkHeader.large_prev`), not
+  # by a walk from the head, wherever it sits: the oldest chunk first, the
+  # deepest, then after a collection whose sweep rebuilt the list in reverse.
+  # Every list store keeps the links; `chunk_back_link_faults` walks the list
+  # and counts the ones that do not name the chunk in front.
+  it "unlinks a large chunk by its back-link wherever it sits in the list" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      heap.large_cache_retain = 0
+      ptrs = Array(Void*).new(48) { heap.malloc(100_000) }
+      heap.chunk_back_link_faults.should eq(0)
+      unlinks = heap.chunk_unlinks
+      steps = heap.unlink_walk_steps
+      # One free and one trim at a time, so each trim has one chunk and takes
+      # `unlink_chunk`.
+      gone = (0...48).step(3).to_a
+      gone.each do |i|
+        heap.free(ptrs[i])
+        heap.trim_large_cache(0)
+      end
+      heap.chunk_unlinks.should eq(unlinks + gone.size)
+      heap.unlink_walk_steps.should eq(steps)
+      heap.chunk_back_link_faults.should eq(0)
+
+      live = (0...48).reject { |i| gone.includes?(i) }.map { |i| ptrs[i] }
+      heap.collect(scan_stack: false, roots: live)
+      live.each { |p| heap.is_heap_ptr(p).should be_true }
+      heap.chunk_back_link_faults.should eq(0)
+      steps = heap.unlink_walk_steps
+      live.each_slice(4).map(&.first).each do |p|
+        heap.free(p)
+        heap.trim_large_cache(0)
+        heap.is_heap_ptr(p).should be_false
+      end
+      heap.unlink_walk_steps.should eq(steps)
+      heap.chunk_back_link_faults.should eq(0)
+      listed = 0
+      heap.each_chunk { listed += 1 }
+      listed.should eq(heap.@chunk_index_count)
+    ensure
+      heap.destroy
+    end
+  end
+
   # `free` lets the cache run up to `LARGE_FREE_TRIM_SLACK` past the retain,
   # then trims all of it in one batch. The collector trims to the retain
   # itself at the end of every collection.

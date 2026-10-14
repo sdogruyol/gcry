@@ -1375,11 +1375,12 @@ module Gcry
     end
 
     # Returns true when the region was guarded (caller must not munmap it).
-    # The first user word of a large chunk: past the chunk header and the block
-    # header. Read before anything releases the range.
+    # The first user word of a large chunk: past the chunk header, the
+    # back-link slot and the block header (`ChunkHeader.large_data_offset`).
+    # Read before anything releases the range.
     private def guard_user_tag(base : UInt64, len : UInt64, kind : UInt8) : UInt64
       return 0_u64 unless kind == GUARD_KIND_LARGE
-      off = ChunkHeader::SIZE.to_u64 &+ BlockHeader::SIZE.to_u64
+      off = ChunkHeader.large_data_offset.to_u64
       return 0_u64 if len <= off &+ 8
       Pointer(UInt64).new(base &+ off).value
     end
@@ -1403,7 +1404,7 @@ module Gcry
     # one block, so its answer is that block's own FREE flag — 0 or 1.
     private def guard_occupied(base : UInt64, len : UInt64, kind : UInt8) : Int32
       if kind == GUARD_KIND_LARGE
-        off = ChunkHeader::SIZE.to_u64
+        off = ChunkHeader.large_header_offset.to_u64
         return -1 if len <= off &+ BlockHeader::SIZE.to_u64
         header = Pointer(BlockHeader).new(base &+ off)
         return BlockHeader.free?(header) ? 0 : 1
@@ -1563,7 +1564,7 @@ module Gcry
       steps = 0
       while user && steps < 1_000_000
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         base = chunk.as(Void*).address
         return base if addr >= base && addr < base &+ chunk.value.mapped_bytes
         user = header.value.next_free

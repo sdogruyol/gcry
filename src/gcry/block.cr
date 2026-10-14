@@ -414,15 +414,14 @@ module Gcry
   struct ChunkHeader
     # 24 -> 32 for `data_offset` and `bitmap_words`.
     #
-    # Every site that recovers a large chunk from its block does
-    # `header - ChunkHeader::SIZE` (heap.cr:1299 and five siblings,
-    # collect.cr:1017, collect_sweep.cr:478, :843), and every site that sizes a
-    # large mapping does `ChunkHeader::SIZE + BlockHeader::SIZE + payload`
-    # (heap.cr:1216). Those stay correct *by construction* because large chunks
-    # keep `data_offset == SIZE`: they hold one object and need no bitmap, so
-    # their single mark bit lives in `flags`. Only size-class chunks move their
-    # data start, and they are never reached by pointer arithmetic on this
-    # constant.
+    # A large chunk's own metadata goes on past this header: its back-link
+    # slot (`LARGE_LINK_BYTES`), then its block header, then the object
+    # (`large_header_offset`, `large_data_offset`). Every site that recovers a
+    # large chunk from its block header goes through `from_large_header`, and
+    # every site that sizes a large mapping through `large_data_offset`, so
+    # the layout has one definition. Large chunks hold one object and need no
+    # bitmap, so their single mark bit lives in the block header's flags.
+    # Only size-class chunks move their data start by a bitmap region.
     SIZE = 32
 
     property next : ChunkHeader*   # 0
@@ -557,23 +556,74 @@ module Gcry
       (chunk.value.flags & Flags::ATOMIC) != 0
     end
 
+    # Bytes from a large chunk's base to its object. Single definition so
+    # sizing, carving and the header slot cannot drift apart.
+    def self.large_data_offset : Int32
+      # The large header keeps its 16 bytes in both builds; only the small
+      # block loses its header.
+      large_header_offset + BlockHeader::LARGE_HEADER_BYTES
+    end
+
+    # The large chunk's back-link slot, between this header and the block
+    # header: the address of the chunk whose `next` is this one, null at the
+    # head of `@chunks` (`large_prev`). A singly linked list finds that
+    # predecessor only by walking from the head, and taking one large chunk
+    # off the list cost a walk of every chunk in front of it: 186 µs a `GC.free`
+    # with 40 000 large chunks alive (`Heap#unlink_chunk`).
+    #
+    # Not a `ChunkHeader` field: every chunk would pay for it, the header is
+    # full at 32 bytes, and 40 would put every small chunk's first block off
+    # its 16-byte alignment. Sixteen bytes here keep the large block header
+    # and the object behind it 16-aligned; the second word is unused. Small
+    # chunks have no back-link, and nothing needs one: only a large chunk
+    # leaves the list on its own (a trim, a recycle); the sweep drops small
+    # chunks inside the walk that rebuilds the list.
+    LARGE_LINK_BYTES = 16
+
+    # Bytes from a large chunk's base to its block header, in both builds.
+    def self.large_header_offset : Int32
+      SIZE + LARGE_LINK_BYTES
+    end
+
+    # The large chunk whose block header is *header*.
+    def self.from_large_header(header : BlockHeader*) : ChunkHeader*
+      (header.as(UInt8*) - large_header_offset).as(ChunkHeader*)
+    end
+
+    # The chunk whose `next` is *chunk*, a large chunk, or null when *chunk*
+    # heads the list (`LARGE_LINK_BYTES`). Written wherever a `next` or the
+    # head is set to a large chunk, under the same exclusion as that store
+    # (`link`, `set_back_link`). Read only under `@chunk_list_lock`, and only
+    # as a claim `Heap#unlink_chunk` verifies before acting on it.
+    def self.large_prev(chunk : ChunkHeader*) : ChunkHeader*
+      (chunk.as(UInt8*) + SIZE).as(ChunkHeader**).value
+    end
+
+    # Record *pred* as what links to *succ* (null: *succ* is the head), when
+    # *succ* is a large chunk; small chunks keep no back-link.
+    def self.set_back_link(succ : ChunkHeader*, pred : ChunkHeader*) : Nil
+      return if succ.null? || !large?(succ)
+      (succ.as(UInt8*) + SIZE).as(ChunkHeader**).value = pred
+    end
+
+    # `pred.next = succ`, and *succ*'s back-link with it. Every list store
+    # that links one chunk to another goes through here or through
+    # `set_next` plus `set_back_link`, so a large chunk's back-link always
+    # names the chunk in front of it.
+    def self.link(pred : ChunkHeader*, succ : ChunkHeader*) : Nil
+      set_next(pred, succ)
+      set_back_link(succ, pred)
+    end
+
     # The single block header of a large chunk.
     #
     # With headers in front of the object this is just `data_start`. Under
     # headerless the object starts at `data_start` and its header is reserved
     # before it, inside the metadata region — so the two differ and every large
     # path must ask for it by name rather than assume `data_start` is a header.
-    # Bytes from a large chunk's base to its object. Single definition so
-    # sizing, carving and the header slot cannot drift apart.
-    def self.large_data_offset : Int32
-      # The large header keeps its 16 bytes in both builds; only the small
-      # block loses its header.
-      ChunkHeader::SIZE + BlockHeader::LARGE_HEADER_BYTES
-    end
-
     def self.large_header(chunk : ChunkHeader*) : BlockHeader*
       {% if !flag?(:gcry_block_headers) %}
-        (chunk.as(UInt8*) + ChunkHeader::SIZE).as(BlockHeader*)
+        (chunk.as(UInt8*) + large_header_offset).as(BlockHeader*)
       {% else %}
         data_start(chunk).as(BlockHeader*)
       {% end %}

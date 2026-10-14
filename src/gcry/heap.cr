@@ -2827,7 +2827,7 @@ module Gcry
         header = BlockHeader.large_header_from_user(user)
         # A cached chunk's pages may have been released reusable at the last
         # major; take them back before anything writes the object.
-        lo, hi = large_release_range((header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*))
+        lo, hi = large_release_range(ChunkHeader.from_large_header(header))
         Platform.reuse_released_pages(lo, hi - lo) if hi > lo
         # Root the block until the caller holds its user pointer: a mutator
         # stopped by signal between `set_used_large` and its return holds only
@@ -2853,7 +2853,7 @@ module Gcry
         # The old chunk's block header is FREE with a stale link. A fresh
         # mapping publishes zeroes there, which the sweep reads as an
         # allocation not yet filled in (`sweep_large_one`).
-        (at.as(UInt8*) + ChunkHeader::SIZE).clear(BlockHeader::LARGE_HEADER_BYTES)
+        (at.as(UInt8*) + ChunkHeader.large_header_offset).clear(BlockHeader::LARGE_HEADER_BYTES)
       elsif extent > mapped
         at = reserve_large_mapping(extent, mapped)
         fresh_room = !at.null?
@@ -2994,7 +2994,7 @@ module Gcry
         return Pointer(Void).null if thread.nil? || stw_signal_exempt?(thread)
         user = take_large_recycle(mapped)
         return Pointer(Void).null unless user
-        old = (BlockHeader.large_header_from_user(user).as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        old = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
         old_mapped = old.value.mapped_bytes
         @heap_size = sat_sub(@heap_size, old_mapped)
         @large_mapped_bytes = sat_sub(@large_mapped_bytes, old_mapped)
@@ -3028,7 +3028,7 @@ module Gcry
           rchunk = Pointer(ChunkHeader).null
           if rest >= LARGE_RECYCLE_SPLIT_MIN
             # FREE before the chunk is published, as the sweep skips it.
-            rheader = (tail &+ ChunkHeader::SIZE).to_u64
+            rheader = (tail &+ ChunkHeader.large_header_offset).to_u64
             Pointer(BlockHeader).new(rheader).value = BlockHeader.large(
               rest &- ChunkHeader.large_data_offset.to_u64,
               BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE)
@@ -3070,7 +3070,7 @@ module Gcry
         prev = Pointer(Void).null
         user = @large_freelists[i]
         while user
-          c = (BlockHeader.large_header_from_user(user).as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          c = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
           m = c.value.mapped_bytes
           if m >= mapped && (best.null? || m < best_mapped) && !ChunkHeader.moved?(c)
             best, best_prev, best_bucket, best_mapped = user, prev, i, m
@@ -3085,7 +3085,7 @@ module Gcry
         prev = Pointer(Void).null
         user = @large_freelists[i]
         while user
-          c = (BlockHeader.large_header_from_user(user).as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          c = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
           m = c.value.mapped_bytes
           if m < mapped && m > best_mapped && !ChunkHeader.moved?(c)
             best, best_prev, best_bucket, best_mapped = user, prev, i, m
@@ -3267,7 +3267,7 @@ module Gcry
       user = @large_freelists[b]
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
         if chunk.value.mapped_bytes == mapped_need && (!freed_only || ChunkHeader.freed?(chunk))
           ChunkHeader.set_freed(chunk, false)
@@ -3301,7 +3301,7 @@ module Gcry
       user = chain
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
         base = chunk.as(Void*).address
@@ -3368,7 +3368,7 @@ module Gcry
       user = chain
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
         hv = header.value
         hv.next_free = @pending_large_release
@@ -3427,7 +3427,7 @@ module Gcry
           user = @large_freelists[b]
           while user && @large_free_bytes > effective
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             nxt = header.value.next_free
             @large_freelists[b] = nxt
             mapped = chunk.value.mapped_bytes
@@ -3518,7 +3518,7 @@ module Gcry
       user = detached
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
         base = chunk.as(Void*).address
@@ -3556,7 +3556,7 @@ module Gcry
           steps &+= 1
           report_large_bucket_cycle(b, user, walk_limit, "trimming") if steps > walk_limit
           header = BlockHeader.large_header_from_user(user)
-          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          chunk = ChunkHeader.from_large_header(header)
           nxt = header.value.next_free
           @large_freelists[b] = nxt
           mapped = chunk.value.mapped_bytes
@@ -3592,7 +3592,7 @@ module Gcry
           user = @large_freelists[b]
           while user
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             nxt = header.value.next_free
             if ChunkHeader.moved?(chunk)
               if prev.null?
@@ -3701,9 +3701,8 @@ module Gcry
       # and nothing occupied, which is exactly right.
       #
       # Large chunks never get one: they hold a single object, so there is
-      # nothing to amortise, and a bitmap region would move `data_start` and
-      # break the twelve sites that recover a large chunk as
-      # `header - ChunkHeader::SIZE`.
+      # nothing to amortise, and their layout is fixed instead
+      # (`ChunkHeader.large_header_offset`, `ChunkHeader.large_data_offset`).
       bitmap_words = 0_u32
       # Large chunks: `ChunkHeader.large_data_offset`, not bare `ChunkHeader::SIZE`.
       #
@@ -3714,22 +3713,23 @@ module Gcry
       # generation straight into the object's second word — two bytes at
       # `user+4`, which is exactly the corruption this chased.
       #
-      # The header stays at `chunk + ChunkHeader::SIZE`, so the twelve sites that
-      # recover a chunk as `header - ChunkHeader::SIZE` are untouched — it is
-      # `data_start` that moves, not the header.
+      # The header sits at `ChunkHeader.large_header_offset` in both builds,
+      # behind the back-link slot (`ChunkHeader::LARGE_LINK_BYTES`), and every
+      # site that recovers a chunk from it uses `ChunkHeader.from_large_header`
+      # — it is `data_start` that differs between the builds, not the header.
       data_offset = if size_class == UInt32::MAX
                       # Where the chunk's *data* begins, which is not the same
                       # as where its object begins. With headers in front,
-                      # `data_start` IS the block header (offset 32) and the
+                      # `data_start` IS the block header (offset 48) and the
                       # object follows it. Under headerless the header is
                       # reserved between them, so data_start is the object at
-                      # offset 48. `large_data_offset` is the chunk-to-object
-                      # distance — 48 in both builds — and is what sizes the
+                      # offset 64. `large_data_offset` is the chunk-to-object
+                      # distance — 64 in both builds — and is what sizes the
                       # mapping; this is the field, and it differs.
                       {% if !flag?(:gcry_block_headers) %}
-                        (ChunkHeader::SIZE + 16).to_u32
+                        ChunkHeader.large_data_offset.to_u32
                       {% else %}
-                        ChunkHeader::SIZE.to_u32
+                        ChunkHeader.large_header_offset.to_u32
                       {% end %}
                     else
                       ChunkHeader::SIZE.to_u32
@@ -3768,7 +3768,13 @@ module Gcry
         # collections: a heap that has reached its working size stops mapping
         # and stops losing. Free beside an mmap.
         @chunks_mapped &+= 1
-        chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags, data_offset, bitmap_words)
+        head = @chunks
+        chunk.value = ChunkHeader.new(head, bytes, size_class, flags, data_offset, bitmap_words)
+        # The new head has nothing in front of it, and the old head now has
+        # this chunk (`ChunkHeader.large_prev`). A recycled or split mapping
+        # (*at*) carries a stale word in the slot, so it is written either way.
+        ChunkHeader.set_back_link(chunk, Pointer(ChunkHeader).null)
+        ChunkHeader.set_back_link(head, chunk)
         # In flight from here until the index has it, and whose
         # (`@chunk_publishing`). The publisher first: the release store
         # publishes it with the chunk.
@@ -3828,6 +3834,40 @@ module Gcry
       Gcry.os_map(bytes)
     end
 
+    # Calls of `unlink_chunk`, and the steps their predecessor searches
+    # walked down `@chunks`. A large chunk's back-link names its predecessor
+    # (`ChunkHeader.large_prev`), so the search walks only when the link
+    # cannot vouch for it (`back_linked_predecessor_locked`); before the link
+    # it walked to every target, as deep as the target sat.
+    # `process_spec/regression/71_large_unlink_walks_nothing_spec.cr` reads
+    # both.
+    getter chunk_unlinks : UInt64 = 0_u64
+    getter unlink_walk_steps : UInt64 = 0_u64
+
+    # Large chunks on `@chunks` whose back-link does not name the chunk in
+    # front of them (`ChunkHeader.large_prev`). Zero while every list store
+    # keeps the links. `unlink_chunk` checks a link before it trusts it, so
+    # a wrong one costs a walk rather than the list; this is what says one
+    # was wrong. A walk of the list under its lock, for gates and specs
+    # (`make chunk-list-drift`, `process_spec/regression/71`).
+    def chunk_back_link_faults : UInt64
+      faults = 0_u64
+      @chunk_list_lock.sync do
+        # Bounded like `unlink_chunk`'s walk.
+        limit = @chunk_index_count.to_u64 &* 2 &+ 64
+        steps = 0_u64
+        prev = Pointer(ChunkHeader).null
+        c = @chunks
+        while c && steps <= limit
+          faults &+= 1 if ChunkHeader.large?(c) && ChunkHeader.large_prev(c) != prev
+          prev = c
+          c = c.value.next
+          steps &+= 1
+        end
+      end
+      faults
+    end
+
     protected def unlink_chunk(target : ChunkHeader*) : Nil
       # Index removal and the list surgery in one section, for the reason
       # `map_chunk` spells out: the predecessor search reads `@chunks` and
@@ -3837,58 +3877,103 @@ module Gcry
       # removed the chunk from the index but **not** from the list — after
       # which the caller unmaps it and the next walker faults.
       @chunk_list_lock.sync do
-        index_remove(target)
+        @chunk_unlinks &+= 1
+        # `index_remove`, with the back-link's check in the same section: the
+        # check reads the index and, if the chunk the link names is in it,
+        # that chunk's `next`.
+        prev = Pointer(ChunkHeader).null
+        note_index_lock_section
+        StwWatchdog.note_index_lock_wait(target.address)
+        @index_lock.sync do
+          index_remove_locked(target)
+          prev = back_linked_predecessor_locked(target)
+        end
+        StwWatchdog.note_index_lock_done
         if @chunks == target
           @chunks = target.value.next
+          ChunkHeader.set_back_link(@chunks, Pointer(ChunkHeader).null)
         else
-          prev = @chunks
-          # Every chunk on the list is indexed, so a walk more than twice the
-          # index long (slack for chunks mid-flight) has gone round a cycle.
-          # It did once — `pattern_fuzz` seed 20102, spinning here for 900 s
-          # with every other thread asleep (campaign-036, 2026-09-29) — and a
-          # spin says nothing about how the cycle formed. Stop and name it.
-          limit = @chunk_index_count.to_u64 &* 2 &+ 64
-          steps = 0_u64
-          while prev
-            if prev.value.next == target
-              # Flags are updated under the class lock. A whole-header copy
-              # here could overwrite a concurrent cursor/dormant flag change.
-              ChunkHeader.set_next(prev, target.value.next)
-              break
+          if prev.null?
+            c = @chunks
+            # Every chunk on the list is indexed, so a walk more than twice the
+            # index long (slack for chunks mid-flight) has gone round a cycle.
+            # It did once — `pattern_fuzz` seed 20102, spinning here for 900 s
+            # with every other thread asleep (campaign-036, 2026-09-29) — and a
+            # spin says nothing about how the cycle formed. Stop and name it.
+            limit = @chunk_index_count.to_u64 &* 2 &+ 64
+            steps = 0_u64
+            while c
+              if c.value.next == target
+                prev = c
+                break
+              end
+              c = c.value.next
+              steps &+= 1
+              report_chunk_list_cycle(target, limit) if steps > limit
             end
-            prev = prev.value.next
-            steps &+= 1
-            report_chunk_list_cycle(target, limit) if steps > limit
+            @unlink_walk_steps &+= steps
           end
+          # Flags are updated under the class lock. A whole-header copy
+          # here could overwrite a concurrent cursor/dormant flag change.
+          ChunkHeader.link(prev, target.value.next) unless prev.null?
         end
       end
+    end
+
+    # *target*'s predecessor on `@chunks` as its back-link names it
+    # (`ChunkHeader.large_prev`), or null when the link cannot vouch for it
+    # and the caller must search. Caller holds `@chunk_list_lock` and
+    # `@index_lock`, and *target* is on the list.
+    #
+    # Every list store keeps the link, so it names the wrong chunk only where
+    # the list's own `next`s are already in question: a writer frozen inside
+    # its locked section while an in-STW sweep relinks (`Heap#sweep`), or the
+    # `GCRY_TRIM_UNLOCKED` control unlinking under the after-world rebuild.
+    # The chunk a wrong link names may since have been unmapped, so the link
+    # is checked before it is followed. The chunk must be in the index:
+    # nothing unmaps an indexed chunk without taking it out under
+    # `@index_lock` first, and the caller holds that, so its `next` can be
+    # read. And that `next` must be *target*. A chunk off the list is out of
+    # the index — `unlink_chunk` and `unlink_detached_large` take it out of
+    # both in one `@chunk_list_lock` section — or is one the sweep dropped
+    # into its release queue, whose `next` names only chunks queued with it
+    # until the flush takes them out of the index. So an indexed chunk whose
+    # `next` is a listed chunk is that chunk's predecessor on the list.
+    private def back_linked_predecessor_locked(target : ChunkHeader*) : ChunkHeader*
+      none = Pointer(ChunkHeader).null
+      return none unless ChunkHeader.large?(target)
+      prev = ChunkHeader.large_prev(target)
+      return none if prev.null?
+      return none unless indexed_locked?(prev)
+      prev.value.next == target ? prev : none
     end
 
     # Take a trim's detached large chunks (a `next_free` chain of users) off
     # the chunk list and out of the index.
     #
-    # One at a time, `unlink_chunk` walks the list from the head for each
-    # chunk's predecessor and shifts the sorted index down by one: O(k·n) for
-    # k chunks among n. A collection whose sweep frees k large objects trims
-    # all k, holding `@alloc_lock`, so every allocating mutator waited on it:
-    # 2.3 s of `GC.collect` with 40 000 large objects live and 5 000 dying
-    # (2026-10-03). Here the k chunks are flagged, then the index is compacted
-    # in one pass and the list in one pass, O(n + k). One chunk keeps
-    # `unlink_chunk`, whose walk stops at the predecessor.
+    # One at a time, `unlink_chunk` shifts the sorted index down by one per
+    # chunk, and before back-links it also walked the list from the head for
+    # each chunk's predecessor: O(k·n) for k chunks among n. A collection
+    # whose sweep frees k large objects trims all k, holding `@alloc_lock`,
+    # so every allocating mutator waited on it: 2.3 s of `GC.collect` with
+    # 40 000 large objects live and 5 000 dying (2026-10-03). Here the k
+    # chunks are flagged, then the index is compacted in one pass and the
+    # list in one pass, O(n + k). One chunk keeps `unlink_chunk`, which finds
+    # the predecessor by the chunk's back-link.
     #
     # The lock order is `unlink_chunk`'s: list, then index.
     private def unlink_detached_large(chain : Void*, count : Int32) : Nil
       return if chain.null?
       if count == 1
         header = BlockHeader.large_header_from_user(chain)
-        unlink_chunk((header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*))
+        unlink_chunk(ChunkHeader.from_large_header(header))
         return
       end
       first = Pointer(ChunkHeader).null
       user = chain
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         first = chunk if first.null?
         ChunkHeader.set_unlinking(chunk)
         user = header.value.next_free
@@ -3901,7 +3986,7 @@ module Gcry
           user = chain
           while user
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             radix_remove(chunk)
             user = header.value.next_free
           end
@@ -3930,8 +4015,9 @@ module Gcry
           if ChunkHeader.unlinking?(c)
             if prev.null?
               @chunks = nxt
+              ChunkHeader.set_back_link(nxt, Pointer(ChunkHeader).null)
             else
-              ChunkHeader.set_next(prev, nxt)
+              ChunkHeader.link(prev, nxt)
             end
             removed += 1
           else
@@ -4238,10 +4324,8 @@ module Gcry
     # contract — see `chunk_set_mark`.
     #
     # Large chunks stay on the header generation under both. They hold exactly
-    # one object, so there is nothing for a bitmap to amortise, and keeping them
-    # on the header avoids a bitmap region that would move `data_start` and
-    # break the twelve sites that recover a large chunk as
-    # `header - ChunkHeader::SIZE`.
+    # one object, so there is nothing for a bitmap to amortise, and their
+    # metadata layout stays fixed (`ChunkHeader.large_header_offset`).
 
     @[AlwaysInline]
     private def chunk_block_ordinal(chunk : ChunkHeader*, addr : UInt64) : UInt64
@@ -4862,6 +4946,14 @@ module Gcry
         end
       end
       lo
+    end
+
+    # Whether *chunk* is in the sorted index, found by its base: reads the
+    # index, never the chunk, so it is safe on a pointer to memory that may be
+    # unmapped. Caller holds `@index_lock`.
+    private def indexed_locked?(chunk : ChunkHeader*) : Bool
+      at = index_lower_bound(chunk.address)
+      at < @chunk_index_count && (@chunk_index + at).value == chunk
     end
 
     # Does the chunk index still describe the chunks that exist?
