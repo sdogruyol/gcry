@@ -205,31 +205,31 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **101.8%** *(this tree, 2026-10-06; 0.34.0: 103.4% in the same session)* |
-| Kemal `/json` peak RSS | **1.43×** *(22.2 vs 15.6 MiB)* |
-| Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB)* |
-| Kemal `/` throughput | **90.9%** *(0.34.0: 100.6% in the same session; not GC-bound — the GC is 0.3% of the run, and the same code moved by NOP padding alone reads 91–98% of 0.34.0)* |
+| Kemal `/json` throughput | **105.4%** *(0.36.0, 2026-10-14; 0.35.0: 104.9% in the same session)* |
+| Kemal `/json` peak RSS | **1.31×** *(21.0 vs 16.0 MB; 0.35.0: 1.33×)* |
+| Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB, 2026-10-06)* |
+| Kemal `/` throughput | **99.9%** *(0.35.0: 100.8%; not GC-bound — the GC is 0.3% of the run, and this row moves with code placement alone)* |
 | Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
 | Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
 
-\*Kemal rows: `bench/log/linux/2026-10-06-pr-benchmarks/` (QEMU x86-64, 12 vCPUs, 11 interleaved trials, server on 3 CPUs, `wrk -c50`). The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
+\*Kemal rows: `bench/log/linux/2026-10-14-0.36-integration-ab/` (QEMU x86-64, 12 vCPUs, 9 interleaved trials, server on 3 CPUs, `wrk -t4 -c50`); the post-collect row is `bench/log/linux/2026-10-06-pr-benchmarks/`. The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
 
 \*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
-Allocation storms, crystal-metric (process-fresh, 11 interleaved trials, 12 CPUs, Crystal 1.21.0, 2026-10-06 — `bench/log/linux/2026-10-06-pr-benchmarks/after-review/`; 0.34.0 in parentheses):
+Allocation storms, crystal-metric (process-fresh whole-process wall time, 7 interleaved reps, 12 CPUs, Crystal 1.21.0, 2026-10-14 — `bench/log/linux/2026-10-14-0.36-integration-ab/`; 0.35.0 from the same session in parentheses):
 
 | Bench | gcry speed vs Boehm | peak RSS × Boehm |
 |-------|--------------------:|-----------------:|
-| Primes | **100%** (42%) | 0.94× |
-| JsonParsePure | **91%** (42%) | 0.83× |
-| Binarytrees | **94%** (81%) | 0.76× |
-| JsonGenerate | **105%** (105%) | 0.70× |
-| JsonParseSerializable | 88% (89%) | 0.92× |
-| JsonParsePull | 91% (93%) | 0.92× |
-| Revcomp | 84% (82%) | 0.64× |
-| RegexDna | 99% (100%) | 0.53× |
+| Primes | **101%** (97%) | 0.93× |
+| JsonParsePure | **102%** (98%) | 0.80× |
+| Binarytrees | **101%** (102%) | 0.76× |
+| JsonGenerate | **106%** (101%) | 0.63× |
+| JsonParseSerializable | **106%** (102%) | 0.77× |
+| JsonParsePull | **103%** (98%) | 0.79× |
+| Revcomp | 92% (95%) | 0.60× |
+| RegexDna | 98% (100%) | 0.53× |
 
-The `realloc` page move (`GCRY_REALLOC_MOVE=1`, opt-in, unsafe for programs that read a buffer after growing it — the stdlib does) gives JsonGenerate 112%, and part of JsonParseSerializable and Revcomp back. Since 0.36.0 a large `realloc` growth grows in place by default instead, keeping the old pointer valid: −17% peak RSS and −24% faults on the JSON parse rows (`bench/log/linux/2026-10-14-realloc-in-place/`); the table above predates it.
+The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.36.0: it keeps the old pointer valid, unlike the opt-in page move (`GCRY_REALLOC_MOVE=1`, unsafe for programs that read a buffer after growing it — the stdlib does) (`bench/log/linux/2026-10-14-realloc-in-place/`). Revcomp's −3 points are code placement: Brainfuck, which allocates nothing, swings 5% between the same builds.
 
 ### macOS (Apple Silicon)
 
