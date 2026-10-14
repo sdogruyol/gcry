@@ -2355,7 +2355,7 @@ module Gcry
       # Guarded by `bytes_since_gc >= gc_threshold / 4` so an idle path that
       # just happened to cross 75% doesn't repeatedly enter a barely-empty
       # incremental cycle.
-      bsg = @bytes_since_gc.get
+      bsg = bytes_since_gc_now
       if @incremental_auto &&
          bsg >= (@gc_threshold >> 2) &&
          bsg >= (@gc_threshold - (@gc_threshold >> 2))
@@ -2630,7 +2630,7 @@ module Gcry
 
     private def debt_under_threshold?(major : Bool) : Bool
       if major
-        @bytes_since_gc.get < @gc_threshold
+        bytes_since_gc_now < @gc_threshold
       else
         @nursery_alloc_bytes.get < @nursery_threshold
       end
@@ -3297,7 +3297,7 @@ module Gcry
 
     private def note_collection_begin : Nil
       @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
-      @bytes_before_gc = @bytes_since_gc.get
+      @bytes_before_gc = bytes_since_gc_now
       @bytes_reclaimed_since_gc = 0_u64
       @precise_stack_roots_marked = 0_u64
       @parked_fp_fill_frames = 0_u64

@@ -71,16 +71,32 @@ module Gcry
 
     def bytes_since_gc : UInt64
       credit_all_cursor_sets
-      @bytes_since_gc.get
+      bytes_since_gc_now
     end
 
     def live_objects : UInt64
       credit_all_cursor_sets
-      n = @live_objects.get
       # Wrapped below zero only while a free has been subtracted ahead of the
       # credit for the allocation it pairs with (`live_objects_sub`); zero
       # until that credit lands.
+      Heap.wrapped_as_zero(@live_objects.get)
+    end
+
+    # A counter that frees subtract from without saturating (`live_objects_sub`,
+    # `bytes_since_gc_sub`) can stand below zero, which as a `UInt64` is a
+    # value above `Int64::MAX` no heap reaches; it reads as zero.
+    @[AlwaysInline]
+    def self.wrapped_as_zero(n : UInt64) : UInt64
       n > Int64::MAX.to_u64 ? 0_u64 : n
+    end
+
+    # `@bytes_since_gc` as every collection decision reads it: as it stands,
+    # without crediting the cursor sets, and wrapped reading as zero. Every
+    # reader goes through here (or the public reader, which credits first);
+    # the hit path adds its own set's uncredited bytes before clamping.
+    @[AlwaysInline]
+    protected def bytes_since_gc_now : UInt64
+      Heap.wrapped_as_zero(@bytes_since_gc.get)
     end
 
     # Hold `@index_lock` for `ms` milliseconds, so a test can produce the one
@@ -1514,7 +1530,16 @@ module Gcry
         return Pointer(Void).null
       end
       local = set.value.bytes_local &+ payload
-      if @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited) >= @gc_threshold
+      # Wrapped (a free subtracted ahead of a credit) reads as zero, as it does
+      # for every reader (`bytes_since_gc_now`); with this set's uncredited
+      # bytes added, a wrap this thread's own frees caused is already undone.
+      # The clamp is asked second, and out of line: a clamped value is never
+      # above the raw one, so the raw comparison alone keeps every allocation
+      # under the threshold on the hit path. Inlined, the two comparisons
+      # cost 64-byte allocation-only churn 1.7% (6.465 → 6.575 ns/alloc,
+      # median of 12 interleaved runs); out of line, 6.455 → 6.460.
+      debt = @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited)
+      if debt >= @gc_threshold && debt_at_threshold?(debt)
         @fast_miss_threshold &+= 1
         return Pointer(Void).null
       end
@@ -1560,6 +1585,13 @@ module Gcry
       s.value.in_flight = Pointer(Void).null
       user
     end
+    # The hit path's threshold test for a raw *debt* already at or above the
+    # threshold: true unless it is a wrapped counter, which reads as zero.
+    @[NoInline]
+    private def debt_at_threshold?(debt : UInt64) : Bool
+      Heap.wrapped_as_zero(debt) >= @gc_threshold
+    end
+
 
     FAST_PATH_MAX = 32768_u64
     @fast_path = false
@@ -1736,17 +1768,28 @@ module Gcry
         @free_bytes.lazy_set(cur >= n ? cur - n : 0_u64)
       end
     end
+    # Never saturates, for the reason `live_objects_sub` gives: an allocation
+    # on the hit path reaches `@bytes_since_gc` only when its cursor set is
+    # credited, and a free subtracts at once. Saturating at zero dropped the
+    # bytes freed ahead of their credit from the subtraction but not from the
+    # credit, so the counter stood that much above what was allocated and
+    # held, and the next collection came that much early: one thread
+    # allocating and freeing 819 200 bytes of 64-byte blocks right after a
+    # reset left it at 246 272 instead of 0, 3 of 3 runs
+    # (process_spec/regression/72); eight threads left 1.47 to 1.70 MB.
+    #
+    # Unlike `@live_objects`, this counter is reset at every major, so a free
+    # of a block allocated before the reset also takes it below zero, and it
+    # stays there until as many bytes are allocated again — the counter is
+    # net allocation since the collection. It always was while above zero:
+    # a free was never told apart by the age of its block. Readers see a
+    # wrapped value as zero (`bytes_since_gc_now`).
 
     private def bytes_since_gc_sub(n : UInt64) : Nil
       if counters_atomic?
-        loop do
-          cur = @bytes_since_gc.get
-          nxt = cur > n ? cur - n : 0_u64
-          break if @bytes_since_gc.compare_and_set(cur, nxt)[1]
-        end
+        @bytes_since_gc.sub(n)
       else
-        cur = @bytes_since_gc.get
-        @bytes_since_gc.set(cur > n ? cur - n : 0_u64)
+        @bytes_since_gc.set(@bytes_since_gc.get &- n)
       end
     end
 
@@ -1869,7 +1912,7 @@ module Gcry
         sm = small_mapped_bytes
         sf = small_free_bytes
         sparse = sm > 0 && sf * 100 >= sm * @tight_grow_gc_pct.to_u64
-        if empty && sparse && @bytes_since_gc.get >= min_bsg
+        if empty && sparse && bytes_since_gc_now >= min_bsg
           @tight_grow_collects &+= 1
           collect(scan_stack: true)
         end

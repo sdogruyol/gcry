@@ -3873,7 +3873,11 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       capacity and read ~0 with MBs free; fixed (`process_spec/regression/70`).
       `bytes_since_gc_sub` loses subtractions even on one thread (819 200
       bytes of net-zero churn left 253 968), which only brings a collection
-      forward and resets at every major; left as is.
+      forward and resets at every major. Fixed the same way on 2026-10-14:
+      the subtraction wraps, every reader clamps a wrapped value to 0
+      (`bytes_since_gc_now`), and the churn reads 0
+      (`process_spec/regression/72`); 114 collections instead of 115 on a
+      20M-allocation churn that frees one in four.
 - [x] **Two collector locks are unfair to a waiter under back-to-back
       collections (Windows, 2026-09-30).** Both were found with `cdb` on
       hung CI probes, and both are livelocks: the collector was still

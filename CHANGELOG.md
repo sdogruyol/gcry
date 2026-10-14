@@ -44,6 +44,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as 0 (`68_live_objects_free_uncredited_spec.cr`). `malloc`/`free` pairs
   on one thread: 38.4 → 37.9 ns.
 
+- **A `free` no longer loses its `bytes_since_gc` subtraction.** The same
+  race as `live_objects` above, and it needs no second thread: the counter
+  starts every cycle at zero, so the first frees after a collection find it
+  below the bytes their thread allocated but has not credited yet. The
+  subtraction saturated at zero while the later credit added the full
+  amount, so the counter stood above what was allocated and held, and the
+  next collection came early. One thread allocating and freeing 819 200
+  bytes of 64-byte blocks right after a collection left it at 246 272
+  instead of 0, 3 of 3 runs (`72_bytes_since_gc_free_uncredited_spec.cr`).
+  The subtraction now wraps and every reader, the collection trigger
+  included, reads a counter below zero as 0. A free of a block allocated
+  before the last collection can now hold it below zero until as many bytes
+  are allocated again, the same net-allocation meaning it always had above
+  zero. In a loop of `malloc`/`free` pairs the lost bytes piled up until
+  the counter sat 32 bytes under the threshold, never reaching it, so
+  19 868 940 of 20 000 000 allocations left the hit path for the locked one
+  on the threshold check; now none do. Release builds, 10 interleaved runs
+  each, 20M operations: that pair loop 65.1 → 38.7 ns, 64-byte
+  allocation-only churn 6.49 → 6.50 ns with 152 collections both, the same
+  churn freeing one allocation in four 115 → 114 collections at 15.1 →
+  15.2 ns, and 1M `String.build` calls 76 collections both at 315 → 321 ns
+  (spread 313–324 against 316–326).
+
 - **`free_bytes` says how much of the heap is free on the default layout.**
   A size-class chunk's capacity was added to the counter only by the header
   allocator. The bitmap allocator mapped its chunks without it, so every
