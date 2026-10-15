@@ -18,6 +18,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   examples and its compiler_spec 13 764 under gcry, 0 failures (run
   38721725009, `bench/log/linux/2026-10-15-crystal-1.22/`).
 
+- **`Perf A/B` measures against Boehm on any runner, macOS and Windows
+  included.** `perf-ab.yml` takes an `os` input (a JSON list of runners;
+  the default is still the Linux x86-64 and aarch64 pair) and builds a
+  stock-Crystal Boehm arm next to the two gcry revisions, so each job
+  prints speed as % of Boehm and peak memory × Boehm, medians of per-rep
+  paired ratios with their interquartile range, and uploads every run as
+  `perf-ab-<os>`. Peak memory is GNU `time`'s `%M` on Linux (a child of the
+  Python driver otherwise inherits its ~20 MiB high-water mark through
+  `exec`), `ru_maxrss` on macOS and `PeakWorkingSetSize` on Windows, where
+  `ab.sh` runs under Git Bash. `kemal_trials` adds Kemal `/json` and `/`
+  under `wrk` (Linux, macOS), and `var_env` a fourth arm, the ref's binary
+  under extra environment, to attribute a change to one default. Each run
+  also records its collections and the bytes each one scanned.
+
+- **0.36.0 measured natively on macOS and Windows.** GitHub runners, Boehm,
+  0.35.0 and 0.36.0, 15 interleaved reps
+  (`bench/log/{macos,windows}/2026-10-15-0.36-native/`, run 38723935225).
+  macOS arm64 (M1): crystal-metric at 78–100% of Boehm, the JSON rows up
+  2–5 points on 0.35.0 (JsonParseSerializable 94% → 99%), JsonGenerate's
+  peak 0.74× → 0.64×; Kemal `/json` 102.1% (0.35.0 102.8%) at 1.94× peak
+  resident size, `/` 100.3%. macOS Intel: 90–98%, nothing slower than
+  0.35.0 beyond the spread. Windows x86_64: 94–105% (Knuckeotide 89%),
+  peak working set 13–17% lower on the buffer-growing rows (JsonGenerate
+  0.70× → 0.58×). Two rows are slower beyond their spread. Primes, +2.6%
+  wall on arm64 and +2.8% on Windows, is where its collections fall:
+  in-place `realloc` growth charges the allocation counter only what a
+  growth adds, the collections move, and a trie whose live set only grows
+  is scanned at later points (Σ scanned 509 → 602 MiB on Windows at 8
+  collections; on Intel, Linux and another arm64 runner the same shift
+  drops a collection instead and Primes runs faster). Windows Revcomp's
+  timed section is +7.7%: a commit-by-commit A/B puts the step at the
+  large back-link commit but swings ±12% between builds that share
+  Revcomp's code, so the cause, code placement or data alignment, is open.
+
 ### Changed
 
 - **The serial mark drains its stack in batches.** It popped one entry at

@@ -3972,7 +3972,20 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       peak RSS (and Linux to 106%), so most of the gap is the RSS-budget
       decision above; ~5-10% of mutator time is left, with the allocation fast
       path faster than Boehm's in isolation
-      (`bench/log/macos/2026-10-03-binarytrees-mutator/`).
+      (`bench/log/macos/2026-10-03-binarytrees-mutator/`). Re-measured on
+      0.36.0 on the `macos-latest` runner (M1, 3 vCPUs), 15 interleaved
+      reps: 78% at 1.78× Boehm's 39 MiB peak, 80% on 0.35.0; Intel
+      `macos-15-intel` 91%, Windows x86_64 94% at 0.94×
+      (`bench/log/{macos,windows}/2026-10-15-0.36-native/`).
+- [ ] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
+      (2026-10-15).** Whole-process wall +3.4%; macOS shows none of it.
+      Against each commit between the releases (12 reps each), the last
+      fast build is `b1cdc0ed`, so the step is `49788b15` (large back-link,
+      large objects 64 bytes into their mapping); but `0a0e3165`, which adds
+      a `Heap` field and a branch to the counters, is as slow as 0.36.0 and
+      the next commit fast again: ±12% between builds that share Revcomp's
+      code. Code placement or data alignment, open; `GCRY_REALLOC_IN_PLACE=0`
+      does not recover it (`bench/log/windows/2026-10-15-0.36-native/`).
 - [ ] **Per-collection mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-15).** With one marker gcry's Σ mark is now 0.37×
       Boehm's single marker on Primes, 0.47× on JsonParsePure, 0.62× on
@@ -4511,7 +4524,7 @@ Target: Crystal compiler defaults to gcry on Linux.
 - [ ] **Crystal defaults to gcry on Linux** — no `-Dgc_none` required
 - [ ] **Full concurrent collection** — no STW pause at any heap size
 - [ ] **Moving / compacting collector** — after precise roots are stable
-- [ ] **Windows parity** — process GC ships since #38 (x86_64 MSVC, ARM64 GNU); parity still needs the incremental barrier (no soft-dirty), workload benchmarks, and fork/signal-diagnostic equivalents
+- [ ] **Windows parity** — process GC ships since #38 (x86_64 MSVC, ARM64 GNU); parity still needs the incremental barrier (no soft-dirty), workload benchmarks on physical hardware and on ARM64, Kemal on a native Windows host (x86_64 crystal-metric is measured on the `windows-latest` runner since 2026-10-15: 94–105% of Boehm on 0.36.0, `bench/log/windows/2026-10-15-0.36-native/`), and fork/signal-diagnostic equivalents
 - [ ] **Conference talks** — CrystalConf, FOSDEM, local meetups
 - [ ] **MacOS default consideration** — platform-by-platform rollout
 
