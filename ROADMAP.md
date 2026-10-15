@@ -3965,6 +3965,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       −24% on the JSON parse rows, now fewer faults than Boehm; Revcomp −6% /
       −7%. Revcomp's remaining ~55k faults over Boehm come from fresh large
       `String` allocations, not realloc chains.
+- [x] **Revcomp's 95% → 92% of Boehm from 0.35.0 to 0.36.0 on Linux
+      (2026-10-14) — code placement, settled 2026-10-15.** perf has no
+      counters on the QEMU host (no PMU, `perf_event_paranoid` 4), so the
+      evidence is instruction counts and a placement probe. In callgrind,
+      0.36.0 runs 0.14% fewer instructions than 0.35.0, and gcry's code is
+      2.8–3.0% of them in every build. gcry's counters are identical across
+      the 0.36.0 commits: 22 collections, 2.1–2.4 ms of total pause.
+      v0.36.0's own source, padded with 16 or 2 096 bytes of nops ahead of
+      the program's code, reads 2.144 and 2.019 s (6.2%) in two sessions.
+      The back-link's 64-byte object start costs nothing: rebuilt at 96 and
+      112 it reads within 0.4%
+      (`bench/log/linux/2026-10-15-revcomp-attribution/`).
 - [ ] **macOS: Binarytrees runs at ~80% of Boehm (2026-10-03, narrowed
       2026-10-05).** User CPU equals wall time and system time is the same as
       Boehm's, so nothing blocks; parallel mark does not help (four workers

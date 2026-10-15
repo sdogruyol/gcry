@@ -229,7 +229,7 @@ Allocation storms, crystal-metric (process-fresh whole-process wall time, 7 inte
 | Revcomp | 92% (95%) | 0.60× |
 | RegexDna | 98% (100%) | 0.53× |
 
-The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.36.0: it keeps the old pointer valid, unlike the opt-in page move (`GCRY_REALLOC_MOVE=1`, unsafe for programs that read a buffer after growing it — the stdlib does) (`bench/log/linux/2026-10-14-realloc-in-place/`). Revcomp's −3 points are code placement: Brainfuck, which allocates nothing, swings 5% between the same builds.
+The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.36.0: it keeps the old pointer valid, unlike the opt-in page move (`GCRY_REALLOC_MOVE=1`, unsafe for programs that read a buffer after growing it — the stdlib does) (`bench/log/linux/2026-10-14-realloc-in-place/`). Revcomp's −3 points are code placement. 0.36.0 executes 0.14% fewer instructions than 0.35.0 on it, gcry's code is 3% of them in both, and Revcomp's own timed section is 4–5% faster. Rebuilding 0.36.0 with nop padding in front of the program's code moves Revcomp by 6% with nothing else changed (`bench/log/linux/2026-10-15-revcomp-attribution/`).
 
 ### macOS (Apple Silicon)
 

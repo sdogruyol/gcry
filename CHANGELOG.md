@@ -52,6 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   large back-link commit but swings ±12% between builds that share
   Revcomp's code, so the cause, code placement or data alignment, is open.
 
+- **Revcomp's drop from 0.35.0 to 0.36.0 on Linux (95% → 92% of Boehm)
+  is code placement, now with counts.** perf has no counters on the QEMU
+  host (no PMU, `perf_event_paranoid` 4), so callgrind counts the
+  instructions. 0.36.0 runs 0.14% fewer than 0.35.0 (27.639 G against
+  27.678 G), gcry's code, inlined parts included, is 2.8–3.0% of them in
+  every build, and the simulated cache and branch misses don't rise.
+  gcry's heap counters are the same at every 0.36.0 commit: 22
+  collections, 2.1–2.4 ms of total pause, 14 in-place grows. Revcomp's
+  timed section is 4–5% faster than 0.35.0's in four interleaved sessions
+  (9–11 reps); whole-process time is 0–1.1% slower, all of it in building
+  the Fasta input. v0.36.0's own source, rebuilt with 16 or 2 096 bytes of
+  nops ahead of the program's code, reads 2.144 and 2.019 s, 6.2% apart
+  and the same in two sessions. Starting large objects at 96 or 112 bytes
+  instead of the back-link's 64 changes nothing on Linux (within 0.4%), so
+  the Linux numbers don't support data alignment
+  (`bench/log/linux/2026-10-15-revcomp-attribution/`).
+
 ### Changed
 
 - **The serial mark drains its stack in batches.** It popped one entry at
