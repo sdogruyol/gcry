@@ -481,19 +481,34 @@ Peak RSS × (median of per-bench peaks): **~0.63×**. Checksum `err` on Crystal 
 A shared development host makes small mark changes unreadable: identical
 product code measured +85% Σ mark against itself in one rep on a host running
 a 5-lane campaign. `Perf A/B` (`.github/workflows/perf-ab.yml`, manual only)
-builds crystal-metric against the dispatched ref and against a base revision
-on GitHub's x86-64 and aarch64 runners and runs both interleaved:
+builds crystal-metric three ways — gcry at the dispatched ref, gcry at a base
+revision, and stock Crystal (Boehm) — and runs them process-fresh, interleaved
+in random order per rep. The runners default to GitHub's Linux x86-64 and
+aarch64 pair; `os` takes any JSON list, macOS and Windows included:
 
 ```sh
 gh workflow run perf-ab.yml --ref my-branch -f base=origin/master
 # optional: -f reps=10 -f benches="Primes JsonParsePure Binarytrees JsonGenerate"
+#           -f os='["macos-latest","macos-15-intel","windows-latest"]'
+#           -f kemal_trials=15   # Kemal /json and / too (Linux, macOS)
+#           -f boehm=0           # skip the Boehm arm
 ```
 
-Each job prints `AB <bench>: mark … ms (±%); time … s (±%)`. Mark is Σ
-`mark_ns` from `GCRY_TRACE`; time is the benchmark's own timed section, which
-leaves out crystal-metric's setup. The same script runs anywhere:
-`AB_BASE=HEAD~1 bench/runner_ab/ab.sh`. Results it produced on 2026-10-03 are
-in `bench/log/linux/2026-10-03-mark-prefilter/`.
+Each job prints a table of speed (whole-process wall) as % of Boehm and peak
+memory × Boehm, medians of per-rep paired ratios with their interquartile
+range, then `AB <bench>: mark … ms (±%); time … s (±%)` for the ref against
+`base`. Mark is Σ `mark_ns` from `GCRY_TRACE`; time is the benchmark's own
+timed section, which leaves out crystal-metric's setup. Peak memory is GNU
+`time`'s `%M` on Linux (a child of the Python driver would inherit its ~20 MiB
+high-water mark through `exec`), `ru_maxrss` on macOS and `PeakWorkingSetSize`
+on Windows (not RSS: recommitted pages count again); the summary states the
+method's floor. Raw runs are the `perf-ab-<os>` artifact. Only `src/` comes
+from `base`, so a release is measured by dispatching on a branch whose `src/`
+is that release, with the older tag as `base`. The same script runs anywhere,
+Git Bash on Windows included: `AB_BASE=HEAD~1 bench/runner_ab/ab.sh`. Results
+it produced are in `bench/log/linux/2026-10-03-mark-prefilter/` and, for
+0.36.0 against 0.35.0 on macOS and Windows,
+`bench/log/{macos,windows}/2026-10-15-0.36-native/`.
 
 ## How to record (Linux)
 

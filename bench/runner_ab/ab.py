@@ -51,9 +51,10 @@ if WIN:
     psapi.GetProcessMemoryInfo.argtypes = [wt.HANDLE, ctypes.POINTER(PMC), wt.DWORD]
 
 
-def run_one(exe, bench, trace, args=None):
+def run_one(exe, bench, trace, args=None, extra_env=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GCRY_")}
     env.update(GCRY_TRACE="1", GCRY_TRACE_ALLOC_SAMPLE="0", GCRY_TRACE_FILE=trace)
+    env.update(extra_env or {})
     if os.path.exists(trace):
         os.remove(trace)
     cmd = [exe] + ([bench] if args is None else args)
@@ -91,11 +92,12 @@ def run_one(exe, bench, trace, args=None):
             peak = int(f.read().split()[-1]) * 1024
         os.remove(hwm)
     m = [x for x in LINE.finditer(text) if x.group(1) == bench]
-    mark = None
+    mark = collections = None
     if os.path.exists(trace):
         with open(trace) as f:
-            mark = sum(json.loads(l)["mark_ns"] for l in f if '"collect_end"' in l) / 1e6
-    r = dict(rc=rc, wall=wall, peak=peak, mark=mark, time=None, result=None)
+            ends = [json.loads(l) for l in f if '"collect_end"' in l]
+        mark, collections = sum(e["mark_ns"] for e in ends) / 1e6, len(ends)
+    r = dict(rc=rc, wall=wall, peak=peak, mark=mark, collections=collections, time=None, result=None)
     if m:
         r["time"] = float(m[-1].group(4))
         r["result"] = "ok" if m[-1].group(2) == "ok" else m[-1].group(3).strip()
@@ -144,14 +146,15 @@ def summarize(rows, benches, arms, floor):
             notes.append(f"- {b}: failed runs (arm, rep): {bad}")
     if "base" in arms and "var" in arms:
         lines += ["", "`var` against `base` (paired, per rep):", "",
-                  "| bench | time (timed section) | wall | peak | Σ mark |", "|---|---:|---:|---:|---:|"]
+                  "| bench | time (timed section) | wall | peak | Σ mark | collections |",
+                  "|---|---:|---:|---:|---:|---:|"]
         for b in benches:
             br, vr = by.get((b, "base"), {}), by.get((b, "var"), {})
             reps = sorted(set(br) & set(vr))
             if not reps:
                 continue
             cells = []
-            for k in ("time", "wall", "peak", "mark"):
+            for k in ("time", "wall", "peak", "mark", "collections"):
                 xs = [vr[i][k] / br[i][k] - 1 for i in reps if vr[i][k] and br[i][k]]
                 cells.append("n/a" if not xs else "{1:+.1%} [{0:+.1%}, {2:+.1%}]".format(*quart(xs)))
             lines.append(f"| {b} | " + " | ".join(cells) + " |")
@@ -166,10 +169,15 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--reps", type=int, default=10)
     ap.add_argument("--arm", action="append", required=True, help="name=path")
+    ap.add_argument("--arm-env", nargs=2, action="append", default=[], metavar=("NAME", "K=V"),
+                    help="extra environment for one arm, e.g. --arm-env var_env GCRY_REALLOC_IN_PLACE=0")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("benches", nargs="+")
     a = ap.parse_args()
     arms = dict(s.split("=", 1) for s in a.arm)
+    arm_env = {}
+    for name, kv in a.arm_env:
+        arm_env.setdefault(name, {}).update([kv.split("=", 1)])
     names = list(arms)
     os.makedirs(a.out, exist_ok=True)
     rnd = random.Random(a.seed)
@@ -178,22 +186,22 @@ def main():
     floor = None if WIN or not true else run_one(true, "", trace, args=[])["peak"]
     # One discarded run per binary: Windows Defender scans a fresh image on
     # its first launch, and every OS pages the binary in once.
-    for exe in arms.values():
-        run_one(exe, a.benches[0], trace)
+    for arm, exe in arms.items():
+        run_one(exe, a.benches[0], trace, extra_env=arm_env.get(arm))
     rows = []
     for rep in range(a.reps):
         for b in a.benches:
             order = names[:]
             rnd.shuffle(order)
             for arm in order:
-                r = run_one(arms[arm], b, trace)
+                r = run_one(arms[arm], b, trace, extra_env=arm_env.get(arm))
                 r.update(rep=rep, bench=b, arm=arm)
                 rows.append(r)
                 if "output" in r:
                     print(f"WARN rep {rep} {b} {arm}: rc={r['rc']}\n{r['output']}", file=sys.stderr, flush=True)
         print(f"rep {rep + 1}/{a.reps} done", file=sys.stderr, flush=True)
         with open(os.path.join(a.out, "runs.json"), "w") as f:
-            json.dump(dict(arms=arms, benches=a.benches, reps=a.reps, platform=sys.platform, floor=floor,
+            json.dump(dict(arms=arms, arm_env=arm_env, benches=a.benches, reps=a.reps, platform=sys.platform, floor=floor,
                            peak_method="PeakWorkingSetSize" if WIN else "GNU time %M" if LINUX_TIME else "ru_maxrss",
                            runs=rows), f, indent=0)
     summary = summarize(rows, a.benches, names, floor)

@@ -47,6 +47,12 @@ if [ "${AB_BOEHM:-1}" != 0 ]; then
   build . ab-boehm
   arms+=(--arm "boehm=$root/bin/ab-boehm$exe")
 fi
+# AB_VAR_ENV="K=V K=V" adds a `var_env` arm: the `var` binary under that
+# environment, e.g. GCRY_REALLOC_IN_PLACE=0 to see what one default costs.
+if [ -n "${AB_VAR_ENV:-}" ]; then
+  arms+=(--arm "var_env=$root/bin/ab-var$exe")
+  for kv in $AB_VAR_ENV; do arms+=(--arm-env var_env "$kv"); done
+fi
 crystal --version
 # shellcheck disable=SC2086 # AB_BENCHES is a space-separated list
 "$py" bench/runner_ab/ab.py --out "$out" --reps "${AB_REPS:-10}" "${arms[@]}" \

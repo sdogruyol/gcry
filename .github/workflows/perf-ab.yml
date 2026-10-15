@@ -22,6 +22,8 @@ name: Perf A/B
 # memory is PeakWorkingSetSize, not RSS (bench/runner_ab/ab.py). `kemal_trials`
 # above 0 also runs Kemal `/json` and `/` under wrk with the same three arms
 # (Linux and macOS only; Windows has no wrk and skips it).
+# `var_env` adds a fourth arm, the ref's binary under extra environment
+# (`-f var_env=GCRY_REALLOC_IN_PLACE=0`), to attribute a change to one default.
 on:
   workflow_dispatch:
     inputs:
@@ -43,6 +45,9 @@ on:
       kemal_trials:
         description: "Kemal /json and / A/B trials per arm (0 = skip; not on Windows)"
         default: "0"
+      var_env:
+        description: 'Extra arm: the ref under this environment, e.g. "GCRY_REALLOC_IN_PLACE=0" (empty = none)'
+        default: ""
 
 jobs:
   ab:
@@ -83,6 +88,7 @@ jobs:
           AB_REPS: ${{ inputs.reps }}
           AB_BENCHES: ${{ inputs.benches }}
           AB_BOEHM: ${{ inputs.boehm }}
+          AB_VAR_ENV: ${{ inputs.var_env }}
           AB_KEMAL_TRIALS: ${{ runner.os != 'Windows' && inputs.kemal_trials || '0' }}
           AB_OUT: bench/log/_ab
         run: bench/runner_ab/ab.sh
