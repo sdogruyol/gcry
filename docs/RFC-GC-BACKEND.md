@@ -162,6 +162,8 @@ method).
 larger zeroed granule; an allocator with exact size classes exposes it as
 `EFAULT` (`src/gcry/crystal_process_compat.cr:1-9`, gcry issue #14).
 Proposed: allocate `args.size + 1`. A one-line fix independent of this RFC.
+Fixed in Crystal 1.22.0 (crystal-lang/crystal#17184); gcry's reopen now
+applies only below that version.
 
 ### 3.3 `String::Builder#to_s` writes its terminator past the buffer (stdlib)
 

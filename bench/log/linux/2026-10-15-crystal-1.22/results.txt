@@ -1,0 +1,55 @@
+# Crystal 1.22.0 evidence (raw lines)
+
+## Local, x86_64 Linux, one run each under the shared heavy lock (commit 860cc03a)
+noshim = copy of src/ with crystal_process_compat.cr gated to {% if false %}; gated = the commit
+s73_121_gated_-Dgcry_block_headers           1 examples, 0 failures, 0 errors, 0 pending | exit 0
+s73_121_gated_headerless                     1 examples, 0 failures, 0 errors, 0 pending | exit 0
+s73_121_noshim_-Dgcry_block_headers          1 examples, 1 failures, 0 errors, 0 pending | exit 1
+s73_121_noshim_headerless                    1 examples, 1 failures, 0 errors, 0 pending | exit 1
+s73_122_gated_-Dgcry_block_headers           1 examples, 0 failures, 0 errors, 0 pending | exit 0
+s73_122_gated_headerless                     1 examples, 0 failures, 0 errors, 0 pending | exit 0
+s73_122_noshim_-Dgcry_block_headers          1 examples, 0 failures, 0 errors, 0 pending | exit 0
+s73_122_noshim_headerless                    1 examples, 0 failures, 0 errors, 0 pending | exit 0
+unit_122                                     294 examples, 0 failures, 0 errors, 0 pending | exit 0
+proc_122                                     200 examples, 0 failures, 0 errors, 0 pending | exit 0
+proc_122_hdr                                 201 examples, 0 failures, 0 errors, 0 pending | exit 0
+allspecs_121                                 281 examples, 0 failures, 0 errors, 0 pending | exit 0
+proc_121                                     200 examples, 0 failures, 0 errors, 0 pending | exit 0
+  (s73 = process_spec/regression/73_execve_argv_terminator_spec.cr -Dgc_none [layout]; unit_122 = crystal 1.22.0 spec; proc_122[_hdr] = 1.22.0 spec -Dgc_none [-Dgcry_block_headers] process_spec; allspecs_121/proc_121 = 1.21.0 gate runs)
+
+## CI run 38721725009 (branch ci-hygiene-0.37, 860cc03a), spec counts in step order
+-- test job crystal 1.21.0, job 116377658427
+Crystal 1.21.0 [57cf7da50] (2026-07-16)
+294 examples, 0 failures, 0 errors, 0 pending
+200 examples, 0 failures, 0 errors, 0 pending
+316 examples, 0 failures, 0 errors, 0 pending
+316 examples, 0 failures, 0 errors, 0 pending
+201 examples, 0 failures, 0 errors, 0 pending
+201 examples, 0 failures, 0 errors, 0 pending
+316 examples, 0 failures, 0 errors, 0 pending
+201 examples, 0 failures, 0 errors, 0 pending
+-- test job crystal 1.22.0, job 116377658235
+Crystal 1.22.0 [39f3f4d08] (2026-10-12)
+294 examples, 0 failures, 0 errors, 0 pending
+200 examples, 0 failures, 0 errors, 0 pending
+316 examples, 0 failures, 0 errors, 0 pending
+316 examples, 0 failures, 0 errors, 0 pending
+201 examples, 0 failures, 0 errors, 0 pending
+201 examples, 0 failures, 0 errors, 0 pending
+316 examples, 0 failures, 0 errors, 0 pending
+201 examples, 0 failures, 0 errors, 0 pending
+
+-- std_spec crystal 1.22.0, job 116377658486
+Crystal 1.22.0 [39f3f4d08] (2026-10-12)
+std_spec: Crystal 1.22.0 [39f3f4d08] (2026-10-12), backend gcry, 4 chunk(s), source /home/runner/work/gcry/gcry/.std-spec/crystal-39f3f4d08
+3761 examples, 0 failures, 0 errors, 0 pending
+5662 examples, 0 failures, 0 errors, 24 pending
+2715 examples, 0 failures, 0 errors, 2 pending
+6119 examples, 0 failures, 0 errors, 4 pending
+
+## Local, Crystal 1.22.0: do the other two reopens still apply? (nocompat = copy of src/ with that compat's require removed from src/gcry.cr)
+s13_122_compat                               1 examples, 0 failures, 0 errors, 0 pending | exit 0
+s13_122_nocompat                             1 examples, 0 failures, 1 errors, 0 pending | exit 1
+s22_122_compat                               3 examples, 0 failures, 0 errors, 0 pending | exit 0
+s22_122_nocompat                             3 examples, 3 failures, 0 errors, 0 pending | exit 1
+  (s13 = 13_rescue_string_new_null_spec.cr, @[Raises] reopen; s22 = 22_string_builder_terminator_spec.cr, String::Builder reopen; both -Dgc_none)

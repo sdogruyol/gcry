@@ -1,0 +1,35 @@
+FFF
+
+Failures:
+
+  1) String::Builder under gcry's exact size classes keeps the terminator inside the string's own block when the content fills a grown buffer
+     Failure/Error: terminator_owned?(s).should be_true, failure_message: "String.build of #{n} bytes"
+
+       String.build of 116 bytes
+
+     # process_spec/regression/22_string_builder_terminator_spec.cr:51
+
+  2) String::Builder under gcry's exact size classes keeps it there when the content fills the initial capacity
+     Failure/Error: terminator_owned?(s).should be_true, failure_message: "String.build(#{n - 1}) of #{n} bytes"
+
+       String.build(3) of 4 bytes
+
+     # process_spec/regression/22_string_builder_terminator_spec.cr:59
+
+  3) String::Builder under gcry's exact size classes is not ended early by a write to the next block
+     Failure/Error: LibC.strlen(s.to_unsafe).should eq(116)
+
+       Expected: 116
+            got: 245
+
+     # process_spec/regression/22_string_builder_terminator_spec.cr:76
+
+Finished in 1.03 milliseconds
+3 examples, 3 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/22_string_builder_terminator_spec.cr:47 # String::Builder under gcry's exact size classes keeps the terminator inside the string's own block when the content fills a grown buffer
+crystal spec process_spec/regression/22_string_builder_terminator_spec.cr:55 # String::Builder under gcry's exact size classes keeps it there when the content fills the initial capacity
+crystal spec process_spec/regression/22_string_builder_terminator_spec.cr:63 # String::Builder under gcry's exact size classes is not ended early by a write to the next block
+exit 1

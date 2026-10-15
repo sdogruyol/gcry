@@ -4063,7 +4063,12 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       ceiling" above (Darwin acik ~18×; Linux tip ~1–1.6× via finalizer + retain=0,
       freelist residual; spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md))
 - [x] **Windows x86_64 + ARM64 process GC** — native backend + unit/process/sample CI
-- [x] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows x86_64 + ARM64
+- [x] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows x86_64 + ARM64.
+      Compilers: 1.21.0 pinned everywhere; since 2026-10-15 also 1.22.0 for
+      the unit and process specs, `std_spec` and the gcry-built compiler.
+      On 1.22.0 the execve argv reopen is gated off (fixed upstream); the
+      `String::Builder` and `@[Raises]` reopens still fail their specs without
+      them (`bench/log/linux/2026-10-15-crystal-1.22/`)
 - [x] **Benchmark regression alerts** — comparator gating against a measured baseline since 2026-09-13 (Linux; Darwin needs a baseline of its own)
 - [ ] **Crystal compiler PR: `-Dgc_gcry` flag** — opt-in flag recognized by the compiler
       (no-op alias for `-Dgc_none`; ecosystem signal that gcry is real)

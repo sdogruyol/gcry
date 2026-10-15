@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CI runs on Crystal 1.22.0.** A new `specs (x86_64, crystal 1.22.0)` job
+  runs the unit and process GC specs on every layout and allocator arm
+  `test` runs them in, plus `make bitmap-marks-freelist`; `std-spec` and
+  `compiler built with gcry` gain a pinned 1.22.0 leg next to 1.21.0, so the
+  newest release keeps coverage once `latest` moves on. On 1.22.0 the spec
+  counts match 1.21.0's in every arm, Crystal's std suite passes 18 257
+  examples and its compiler_spec 13 764 under gcry, 0 failures (run
+  38721725009, `bench/log/linux/2026-10-15-crystal-1.22/`).
+
 ### Changed
 
 - **The serial mark drains its stack in batches.** It popped one entry at
@@ -19,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   floor (Binarytrees −15%). `GCRY_PREFETCH=0` now scans the same batches
   without prefetches. The mark stack's high-water mark was unchanged on all
   four (`bench/log/linux/2026-10-15-mark-cost/`).
+
+- **The `execve` argv reopen applies only before Crystal 1.22.0.** 1.22.0
+  allocates the NULL terminator `execve` needs itself
+  (crystal-lang/crystal#17184), so on it and later
+  `src/gcry/crystal_process_compat.cr` no longer replaces the fixed stdlib
+  method with a copy of it. `73_execve_argv_terminator_spec.cr` checks that
+  the terminator slot lies inside argv's own block and is NULL for one to
+  eight arguments; with the reopen removed it fails on 1.21.0 and passes on
+  1.22.0. The `String::Builder` and `@[Raises]` reopens stay on every
+  version: their upstream fixes (crystal-lang/crystal#17645, #17644) are not
+  in 1.22.0.
 
 ### Fixed
 
