@@ -20,6 +20,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without prefetches. The mark stack's high-water mark was unchanged on all
   four (`bench/log/linux/2026-10-15-mark-cost/`).
 
+### Fixed
+
+- **The Windows gates jobs no longer fail after their specs pass.** The
+  Makefile targets those jobs run still called `crystal spec`, which deletes
+  the image it just ran; on the Windows runners a handle on that image can
+  outlive the process, and `make bitmap-marks-freelist` failed that way on
+  windows arm64 on 2026-10-14 with `0 failures` printed ("Error deleting
+  file ... crystal-run-spec.tmp.exe", run 38633380085; the rerun passed).
+  `ci/windows.ps1` has avoided it for its own runs since 0.27.0. Every spec
+  run in the Makefile (`spec`, `spec-process`, `invariants`,
+  `bitmap-marks-freelist`, `kernels-broken`) now goes through
+  `ci/crystal-spec.sh`, which is plain `crystal spec` except on Windows,
+  where it builds the specs under a name of their own through an entry file
+  of `require`s and runs the binary, so there is nothing to delete.
+  `GCRY_SPEC_BUILD=1` takes that path on any host. Example counts are
+  unchanged: on Linux 294, 316, 201 and 13 either way; on the Windows gates
+  jobs `bitmap-marks-freelist` still runs 310 + 160 (x86_64) and 308 + 160
+  (arm64) examples (run 38721725009 against master's 38709043581;
+  `bench/log/windows/2026-10-15-spec-image-delete/`).
+
 ## [0.36.0] - 2026-10-15
 
 ### Fixed

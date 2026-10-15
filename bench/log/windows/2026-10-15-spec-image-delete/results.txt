@@ -1,0 +1,35 @@
+# Example counts, `crystal spec` vs ci/crystal-spec.sh build-then-run
+
+## Linux local (x86_64, Crystal 1.21.0, GCRY_SPEC_BUILD=1 forces the build path), commit 860cc03a
+v3_bmf_proc_build            201 examples, 0 failures, 0 errors, 0 pending | exit 0
+v3_bmf_proc_plain            201 examples, 0 failures, 0 errors, 0 pending | exit 0
+v3_bmf_unit_build            316 examples, 0 failures, 0 errors, 0 pending | exit 0
+v3_bmf_unit_plain            316 examples, 0 failures, 0 errors, 0 pending | exit 0
+v3_kernels_build             13 examples, 0 failures, 0 errors, 0 pending | exit 0
+v3_kernels_plain             13 examples, 0 failures, 0 errors, 0 pending | exit 0
+v3_spec_build                294 examples, 0 failures, 0 errors, 0 pending | exit 0
+v3_spec_plain                294 examples, 0 failures, 0 errors, 0 pending | exit 0
+
+## Windows CI, make bitmap-marks-freelist spec lines
+before: run 38709043581 (master 233b3ad6, plain crystal spec)
+after:  run 38721725009 (ci-hygiene-0.37 860cc03a, ci/crystal-spec.sh)
+-- x86_64 job 116335569976
+GCRY_BITMAP=1 crystal spec -Dgcry_block_headers --error-trace
+310 examples, 0 failures, 0 errors, 4 pending
+GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
+160 examples, 0 failures, 0 errors, 0 pending
+-- x86_64 job 116377658974
+GCRY_BITMAP=1 CRYSTAL="crystal" BIN="bin" ci/crystal-spec.sh -Dgcry_block_headers --error-trace
+310 examples, 0 failures, 0 errors, 4 pending
+GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 CRYSTAL="crystal" BIN="bin" ci/crystal-spec.sh -Dgc_none -Dgcry_block_headers process_spec --error-trace
+160 examples, 0 failures, 0 errors, 0 pending
+-- arm64 job 116335570252
+GCRY_BITMAP=1 C:/a/_temp/crystal-windows-aarch64/bin/crystal.exe spec -Dgcry_block_headers --error-trace
+308 examples, 0 failures, 0 errors, 4 pending
+GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 C:/a/_temp/crystal-windows-aarch64/bin/crystal.exe spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
+160 examples, 0 failures, 0 errors, 0 pending
+-- arm64 job 116377659034
+GCRY_BITMAP=1 CRYSTAL="C:/a/_temp/crystal-windows-aarch64/bin/crystal.exe" BIN="bin" ci/crystal-spec.sh -Dgcry_block_headers --error-trace
+308 examples, 0 failures, 0 errors, 4 pending
+GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 CRYSTAL="C:/a/_temp/crystal-windows-aarch64/bin/crystal.exe" BIN="bin" ci/crystal-spec.sh -Dgc_none -Dgcry_block_headers process_spec --error-trace
+160 examples, 0 failures, 0 errors, 0 pending
