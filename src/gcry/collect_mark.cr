@@ -373,50 +373,49 @@ module Gcry
       end
     end
 
-    # Depth of the mark-loop prefetch ring. simdgc measured 16-32 as the knee
-    # (mark 23 -> 13 ms); past ~64 the line-fill buffers oversubscribe.
+    # Distance, in entries of a batch, at which a mark drain prefetches the
+    # object it will scan (`scan_batch_prefetched`). simdgc measured 16-32 as
+    # the knee (mark 23 -> 13 ms); past ~64 the line-fill buffers
+    # oversubscribe.
     MARK_PREFETCH_DEPTH = 16
 
-    # Serial mark drain with a fixed-depth software prefetch pipeline.
+    # Serial mark drain: up to `MarkStack::BATCH_ENTRIES` entries off the top
+    # of the stack, then scanned in that order with each one's payload
+    # prefetched `MARK_PREFETCH_DEPTH` entries ahead (`scan_batch_prefetched`,
+    # the parallel workers' batch scan); repeat until the stack is empty.
     #
-    # A plain LIFO drain pops an object and scans it immediately, so its cache
-    # line — random on a real graph, and mark is latency-bound not
-    # compute-bound (`simdgc-perf-notes.md`: 147 ns per dependent miss) — is
-    # loaded on the critical path every time.
+    # Mark is latency-bound, not compute-bound (`simdgc-perf-notes.md`: 147 ns
+    # per dependent miss), so the drain's job is to have the next objects'
+    # lines in flight while this one is scanned. Until 0.37.0 that was a
+    # 16-entry ring in front of a strict LIFO drain: one pop, prefetched, per
+    # scan. The batch scans the same objects in a different order — the
+    # newest grey objects together, then their children — and that order is
+    # cheaper on every heap measured. Σ mark per live object with one marker,
+    # 7 interleaved runs against the ring: Primes −23%, JsonParsePure −15%,
+    # JsonGenerate −11%, Binarytrees −18%. Batches of 64 and 256 kept less of
+    # it, and 4 096 no more (`bench/log/linux/2026-10-15-mark-cost/`).
     #
-    # The ring decouples pop from scan by `MARK_PREFETCH_DEPTH`: an object is
-    # prefetched when it enters, scanned when it leaves, and the K objects
-    # between hide the miss. The stack underneath stays strict LIFO, so depth is
-    # still bounded by graph depth — no BFS blow-up, no `MarkStack#grow` raising
-    # `OutOfMemoryError` (which allocates, the -Dgc_none deadlock). The ring is a
-    # fixed reorder buffer in front of scan, not a second work list.
+    # The stack is no longer strictly LIFO, so it can outgrow a depth-first
+    # drain's: each batch may push all of its children before any of them is
+    # popped, as the parallel workers' 256-entry pops always could. It is
+    # still `mmap`ed, and with one marker its mapped size at exit was the
+    # ring's on all four benchmarks (256 KiB to 16 MiB).
     #
-    # `GCRY_PREFETCH=0` selects the plain drain for A/B.
+    # `GCRY_PREFETCH=0` scans each batch without the prefetches, for A/B.
     @[AlwaysInline]
     private def serial_mark_drain : Nil
-      unless @mark_prefetch
-        until @mark_stack.empty?
-          scan_object(@mark_stack.pop)
+      stack = @mark_stack
+      batch = stack.batch_buffer
+      if batch.null?
+        # No batch buffer could be mapped: one entry at a time.
+        until stack.empty?
+          scan_object(stack.pop)
         end
         return
       end
-
-      ring = uninitialized StaticArray(BlockHeader*, MARK_PREFETCH_DEPTH)
-      head = 0
-      count = 0
-      stack = @mark_stack
-      loop do
-        while count < MARK_PREFETCH_DEPTH && !stack.empty?
-          h = stack.pop
-          prefetch_mark_entry(h)
-          ring[(head + count) % MARK_PREFETCH_DEPTH] = h
-          count += 1
-        end
-        break if count == 0
-        h = ring[head]
-        head = (head + 1) % MARK_PREFETCH_DEPTH
-        count -= 1
-        scan_object(h)
+      until stack.empty?
+        m = stack.pop_into(batch, MarkStack::BATCH_ENTRIES)
+        scan_batch_prefetched(batch, m, nil)
       end
     end
 

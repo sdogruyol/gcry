@@ -477,16 +477,17 @@ module Gcry
       push_to_shard(header, mark_shard(slot))
     end
 
-    # Scan a batch with the serial drain's prefetch (`prefetch_mark_entry`)
-    # of the object `MARK_PREFETCH_DEPTH` ahead, while this one
-    # scans. The batch scan had none, and mark is latency-bound — on 64-byte
-    # objects the serial drain is **27.6% slower** without its ring
-    # (`GCRY_PREFETCH=0`, t=+12.9), which is about the whole gap between two
+    # Scan a batch, prefetching (`prefetch_mark_entry`) the object
+    # `MARK_PREFETCH_DEPTH` ahead while this one scans. The parallel batch
+    # scan had no prefetch at first, and mark is latency-bound — on 64-byte
+    # objects the serial drain was **27.6% slower** without its prefetch
+    # (`GCRY_PREFETCH=0`, t=+12.9), which was about the whole gap between two
     # parallel workers and one serial one at that size
     # (`bench/log/linux/2026-09-23-parallel-mark-scaling/`). `GCRY_PREFETCH=0`
-    # turns this off too, so the A/B is one knob.
+    # turns this off too, so the A/B is one knob. The serial drain scans its
+    # batches here as well, with no shard (`serial_mark_drain`).
     @[AlwaysInline]
-    private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32, shard : MarkShard) : Nil
+    private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
       unless @mark_prefetch
         i = 0
         while i < m

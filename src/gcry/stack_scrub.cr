@@ -121,7 +121,8 @@ module Gcry
     # Bytes of dead stack zeroed below the SP at every collection entry
     # (`GCRY_COLLECT_SCRUB`, 0 disables). The previous collection's mark frames
     # are still intact below the mutator's SP, and they are dense with block
-    # addresses: mark-stack batches, the prefetch ring, `find_block` results.
+    # addresses: the parallel marker's pop batches, `find_block` results. (The
+    # serial drain's batch is `mmap`ed, `MarkStack#batch_buffer`.)
     # The next collection's scan chain pushes frames over that region and then
     # scans it, so every slot a frame does not write reads as last cycle's
     # heap pointer and is accepted as a root. On the headerless layout a
