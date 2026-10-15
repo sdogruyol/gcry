@@ -1,0 +1,27 @@
+--- arms/rtagprod/src/gcry/collect_mark.cr	2026-10-15 14:26:58.233963083 +0300
++++ arms/rtagshadow/src/gcry/collect_mark.cr	2026-10-15 14:28:40.449775628 +0300
+@@ -626,6 +626,8 @@
+     # Whether `scan_payload` may resolve heap edges itself, for the length of
+     # one `mark_loop` (set and cleared there).
+     @mark_edges_inline : Bool = false
++    getter shadow_checks : UInt64 = 0_u64
++    getter shadow_bad : UInt64 = 0_u64
+ 
+     # The configurations in which `scan_edges_inline` gives exactly
+     # `mark_impl_unlocked`'s answer for a word that lands in a small bitmap
+@@ -697,6 +699,15 @@
+         chunk = slot & ~RADIX_TAG_MASK
+         index = tag.to_i32 &- 1
+         geom = @radix_class_geom.unsafe_fetch(index)
++        # SHADOW: the tag and geometry against the chunk's own header.
++        sc = Pointer(ChunkHeader).new(chunk)
++        @shadow_checks &+= 1
++        if sc.value.size_class.to_u64 != tag &- 1 || ChunkHeader.large?(sc) || ChunkHeader.nursery?(sc) ||
++           sc.value.data_offset.to_u64 != (geom & 0xFFFF_u64) || sc.value.bitmap_words.to_u64 != ((geom >> 16) & 0xFFFF_u64) ||
++           chunk_block_count(sc) != (geom >> 32) || ChunkHeader.atomic?(sc) != ((slot & RADIX_TAG_ATOMIC) != 0) ||
++           Heap.radix_entry(l1, shift, l2_mask, w) != sc || (w >= chunk &+ (geom & 0xFFFF_u64) && !ChunkHeader.contains?(sc, w))
++          @shadow_bad &+= 1
++        end
+         data_start = chunk &+ (geom & 0xFFFF_u64)
+         # Into the chunk's header or bitmaps.
+         if w < data_start

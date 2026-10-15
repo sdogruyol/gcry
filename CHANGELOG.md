@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The serial mark drains its stack in batches.** It popped one entry at
+  a time through a 16-entry prefetch ring; it now takes up to 1 024 entries
+  into a buffer the mark stack maps once and scans them as the parallel
+  workers scan theirs, each prefetched 16 entries ahead. One marker, Σ mark
+  per marked object over 7 interleaved runs: Primes −23%, JsonParsePure
+  −15%, JsonGenerate −11%, Binarytrees −18% (Σ mark 205 → 157 ms on
+  Primes, wall 1.01 → 0.89 s). Default workers use it below the 32 MiB live
+  floor (Binarytrees −15%). `GCRY_PREFETCH=0` now scans the same batches
+  without prefetches. The mark stack's high-water mark was unchanged on all
+  four (`bench/log/linux/2026-10-15-mark-cost/`).
+
 ## [0.36.0] - 2026-10-15
 
 ### Fixed

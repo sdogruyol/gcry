@@ -3974,30 +3974,30 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       path faster than Boehm's in isolation
       (`bench/log/macos/2026-10-03-binarytrees-mutator/`).
 - [ ] **Per-collection mark cost on a large pointer heap (2026-10-03,
-      refreshed 2026-10-06).** One marker now costs about Boehm's single
-      marker on JsonParsePure and 1.3× on Primes, after inline candidate
-      resolution and whole-payload prefetch (`bench/log/linux/2026-10-06-mark-cost/`),
-      and parallel mark is on by default (`docs/DEFAULT-GC-READINESS.md` M1).
-      The history: Primes' largest mark was 470 ms
-      against 178 ms for Boehm with one marker (`GC_MARKERS=1`) after the
-      heap-span prefilter. Boehm's default is a marker per CPU, which takes
-      that collection to 46 ms on 12 vCPUs. gcry's parallel mark made
-      these marks slower at every worker count until three shared writes were
-      removed (2026-10-04); with 4 workers it is now −21% to −62% Σ mark on
-      4-vCPU runners (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
-      It is the default since 2026-10-05
-      (`bench/log/linux/2026-10-05-parallel-mark-default/`): two workers with
-      the 32 MiB floor gain 8–16 points of Boehm's speed on the GC-heavy rows
-      on x86-64, arm64 and macOS; four beat two only on arm64 and cost up to
-      2× the CPU elsewhere. The shipped count is `min(2, CPUs − 1)` up to 7
-      CPUs, then `CPUs / 4 + 1`, at most 8; `GCRY_PARALLEL_MARK_MIN_LIVE`
-      (serial below a live-set floor) and the helpers' idle backoff (since
-      replaced by parking) left Kemal at its one-worker throughput with four
-      workers. Before the 2026-10-06 inline resolution, a SIGPROF profile
-      puts it in candidate resolution (radix → chunk header → occupancy and
-      mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
-      instruction-level trims have stopped paying on this host
-      (`bench/log/linux/2026-10-03-mark-prefilter/`).
+      refreshed 2026-10-15).** With one marker gcry's Σ mark is now 0.37×
+      Boehm's single marker on Primes, 0.47× on JsonParsePure, 0.62× on
+      JsonGenerate and 0.23× on Binarytrees, but gcry collects about half as
+      often on the first three: per collection it is 0.70×, 0.91× and 1.17×
+      (`bench/log/linux/2026-10-15-mark-cost/`; Boehm's figure includes its
+      root scan, and no per-byte comparison was taken). 0.37.0 drains the
+      serial mark stack in batches of 1 024 instead of a 16-entry ring: ns
+      per marked object −11% to −23% with one marker. Parallel mark is on by
+      default (`docs/DEFAULT-GC-READINESS.md` M1): `min(2, CPUs − 1)`
+      workers up to 7 CPUs, then `CPUs / 4 + 1`, at most 8, serial under a
+      32 MiB live floor; with two workers it is 1.3–1.55× the serial drain
+      per marked object on these heaps. What is left, from the 2026-10-15
+      profile of the inline candidate path: the wait for the mark and `occ`
+      words (13–29% of it, two lines per fresh mark where Boehm reads one
+      mark byte), the chunk header (8–16%), the ordinal arithmetic (13–16%)
+      and branch recovery (11–15%). Measured, not taken: a parallel pop batch
+      of 1 024 (−7% to −14% per object with two workers), which needs the
+      master's batch off the collector's stack first, and the size class in
+      each radix entry to skip the header (inside the spread). History:
+      Primes' largest mark was 470 ms against 178 ms for Boehm's one marker
+      on 2026-10-03; inline candidate resolution and whole-payload prefetch
+      (`bench/log/linux/2026-10-06-mark-cost/`), the parallel-mark
+      shared-write fixes (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`)
+      and the 0.36 pacing came between.
 - [x] **Decide what to do with `Gcry::Layout` registration — removed in
       0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
       collided with registered maps

@@ -1,0 +1,32 @@
+== g5-darwin-typecheck.txt
+exit 0
+== g5-lint.txt
+[32m223 inspected, 0 failures[39m
+exit 0
+== g5-mark-audit.txt
+ok — the audit names a planted edge the mark does not follow, and reports none on the same workload without it
+ok — with the knob off nothing is walked, so the other run's edge counts are attributable to the audit
+exit 0
+== g5-parallel-mark-process.txt
+ok — serial mark kept the chain and stole nothing
+exit 0
+== g5-parallel-mark-termination.txt
+ok — the mark cycle does not end while a worker holds a batch
+exit 0
+== g5-process-headers-freelist.txt
+200 examples, 0 failures, 0 errors, 0 pending
+exit 0
+== g5-process.txt
+199 examples, 0 failures, 0 errors, 0 pending
+exit 0
+== g5-spec-headers.txt
+...........................................................................................................................................GCRY INVARIANT FAILUR
+303 examples, 0 failures, 0 errors, 0 pending
+exit 0
+== g5-spec.txt
+...............................................................................................................................GCRY INVARIANT FAILURE: live_obje
+281 examples, 0 failures, 0 errors, 0 pending
+exit 0
+== g5-windows-typecheck.txt
+ok — the Windows build type-checks on both targets
+exit 0

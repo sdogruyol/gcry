@@ -1,0 +1,16 @@
+--- arms/sbprod/src/gcry/parallel_mark.cr	2026-10-15 14:24:53.890576911 +0300
++++ arms/pb1024/src/gcry/parallel_mark.cr	2026-10-15 14:25:13.490610266 +0300
+@@ -307,11 +307,11 @@
+       end
+     end
+ 
+-    MARK_POP_BATCH = 256
++    MARK_POP_BATCH = 1024
+     # Entries are {header, chunk} pairs, so the flat buffer is twice the count.
+     # Literal, not `MARK_POP_BATCH * 2`: a computed constant initializer runs
+     # before Fiber is up during GC.init (see size_classes.cr).
+-    MARK_POP_BATCH_WORDS = 512
++    MARK_POP_BATCH_WORDS = 2048
+ 
+     # Which shard the current OS thread owns. -1 until claimed; the master sets
+     # 0 explicitly. Survives across collections, so a pthread keeps its slot.
