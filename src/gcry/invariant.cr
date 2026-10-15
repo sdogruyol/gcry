@@ -54,33 +54,68 @@ module Gcry
       @@live_object_checks
     end
 
-    # State the counter invariant even of a heap whose counters may lose
-    # updates, and count the failures instead of declining. Research only,
-    # called after `GC.init` (`make counter-loss`). Its env knob enabled the
-    # checker inside `GC.init` and crashed there on the runtime's first
-    # allocation, before any `Thread` exists (`init_from_env` says why), so it
-    # was removed.
+    # Walk minus counter, read once, or nil when the counter moved across the
+    # walk. Research only (`make counter-loss`), and not a check: it neither
+    # skips for other threads nor raises, so the caller picks the moment.
     #
-    # The scope correction that shipped with this checker was right — an
-    # invariant stated of a heap that cannot keep its counter is a flake, and
-    # skipping took `spec/invariant_spec.cr` from 6 failures in 25 runs to 0 in
-    # 60 — but it also stopped the one measurement that says whether the
-    # counter is wrong. That measurement is what decides
-    # `heap_counters_atomic`'s default, so it needs a way back. The double read
-    # below still guards it: a counter that *moves* between the two reads is a
-    # sampling race and is skipped, so a failure here is a genuinely lost
-    # increment and not a walk racing an allocation.
-    @@force_counters = false
-
-    def self.force_counters : Nil
-      @@force_counters = true
+    # It replaces counting stable mismatches after every allocation
+    # (`force_counters`, 2026-09-13), which could not tell a lost update from
+    # a thread caught between setting an occupancy bit and crediting the
+    # counter: the one "lost increment" on macos-15-intel CI (1 in 983 361
+    # comparisons) was not seen at any comparison after it, which a lost
+    # update always is (an increment dropped on purpose was counted at
+    # 884 952 of 983 286). It was a runtime thread's birth allocation in
+    # flight, and the checker now declines while one is
+    # (`Heap#concurrent_mutators?`). A lost update is the one drift that never
+    # comes back, so the caller reads again later and calls only a drift that
+    # stayed a loss.
+    def self.live_objects_drift(heap : Heap) : Int64?
+      reported = heap.live_objects
+      actual = count_live_blocks(heap)
+      return nil unless heap.live_objects == reported
+      actual.to_i64 &- reported.to_i64
     end
 
-    # Times the forced comparison found the counter below (or above) the walk.
-    @@counter_losses = 0_u64
+    # `free_bytes` against a walk of the chunk list, in the same form: walk
+    # minus counter, nil when the counter moved across the walk. Free means
+    # what the counter has meant on the header layout since it existed: every
+    # block of a size-class chunk nothing occupies, a dormant chunk's whole
+    # capacity (its pages are released, its mapping and its place in
+    # `heap_size` are not), and every cached large chunk's mapping. Memory
+    # that left the heap is in neither.
+    def self.free_bytes_drift(heap : Heap) : Int64?
+      reported = heap.free_bytes
+      actual = count_free_bytes(heap)
+      return nil unless heap.free_bytes == reported
+      actual.to_i64 &- reported.to_i64
+    end
 
-    def self.counter_losses : UInt64
-      @@counter_losses
+    private def self.count_free_bytes(heap : Heap) : UInt64
+      total = 0_u64
+      heap.each_chunk do |chunk|
+        if ChunkHeader.large?(chunk)
+          total &+= chunk.value.mapped_bytes if BlockHeader.free_large?(ChunkHeader.large_header(chunk))
+          next
+        end
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        payload = SizeClasses.payload(class_index).to_u64
+        block_bytes = BlockHeader::SIZE.to_u64 + payload
+        nblocks = Heap.chunk_block_count(block_bytes, chunk.value.mapped_bytes, chunk.value.data_offset)
+        if ChunkHeader.dormant?(chunk)
+          total &+= nblocks &* payload
+        elsif heap.bitmap_alloc_chunk_public?(chunk)
+          total &+= (nblocks &- heap.chunk_occupied_count(chunk)) &* payload
+        else
+          cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+          limit = ChunkHeader.data_end(chunk).as(UInt8*)
+          while (cursor + block_bytes) <= limit
+            total &+= payload if BlockHeader.free?(cursor.as(BlockHeader*))
+            cursor += block_bytes
+          end
+        end
+      end
+      total
     end
 
     # Verify that `live_objects` matches the actual number of live (non-free)
@@ -128,13 +163,13 @@ module Gcry
     def self.check_live_objects(heap : Heap) : Nil
       return unless enabled?
       return if @@checking
-      # `concurrent_mutators?` is `multi_mutator_threads?`: a count of Crystal's
-      # thread list against a small constant. It answers a question about the
-      # *process*, and for a heap no other thread can reach — a spec's own
-      # `Gcry::Heap.new` — it answers the wrong one. A heap that says it has a
-      # single mutator is taken at its word here; the two-instant race the skip
-      # exists for is still caught below, where a `reported != after` mismatch
-      # skips rather than reports.
+      # `concurrent_mutators?` is `multi_mutator_threads?` — a count of Crystal's
+      # thread list against a small constant — plus any runtime thread still in
+      # its birth. It answers a question about the *process*, and for a heap no
+      # other thread can reach — a spec's own `Gcry::Heap.new` — it answers the
+      # wrong one. A heap that says it has a single mutator is taken at its word
+      # here; the two-instant race the skip exists for is still caught below,
+      # where a `reported != after` mismatch skips rather than reports.
       #
       # This replaces waiting for the thread list to drain, which is what
       # `spec/invariant_spec.cr` did between 06fb325 and this: `Thread#join`
@@ -145,10 +180,7 @@ module Gcry
         @@concurrent_skips += 1
         return
       end
-      # The counter half of the skip is what `force_counters` removes: a heap
-      # with a second thread has counters that *may* lose updates, and whether
-      # they do is the measurement.
-      if heap.counters_may_lose_updates? && !@@force_counters
+      if heap.counters_may_lose_updates?
         @@concurrent_skips += 1
         return
       end
@@ -171,12 +203,6 @@ module Gcry
             return
           end
           attempts += 1
-        end
-        if @@force_counters
-          # Counted, not fatal: this arm exists to produce a rate, and a rate
-          # needs the run to continue.
-          @@counter_losses += 1
-          return
         end
         fail("live_objects mismatch: actual=#{actual} reported=#{reported}")
       ensure

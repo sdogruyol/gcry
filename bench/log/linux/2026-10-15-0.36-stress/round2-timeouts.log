@@ -1,0 +1,53 @@
+=== stw-mt-property-test run 178 FAILED 2026-10-15T02:00:50+03:00 ===
+Process-GC STW + concurrent mutation property test
+  seed=8804 iterations=200 workers=[2, 4, 8]
+  stop_the_world=true
+  bitmap_alloc=true headers=false
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=200 seed=8804
+=== stw-mt-property-test-release run 10 FAILED 2026-10-15T02:24:39+03:00 ===
+Process-GC STW + concurrent mutation property test
+  seed=26274 iterations=400 workers=[2, 4, 8]
+  stop_the_world=true
+  bitmap_alloc=true headers=false
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=400 seed=26274
+=== stw-mt-property-test-release run 15 FAILED 2026-10-15T02:44:41+03:00 ===
+Process-GC STW + concurrent mutation property test
+  seed=12736 iterations=400 workers=[2, 4, 8]
+  stop_the_world=true
+  bitmap_alloc=true headers=false
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=400 seed=12736
+=== stw-mt-property-test-release run 57 FAILED 2026-10-15T03:05:02+03:00 ===
+Process-GC STW + concurrent mutation property test
+  seed=14795 iterations=400 workers=[2, 4, 8]
+  stop_the_world=true
+  bitmap_alloc=true headers=false
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=400 seed=14795
+=== stw-mt-property-test-release run 133 FAILED 2026-10-15T03:25:40+03:00 ===
+Process-GC STW + concurrent mutation property test
+  seed=13054 iterations=400 workers=[2, 4, 8]
+  stop_the_world=true
+  bitmap_alloc=true headers=false
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=400 seed=13054
+    allocs=3210 pinned=3208 collects=401 roots=16 ok=true
+
+  STW-MT workers=4 iterations=400 seed=23054

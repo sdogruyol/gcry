@@ -7,6 +7,233 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-15
+
+### Fixed
+
+- **A fatal exception on Windows ends the process instead of hanging in
+  Crystal's crash report.** Crystal's MSVC handler for an access violation
+  or a stack overflow allocates through the GC while it prints the
+  backtrace. A thread that faulted inside gcry's allocator spun forever on
+  the size-class lock it already held. A second thread faulting during a
+  report (SYSMON, in practice) waited on the report's `Crystal.once`,
+  raised, waited again, and overflowed its stack inside a lock it then spun
+  on. This was the hang of `make parallel-mark-termination`'s red arm on
+  Windows x86_64 CI: 18 of 81 runs on 2026-10-14, with `cdb` stacks of every
+  hung child in `bench/log/windows/2026-10-14-pmt-hang/`. 0.35.0 hangs the
+  same way, which refutes the C-heap-in-the-stop suspicion 0.35.0 recorded
+  for that bench. A vectored handler now runs ahead of Crystal's
+  (`Gcry::CrashGuard`): the reporting thread allocates from the C heap, and
+  any other thread that faults during the report parks until the report
+  exits. After: 0 hangs in 923 runs of the bench and 6 509 of its red child
+  alone. A fault inside a `GC_set_on_heap_resize` callback hung 10 of 10
+  runs before and exits 1 in 10 of 10 after; two threads faulting at once
+  hung 1 in 20 and died with 0xC0000005 in the other 19 before, and exit 1
+  in 20 of 20 after (`67_crash_report_exits_spec.cr`). The aarch64 Windows
+  (GNU) and Linux handlers do not allocate and were never affected.
+
+- **A `free` no longer loses its `live_objects` decrement.** An allocation
+  on the hit path reaches the heap-wide counter only when its thread's
+  cursor set is credited, while a free subtracts at once, so the counter can
+  stand below the blocks that are live. The subtraction saturated at zero,
+  and the credit it took first when the counter read low covered one
+  thread, not two: two frees that both read 1 both skipped it, and the
+  second found 0. Each such decrement was lost for good, leaving
+  `live_objects` permanently above the heap. It needed two threads freeing
+  at once: 8 threads each freeing 51 200 blocks lost 21 to 68 decrements on
+  2 CPUs and 569 to 796 on 12, in 10 of 10 runs, and none after. The
+  subtraction now wraps, and the reader shows a counter briefly below zero
+  as 0 (`68_live_objects_free_uncredited_spec.cr`). `malloc`/`free` pairs
+  on one thread: 38.4 → 37.9 ns.
+
+- **A `free` no longer loses its `bytes_since_gc` subtraction.** The same
+  race as `live_objects` above, and it needs no second thread: the counter
+  starts every cycle at zero, so the first frees after a collection find it
+  below the bytes their thread allocated but has not credited yet. The
+  subtraction saturated at zero while the later credit added the full
+  amount, so the counter stood above what was allocated and held, and the
+  next collection came early. One thread allocating and freeing 819 200
+  bytes of 64-byte blocks right after a collection left it at 246 272
+  instead of 0, 3 of 3 runs (`72_bytes_since_gc_free_uncredited_spec.cr`).
+  The subtraction now wraps and every reader, the collection trigger
+  included, reads a counter below zero as 0. A free of a block allocated
+  before the last collection can now hold it below zero until as many bytes
+  are allocated again, the same net-allocation meaning it always had above
+  zero. In a loop of `malloc`/`free` pairs the lost bytes piled up until
+  the counter sat 32 bytes under the threshold, never reaching it, so
+  19 868 940 of 20 000 000 allocations left the hit path for the locked one
+  on the threshold check; now none do. Release builds, 10 interleaved runs
+  each, 20M operations: that pair loop 65.1 → 38.7 ns, 64-byte
+  allocation-only churn 6.49 → 6.50 ns with 152 collections both, the same
+  churn freeing one allocation in four 115 → 114 collections at 15.1 →
+  15.2 ns, and 1M `String.build` calls 76 collections both at 315 → 321 ns
+  (spread 313–324 against 316–326).
+
+- **`free_bytes` says how much of the heap is free on the default layout.**
+  A size-class chunk's capacity was added to the counter only by the header
+  allocator. The bitmap allocator mapped its chunks without it, so every
+  allocation from a fresh chunk was taken from capacity never counted, the
+  subtraction stopped at zero, and `GC.stats.free_bytes`,
+  `GC_get_heap_usage_safe`, `GC_get_prof_stats` and `/gc-stats` read about
+  0. A quiet heap with 2 199 744 bytes free reported 0. The capacity is now
+  credited when the chunk is mapped. The counter agrees with a walk of the
+  chunks through allocation, frees racing their credit, the large cache,
+  dormant release, revival and unmapping, on both layouts
+  (`70_free_bytes_capacity_spec.cr`, 5 of 5 failing before). It also agrees
+  on a process heap whose frees race the sweep, where 18 of 18 readings had
+  been 4.3 to 5.1 MB short. Dashboards that baselined the old values will
+  move. `GCRY_TIGHT_GROW`'s collect-before-grow, which reads it, stays
+  freelist-only.
+
+- **`make counter-loss` measures something, and runs on macOS again.** Its
+  "atomic" and "plain" arms were the same code on every default build,
+  because the bitmap allocator implies atomic counters whatever
+  `heap_counters_atomic` says. Its one failure, 1 "lost increment" in
+  983 361 comparisons on macos-15-intel, was not a loss either: a lost
+  increment is counted at every comparison after it (884 952 of 983 286
+  when one is dropped on purpose), and this one was counted once. It was the
+  Monitor or the idle thread allocating in its birth, caught by the
+  per-allocation walk between setting an occupancy bit and crediting the
+  counter. The invariant checker now treats either thread as a mutator
+  until its birth is over (`69_runtime_thread_birth_mutator_spec.cr`). The
+  gate compares the counter with a walk only when every thread has joined
+  and the reading holds still: each round 80 threads, 16 of them on the
+  shared fallback cursor set, allocate and free. The shipped arm ended exact
+  in 27 of 27 runs on 12 CPUs and 6 of 6 on 3; built against the old
+  subtraction it failed 10 of 10 on 12 CPUs. `--plain` forces the plain
+  branch (`Heap#debug_plain_counters`) and loses 223 to 95 197 per run. The
+  gate takes about 12 s, down from about 35 s. `--control`, `--inject`,
+  `Invariant.force_counters` and `Invariant.counter_losses` are gone with
+  the old harness.
+
+### Changed
+
+- **`realloc` grows a large block where it stands.** A growth that has to
+  copy now reserves address space past the block it copies into: its first
+  page, then its data rounded up to a power of two and doubled once. The
+  reservation is `PROT_NONE`, or `MEM_RESERVE` on Windows, so it costs
+  neither RSS nor commit charge until used. The next growth commits pages
+  there instead of mapping, faulting and copying a fresh chunk. The old
+  pointer *is* the grown block, so `io.write(io.to_slice)` and the other
+  stdlib reads of a buffer after it grew still work (`30_*`), which the
+  opt-in page move cannot offer. A doubling `IO::Memory` or
+  `String::Builder` now copies every other step instead of every step, and
+  an `Array` about one step in four. The room goes back when the block dies.
+  Only mappings of 256 KiB and up reserve, and none under a finite
+  `RLIMIT_AS`. `GCRY_REALLOC_IN_PLACE=0` copies every growth as before.
+  crystal-metric, one binary against `GCRY_REALLOC_IN_PLACE=0`, 5
+  interleaved trials (`bench/log/linux/2026-10-14-realloc-in-place/`):
+  - Peak RSS: Revcomp 560 → 527 MiB, JsonParseSerializable 496 → 412,
+    JsonParsePull 496 → 410, JsonGenerate 856 → 772 (Boehm 824 / 573 / 524 /
+    1 247).
+  - Minor faults: 287k → 266k, 184k → 139k, 173k → 131k, 362k → 293k (Boehm
+    211k / 146k / 134k / 319k). The JSON rows now take fewer than Boehm.
+  - Largest address space: unchanged on Revcomp (843 MiB) and lower on the
+    JSON parse rows (823 → 746 / 737); JsonGenerate +444 MiB, to Boehm's
+    1.6 GB.
+  - Benchmark time moves within its spread: Revcomp −1.7%,
+    JsonParseSerializable −2%, JsonParsePull +1%. Whole-process wall on the
+    JSON rows is −4%, since their setup builds the input through
+    `IO::Memory`.
+  - `process_spec/regression/66_*` fails 3 of 3 on 0.35.0.
+    `make realloc-move-stress` gains an in-place arm under concurrent
+    collections.
+
+- **Freeing a large object no longer walks the chunk list.** A `GC.free`
+  that trims one large chunk took it off the list by a walk from the list
+  head to the chunk in front of it: as many steps as the chunk sat deep.
+  That is a free of a block past the 2 MiB cache slack with nothing else
+  cached, and, under large-object recycling (the Linux default), nearly
+  every large free once the cache is full: 2 470 of 2 500 64 KiB frees. A
+  large chunk now carries a back-link to that chunk, in 16 bytes between
+  its chunk header and its block header, kept by every list store and
+  checked against the index before the unlink follows it. Per free with
+  2 500, 10 000 and 40 000 large chunks alive, medians of three runs: a
+  4 MiB block 9.6 → 4.1 µs, 35.4 → 4.8 µs and 186 → 7.7 µs; a 64 KiB
+  block (`largefree_scale.cr`, one run) 2.9 → 1.6 µs, 7.9 → 1.3 µs and
+  41.7 → 1.5 µs (`bench/log/linux/2026-10-14-large-free-unlink/`). What
+  still grows is the sorted index's shift on removal, 3.8 µs of the 4 MiB
+  free at 40 000. A large object now starts 64 bytes into its mapping
+  instead of 48, still 16-aligned; a mapping grows by a page only for a
+  payload in the 16 bytes below a page multiple minus 48.
+  `process_spec/regression/71_*` walked 283 steps before (bound 16) and 0
+  after. `make chunk-list-drift`'s window arm audits the links after each
+  collection: a wrong one in 293 of 300 collections without the rewrite at
+  the after-world store, none with it.
+
+- **The RSS budget is set: peak RSS within 1.1× Boehm's on every
+  crystal-metric row.** The adaptive threshold's cap floor stays at 64 MiB:
+  re-measured on 0.35.0, pacing and the parallel mark default already run
+  Primes at 103–107% and JsonParsePure at 99–101% of Boehm's speed with it,
+  at 0.94× and 0.83× Boehm's peak, while 256 MiB now puts RegexDna at 1.24×
+  (`bench/log/linux/2026-10-14-rss-budget-recheck/`). One row is over it at
+  every cap: Knuckeotide, a 40–47 MB process whose peak is the 8 MiB
+  threshold floor and the warm budget, at 1.3–1.6× Boehm's.
+
+### Removed
+
+- **`Gcry::Layout` and its registration API.** The mark has read no layout
+  since 0.34.0, when a mixed union's buffer was shown to collide with
+  registered maps (`bench/log/linux/2026-10-04-layout-union-collision/`), so
+  registration only cost boot time, a malloc'd table and a counter reset per
+  collection. Gone with it: `Gcry::Layout`, `Gcry.register_layout`,
+  `register_hash`, `register_set`, `register_layouts` and
+  `Heap#layout_precise`; the env knobs `GCRY_DISABLE_LAYOUT`,
+  `GCRY_AUTO_LAYOUTS`, `GCRY_DISABLE_AUTO_LAYOUTS`, `GCRY_SCAN_CAPS`,
+  `GCRY_LAYOUT_DROP_UNCLASSIFIED` and `GCRY_LAYOUT_DUMP`; the `Metrics`
+  fields `layout_precise_scans`, `layout_conservative_scans`,
+  `layout_entries` and `layout_unsafe_skips`, the Prometheus series
+  `gcry_layout_entries`, `gcry_layout_unsafe_skips_total` and
+  `gcry_layout_precise_scans_total`, and the `json_stats` keys
+  `layout_precise`, `layout_precise_scans`, `layout_conservative_scans`,
+  `layout_hash_bodies`, `layout_entries` and `layout_unsafe_skips` (the scan
+  counters had read 0 since 0.34.0); the gates `make layout-property-test`,
+  `make ivar-layout-roots`, `make auto-layouts`, `compiler-gc-contract`'s
+  layout check with its `GCRY_DISABLE_LAYOUT=1` red arm, and
+  `process_spec/regression/12_private_type_registration_spec.cr`, which
+  tested registration itself. Callers of the registration API fail to
+  compile: delete the calls. −2 200 lines.
+
+- **Research arms and defect-restoring switches that no gate, spec or CI
+  job sets any more are gone.** `GCRY_BIRTH_GRACE` and its controls
+  `GCRY_BIRTH_GRACE_MIN` / `_MAX` / `_NOROOT` / `_DUMMY` / `_TOUCH`, with
+  `GCRY_POST_MARK_SPIN`; the unowned-stack arms `GCRY_POOLED_STACK_ROOTS` /
+  `_NOROOT`, `GCRY_MAPS_INFLIGHT_ROOTS` / `_NOROOT` and
+  `GCRY_UNOWNED_COVERAGE_AUDIT`; `GCRY_RELEASE_HOLDERS`,
+  `GCRY_SWEEP_OCC_AUDIT` (and `bench/sweep_occ_race.cr`, which no target
+  ran), `GCRY_FULL_SUSPENDED_STACK`, `GCRY_ALWAYS_CLEAR`,
+  `GCRY_ALLOC_FAST_PATH`, `GCRY_PAGE_RELEASE_TEST_STALL_MS` and
+  `GCRY_DYING_REGISTER_AUDIT` had answered what they were for, and
+  `GCRY_EMPTY_FLUSH_UNLOCKED`, `GCRY_MADVISE_UNCHECKED`,
+  `GCRY_TLAB_QUIESCE=0` and `GCRY_FINALIZER_NO_RESURRECT` only put back a
+  defect that has since been fixed. The defaults are unchanged: every
+  removed path was off unless its variable was set. The dying-register audit
+  still runs under `GCRY_ADDRESS_SPACE_AUDIT=1`, and
+  `Heap#finalizer_resurrect = false` stays for `make finalizer-complex
+  --broken`. Setting one of the variables now does nothing. `/gc-stats`
+  loses the fields that reported them: `birth_grace_rooted`,
+  `birth_grace_saved`, `birth_grace_overflows`, `sweep_occ_in_flight`,
+  `sweep_occ_audit_words`, `release_holders_searches`,
+  `release_live_holders`, `release_live_frame_holders`. About 970 lines of
+  code went with them.
+
+- **`GCRY_THREAD_LIST_TRIPWIRE` and the `ThreadListWatch` instruments it
+  armed.** The family walked the `0x18` crash in `Thread.lock` to
+  `index_insert_locked` publishing the index count after the shift, fixed
+  on 2026-08-27 (`bench/log/linux/2026-08-27-thread-list-tripwire/`). Since
+  then only `bench/tlw_batch.sh` set the variable, and no target, CI job or
+  script ran that. Gone: `src/gcry/thread_list_tripwire.cr`, the unlocked
+  walk of the runtime thread list before `Thread.lock`, the range checks on
+  block `set_free`/`set_used`, the large cache, large header and link
+  writes, releases, `madvise` and index removes, the phase-boundary header
+  probes, the mark-offer reject reporter, the per-operation chunk-index
+  verifier, `Heap#thread_list_tripwire`, `#thread_list_seen_max`,
+  `#thread_list_empty`, `#thread_list_hdr_bad`, and `bench/tlw_batch.sh`.
+  `make dormant-flush-race`'s child line loses `tl_max`, `tl_empty` and
+  `tlw_hits`. Every hook returned at once unless the variable was set, so
+  the default path is unchanged. Setting it now does nothing. About 530
+  lines.
+
 ## [0.35.0] - 2026-10-12
 
 ### Fixed
@@ -7175,7 +7402,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/sdogruyol/gcry/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/sdogruyol/gcry/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/sdogruyol/gcry/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/sdogruyol/gcry/compare/v0.32.0...v0.33.0

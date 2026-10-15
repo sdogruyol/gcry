@@ -289,7 +289,6 @@ module Gcry
         # headerless requires). Reaching here would corrupt an object.
         return
       {% end %}
-      Gcry::ThreadListWatch.check(header.address, SIZE.to_u64 &+ header.value.size, Gcry::ThreadListWatch::SITE_SET_FREE, header.value.flags)
       h = header.value
       h.flags |= Flags::FREE
       h.next_free = next_free
@@ -375,6 +374,31 @@ module Gcry
       header.value = h
     end
 
+    # Raises a large block's recorded size to *size*, which is larger, for a
+    # block that grew where it stands (`Heap#grow_large`). Not `large` and a
+    # header store: the mark is a read-modify-write of the flags word, and the
+    # after-world sweep's `clear_mark_large` and a stopped world's
+    # `set_mark_large` both rewrite the whole header, so a header written from
+    # a copy taken before a stop drops the mark that stop made, and a live
+    # block reads as dead. The high size bits go in by compare-and-swap, which
+    # a mark in between fails; the low word by one store, which a whole-header
+    # write in between leaves alone, since it carries the old low word back.
+    # High bits first: in between, the size reads larger than *size*, which
+    # the mapping bounds (`Heap#block_payload`); low first, it would read
+    # smaller than the block was, and a scan would stop short of what the
+    # program had already written.
+    def self.grow_large_size(header : BlockHeader*, size : UInt64) : Nil
+      hi = (size >> 32).to_u32! << Flags::SIZE_HI_SHIFT
+      flags = pointerof(header.value.@flags)
+      loop do
+        old = Atomic::Ops.load(flags, :monotonic, false)
+        break if (old & Flags::SIZE_HI_MASK) == hi
+        _, swapped = Atomic::Ops.cmpxchg(flags, old, (old & ~Flags::SIZE_HI_MASK) | hi, :sequentially_consistent, :monotonic)
+        break if swapped
+      end
+      Atomic::Ops.store(pointerof(header.value.@size), size.to_u32!, :release, true)
+    end
+
     def self.set_used(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
       {% if !flag?(:gcry_block_headers) %}
         # Nothing to write. Occupancy is `occ`, size is the chunk's size class,
@@ -382,13 +406,6 @@ module Gcry
         # Writing here would land on the object's own first 16 bytes.
         return
       {% end %}
-      if Gcry::ThreadListWatch.check(header.address, SIZE.to_u64 &+ size, Gcry::ThreadListWatch::SITE_SET_USED, header.value.flags)
-        # The one caller identity that matters, taken at the corrupting
-        # hand-out itself rather than at the crash that follows it. The crash
-        # handler's own printer: no allocation, so no reentry into the
-        # allocator this runs inside of.
-        Gcry::RawOut.print_backtrace
-      end
       header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
     end
   end
@@ -397,15 +414,14 @@ module Gcry
   struct ChunkHeader
     # 24 -> 32 for `data_offset` and `bitmap_words`.
     #
-    # Every site that recovers a large chunk from its block does
-    # `header - ChunkHeader::SIZE` (heap.cr:1299 and five siblings,
-    # collect.cr:1017, collect_sweep.cr:478, :843), and every site that sizes a
-    # large mapping does `ChunkHeader::SIZE + BlockHeader::SIZE + payload`
-    # (heap.cr:1216). Those stay correct *by construction* because large chunks
-    # keep `data_offset == SIZE`: they hold one object and need no bitmap, so
-    # their single mark bit lives in `flags`. Only size-class chunks move their
-    # data start, and they are never reached by pointer arithmetic on this
-    # constant.
+    # A large chunk's own metadata goes on past this header: its back-link
+    # slot (`LARGE_LINK_BYTES`), then its block header, then the object
+    # (`large_header_offset`, `large_data_offset`). Every site that recovers a
+    # large chunk from its block header goes through `from_large_header`, and
+    # every site that sizes a large mapping through `large_data_offset`, so
+    # the layout has one definition. Large chunks hold one object and need no
+    # bitmap, so their single mark bit lives in the block header's flags.
+    # Only size-class chunks move their data start by a bitmap region.
     SIZE = 32
 
     property next : ChunkHeader*   # 0
@@ -469,6 +485,14 @@ module Gcry
       # through the recycler's fresh mapping (`Heap#take_large_free`).
       # Cleared when taken.
       FREED = 2048_u32
+      # Bits 16–21 of a large chunk's flags: the address space reserved for
+      # it from its base, mapped or not (`Heap#grow_large`), as log2 of what
+      # it holds past its first page: the extent is that power of two plus
+      # one host page (`Heap#large_grow_extent`). 0 when it has none. Six bits
+      # hold any extent a 64-bit target can map. Written at map time, cleared
+      # when the room goes back (`Heap#release_large_reservation`).
+      GROW_EXTENT_SHIFT =              16
+      GROW_EXTENT_MASK  = 0x003F_0000_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -532,23 +556,74 @@ module Gcry
       (chunk.value.flags & Flags::ATOMIC) != 0
     end
 
+    # Bytes from a large chunk's base to its object. Single definition so
+    # sizing, carving and the header slot cannot drift apart.
+    def self.large_data_offset : Int32
+      # The large header keeps its 16 bytes in both builds; only the small
+      # block loses its header.
+      large_header_offset + BlockHeader::LARGE_HEADER_BYTES
+    end
+
+    # The large chunk's back-link slot, between this header and the block
+    # header: the address of the chunk whose `next` is this one, null at the
+    # head of `@chunks` (`large_prev`). A singly linked list finds that
+    # predecessor only by walking from the head, and taking one large chunk
+    # off the list cost a walk of every chunk in front of it: 186 µs a `GC.free`
+    # with 40 000 large chunks alive (`Heap#unlink_chunk`).
+    #
+    # Not a `ChunkHeader` field: every chunk would pay for it, the header is
+    # full at 32 bytes, and 40 would put every small chunk's first block off
+    # its 16-byte alignment. Sixteen bytes here keep the large block header
+    # and the object behind it 16-aligned; the second word is unused. Small
+    # chunks have no back-link, and nothing needs one: only a large chunk
+    # leaves the list on its own (a trim, a recycle); the sweep drops small
+    # chunks inside the walk that rebuilds the list.
+    LARGE_LINK_BYTES = 16
+
+    # Bytes from a large chunk's base to its block header, in both builds.
+    def self.large_header_offset : Int32
+      SIZE + LARGE_LINK_BYTES
+    end
+
+    # The large chunk whose block header is *header*.
+    def self.from_large_header(header : BlockHeader*) : ChunkHeader*
+      (header.as(UInt8*) - large_header_offset).as(ChunkHeader*)
+    end
+
+    # The chunk whose `next` is *chunk*, a large chunk, or null when *chunk*
+    # heads the list (`LARGE_LINK_BYTES`). Written wherever a `next` or the
+    # head is set to a large chunk, under the same exclusion as that store
+    # (`link`, `set_back_link`). Read only under `@chunk_list_lock`, and only
+    # as a claim `Heap#unlink_chunk` verifies before acting on it.
+    def self.large_prev(chunk : ChunkHeader*) : ChunkHeader*
+      (chunk.as(UInt8*) + SIZE).as(ChunkHeader**).value
+    end
+
+    # Record *pred* as what links to *succ* (null: *succ* is the head), when
+    # *succ* is a large chunk; small chunks keep no back-link.
+    def self.set_back_link(succ : ChunkHeader*, pred : ChunkHeader*) : Nil
+      return if succ.null? || !large?(succ)
+      (succ.as(UInt8*) + SIZE).as(ChunkHeader**).value = pred
+    end
+
+    # `pred.next = succ`, and *succ*'s back-link with it. Every list store
+    # that links one chunk to another goes through here or through
+    # `set_next` plus `set_back_link`, so a large chunk's back-link always
+    # names the chunk in front of it.
+    def self.link(pred : ChunkHeader*, succ : ChunkHeader*) : Nil
+      set_next(pred, succ)
+      set_back_link(succ, pred)
+    end
+
     # The single block header of a large chunk.
     #
     # With headers in front of the object this is just `data_start`. Under
     # headerless the object starts at `data_start` and its header is reserved
     # before it, inside the metadata region — so the two differ and every large
     # path must ask for it by name rather than assume `data_start` is a header.
-    # Bytes from a large chunk's base to its object. Single definition so
-    # sizing, carving and the header slot cannot drift apart.
-    def self.large_data_offset : Int32
-      # The large header keeps its 16 bytes in both builds; only the small
-      # block loses its header.
-      ChunkHeader::SIZE + BlockHeader::LARGE_HEADER_BYTES
-    end
-
     def self.large_header(chunk : ChunkHeader*) : BlockHeader*
       {% if !flag?(:gcry_block_headers) %}
-        (chunk.as(UInt8*) + ChunkHeader::SIZE).as(BlockHeader*)
+        (chunk.as(UInt8*) + large_header_offset).as(BlockHeader*)
       {% else %}
         data_start(chunk).as(BlockHeader*)
       {% end %}
@@ -668,6 +743,21 @@ module Gcry
 
     def self.set_sparse(chunk : ChunkHeader*, value : Bool) : Nil
       update_flag(chunk, Flags::SPARSE, value)
+    end
+
+    # The chunk flags that record a reservation of `2^log` bytes past the
+    # chunk's first page (`Flags::GROW_EXTENT_SHIFT`).
+    def self.grow_extent_flags(log : Int32) : UInt32
+      log.to_u32 << Flags::GROW_EXTENT_SHIFT
+    end
+
+    # That log2, or 0 when nothing is reserved.
+    def self.grow_extent_log(chunk : ChunkHeader*) : Int32
+      ((chunk.value.flags & Flags::GROW_EXTENT_MASK) >> Flags::GROW_EXTENT_SHIFT).to_i32
+    end
+
+    def self.clear_grow_extent(chunk : ChunkHeader*) : Nil
+      update_flag(chunk, Flags::GROW_EXTENT_MASK, false)
     end
   end
 

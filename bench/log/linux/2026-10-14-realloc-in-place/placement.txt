@@ -1,0 +1,10 @@
+# master vs this branch on rows that grow no large block by realloc, 5 interleaved trials, medians: the two builds differ by -6% to +3% where the change does nothing (Brainfuck allocates nothing).
+bench                  arm             bench s      (min-max)  wall s   user    sys  RSS MiB   minflt VmPeak MiB
+Binarytrees            master           0.5410  (0.537-0.553)    0.54   0.54   0.01     38.4    15809      272.5
+Binarytrees            branch           0.5310  (0.526-0.536)    0.53   0.53   0.00     38.5    14016      272.5
+Primes                 master           0.6390  (0.630-0.683)    0.66   0.78   0.10    611.2   175610      813.5
+Primes                 branch           0.6010  (0.579-0.605)    0.63   0.67   0.10    615.1   168243      823.7
+JsonParsePure          master           0.3550  (0.351-0.362)    0.84   0.97   0.15    576.1   221401      781.5
+JsonParsePure          branch           0.3640  (0.362-0.376)    0.83   0.96   0.13    554.3   191183      761.9
+Brainfuck              master           2.5550  (2.519-2.706)    2.55   2.57   0.00      7.6      944      272.5
+Brainfuck              branch           2.5150  (2.507-2.544)    2.51   2.53   0.00      7.6      942      272.5

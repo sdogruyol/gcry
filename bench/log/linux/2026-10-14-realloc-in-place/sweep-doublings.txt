@@ -1,0 +1,24 @@
+# Reservation sizing, one binary with the sizing as env knobs (since removed), 5 interleaved trials, medians.
+# off = GCRY_REALLOC_IN_PLACE=0 (every growth copies); dN = room for N doublings past the first page, min 256 KiB.
+# bench s = the benchmark's own line; wall/user/sys/RSS/minflt from /usr/bin/time -v; VmPeak printed at exit by vmpeak.so.
+bench                  arm             bench s      (min-max)  wall s   user    sys  RSS MiB   minflt VmPeak MiB
+Revcomp                off              0.5870  (0.580-0.592)    2.05   1.90   0.20    560.3   286870      842.0
+Revcomp                d1               0.5760  (0.574-0.587)    2.02   1.88   0.19    526.9   266201      843.2
+Revcomp                d2               0.5770  (0.574-0.586)    2.03   1.88   0.20    560.2   271169     1226.0
+Revcomp                d3               0.5810  (0.576-0.585)    2.03   1.88   0.20    526.9   265121     1611.2
+Revcomp                d4               0.5710  (0.566-0.579)    2.01   1.89   0.17    526.9   256102      843.2
+JsonParseSerializable  off              0.2990  (0.295-0.305)    0.89   0.91   0.13    494.2   185178      821.0
+JsonParseSerializable  d1               0.2910  (0.286-0.291)    0.84   0.85   0.10    409.5   137608      738.7
+JsonParseSerializable  d2               0.2880  (0.286-0.306)    0.83   0.87   0.10    417.7   136226     1223.3
+JsonParseSerializable  d3               0.2880  (0.285-0.290)    0.83   0.83   0.09    409.5   129003     1139.6
+JsonParseSerializable  d4               0.2900  (0.288-0.298)    0.83   0.86   0.10    416.5   131835     1139.3
+JsonParsePull          off              0.2840  (0.279-0.291)    0.86   0.87   0.11    495.7   173189      822.7
+JsonParsePull          d1               0.2870  (0.281-0.297)    0.83   0.84   0.09    409.4   131804      746.7
+JsonParsePull          d2               0.2820  (0.280-0.290)    0.82   0.85   0.09    411.2   129410     1214.6
+JsonParsePull          d3               0.2830  (0.282-0.289)    0.82   0.85   0.09    412.7   126591     1122.1
+JsonParsePull          d4               0.2840  (0.281-0.288)    0.82   0.85   0.09    408.6   125554      890.8
+JsonGenerate           off              0.6010  (0.597-0.604)    1.54   1.73   0.23    856.2   361873     1221.4
+JsonGenerate           d1               0.5870  (0.581-0.595)    1.47   1.68   0.19    772.0   293042     1673.1
+JsonGenerate           d2               0.5690  (0.562-0.583)    1.45   1.68   0.16    764.5   259463     1537.1
+JsonGenerate           d3               0.5610  (0.556-0.583)    1.45   1.67   0.16    764.5   253479     2433.1
+JsonGenerate           d4               0.5770  (0.572-0.581)    1.45   1.68   0.18    763.6   272929     5248.1

@@ -122,6 +122,7 @@ module Gcry
         chunk = map_chunk(@small_chunk_bytes, index.to_u32, flags,
           Pointer(Void).new(@oom_reserve_base &+ @oom_reserve_used))
         @oom_reserve_used &+= @small_chunk_bytes unless chunk.null?
+        bitmap_credit_capacity(chunk)
         chunk
       end
     end

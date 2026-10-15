@@ -357,7 +357,8 @@ module Gcry
     # one word, and anything else that can hold a pointer gets every word of its
     # slot marked. Values (`Int32`, `Bool`, `Atomic(Int32)`, an enum) are skipped
     # because `has_inner_pointers?` says there is nothing in them — the same
-    # predicate `Layout.register` was fixed to ask on 2026-08-15.
+    # predicate the removed `Gcry::Layout` registration was fixed to ask on
+    # 2026-08-15.
     private macro pin_ec_ivars(obj, type)
       {% for ivar in type.resolve.instance_vars %}
         {% ty = ivar.type %}
@@ -952,7 +953,39 @@ module Gcry
       # nothing clears it when the thread dies — so "staged and not in the list"
       # covers the birth window and every dead thread since, and a check that
       # skips forever is worse than one that races.
-      multi_mutator_threads?
+      return true if multi_mutator_threads?
+      # The Monitor and the idle collector are not mutators once they are in
+      # their loops, which is why `multi_mutator_threads?` allows the one and
+      # skips the other. Each allocates in its birth, though — `Thread#start`
+      # pushes the thread onto Crystal's list and then allocates its main
+      # `Fiber` — and a walk taken while one sat between setting an occupancy
+      # bit and crediting the counter read one block more than the counter,
+      # stably, for as long as that thread was off the CPU. That is the "lost
+      # increment" `make counter-loss` counted once on macos-15-intel, and on
+      # Linux under CPU contention: 11 of 3 840 runs counted 1 to 239 such
+      # mismatches, in the first round (the Monitor's birth) or the second (the
+      # idle thread's, born at the end of the first collection), none of them
+      # still there 50 ms later; with the Monitor settled before the first
+      # walk and the idle thread off, 0 of 2 400. So a runtime thread is a
+      # mutator here until it has stored itself as exempt: the same
+      # per-allocation comparison then counted 0 in 1 440 runs, against 2 in
+      # 1 440 without this, interleaved (process_spec/regression/69). Process
+      # GC only: neither allocates from any other heap.
+      {% if flag?(:gc_none) %}
+        Thread.unsafe_each do |thread|
+          return true if runtime_thread_in_birth?(thread)
+        end
+      {% end %}
+      false
+    end
+
+    # The Monitor or the idle collector, before it has stored itself as exempt
+    # (`MonitorGate.settle`, `IdleRelease.loop_forever`). By `@name`, as
+    # `monitor_thread?` asks, so the walk allocates nothing.
+    private def runtime_thread_in_birth?(thread : Thread) : Bool
+      return !IdleRelease.signal_exempt?(thread) if IdleRelease.thread?(thread)
+      name = thread.@name
+      !name.nil? && name == "SYSMON" && !MonitorGate.signal_exempt?(thread)
     end
 
     # Can this heap's counters lose an update outright? `note_alloc_bytes` uses
@@ -1124,23 +1157,6 @@ module Gcry
     # and can miss a deeper pointer.
     property stw_multi_pthread_lag : UInt64 = 0_u64
 
-    # Lowest scan address from a suspended thread SP on *fiber*, or nil.
-    # `GCRY_FULL_SUSPENDED_STACK=1`: decline the SP clamp so a running fiber's
-    # stack is scanned from the guard page instead of from the suspended SP.
-    #
-    # This is the question the `0x18` hunt ends on. The holders of the dying
-    # object all sat *below* the suspended SP — dead slots by the ABI, which a
-    # collector is right to skip — while Boehm, whose per-thread stack pointer
-    # is taken inside its signal handler and is therefore deeper, keeps the
-    # object. If scanning the whole stack saves it, the difference between the
-    # two collectors is over-retention on Boehm's side and not a missed root on
-    # gcry's, and that is worth knowing before anything else is changed.
-    #
-    # Runtime, not a rebuild: in this bench a recompile moves where the value
-    # lives, so a two-build A/B measures the compiler
-    # (`bench/log/linux/2026-08-26-debug-build-own-stack-root/FINDINGS.md`).
-    property full_suspended_stack : Bool = false
-
     # Set on every call to `fiber_stack_sp_scan_low`. False means the walk met
     # a thread whose SP the stop did not record, so a nil return says "no
     # thread was *found* on this stack", not "no thread is on it". That
@@ -1180,9 +1196,9 @@ module Gcry
       nil
     end
 
+    # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
       @fiber_sp_all_known = false
-      return nil if @full_suspended_stack
       return nil unless @world_stopped
 
       stack = fiber.@stack
@@ -1905,7 +1921,7 @@ module Gcry
     #     0 (the old bound)     9 objects lost of 264
     #
     # Fisher p ≈ 0.004. 4096 is the value that was measured; a full guard→bottom
-    # scan fixes it too and costs far more (`full_suspended_stack`).
+    # scan fixes it too and costs far more.
     #
     # That is Linux, where the suspend is a signal. macOS (`thread_suspend`)
     # and Windows (`SuspendThread`) write nothing on the thread's stack: the

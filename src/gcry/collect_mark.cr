@@ -23,9 +23,9 @@ module Gcry
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
     # into its allocation). Never apply type_id_gate (raw buffers OK).
     #
-    # Inlined, with the heap-span test first: the precise scans (layout
-    # offsets, Hash entries) call this once per slot, and most slots hold no
-    # heap address. See the conservative loop in `scan_object`.
+    # Inlined, with the heap-span test first: the nursery and dirty-page
+    # rescans call this once per candidate word, and most words hold no heap
+    # address. See the conservative loop in `scan_object`.
     @[AlwaysInline]
     private def mark_candidate(pointer : Void*) : Nil
       addr = pointer.address
@@ -177,9 +177,6 @@ module Gcry
 
     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       addr = pointer.address
-      if ThreadListWatch.note_candidate(addr)
-        report_thread_list_offer(pointer, gate_type_id)
-      end
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned, so the filter below is a cheap reject
       # of misaligned false hits - but a misaligned interior into a byte buffer
@@ -575,7 +572,7 @@ module Gcry
         @mark_scanned_bytes &+= size
       end
 
-      # No type map narrows this scan. `Gcry::Layout` keyed one off the
+      # No type map narrows this scan. The removed `Gcry::Layout` keyed one off the
       # payload's first Int32, and a raw buffer of a mixed union starts with
       # exactly such an id: Crystal tags every element with its runtime type
       # id. `[JSON::Any.new(array), JSON::Any.new("x")]` is a 32-byte buffer
@@ -590,7 +587,7 @@ module Gcry
       #
       # Raw buffers (no Crystal type_id): object-base only — cuts interior false
       # hits from JSON/bytes. Typed References keep interiors so Array#shift and
-      # layout-miss types with mid-object pointers stay correct.
+      # types with mid-object pointers stay correct.
       #
       # This is a root-completeness heuristic on *heap edges*, not just on
       # ambient roots: an interior pointer stored inside a Slice / raw buffer is
@@ -638,25 +635,26 @@ module Gcry
     # not while the index audit counts lock skips); `occ` as the allocation
     # answer and the bitmap as the only mark (`bitmap_alloc`, which also
     # retires the header-mark union); the minor's nursery filter; first-mark
-    # attribution; the misaligned-candidate filter; the thread-list tripwire;
-    # and the double-push catcher.
+    # attribution; the misaligned-candidate filter; and the double-push
+    # catcher.
     private def mark_edges_inline_allowed? : Bool
       {% if flag?(:gcry_hl_assert) %}
         return false
       {% end %}
       @world_stopped && !@index_audit && !@radix_l1.null? && @bitmap_alloc && @bitmap_marks &&
-        !@minor_only && !@live_attr_roots && @scan_unaligned_candidates && !ThreadListWatch.armed?
+        !@minor_only && !@live_attr_roots && @scan_unaligned_candidates
     end
 
     # `scan_payload`'s loop with the candidate resolved in place rather than
     # through a `mark_impl_unlocked` call per word that passes the heap span.
     #
-    # That call was most of the mark's instructions. Its frame carries a
-    # 500-byte buffer (`report_thread_list_offer` inlines into it), so every
-    # candidate saved and restored six registers; the radix shift went out of
-    # line; and every `self` field was reloaded after each store, so the block
-    # ordinal — a load of the size class and data offset, a checked multiply,
-    # a bounds-checked table read — was derived three times, once each for
+    # That call was most of the mark's instructions. Its frame carried a
+    # 500-byte buffer (the thread-list tripwire's offer reporter, removed in
+    # 0.36.0, inlined into it), so every candidate saved and restored six
+    # registers; the radix shift went out of line; and every `self` field was
+    # reloaded after each store, so the block ordinal — a load of the size
+    # class and data offset, a checked multiply, a bounds-checked table read —
+    # was derived three times, once each for
     # `block_allocated?`, `block_marked_in?` and `set_block_mark_in`. Here it
     # is derived once, with the table, the span and the radix fields in
     # registers. Serial Σ mark over 7 interleaved runs: Primes 774 → 592 ms,
@@ -1082,10 +1080,9 @@ module Gcry
           # Its fields were marked above; only its own mark is missing, so
           # set it rather than push the object to be scanned a second time.
           #
-          # Research only (`finalizer_resurrect = false`,
-          # `GCRY_FINALIZER_NO_RESURRECT=1`): skip the object's own
-          # resurrection, so the sweep reclaims its block and the callback
-          # runs on freed memory — the pre-Boehm-rule behaviour.
+          # Research only (`finalizer_resurrect = false`, library heaps): skip
+          # the object's own resurrection, so the sweep reclaims its block and
+          # the callback runs on freed memory — the pre-Boehm-rule behaviour.
           # `make finalizer-complex --broken` requires the callback to find
           # its object gone.
           if @finalizer_resurrect

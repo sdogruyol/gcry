@@ -412,7 +412,7 @@ if ARGV.first? == "--child"
     exit 0
   end
   pointer = heap.malloc_atomic(40 * 1024)
-  chunk = (Gcry::BlockHeader.large_header_from_user(pointer).as(UInt8*) - Gcry::ChunkHeader::SIZE).as(Gcry::ChunkHeader*)
+  chunk = Gcry::ChunkHeader.from_large_header(Gcry::BlockHeader.large_header_from_user(pointer))
   heap.free(pointer)
   if mode == "tlab-slots"
     heap.chunk_search_tlab_slots_probe

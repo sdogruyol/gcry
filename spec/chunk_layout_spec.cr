@@ -216,19 +216,31 @@ describe Gcry::Heap do
   end
 
   describe "ChunkHeader" do
-    it "keeps large chunks at the constant offset the back-references assume" do
-      # heap.cr:1299 and five siblings, collect.cr:1017, collect_sweep.cr:386
-      # and :751 all recover a large chunk as `header - ChunkHeader::SIZE`.
-      # That is only correct while large chunks carry no bitmap region.
-      bytes = 65536_u64
-      raw = Pointer(UInt8).malloc(bytes)
-      chunk = raw.as(Gcry::ChunkHeader*)
-      chunk.value = Gcry::ChunkHeader.new(Pointer(Gcry::ChunkHeader).null, bytes, UInt32::MAX)
-      Gcry::ChunkHeader.large?(chunk).should be_true
-      chunk.value.data_offset.should eq(Gcry::ChunkHeader::SIZE.to_u32)
-      Gcry::ChunkHeader.data_start(chunk).address.should eq(chunk.address + Gcry::ChunkHeader::SIZE)
-      Gcry::ChunkHeader.occ_bitmap(chunk).should eq(Pointer(UInt64).null)
-      Gcry::ChunkHeader.mark_bitmap(chunk).should eq(Pointer(UInt64).null)
+    it "lays a large chunk out as header, back-link slot, block header, object" do
+      # Every site that recovers a large chunk from its block header goes
+      # through `from_large_header`, and every site that sizes a large mapping
+      # through `large_data_offset`; both stay 16-aligned, so the object does.
+      Gcry::ChunkHeader.large_header_offset.should eq(Gcry::ChunkHeader::SIZE + Gcry::ChunkHeader::LARGE_LINK_BYTES)
+      Gcry::ChunkHeader.large_data_offset.should eq(Gcry::ChunkHeader.large_header_offset + Gcry::BlockHeader::LARGE_HEADER_BYTES)
+      (Gcry::ChunkHeader.large_header_offset % 16).should eq(0)
+      (Gcry::ChunkHeader.large_data_offset % 16).should eq(0)
+      heap = Gcry::Heap.new
+      begin
+        user = heap.malloc(40_000)
+        header = Gcry::BlockHeader.large_header_from_user(user)
+        chunk = Gcry::ChunkHeader.from_large_header(header)
+        Gcry::ChunkHeader.large?(chunk).should be_true
+        Gcry::ChunkHeader.large_header(chunk).should eq(header)
+        Gcry::ChunkHeader.large_user(chunk).should eq(user)
+        (user.address - chunk.address).should eq(Gcry::ChunkHeader.large_data_offset)
+        Gcry::ChunkHeader.occ_bitmap(chunk).should eq(Pointer(UInt64).null)
+        Gcry::ChunkHeader.mark_bitmap(chunk).should eq(Pointer(UInt64).null)
+        # The slot is not part of the object: a pointer into it resolves to
+        # no block.
+        Gcry::ChunkHeader.contains?(chunk, chunk.address + Gcry::ChunkHeader::SIZE).should be_false
+      ensure
+        heap.destroy
+      end
     end
 
     it "places occ and mark back to back after the header" do

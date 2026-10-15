@@ -176,21 +176,25 @@ def run_child(self_path : String, fast : Bool, plain : Bool = false) : {Array(Bu
 end
 
 # A window child: its buckets, whether it exited cleanly, and from its last
-# `window` line how often the hook ran and how many chunks it mapped there.
-def run_window_child(self_path : String, splice : Bool) : {Array(Bucket), Bool, UInt64, UInt64}
+# `window` line how often the hook ran, how many chunks it mapped there, and
+# how many large chunks' back-links the audits after its collections found
+# not naming the chunk in front (`Heap#chunk_back_link_faults`, summed).
+def run_window_child(self_path : String, splice : Bool) : {Array(Bucket), Bool, UInt64, UInt64, UInt64}
   args = ["--child", "--window"]
   args << "--no-splice" unless splice
   sink = IO::Memory.new
   status = Process.run(self_path, args, output: sink, error: Process::Redirect::Close)
   fired = 0_u64
   prepends = 0_u64
+  link_faults = 0_u64
   sink.to_s.each_line do |line|
     f = line.split
-    next unless f.size == 3 && f[0] == "window"
+    next unless f.size == 4 && f[0] == "window"
     fired = f[1].to_u64
     prepends = f[2].to_u64
+    link_faults = f[3].to_u64
   end
-  {parse_buckets(sink.to_s), status.success?, fired, prepends}
+  {parse_buckets(sink.to_s), status.success?, fired, prepends, link_faults}
 end
 
 # The window-free arm's free: armed before each collection, held in class state
@@ -339,12 +343,17 @@ unless ARGV.includes?("--child")
   # that dropped the prefix also measured 0 in 12.1 million mappings. These
   # two put a prepend between the after-world sweep's walk and its store in
   # every collection. The splice must keep every one; without it every one
-  # strands, which is what proves the hook is in the window.
+  # strands, which is what proves the hook is in the window. The prepend also
+  # writes the back-link of the chunk the walk started from, which the
+  # rebuild has meanwhile put behind another (`ChunkHeader.large_prev`); the
+  # store rewrites it, and the audits after each collection count the links
+  # left wrong.
   puts "=== window — a chunk mapped between the after-world sweep's walk and its store, #{WINDOW_ROUNDS} collections ==="
-  window, window_ok, window_fired, window_prepends = run_window_child(self_path, true)
+  window, window_ok, window_fired, window_prepends, window_link_faults = run_window_child(self_path, true)
   window_lost = window.empty? ? 0_u64 : window.last.chunks
-  puts "  splice:    hook ran #{window_fired} time(s), mapped #{window_prepends} chunk(s) in the window, stranded #{window_lost}#{window_ok ? "" : " — the child crashed"}"
-  control, control_ok, control_fired, control_prepends = run_window_child(self_path, false)
+  puts "  splice:    hook ran #{window_fired} time(s), mapped #{window_prepends} chunk(s) in the window, stranded #{window_lost}, " \
+       "back-links wrong #{window_link_faults}#{window_ok ? "" : " — the child crashed"}"
+  control, control_ok, control_fired, control_prepends, _ = run_window_child(self_path, false)
   control_lost = control.empty? ? 0_u64 : control.last.chunks
   puts "  no splice: hook ran #{control_fired} time(s), mapped #{control_prepends} chunk(s) in the window, stranded #{control_lost}#{control_ok ? "" : " — the child crashed"}"
   puts ""
@@ -393,6 +402,10 @@ unless ARGV.includes?("--child")
     failures << "the window arm stranded #{window_lost} of the #{window_prepends} chunks mapped in the window: " +
                 "the store is dropping what was prepended during the sweep's walk"
   end
+  if window_link_faults > 0
+    failures << "the window arm left #{window_link_faults} large chunk back-link(s) not naming the chunk in front: " +
+                "the store no longer rewrites the walk head's link the prepend overwrote"
+  end
   if control_lost == 0
     failures << "the window control stranded nothing of #{control_prepends} chunk(s) mapped in the window: " +
                 "the window arm no longer reaches the race it exists to show closed"
@@ -428,7 +441,8 @@ unless ARGV.includes?("--child")
     exit 1
   end
   puts "ok — shipped: 0 stranded over #{shipped_mapped} mappings and 0 over #{plain_mapped} in short processes (cap 0);"
-  puts "     window: 0 of #{window_prepends} prepends in the window stranded, #{control_lost} of #{control_prepends} without the splice;"
+  puts "     window: 0 of #{window_prepends} prepends in the window stranded and no back-link left wrong, " \
+       "#{control_lost} of #{control_prepends} stranded without the splice;"
   puts "     window-free: #{free_report.try(&.freed)} large frees in the window, none released while still listed;"
   puts "     the pre-fix shape #{fast_rate.round(1)} per 1000 and #{(fast.last.bytes * 100.0 / fast.last.heap_bytes).round(1)}% of its heap stranded."
   exit 0
@@ -460,13 +474,15 @@ if ARGV.includes?("--window")
   WindowPrepend.reserve(WINDOW_ROUNDS * 2)
   heap.post_stw_hook = ->(stage : Symbol) { WindowPrepend.call(stage) }
   window_every = WINDOW_ROUNDS // BUCKETS
+  link_faults = 0_u64
   WINDOW_ROUNDS.times do |i|
     # Some garbage, so each sweep has something to reclaim.
     64.times { Array(UInt8).new(512, 3_u8) }
     GC.collect
+    link_faults &+= heap.chunk_back_link_faults
     next unless (i + 1) % window_every == 0
     puts "bucket #{i + 1} #{heap.chunk_index_only_now} #{heap.chunk_index_only_now_bytes} #{heap.heap_size} #{heap.chunks_mapped}"
-    puts "window #{WindowPrepend.fired} #{WindowPrepend.prepends}"
+    puts "window #{WindowPrepend.fired} #{WindowPrepend.prepends} #{link_faults}"
     STDOUT.flush
   end
   exit 0

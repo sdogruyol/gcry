@@ -594,7 +594,7 @@ module Gcry
     # and is stopped outside it. Released as soon as the world is stopped: no
     # mutator can reach a slot then, and `flush_all_tlabs` does not lock them.
     protected def lock_tlab_slots_for_stop : Bool
-      return false unless @tlabs_booted && @tlab_enabled && @tlab_quiesce
+      return false unless @tlabs_booted && @tlab_enabled
       i = 0
       while i < MAX_TLABS
         (@tlab_slot_locks.to_unsafe + i).value.lock

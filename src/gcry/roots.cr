@@ -169,10 +169,10 @@ module Gcry
       # (shouldn't) — take the lesser address so we never shrink the window.
       approx = stack_pointer.address
       low = approx if approx < low
-      # Recorded, not re-derived: `GCRY_BIRTH_GRACE` asks whether a stack slot
-      # was inside the window this scan actually used, and computing a second
-      # opinion of "where SP was" from another frame would answer a different
-      # question. Two stores on a once-per-collection path.
+      # Recorded, not re-derived: the address-space audit asks whether a stack
+      # slot was inside the window this scan actually used, and computing a
+      # second opinion of "where SP was" from another frame would answer a
+      # different question. Two stores on a once-per-collection path.
       @@last_mutator_low = low
       @@last_mutator_high = bottom.address
       scan_stack(low, bottom.address, stack_low.address, bottom.address) do |candidate|

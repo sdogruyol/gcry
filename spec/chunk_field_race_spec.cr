@@ -86,8 +86,8 @@ describe "chunk fields updated under different locks" do
       heap.gc_threshold = UInt64::MAX
       first = heap.malloc(40 * 1024)
       second = heap.malloc(40 * 1024)
-      target = (Gcry::BlockHeader.large_header_from_user(first).as(UInt8*) - Gcry::ChunkHeader::SIZE).as(Gcry::ChunkHeader*)
-      predecessor = (Gcry::BlockHeader.large_header_from_user(second).as(UInt8*) - Gcry::ChunkHeader::SIZE).as(Gcry::ChunkHeader*)
+      target = Gcry::ChunkHeader.from_large_header(Gcry::BlockHeader.large_header_from_user(first))
+      predecessor = Gcry::ChunkHeader.from_large_header(Gcry::BlockHeader.large_header_from_user(second))
       ChunkFieldRaceSpec.before_next = -> {
         Gcry::ChunkHeader.set_cursor(predecessor, true)
         nil

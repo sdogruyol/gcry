@@ -1,4 +1,6 @@
-# Regression test for layout scan_cap requiring alloc_size match.
+# Regression test for the former layout scan_cap requiring alloc_size match.
+# `Gcry::Layout` has since been removed; the same raw buffer now guards the
+# conservative body scan.
 #
 # Fixed in v0.12.0: on size mismatch (raw buffer whose leading Int32
 # collided with a registered type_id), the old path still applied that

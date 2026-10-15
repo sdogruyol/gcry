@@ -1,0 +1,27 @@
+# The first sizing: the whole mapping rounded up to a power of two, then doubled N times (dN). Same harness, 5 interleaved trials, medians.
+# d3min1m = three doublings from a 1 MiB minimum. Compare dN here with d(N) in sweep-doublings.txt: same faults, more address space.
+bench                  arm             bench s      (min-max)  wall s   user    sys  RSS MiB   minflt VmPeak MiB
+Revcomp                off              0.5680  (0.562-0.574)    2.00   1.88   0.19    560.3   286878      842.0
+Revcomp                d1               0.5650  (0.558-0.566)    1.99   1.86   0.18    527.0   264660     1099.2
+Revcomp                d2               0.5600  (0.549-0.568)    2.00   1.88   0.17    560.3   271162     1866.0
+Revcomp                d3               0.5640  (0.558-0.592)    1.99   1.85   0.17    527.0   265127     2635.2
+Revcomp                d4               0.5580  (0.550-0.564)    1.98   1.86   0.16    526.9   256114     1099.2
+Revcomp                d3min1m          0.5590  (0.553-0.564)    1.98   1.86   0.16    527.0   258250     1099.2
+JsonParseSerializable  off              0.2880  (0.286-0.311)    0.87   0.88   0.11    484.6   183880      811.6
+JsonParseSerializable  d1               0.2850  (0.279-0.286)    0.82   0.82   0.09    409.5   137833      875.8
+JsonParseSerializable  d2               0.2850  (0.280-0.290)    0.82   0.85   0.09    421.0   137897     1737.1
+JsonParseSerializable  d3               0.2830  (0.276-0.285)    0.81   0.83   0.08    415.1   129921     1651.6
+JsonParseSerializable  d4               0.2800  (0.277-0.282)    0.81   0.86   0.08    408.1   129804     1267.3
+JsonParseSerializable  d3min1m          0.2840  (0.283-0.287)    0.82   0.82   0.09    409.7   134105     1027.4
+JsonParsePull          off              0.2750  (0.274-0.276)    0.85   0.86   0.11    495.7   173077      822.7
+JsonParsePull          d1               0.2760  (0.272-0.280)    0.81   0.82   0.09    415.4   134106      876.8
+JsonParsePull          d2               0.2750  (0.272-0.278)    0.82   0.85   0.08    423.2   132832     1738.5
+JsonParsePull          d3               0.2750  (0.272-0.280)    0.81   0.83   0.07    413.2   126866     1634.7
+JsonParsePull          d4               0.2770  (0.272-0.280)    0.80   0.84   0.08    408.5   125209     1018.5
+JsonParsePull          d3min1m          0.2770  (0.272-0.284)    0.81   0.82   0.08    409.3   128460     1028.4
+JsonGenerate           off              0.6070  (0.604-0.617)    1.53   1.73   0.22    856.2   363950     1221.4
+JsonGenerate           d1               0.5970  (0.589-0.609)    1.48   1.70   0.19    772.0   292660     2191.2
+JsonGenerate           d2               0.5740  (0.572-0.582)    1.44   1.71   0.14    763.7   258348     2048.1
+JsonGenerate           d3               0.5730  (0.570-0.583)    1.46   1.71   0.16    764.5   254812     2945.1
+JsonGenerate           d4               0.5880  (0.584-0.595)    1.45   1.72   0.16    763.7   273691     9344.1
+JsonGenerate           d3min1m          0.5900  (0.583-0.595)    1.46   1.70   0.16    764.4   275678     5249.1

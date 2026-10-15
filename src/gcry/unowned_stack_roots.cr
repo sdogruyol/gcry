@@ -30,17 +30,8 @@
 #     moved 13/24 to 8/24, which is not a result (p≈0.24), so the hook was
 #     removed rather than shipped on a maybe.
 #
-# `GCRY_DEAD_STACK_ROOTS=0` turns the fix off. The research arms —
-# `GCRY_DEAD_STACK_NOROOT`, `GCRY_POOLED_STACK_ROOTS`,
-# `GCRY_POOLED_STACK_NOROOT`, `GCRY_MAPS_INFLIGHT_ROOTS`,
-# `GCRY_MAPS_INFLIGHT_NOROOT` — stay, because the next question about this
-# defect will want the same arms, and rebuilding them from a log is how a
-# measurement gets quietly redefined.
-#
-# `GCRY_UNOWNED_COVERAGE_AUDIT=1` is the independent opinion: it walks
-# `/proc/self/maps` beside the fix and counts stack-shaped mappings that no
-# fiber, no pool and no thread's dying-fiber slot accounts for. A fix whose
-# coverage is only argued for is the shape of every defect on this board.
+# `GCRY_DEAD_STACK_ROOTS=0` turns the fix off, and `GCRY_DEAD_STACK_NOROOT=1`
+# is its twin: the same walk, offering nothing.
 #
 # Only the top `UNOWNED_STACK_WINDOW` of a stack is scanned. Every hit the
 # address-space audit reported was 968 to 1408 bytes below the stack top —
@@ -54,29 +45,11 @@ module Gcry
     # Its twin: walk the same memory, offer nothing.
     property dead_stack_noroot : Bool = false
 
-    property pooled_stack_roots : Bool = false
-    property pooled_stack_noroot : Bool = false
-    property maps_inflight_roots : Bool = false
-    property maps_inflight_noroot : Bool = false
-
-    property unowned_coverage_audit : Bool = false
-    getter unowned_covered : UInt64 = 0_u64
-    getter unowned_uncovered : UInt64 = 0_u64
-    # Uncovered mappings that turned out to be thread stacks — scanned, just not
-    # by the route this audit checks.
-    getter unowned_thread_stacks : UInt64 = 0_u64
-    # Thread stack bounds the last comparison had available.
-    getter unowned_bounds_compared : UInt64 = 0_u64
-
     # Stacks walked and words offered, per arm. Counted so a null result cannot
     # be "the arm never ran" — the failure mode every step of this hunt has hit
     # at least once.
     getter dead_stacks_walked : UInt64 = 0_u64
     getter dead_stack_words : UInt64 = 0_u64
-    getter pooled_stacks_walked : UInt64 = 0_u64
-    getter pooled_stack_words : UInt64 = 0_u64
-    getter maps_inflight_walked : UInt64 = 0_u64
-    getter maps_inflight_words : UInt64 = 0_u64
 
     UNOWNED_STACK_WINDOW = 64_u64 * 1024
 
@@ -87,10 +60,6 @@ module Gcry
 
     protected def scan_unowned_stacks : Nil
       scan_dead_fiber_stacks if @dead_stack_roots || @dead_stack_noroot
-      scan_pooled_stacks if @pooled_stack_roots || @pooled_stack_noroot
-      if @maps_inflight_roots || @maps_inflight_noroot || @unowned_coverage_audit
-        scan_maps_inflight_stacks
-      end
     end
 
     # Read from the ivar, never through `dead_fiber_stack?`, which hands the
@@ -111,60 +80,6 @@ module Gcry
       {% end %}
     end
 
-    private def scan_pooled_stacks : Nil
-      offer = @pooled_stack_roots
-      each_pooled_stack do |lo, hi|
-        @pooled_stacks_walked &+= 1
-        walk_stack_top(lo, hi, offer, pointerof(@pooled_stack_words))
-      end
-    end
-
-    # Every mapping shaped like a `Fiber::StackPool` stack that nothing claims.
-    # The shape test is the mapped size alone — `mmap` promises page alignment,
-    # not stack-size alignment — so it can pick up an unrelated mapping of the
-    # same size. That costs precision, not soundness: scanning extra memory
-    # conservatively retains, it does not corrupt.
-    private def scan_maps_inflight_stacks : Nil
-      offer = @maps_inflight_roots
-      walk = @maps_inflight_roots || @maps_inflight_noroot
-      Platform.each_map_region do |lo, hi, perms, _name, _name_len|
-        next unless perms[0] == 'r'.ord.to_u8
-        next unless fiber_stack_geometry?(lo, hi)
-        next if fiber_owns_stack?(lo, hi)
-        next if pool_holds_stack?(lo, hi)
-        if @unowned_coverage_audit
-          if dying_fiber_stack?(lo, hi)
-            @unowned_covered &+= 1
-          elsif thread_stack_region?(lo, hi)
-            # A **tripwire**, and it is expected to read zero: measured on
-            # x86_64/glibc, the geometry test above looks for
-            # `STACK_SIZE - PAGE_SIZE` = 8 384 512 bytes and a Crystal thread's
-            # stack maps exactly `STACK_SIZE` = 8 388 608 — one page apart, so a
-            # thread stack cannot reach this branch at all.
-            #
-            # It is kept rather than deleted because that page is an accident of
-            # how glibc places the guard, not a guarantee: a libc that maps the
-            # guard inside the stack, or a different guard size, makes the two
-            # shapes identical and every thread stack starts landing in this
-            # audit's residue. A **non-zero** count here says that has happened
-            # — it does not say a root is missing, because `stop_world`
-            # snapshots those bounds and the scan walks them by that route.
-            #
-            # Its zero is therefore structural, and saying so is the point: an
-            # earlier version of this comment claimed the two sizes were the
-            # same and offered the zero as a measurement that ruled thread
-            # stacks out. It ruled nothing out; it could not have.
-            @unowned_thread_stacks &+= 1
-          else
-            @unowned_uncovered &+= 1
-          end
-        end
-        next unless walk
-        @maps_inflight_walked &+= 1
-        walk_stack_top(lo, hi, offer, pointerof(@maps_inflight_words))
-      end
-    end
-
     private def walk_stack_top(lo : UInt64, hi : UInt64, offer : Bool, words : UInt64*) : Nil
       low = hi - UNOWNED_STACK_WINDOW
       low = lo if low < lo
@@ -180,89 +95,6 @@ module Gcry
       page = Roots::PAGE_SIZE.to_u64
       return false unless (lo & (page - 1)) == 0
       (hi & (page - 1)) == 0
-    end
-
-    # Does any thread's snapshotted stack overlap this mapping? Bounds come from
-    # the pre-stop snapshot, which is taken before this scan runs.
-    private def thread_stack_region?(lo : UInt64, hi : UInt64) : Bool
-      found = false
-      bounds_seen = 0_u64
-      Thread.unsafe_each do |thread|
-        bounds = Platform.snapshotted_stack_bounds(thread.to_unsafe)
-        next unless bounds
-        bounds_seen &+= 1
-        blo = bounds[0].address
-        bhi = bounds[1].address
-        found = true if blo < hi && bhi > lo
-      end
-      # A "no thread stack" answer from a walk that had no bounds to compare
-      # against is not an answer. Recorded rather than assumed: the check is
-      # called inside the roots phase, and whether the pre-stop snapshot has
-      # been taken by then is exactly the sort of thing this file has been wrong
-      # about before.
-      @unowned_bounds_compared = bounds_seen
-      found
-    end
-
-    private def dying_fiber_stack?(lo : UInt64, hi : UInt64) : Bool
-      {% if Thread.instance_vars.any? { |v| v.name == "dead_fiber_stack" } %}
-        parked = false
-        Thread.unsafe_each do |thread|
-          next if parked
-          stack = thread.@dead_fiber_stack
-          next unless stack
-          parked = true if stack.pointer.address <= lo && stack.bottom.address >= hi
-        end
-        parked
-      {% else %}
-        false
-      {% end %}
-    end
-
-    private def fiber_owns_stack?(lo : UInt64, hi : UInt64) : Bool
-      owned = false
-      Fiber.unsafe_each do |fiber|
-        next if owned
-        stack = fiber.@stack
-        owned = true if stack.pointer.address <= lo && stack.bottom.address >= hi
-      end
-      owned
-    end
-
-    private def pool_holds_stack?(lo : UInt64, hi : UInt64) : Bool
-      held = false
-      each_pooled_stack do |plo, phi|
-        held = true if plo <= lo && phi >= hi
-      end
-      held
-    end
-
-    # The deque is read through its raw ivars and clamped rather than iterated:
-    # the buffer whose freeing started this hunt is exactly the one this would
-    # be walking, and an instrument must not become the second crash.
-    private def each_pooled_stack(& : UInt64, UInt64 ->) : Nil
-      {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
-        Fiber::ExecutionContext.unsafe_each do |ec|
-          pool = ec.stack_pool?
-          next unless pool
-          deque = pool.@deque
-          buffer = deque.@buffer
-          next if buffer.null?
-          capacity = deque.@capacity
-          size = deque.@size
-          next if capacity <= 0 || size <= 0 || size > capacity
-          start = deque.@start
-          next if start < 0 || start >= capacity
-          i = 0
-          while i < size
-            stack = buffer[(start + i) % capacity]
-            i += 1
-            lo = stack.pointer.address
-            hi = stack.bottom.address
-            yield lo, hi if plausible_stack_range?(lo, hi)
-          end
-        end
-      {% end %}
     end
   end
 end

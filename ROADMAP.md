@@ -4,10 +4,11 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-**Release state.** Latest release **v0.35.0** (2026-10-12): parallel mark
-on by default, Boehm's `GC_*` C ABI, and the default-path fixes of PR #47,
-#48 and #49. The tip is the next candidate; `CHANGELOG.md`'s
-`[Unreleased]` section is what it holds.
+**Release state.** Latest release **v0.36.0** (2026-10-15): `Gcry::Layout`
+and 29 knobs removed, large `realloc` grown in place, O(1) large
+free, the RSS budget set, and the counter, `free_bytes` and Windows
+crash-report fixes of PR #51. The tip is the next candidate;
+`CHANGELOG.md`'s `[Unreleased]` section is what it holds.
 
 The headings below carry **no version numbers on purpose**. They are work
 buckets, and every attempt to number them has rotted: v0.20.0 through v0.25.0
@@ -3764,8 +3765,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       fault. Campaign-036's two
       stalls were captures of the harness parent only, not release faults.
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
-- [ ] **Freeing a large object costs O(live large chunks), so freeing many is
-      quadratic (diagnosed 2026-10-01).** Measured with
+- [x] **Freeing a large object costs O(live large chunks), so freeing many is
+      quadratic (diagnosed 2026-10-01) — closed 2026-10-14.** Measured with
       `bench/log/linux/2026-10-01-large-free-quadratic/largefree_scale.cr`:
       4.5 µs per free with 2 500 large chunks alive, 19 µs with 10 000 and
       88 µs with 40 000. That is 3.5 s to free 40 000 64 KiB objects. On Linux
@@ -3801,10 +3802,24 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       5 000 dying). Explicit `GC.free` trims only once the cache is 2 MiB past
       the retain: 81.6 µs to 10.9 µs per free at 40 000. Post-collection RSS
       is unchanged, since the collector still trims to the retain.
-      Open: a free of a block bigger than the slack is still one O(n) unlink.
-      O(1) removal needs a doubly linked list, and that does not fit:
-      `ChunkHeader` is 32 bytes and full, and a `prev` field breaks a large
-      payload's 16-byte alignment.
+      **2026-10-14: closed.** A free of a block bigger than the slack was
+      still one O(n) unlink, and so, under large-object recycling (the Linux
+      default since 2026-10-06), was nearly every large free once the cache
+      held the recycling floor: 2 470 of 2 500 64 KiB frees. A large chunk
+      now carries a back-link to the chunk in front of it, in 16 bytes
+      between its chunk header and its block header (the object starts at
+      64 instead of 48, still 16-aligned; `ChunkHeader` and small chunks are
+      unchanged). Every list store keeps it, `publish_relinked_chunks`
+      rewrites the one the after-world rebuild races, and `unlink_chunk`
+      checks it against the index before following it, walking as before
+      when it cannot. Per free with 2 500, 10 000 and 40 000 large chunks
+      alive (medians of three): a 4 MiB block 9.6 → 4.1, 35.4 → 4.8 and
+      186 → 7.7 µs; `largefree_scale.cr`'s 64 KiB frees 2.9 → 1.6, 7.9 → 1.3
+      and 41.7 → 1.5 µs (one run). The rest that grows is the sorted index's
+      shift on removal, 3.8 µs at 40 000 and 0.3 at 2 500; it would need an
+      index that is not a sorted array, and is not worth one at these sizes.
+      `process_spec/regression/71_*` walked 283 steps before, 0 after
+      (`bench/log/linux/2026-10-14-large-free-unlink/`).
 - [x] **`make parallel-dormant` failed on Linux and macOS CI — diagnosed
       2026-09-30.** Seven sightings, two failure modes, both of the harness
       and neither of the release. (1) Budget timing, macOS 8 of 300 runs
@@ -3851,20 +3866,33 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       parallel-mark-stress` in every job that runs the parallel-mark gates
       (`bench/log/linux/2026-10-01-parallel-mark-late-pop/`). Parallel mark
       stays experimental.
-- [ ] **Plain heap counters lost an increment on Intel macOS (2026-10-01).**
-      `make counter-loss`'s plain arm, which is the shipped default, counted 1
-      lost increment in 983 361 comparisons on macos-15-intel CI (run
-      36867713756), with no spawned thread: main and the monitor. That is the
-      v0.20.0 sighting's shape, and the 2026-09-13 item above says the gate is
-      what will notice if it returns. It is not seen on Linux or macOS arm64.
-      Open: which thread writes the counters concurrently on Darwin, and whether
-      Darwin should default to `GCRY_HEAP_COUNTERS_ATOMIC=1`. That cost was not
-      resolvable on Linux. Until then the gate is not run in the Darwin gates
-      job. The loss only skews GC timing (`bytes_since_gc`, `live_objects`); it
-      does not reclaim anything. A probe the same day ran 12 runs each of the
-      plain arm, the plain arm with `GCRY_IDLE_RELEASE_MS=0`, and the atomic
-      arm on macos-15-intel. All 36 counted 0, so it is too rare to bisect at
-      that budget.
+- [x] **Plain heap counters lost an increment on Intel macOS (2026-10-01) —
+      closed 2026-10-14.** `make counter-loss`'s plain arm counted 1 lost
+      increment in 983 361 comparisons on macos-15-intel CI (run
+      36867713756). Not a lost increment: a lost increment is counted at every
+      comparison after it, and this one was counted once. It was the
+      Monitor's or the idle thread's birth allocation, caught by the
+      per-allocation walk between setting an occupancy bit and crediting the
+      counter. Reproduced on Linux under CPU contention in 11 of 3 840 runs,
+      and in 0 of 2 400 with both births kept out of the way. The checker now
+      counts those threads as mutators until their births are over
+      (`process_spec/regression/69`). The gate's two arms had been the same
+      code on the bitmap layout. It was rebuilt: quiescent comparisons only,
+      80 threads with 16 on the fallback cursor set, and a `--plain` red arm
+      that loses 223 to 95 197 per run. It found a real loss in the shipped
+      path: `live_objects_sub` saturated at zero when two frees beat their
+      allocations' credit (`process_spec/regression/68`). Fixed; back in the
+      Darwin gates job. The other two saturating counters, checked the same
+      day: `free_bytes` cannot drift from the race (a lagging credit leaves
+      it high), but on the bitmap layout it never received a fresh chunk's
+      capacity and read ~0 with MBs free; fixed (`process_spec/regression/70`).
+      `bytes_since_gc_sub` loses subtractions even on one thread (819 200
+      bytes of net-zero churn left 253 968), which only brings a collection
+      forward and resets at every major. Fixed the same way on 2026-10-14:
+      the subtraction wraps, every reader clamps a wrapped value to 0
+      (`bytes_since_gc_now`), and the churn reads 0
+      (`process_spec/regression/72`); 114 collections instead of 115 on a
+      20M-allocation churn that frees one in four.
 - [x] **Two collector locks are unfair to a waiter under back-to-back
       collections (Windows, 2026-09-30).** Both were found with `cdb` on
       hung CI probes, and both are livelocks: the collector was still
@@ -3889,7 +3917,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       CPUs: 1.1 s → 41 s). The harness yield is gone;
       `process_spec/regression/50_collector_lock_fairness_spec.cr` failed 20
       of 20 before and passes on one and two CPUs after.
-- [ ] **Decide the RSS budget for large live sets (2026-10-03).** The
+- [x] **Decide the RSS budget for large live sets (2026-10-03) — decided
+      2026-10-14: within 1.1× Boehm's peak, cap floor stays 64 MiB.** The
       adaptive threshold's cap now follows a third of the bytes the mark
       scanned (Primes −17%, peak RSS unchanged everywhere). Primes is still
       2.1× and JsonParsePure 2.3× Boehm's process time, and the rest of that
@@ -3905,8 +3934,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       23 (macOS) points of Boehm's speed, JsonParsePure 9 and 11. A budget
       stated against Boehm ("within 10%") rather than against gcry's own
       default admits it.
-- [ ] **Large `realloc` growth maps, faults and copies every step
-      (2026-10-04).** Revcomp's buffers double from 64 KiB to 126 MiB three
+      **Re-measured on 0.35.0** (`b18d5c8`,
+      `bench/log/linux/2026-10-14-rss-budget-recheck/`): pacing and the
+      parallel mark default had already taken Primes to 103–107% of Boehm's
+      speed and JsonParsePure to 99–101%, at 0.94× and 0.83× its peak. Since
+      the paced threshold reaches 3× the cap, 256 MiB now puts RegexDna at
+      1.24× Boehm's peak, past the budget, and 128 / 192 MiB buy nothing
+      outside the noise while Revcomp goes 0.63× → 0.87×. Knuckeotide (47 MB
+      under Boehm) is the one row over 1.1×, at every cap: its peak is the
+      threshold floor and warm budget, not the cap.
+- [x] **Large `realloc` growth maps, faults and copies every step
+      (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
       of its speed locally and 73% on the CI runner (peak RSS 0.65×). In-place
       growth needs free address space above the chunk; moving breaks the
@@ -3920,6 +3958,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the index, the radix and `@heap_max` under the locks `map_chunk` takes.
       Every large unmap, trim, guard and quarantine path must then release
       the reservation, not `mapped_bytes`.
+      **Done as sketched** (`bench/log/linux/2026-10-14-realloc-in-place/`):
+      a copying growth reserves one page plus its data rounded to a power of
+      two, doubled once, and the next growth commits there and returns the
+      same pointer (`process_spec/regression/66`). Peak RSS −17% and faults
+      −24% on the JSON parse rows, now fewer faults than Boehm; Revcomp −6% /
+      −7%. Revcomp's remaining ~55k faults over Boehm come from fresh large
+      `String` allocations, not realloc chains.
 - [ ] **macOS: Binarytrees runs at ~80% of Boehm (2026-10-03, narrowed
       2026-10-05).** User CPU equals wall time and system time is the same as
       Boehm's, so nothing blocks; parallel mark does not help (four workers
@@ -3953,26 +3998,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
       instruction-level trims have stopped paying on this host
       (`bench/log/linux/2026-10-03-mark-prefilter/`).
-- [ ] **Decide what to do with `Gcry::Layout` registration (2026-10-04).**
-      The mark reads no layout since a mixed union's buffer was shown to
-      collide, by its first tag, with both a registered `Array` map and a
-      `Hash` map that passed its shape check — two default-settings
-      use-after-frees, and the class acikturkiye hit in August
-      (`bench/log/linux/2026-10-04-layout-union-collision/`). Registration
-      still runs: `Layout.register`, `register_hash`, `Gcry.register_layouts`
-      (public API), `register_builtins` at boot, `GCRY_AUTO_LAYOUTS`,
-      `GCRY_SCAN_CAPS`, `GCRY_LAYOUT_DROP_UNCLASSIFIED`, `GCRY_LAYOUT_DUMP`,
-      `make ivar-layout-roots`, `make auto-layouts`, the
-      `compiler-gc-contract` layout check and the `layout_*` counters. Either
-      remove it all (a public API removal), or find a key a raw buffer cannot
-      forge before any map narrows a scan again. The removal is ready on the
-      `layout-removal` branch (`033daf7`, −2 205 lines, rebased onto
-      `d15b0ea`, CI green on every platform, not merged). Its one earlier CI
-      failure, `fp-register-root`'s red arm on Darwin x86_64 keeping its
-      victim 12 of 13 runs, was not the branch: the collector left copies of
-      suspended threads' registers in dead frames of its own stack and then
-      scanned them, and that build's frame sizes put them in the window
-      (`bench/log/macos/2026-10-05-dead-register-copies/`, fixed on master).
+- [x] **Decide what to do with `Gcry::Layout` registration — removed in
+      0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
+      collided with registered maps
+      (`bench/log/linux/2026-10-04-layout-union-collision/`), so the whole
+      subsystem went: `Gcry::Layout`, `register_layout` / `register_hash` /
+      `register_set` / `register_layouts`, `register_builtins` at boot, the
+      six layout env knobs, the `layout_*` counters, `make
+      layout-property-test`, `make ivar-layout-roots`, `make auto-layouts` and
+      the `compiler-gc-contract` layout check, which was that gate's only red
+      arm (it is green-only now: no knob can fail its remaining checks).
 - [x] **`make nursery-headers` tests the old→young scan — fixed 2026-10-04.**
       It never had: a major does not promote, so the Hash and its `@entries`
       were still young when the key was planted, and the minor reached the
@@ -4047,6 +4082,11 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       Windows and 1 300 on Linux aarch64/x86_64
       (`bench/log/linux/2026-09-30-cross-platform-stress/`). Open: no
       coverage-guided fuzzer, and no hours on a production workload.
+      2026-10-15, on the 0.36.0 integration: about four hours over 21 loops
+      and 1 822 bounded runs, 0 gcry failures. The 4 stalls captured were all
+      Crystal's Parallel-scheduler deadlock (#17486); 5 earlier, uncaptured
+      timeouts of the same harness stopped at the same point
+      (`bench/log/linux/2026-10-15-0.36-stress/`).
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 

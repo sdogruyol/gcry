@@ -34,14 +34,16 @@ compiler PR").
 | m7 | **Mitigated**: one byte of slack on atomic blocks, as under Boehm; the argv patch stays | `heap.cr`; `process_spec/regression/24` |
 | m8 | **Fixed**: docs refreshed; `INTEGRATION.md` lists Windows as in scope only, and its Boehm parity table names what differs; `COMPARISON.md` describes the current tree | `README.md`, `docs/*` |
 | m9 | **Fixed**: `rbp`/`x29` captured unmangled | `roots.cr`; `process_spec/regression/15` |
-| M5 | **Partly closed** (readiness-2): chunk index/list drift is closed (the relink store splices back what was mapped during the walk, and a `GC.free` trim no longer detaches during it; `make chunk-list-drift` cap 0); the Windows collector-lock livelock is fixed in the product (the collection section hands over in arrival order and `GC.collect` is answered by any full collection that began after it; the roots lock lets waiting mutators in ahead of a stop; `process_spec/regression/50`). Still open: `dormant_flush` (unreproduced), the `@index_lock` holder in a stop (policy), Darwin Intel counter loss, O(n) single large unlink, in-place large `realloc` growth | `collect_sweep.cr`, `collect.cr`, `roots_lock.cr`; `ROADMAP.md` |
-| M6, M7 | **Open**: TSan/fuzzing, knob surface | §2–4 below; `ROADMAP.md` |
+| M5 | **Partly closed** (readiness-2): chunk index/list drift is closed (the relink store splices back what was mapped during the walk, and a `GC.free` trim no longer detaches during it; `make chunk-list-drift` cap 0); the Windows collector-lock livelock is fixed in the product (the collection section hands over in arrival order and `GC.collect` is answered by any full collection that began after it; the roots lock lets waiting mutators in ahead of a stop; `process_spec/regression/50`). Counter loss closed (0.36.0): the macos-15-intel sighting was the checker reading a runtime thread's birth allocation in flight (`69`); a real lost decrement, `live_objects_sub` saturating at zero, is fixed (`68`); `make counter-loss` has a red arm that is actually plain and runs on Darwin again. Still open: `dormant_flush` (unreproduced), the `@index_lock` holder in a stop (policy), O(n) single large unlink. Large `realloc` grows in place since 0.36.0 (`66`) | `collect_sweep.cr`, `collect.cr`, `roots_lock.cr`; `ROADMAP.md` |
+| M6 | **Open**: TSan/fuzzing | §2–4 below; `ROADMAP.md` |
+| M7 | **Partly closed** (0.36.0): `Gcry::Layout` and its registration API removed (6 knobs, −2 200 lines), 22 research-only or defect-restoring knobs no gate set (−1 140 lines), and the `GCRY_THREAD_LIST_TRIPWIRE` instrument family, whose `0x18` crash (`index_insert_locked`'s publication order) was fixed on 2026-08-27 (−530 lines). Still open: the research arms no gate sets, e.g. `GCRY_DYING_GREG_DUMP` | `CHANGELOG.md` `[Unreleased]` |
 | D1 | **Fixed** (PR #47, #48; not in the 2026-10-04 review): 11 defects on the default path. #47: a `Thread`'s birth root armed after its thread could end, `EINTR` and `errno` from the stop signals, stacks deeper than 64 MiB, the probe pipe under fd pressure, a parked finalizer blocking collection, a forked child's first stop. #48: chunk-index OOM hang, `realloc` shrink-then-grow stale bytes, `GC.free` of finalizers and of disappearing links, `GC.stop_world` without the collection's locks, release of a chunk holding an allocation cursor. Since then the stop calls no C heap function on Windows and macOS | `CHANGELOG.md` `[Unreleased]`; `process_spec/regression/52`–`63` |
 
 Two Crystal bugs turned up along the way, both outside gcry: `raises?` is not
 a fixpoint (§1, E3), and `String::Builder#to_s` writes one byte past its
 buffer (`bench/log/linux/2026-10-05-string-builder-terminator/`). Both have
-patches ready for upstream.
+patches ready for upstream, re-verified on Crystal master `39f3f4d` with the
+issue and PR text in each directory's `UPSTREAM.md` (2026-10-14).
 
 Each item has an ID so later work can refer to it. Evidence is either
 **observed** (run during this review) or **read** (taken from source or docs
@@ -164,6 +166,8 @@ x = [nil] of R
   registration should stay at all is still the ROADMAP's open question. Gate:
   `process_spec/regression/12_private_type_registration_spec.cr`. Before the
   fix it does not compile.
+- **Since 0.36.0** the registration is gone with `Gcry::Layout`, and with it
+  the macros and spec 12.
 
 ### E3: an exception that `rescue` does not catch
 

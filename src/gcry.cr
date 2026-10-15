@@ -7,10 +7,9 @@
 require "./gcry/clock"
 require "./gcry/cpu"
 require "./gcry/heap"
-require "./gcry/layout"
 
 module Gcry
-  VERSION = "0.35.0"
+  VERSION = "0.36.0"
 
   struct PauseStats
     getter last_ns : UInt64
@@ -34,11 +33,9 @@ require "./gcry/stw_watchdog"
 require "./gcry/idle_release"
 require "./gcry/raw_out"
 require "./gcry/ec_queue_audit"
-require "./gcry/birth_grace"
 require "./gcry/mark_audit"
 require "./gcry/address_space_audit"
 require "./gcry/thread_block_audit"
-require "./gcry/thread_list_tripwire"
 require "./gcry/thread_birth_root"
 require "./gcry/unowned_stack_roots"
 require "./gcry/poison_holders"
@@ -245,6 +242,10 @@ end
   require "./gcry/crystal_process_compat"
   require "./gcry/crystal_raises_compat"
   require "./gcry/crystal_string_builder_compat"
+  require "./gcry/crash_guard"
+  # Here, at the top level, so it runs after the prelude's
+  # `Exception::CallStack.setup_crash_handler` and is called before it.
+  Gcry::CrashGuard.install
   # Boehm's `GC_*` entry points, which `crystal i` and code bound to
   # `gc/boehm.cr`'s `LibGC` call. `-Dgcry_no_boehm_abi` leaves them out, for a
   # program that also links libgc itself: Crystal's distribution ships

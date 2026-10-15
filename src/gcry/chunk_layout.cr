@@ -120,15 +120,15 @@ module Gcry
                             bitmaps : Bool) : {UInt32, UInt32}
       # Large chunks (bitmaps == false) hold exactly one object and keep a real
       # block header — under headerless it is reserved *inside the metadata
-      # region*, between ChunkHeader and data_start, rather than in front of the
-      # object. Large blocks need somewhere to store the freelist and
-      # pending-large-cache links that `cache_large_chunk` and `sweep_large`
-      # chain them through, and with no header those writes land on the object's
-      # own bytes. One header per large chunk is free; one per small block is
-      # the 16 bytes this phase exists to remove.
+      # region*, between the back-link slot and data_start, rather than in
+      # front of the object. Large blocks need somewhere to store the freelist
+      # and pending-large-cache links that `cache_large_chunk` and
+      # `sweep_large` chain them through, and with no header those writes land
+      # on the object's own bytes. One header per large chunk is free; one per
+      # small block is the 16 bytes this phase exists to remove.
       unless bitmaps
         {% if !flag?(:gcry_block_headers) %}
-          return {0_u32, (ChunkHeader::SIZE + 16).to_u32}
+          return {0_u32, ChunkHeader.large_data_offset.to_u32}
         {% else %}
           return {0_u32, ChunkHeader::SIZE.to_u32}
         {% end %}

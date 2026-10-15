@@ -14,15 +14,25 @@
 #   churn      every worker also allocates small garbage, so a box the
 #              collector wrongly freed is soon overwritten
 #
-# The move is opt-in (`GCRY_REALLOC_MOVE=1`), so both arms turn it on:
+# The move is opt-in (`GCRY_REALLOC_MOVE=1`), and growth in place
+# (`Heap#grow_large`, the default) would take most steps before a move could,
+# so both move arms turn the one on and the other off
+# (`GCRY_REALLOC_IN_PLACE=0`):
 #
 #   moving                                   must survive, every box intact
 #   GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200  must fail: the signal is not
 #                                            blocked and the window held open
 #
+# A third arm runs the default, growth in place: a stop can find a worker
+# between committing the new pages, publishing the chunk's extent and raising
+# the block's size, and every box must survive that too.
+#
+#   in place                                 must survive, every box intact
+#
 #   crystal build -Dgc_none bench/realloc_move_stress.cr -o bin/realloc_move_stress
 #   bin/realloc_move_stress
-#   GCRY_REALLOC_MOVE=1 GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200 bin/realloc_move_stress --child
+#   GCRY_REALLOC_MOVE=1 GCRY_REALLOC_IN_PLACE=0 GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US=200 bin/realloc_move_stress --child
+#   bin/realloc_move_stress --child --in-place
 
 require "../src/gcry"
 require "./bounded_child"
@@ -106,9 +116,14 @@ if ARGV.includes?("--child")
   threads.each(&.join)
   collector.join
   heap = Gcry.default_heap
-  puts "child: #{Verdict.bad} bad rounds, #{heap.realloc_moves} moves (#{heap.realloc_moved_bytes // 1048576} MiB), #{heap.collections} collections"
-  # No moves means the arm tested nothing (run without `GCRY_REALLOC_MOVE=1`).
-  exit(1) if heap.realloc_moves == 0
+  puts "child: #{Verdict.bad} bad rounds, #{heap.realloc_moves} moves (#{heap.realloc_moved_bytes // 1048576} MiB), " \
+       "#{heap.realloc_in_place_grows} grown in place, #{heap.collections} collections"
+  # Nothing moved, or nothing grew in place, means the arm tested nothing.
+  if ARGV.includes?("--in-place")
+    exit(1) if heap.realloc_in_place_grows == 0
+  else
+    exit(1) if heap.realloc_moves == 0
+  end
   exit(Verdict.bad > 0 ? 1 : 0)
 end
 
@@ -116,20 +131,21 @@ end
 exe = Process.executable_path.not_nil!
 attempts = (ENV["REALLOC_MOVE_STRESS_ATTEMPTS"]?.try(&.to_i?) || 3)
 
-puts "=== realloc page-move stress ==="
+puts "=== realloc page-move and in-place stress ==="
 puts "#{WORKERS} workers × #{ROUNDS} rounds of #{BOXES} boxes, one collector, #{attempts} attempts per arm"
 
-# The moving arm needs every attempt clean; the control needs one failure to
-# show the harness can see the window, and stops at it.
-def run_arm(exe : String, env : Hash(String, String), attempts : Int32, control : Bool) : {Int32, Int32}
+# The moving and in-place arms need every attempt clean; the control needs
+# one failure to show the harness can see the window, and stops at it.
+def run_arm(exe : String, label : String, args : Array(String), env : Hash(String, String),
+            attempts : Int32, control : Bool) : {Int32, Int32}
   bad = 0
   tries = 0
   attempts.times do
     break if control && bad > 0
     tries += 1
-    result = BoundedChild.run(exe, ["--child"], env)
+    result = BoundedChild.run(exe, args, env)
     line = result.output.lines.find(&.starts_with?("child:"))
-    puts "  #{control ? "control" : "moving"}: #{result.ok ? "ok" : (result.timed_out ? "TIMED OUT" : "FAILED")}#{line ? " — #{line}" : ""}"
+    puts "  #{label}: #{result.ok ? "ok" : (result.timed_out ? "TIMED OUT" : "FAILED")}#{line ? " — #{line}" : ""}"
     unless result.ok
       bad += 1
       STDERR.puts result.output.lines.last(20).join("\n") unless control
@@ -138,12 +154,18 @@ def run_arm(exe : String, env : Hash(String, String), attempts : Int32, control 
   {bad, tries}
 end
 
-move_bad, move_tries = run_arm(exe, {"GCRY_REALLOC_MOVE" => "1", "GCRY_SEGV_REPORT" => "1"}, attempts, false)
-control_bad, control_tries = run_arm(exe, {"GCRY_REALLOC_MOVE" => "1", "GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US" => "200"}, attempts * 4, true)
+move_bad, move_tries = run_arm(exe, "moving", ["--child"],
+  {"GCRY_REALLOC_MOVE" => "1", "GCRY_REALLOC_IN_PLACE" => "0", "GCRY_SEGV_REPORT" => "1"}, attempts, false)
+control_bad, control_tries = run_arm(exe, "control", ["--child"],
+  {"GCRY_REALLOC_MOVE" => "1", "GCRY_REALLOC_IN_PLACE" => "0", "GCRY_REALLOC_MOVE_TEST_UNBLOCKED_US" => "200"},
+  attempts * 4, true)
+in_place_bad, in_place_tries = run_arm(exe, "in place", ["--child", "--in-place"],
+  {"GCRY_SEGV_REPORT" => "1"}, attempts, false)
 
 puts ""
 puts "moving: #{move_bad} of #{move_tries} failed"
 puts "control (unblocked, 200 µs window): #{control_bad} of #{control_tries} failed"
-ok = move_bad == 0 && control_bad > 0
+puts "in place: #{in_place_bad} of #{in_place_tries} failed"
+ok = move_bad == 0 && control_bad > 0 && in_place_bad == 0
 puts ok ? "PASS" : "FAIL"
 exit(ok ? 0 : 1)

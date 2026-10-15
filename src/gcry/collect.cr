@@ -52,6 +52,12 @@ module Gcry
     # live set growing to 550 MiB was collected every 64 MiB, nine majors
     # between 100 and 550 MiB where Boehm's free-space divisor takes five,
     # and its mark work summed to quadratic in the live set.
+    #
+    # The budget the floor is held to is peak RSS within 1.1× Boehm's on
+    # every crystal-metric row. Raising it buys nothing since pacing: the
+    # paced threshold already reaches 3× the cap, Primes and JsonParsePure
+    # run at Boehm's speed with 64 MiB, and 256 MiB puts RegexDna at 1.24×
+    # Boehm's peak (`bench/log/linux/2026-10-14-rss-budget-recheck/`).
     property adaptive_threshold_max : UInt64 = ADAPTIVE_THRESHOLD_MAX
     # Bytes the last major's mark scanned: every reached object that is not
     # atomic, small or large, counted by `scan_object` as it reads it. It is
@@ -276,10 +282,6 @@ module Gcry
     # deadlocked on aarch64.
     property monitor_gate_late_close : Bool = false
 
-    # Research only: flush empty chunks without `@alloc_lock`, which is what it
-    # did before 2026-08-24.
-    property empty_flush_unlocked : Bool = false
-
     # Hold off automatic collection for a window a caller cannot be interrupted
     # in. `MonitorGate` uses it: the Monitor is never signal-suspended, so a
     # stop waits for it by spinning on a busy bit — and a collection started
@@ -292,9 +294,6 @@ module Gcry
       @suppress_collect.sub(1)
     end
 
-    # Research only: skip the check and issue the syscall anyway, which is what
-    # it did before 2026-08-23.
-    property madvise_unchecked : Bool = false
     # Research only (`GCRY_LARGE_RELEASE_FROM_BASE=1`): restore the pre-2026-09-03
     # lower bound in the large-freelist page release, which started the range at
     # the chunk base and so covered the chunk's own header page. It exists so
@@ -333,36 +332,8 @@ module Gcry
     # type_id_root_rejections that were later revisited and would have passed —
     # useful for tuning the upper-bound heuristic (false negatives == UAF risk).
     # When non-zero in production, the gate is too strict and the upper bound
-    # (1_000_000) needs to grow or the layout-aware gate must take over.
+    # (1_000_000) needs to grow.
     getter type_id_root_false_negatives : UInt64 = 0_u64
-    # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
-    property layout_precise : Bool = true
-    # Objects the mark scanned precisely / conservatively. Incremented once
-    # per scanned object, by every mark worker — so they are **per worker**,
-    # one cache line each, and summed on read. As two shared `Heap` fields they
-    # were written by every worker on every object, which is false sharing on
-    # the hottest path in the collector: measured on a graph-heavy workload
-    # (`gc_phases --fanout=6 --shuffle`), dropping them took 2-worker parallel
-    # mark from +34% to +21% against one worker
-    # (`bench/log/linux/2026-09-23-parallel-mark-scaling/`). Slot 0 is the
-    # master and every thread outside a parallel mark; 1..16 the helpers.
-    LAYOUT_SCAN_SLOTS  = 17
-    LAYOUT_SCAN_STRIDE =  8                                   # UInt64s per slot: one 64-byte line
-    @layout_scan_counts = StaticArray(UInt64, 272).new(0_u64) # 2 x 17 x 8
-
-    def layout_precise_scans : UInt64
-      sum = 0_u64
-      LAYOUT_SCAN_SLOTS.times { |s| sum &+= @layout_scan_counts[s &* LAYOUT_SCAN_STRIDE] }
-      sum
-    end
-
-    def layout_conservative_scans : UInt64
-      sum = 0_u64
-      base = LAYOUT_SCAN_SLOTS &* LAYOUT_SCAN_STRIDE
-      LAYOUT_SCAN_SLOTS.times { |s| sum &+= @layout_scan_counts[base &+ s &* LAYOUT_SCAN_STRIDE] }
-      sum
-    end
-
     # Bytes a parallel mark scanned, per worker, in its shard
     # (`Heap#mark_shard`): a line that worker already owns, so counting adds
     # no shared write. Folded into `@mark_scanned_bytes` once the cycle's
@@ -410,30 +381,6 @@ module Gcry
     # moves: a `pinned` that grows while this stays zero is a chunk nobody will
     # ever release, which is what it meant until 2026-09-04.
     getter sweep_cursor_retired : UInt64 = 0_u64
-    # `GCRY_SWEEP_OCC_AUDIT=1`. Blocks a cursor slot was mid-allocation inside
-    # when the after-world sweep called them dead — occupied, live, unmarked,
-    # one step short of being handed to a caller. The publish this asks about
-    # is `occ[i] = mark[i]`, whose safety is an argument made in three other
-    # files (see the long note on `sweep_words_poisoning`); this is the number
-    # that checks it. Non-zero is a live block being reclaimed.
-    getter sweep_occ_in_flight : UInt64 = 0_u64
-    # Words the audited pass covered. Zero means the question was never asked,
-    # which is the first thing to rule out when the counter above is silent.
-    getter sweep_occ_audit_words : UInt64 = 0_u64
-    property sweep_occ_audit : Bool = false
-    # `GCRY_RELEASE_HOLDERS=1`. Large releases the holders search was run
-    # against, and the ones where something pointed into the block at that
-    # instant. The second being non-zero is a live block being released, with
-    # the holder named on stderr — the question the fault-time search cannot
-    # answer because it arrives a hundred collections late.
-    getter release_holders_searches : UInt64 = 0_u64
-    getter release_live_holders : UInt64 = 0_u64
-    # Of those, the stack words that sat **above** the collector's entry SP —
-    # live mutator frames the mark phase read. Non-zero is a missing root;
-    # zero with a non-zero count above means every reference was in the
-    # collection's own frames or in dead space, and the release was correct.
-    getter release_live_frame_holders : UInt64 = 0_u64
-    property release_holders : Bool = false
     # Large blocks offered to the cache while already on a freelist, and blocks
     # taken off a freelist that were not FREE. Either one is the same memory
     # reaching two owners.
@@ -450,9 +397,6 @@ module Gcry
     # whole old→young scan, dirty pages and the walk of every old block, so a
     # young key that lives only in an old `@entries` blob must be swept.
     property nursery_old_scan : Bool = true
-    # Hash-kind objects whose own body was word-scanned alongside the entry
-    # walk. Silence here would mean the collision guard is not engaged.
-    getter layout_hash_bodies : UInt64 = 0_u64
     # When true, load `.llvm_stackmaps` and mark_precise_root.
     # Opt-in: GCRY_PRECISE_STACK=1 (hybrid) or =2 (exclusive). See STACK_MAPS.md.
     property precise_stack_roots : Bool = false
@@ -734,11 +678,6 @@ module Gcry
     # seeing it trigger says nothing. Never ship non-zero.
     property stw_test_stall_ms : UInt64 = 0_u64
 
-    # Research only (`GCRY_PAGE_RELEASE_TEST_STALL_MS`, default 0): sleep
-    # between building the free-page mask and the release syscalls, so the
-    # window a mutator can allocate into becomes wide enough to measure.
-    property page_release_test_stall_ms : UInt64 = 0_u64
-
     # Research only: hold the **suspend** phase, which is a different one and the
     # only one the aarch64 hang has ever been seen in. `stw_test_stall_ms`
     # stalls thread-stacks, so it cannot exercise the report that names the
@@ -791,8 +730,7 @@ module Gcry
     # finalizer is queued and *not* marked, so the sweep reclaims it and the
     # callback runs on freed memory — what this code did before the Boehm
     # rule (`Socket`/`Digest#finalize` on a swept block, the acik wrk SEGV).
-    # `GCRY_FINALIZER_NO_RESURRECT=1` on a process heap; the `--broken` arm
-    # of `make finalizer-complex` on a library one.
+    # The `--broken` arm of `make finalizer-complex`, on a library heap.
     property finalizer_resurrect : Bool = true
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says, so the kept-chunk ledger and its crash-report line are
@@ -1316,9 +1254,6 @@ module Gcry
     # Released bases the kernel handed back to a later `mmap`. Silence here
     # would mean the cancel side never fires and the counter above is unread.
     getter release_remapped : UInt64 = 0_u64
-    # `GCRY_ALWAYS_CLEAR=1`: zero every allocation, including the ones whose
-    # bytes are already believed to be zero.
-    property always_clear : Bool = false
 
     private def release_map_slot(base : UInt64) : Int32
       ((base >> 12) % RELEASE_MAP_SLOTS).to_i32
@@ -1440,11 +1375,12 @@ module Gcry
     end
 
     # Returns true when the region was guarded (caller must not munmap it).
-    # The first user word of a large chunk: past the chunk header and the block
-    # header. Read before anything releases the range.
+    # The first user word of a large chunk: past the chunk header, the
+    # back-link slot and the block header (`ChunkHeader.large_data_offset`).
+    # Read before anything releases the range.
     private def guard_user_tag(base : UInt64, len : UInt64, kind : UInt8) : UInt64
       return 0_u64 unless kind == GUARD_KIND_LARGE
-      off = ChunkHeader::SIZE.to_u64 &+ BlockHeader::SIZE.to_u64
+      off = ChunkHeader.large_data_offset.to_u64
       return 0_u64 if len <= off &+ 8
       Pointer(UInt64).new(base &+ off).value
     end
@@ -1468,7 +1404,7 @@ module Gcry
     # one block, so its answer is that block's own FREE flag — 0 or 1.
     private def guard_occupied(base : UInt64, len : UInt64, kind : UInt8) : Int32
       if kind == GUARD_KIND_LARGE
-        off = ChunkHeader::SIZE.to_u64
+        off = ChunkHeader.large_header_offset.to_u64
         return -1 if len <= off &+ BlockHeader::SIZE.to_u64
         header = Pointer(BlockHeader).new(base &+ off)
         return BlockHeader.free?(header) ? 0 : 1
@@ -1487,76 +1423,8 @@ module Gcry
       n
     end
 
-    # Does anything point into this large block at the instant it is released?
-    #
-    # The holders search has only ever been run from a fault, and by then it is
-    # answering about a block that was released tens or hundreds of collections
-    # earlier — on the open live-large-object release, 109 of them. "Nothing
-    # points into it" is unsurprising at that distance and says nothing about
-    # whether anything did when the decision was made. This asks at the
-    # decision, which is the only moment the answer discriminates: a holder
-    # here is a live block being released and the search names who held it; no
-    # holder here means the reference appeared *after* the release, which is a
-    # different defect with a different owner.
-    #
-    # Large only. A size-class chunk's release is a statement about 64-odd
-    # blocks at once and the search takes one range.
-    #
-    # Expensive by construction — `search_at` walks the root set, every live
-    # block and every fiber stack, per released chunk — and it runs with the
-    # world up, where the heap it walks is moving under it. Research only, and
-    # it stays silent unless it finds something, so the reproducer's hundred
-    # releases per run cost time and no output.
-    private def audit_release_holders(base : UInt64, len : UInt64, kind : UInt8) : Nil
-      return unless kind == GUARD_KIND_LARGE
-      off = ChunkHeader.large_data_offset.to_u64
-      return if len <= off
-      user = base &+ off
-      size = len &- off
-      @release_holders_searches &+= 1
-      found = 0_u64
-      live_frames = 0_u64
-      # `PoisonHolders` is a unix diagnostic (`skip_file unless flag?(:unix)`),
-      # so this knob is one too. Windows has no equivalent walk of stacks and
-      # live blocks to borrow.
-      {% if flag?(:unix) %}
-        # The verdict floor: slots above this were mutator frames when the
-        # mark phase ran, slots below are this collection's own.
-        PoisonHolders.entry_sp = @collect_entry_sp
-        PoisonHolders.reset_live_frame_hits
-        found = PoisonHolders.holders_count(self, user, size)
-        live_frames = PoisonHolders.live_frame_hits
-        @release_live_frame_holders &+= live_frames
-      {% end %}
-      return if found == 0
-      # Found one. Say everything about it, once: this is the sighting the
-      # whole knob exists for.
-      @release_live_holders &+= 1
-      buf = uninitialized UInt8[RawOut::LIMIT]
-      l = RawOut.append(buf.to_unsafe, 0,
-        "gcry: RELEASING A BLOCK SOMETHING POINTS AT — large chunk 0x")
-      l = RawOut.append_hex(buf.to_unsafe, l, base)
-      l = RawOut.append(buf.to_unsafe, l, ", user 0x")
-      l = RawOut.append_hex(buf.to_unsafe, l, user)
-      l = RawOut.append(buf.to_unsafe, l, ", ")
-      l = RawOut.append_u64(buf.to_unsafe, l, size)
-      l = RawOut.append(buf.to_unsafe, l, " bytes, at collection ")
-      l = RawOut.append_u64(buf.to_unsafe, l, @collections)
-      l = RawOut.append(buf.to_unsafe, l, ", ")
-      l = RawOut.append_u64(buf.to_unsafe, l, live_frames)
-      l = RawOut.append(buf.to_unsafe, l,
-        " of the stack words are above the collector's entry SP (live mutator frames)\n")
-      RawOut.flush(buf.to_unsafe, l)
-      {% if flag?(:unix) %}
-        PoisonHolders.search(self, user, size)
-        PoisonHolders.scanned_windows_report(self, user, size)
-      {% end %}
-    end
-
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
-      ThreadListWatch.check(base, len, ThreadListWatch::SITE_RELEASE)
       note_release_base(base, kind) if @release_ledger || @unmap_guard
-      audit_release_holders(base, len, kind) if @release_holders
       unless @unmap_guard
         return false unless @release_ledger
         # Ring, not a bounded list: a ledger that fills up stops recording the
@@ -1696,7 +1564,7 @@ module Gcry
       steps = 0
       while user && steps < 1_000_000
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         base = chunk.as(Void*).address
         return base if addr >= base && addr < base &+ chunk.value.mapped_bytes
         user = header.value.next_free
@@ -2086,9 +1954,6 @@ module Gcry
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
-      # Snapshot the mutator's callee-saved registers before any collector frame
-      # can save them into its own (src/gcry/birth_grace.cr). Armed knob only.
-      note_collect_entry_regs if @birth_grace
       abort_incremental
       Trace.collect_start(major: true)
       @warm_released_collects &+= 1 if release_warm
@@ -2490,7 +2355,7 @@ module Gcry
       # Guarded by `bytes_since_gc >= gc_threshold / 4` so an idle path that
       # just happened to cross 75% doesn't repeatedly enter a barely-empty
       # incremental cycle.
-      bsg = @bytes_since_gc.get
+      bsg = bytes_since_gc_now
       if @incremental_auto &&
          bsg >= (@gc_threshold >> 2) &&
          bsg >= (@gc_threshold - (@gc_threshold >> 2))
@@ -2765,7 +2630,7 @@ module Gcry
 
     private def debt_under_threshold?(major : Bool) : Bool
       if major
-        @bytes_since_gc.get < @gc_threshold
+        bytes_since_gc_now < @gc_threshold
       else
         @nursery_alloc_bytes.get < @nursery_threshold
       end
@@ -2806,9 +2671,9 @@ module Gcry
     end
 
     # The mutator's stack pointer as the collector was entered. Everything below
-    # it is the collector's own frames — including, when `GCRY_BIRTH_GRACE` is
-    # searching for who holds a block, that search's own parameters. An
-    # instrument that scans the stack has to be able to exclude itself.
+    # it is the collector's own frames — including, when an audit is searching
+    # for who holds a block, that search's own parameters. An instrument that
+    # scans the stack has to be able to exclude itself.
     getter collect_entry_sp : UInt64 = 0_u64
 
     # See `Heap#alloc_large`: the block a stopped mutator is mid-way through
@@ -2819,9 +2684,6 @@ module Gcry
       return if user.null?
       mark_explicit_root(user)
     end
-
-    # `GCRY_POST_MARK_SPIN`. Research control only; see the spin site.
-    property post_mark_spin : UInt64 = 0_u64
 
     # Thin on purpose, and the body is never inlined into it: every frame a
     # collection pushes — the body's own large, heavily inlined frame included
@@ -2930,19 +2792,13 @@ module Gcry
           stw_reported = true
           collection_event(CollectionEvent::PostStopWorld)
           @last_phase_stw_stop_ns = monotonic_ns - t0
-          @thread_list_last_major = major
-          ThreadListWatch.new_cycle
-          probe_thread_list_header("the suspension")
           StwWatchdog.enter(StwWatchdog::PHASE_FLUSH)
           flush_all_tlabs
-          probe_thread_list_header("the TLAB flush")
           # TLAB-off USED stash → freelist before mark (unscanned thread locals).
           flush_all_alloc_batches
-          probe_thread_list_header("the alloc-batch flush")
           # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
           # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
           scrub_freelists
-          probe_thread_list_header("the freelist scrub")
           note_collection_begin
           StwWatchdog.enter(StwWatchdog::PHASE_CLEAR)
           @mark_stack.clear
@@ -3048,24 +2904,14 @@ module Gcry
 
           t0 = monotonic_ns
           mark_loop
-          # EXPERIMENT (GCRY_BIRTH_GRACE=1): *after* the mark, so a newborn block
-          # that nothing reached is visible as such. Reports what it saved, then
-          # marks it and drains again — the point is to name the block the
-          # collector was about to take, not only to keep the process alive.
-          if @birth_grace
-            mark_birth_grace_roots
-            mark_loop
-          end
           @last_phase_mark_ns = monotonic_ns - t0
           CrystalTrace.finish("collect:mark", trace_mark)
           collection_event(CollectionEvent::MarkEnd)
-          probe_thread_list_header("the mark", expect_marked: true)
           StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
           # Claiming FREE mid-alloc blocks during mark can leave USED-on-freelist;
           # drop them before sweep / empty-chunk unlink.
           scrub_freelists
-          probe_thread_list_header("the post-mark freelist scrub", expect_marked: true)
 
           # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
           enqueue_unreachable_finalizers
@@ -3075,22 +2921,6 @@ module Gcry
           if !major
             @nursery_alloc_before_minor = @nursery_alloc_bytes.get
             @nursery_survival_bytes = 0_u64
-          end
-
-          reset_birth_grace if @birth_grace
-
-          # `GCRY_POST_MARK_SPIN=<n>`: pure delay between mark and sweep, no
-          # bookkeeping of any kind. The control the birth-grace arms needed:
-          # every arm that walks a table here takes the crash rate to zero, and
-          # every arm that does not leaves it at the control rate — including
-          # one that roots a null pointer. If a bare spin does the same, the
-          # grace was never keeping anything alive.
-          if (n = @post_mark_spin) > 0
-            i = 0_u64
-            while i < n
-              Intrinsics.pause
-              i &+= 1
-            end
           end
 
           # Mark completeness, in the only window where the answer exists: the
@@ -3459,9 +3289,8 @@ module Gcry
 
     private def note_collection_begin : Nil
       @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
-      @bytes_before_gc = @bytes_since_gc.get
+      @bytes_before_gc = bytes_since_gc_now
       @bytes_reclaimed_since_gc = 0_u64
-      @layout_scan_counts = StaticArray(UInt64, 272).new(0_u64)
       @precise_stack_roots_marked = 0_u64
       @parked_fp_fill_frames = 0_u64
       @parked_fp_fill_bytes = 0_u64

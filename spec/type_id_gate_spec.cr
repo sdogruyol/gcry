@@ -7,7 +7,6 @@ it "default type_id_gate leaves stack decoys live (Channel-buffer class)" do
     heap.type_id_gate = true
     heap.type_id_gate_stacks = false # process default
     heap.allow_interior_pointers = false
-    heap.layout_precise = false
 
     decoy = heap.malloc(32)
     decoy.as(UInt8*).clear(32)
@@ -37,7 +36,6 @@ it "root type_id gate rejects ambient buffer; heap scan still marks children" do
     # Spec exercises gated stack roots (process default gates Static only).
     heap.type_id_gate_stacks = true
     heap.allow_interior_pointers = false
-    heap.layout_precise = false
 
     # Parent with plausible type_id pointing at child buffer (absurd type_id).
     child = heap.malloc(32)
@@ -83,7 +81,6 @@ it "per-source reject counters attribute to stack scan (P2.2)" do
     heap.type_id_gate = true
     heap.type_id_gate_stacks = true
     heap.allow_interior_pointers = false
-    heap.layout_precise = false
 
     # Plant two ambient decoys inside a fake "stack" range, both gated.
     root_words = heap.malloc(32)
@@ -118,7 +115,6 @@ it "per-source reject counters reset on each major collection (P2.2)" do
   begin
     heap.gc_threshold = UInt64::MAX
     heap.type_id_gate = true
-    heap.layout_precise = false
 
     # Survives every collect via add_root (passes gate). We then plant a
     # second word inside it that the stack scan will see — but the stack
@@ -163,7 +159,6 @@ it "type_id_root_false_negatives is exposed and zero under clean stack (P2.2)" d
   begin
     heap.gc_threshold = UInt64::MAX
     heap.type_id_gate = true
-    heap.layout_precise = false
 
     obj = heap.malloc(32)
     obj.as(UInt8*).clear(32)

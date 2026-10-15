@@ -31,12 +31,12 @@
 #     sweep and is reconstructed afterwards. That would move the hunt to the
 #     mutator: something re-derives the pointer from a stale copy.
 #
-# `GCRY_ADDRESS_SPACE_AUDIT=1`, and it implies `GCRY_DYING_REGISTER_AUDIT=1`
-# because it is that audit's unreferenced branch that triggers it. Off by
-# default and violently expensive — it reads the whole resident address space
-# inside the pause — so it fires **once per collection**, for the first dying
-# block that survives every other check, and stops after
-# `ADDRESS_SPACE_SCAN_LIMIT` bytes.
+# `GCRY_ADDRESS_SPACE_AUDIT=1`, and it implies the dying-register audit
+# (src/gcry/mark_audit.cr) because it is that audit's unreferenced branch that
+# triggers it. Off by default and violently expensive — it reads the whole
+# resident address space inside the pause — so it fires **once per
+# collection**, for the first dying block that survives every other check, and
+# stops after `ADDRESS_SPACE_SCAN_LIMIT` bytes.
 #
 # Interior hits are counted but not reported one by one: a word pointing into
 # the middle of the buffer is how `Deque` iteration works and would bury the
@@ -429,12 +429,10 @@ module Gcry
       hi = stack.bottom.address
       return nil unless lo < hi && at >= lo && at < hi
 
-      # The collector's own frames first, and for the same reason
-      # `GCRY_BIRTH_GRACE`'s holder search excludes them (src/gcry/birth_grace.cr):
-      # this audit carries the target as an argument through a call chain that
-      # sits *below* where the collector was entered — and the scan window's low
-      # bound is deeper still, so those frames are **inside** the window the scan
-      # used. Without this branch the instrument reports itself as "the scan
+      # The collector's own frames first: this audit carries the target as an
+      # argument through a call chain that sits *below* where the collector was
+      # entered — and the scan window's low bound is deeper still, so those
+      # frames are **inside** the window the scan used. Without this branch the instrument reports itself as "the scan
       # walked these bytes and did not offer the value", which is a filter bug
       # that does not exist. Measured on the gate: 5 of 6 base hits in the `dies`
       # arm are the audit's own chain, and the 6th is its caller's `addr` local.

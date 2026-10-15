@@ -1,0 +1,18 @@
+# master (b18d5c8) vs this branch vs this branch with GCRY_REALLOC_IN_PLACE=0 vs Boehm, crystal-metric built as bench/run_crystal_metric_ab.sh builds it, 5 interleaved trials, medians, Linux x86_64 12 vCPUs.
+bench                  arm             bench s      (min-max)  wall s   user    sys  RSS MiB   minflt VmPeak MiB
+Revcomp                boehm            0.4940  (0.489-0.505)    1.93   1.79   0.14    824.2   210656     1038.1
+Revcomp                master           0.5840  (0.577-0.593)    2.05   1.90   0.20    560.2   286874      842.0
+Revcomp                branch           0.5750  (0.570-0.585)    2.02   1.89   0.18    527.0   266187      843.2
+Revcomp                branch-off       0.5850  (0.578-0.591)    2.04   1.89   0.19    560.3   286871      842.0
+JsonParseSerializable  boehm            0.2630  (0.261-0.270)    0.86   1.13   0.10    572.5   146210      845.6
+JsonParseSerializable  master           0.2890  (0.285-0.297)    0.87   0.88   0.13    498.0   186508      824.9
+JsonParseSerializable  branch           0.2970  (0.293-0.303)    0.84   0.86   0.09    412.1   139397      746.1
+JsonParseSerializable  branch-off       0.3030  (0.300-0.323)    0.88   0.88   0.12    495.8   183774      822.7
+JsonParsePull          boehm            0.2580  (0.254-0.265)    0.85   1.11   0.10    523.5   133655      815.7
+JsonParsePull          master           0.2780  (0.277-0.280)    0.86   0.88   0.11    497.1   173173      827.5
+JsonParsePull          branch           0.2910  (0.291-0.298)    0.83   0.85   0.08    409.5   131144      737.3
+JsonParsePull          branch-off       0.2880  (0.284-0.289)    0.86   0.88   0.11    495.7   173050      822.7
+JsonGenerate           boehm            0.6320  (0.630-0.646)    1.52   2.10   0.20   1247.4   319000     1647.4
+JsonGenerate           master           0.6120  (0.609-0.616)    1.55   1.76   0.23    856.1   362265     1221.4
+JsonGenerate           branch           0.5980  (0.585-0.602)    1.49   1.72   0.18    772.1   293381     1665.1
+JsonGenerate           branch-off       0.6010  (0.599-0.604)    1.53   1.75   0.22    856.2   362450     1221.4

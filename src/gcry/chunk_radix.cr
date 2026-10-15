@@ -244,17 +244,27 @@ module Gcry
     end
 
     private def radix_each_granule(chunk : ChunkHeader*, & : (ChunkHeader**, UInt64) ->) : Nil
-      l1 = @radix_l1
-      return if l1.null?
+      return if @radix_l1.null?
       base = chunk.address
       limit = base &+ chunk.value.mapped_bytes
-      first = base >> @radix_granule_shift
-      last = (limit &- 1) >> @radix_granule_shift
-      if last &- first &+ 1 > RADIX_MAX_GRANULES
+      if radix_oversize?(base, limit)
         @radix_oversize_skips &+= 1
         return
       end
+      radix_each_granule_in(base, limit) { |l2, idx| yield l2, idx }
+    end
 
+    # Does a chunk spanning `[base, limit)` exceed `RADIX_MAX_GRANULES`?
+    private def radix_oversize?(base : UInt64, limit : UInt64) : Bool
+      last = (limit &- 1) >> @radix_granule_shift
+      last &- (base >> @radix_granule_shift) &+ 1 > RADIX_MAX_GRANULES
+    end
+
+    private def radix_each_granule_in(base : UInt64, limit : UInt64, & : (ChunkHeader**, UInt64) ->) : Nil
+      l1 = @radix_l1
+      return if l1.null?
+      first = base >> @radix_granule_shift
+      last = (limit &- 1) >> @radix_granule_shift
       g = first
       while g <= last
         addr = g << @radix_granule_shift
@@ -268,6 +278,28 @@ module Gcry
         end
         yield l2, (addr >> @radix_granule_shift) & @radix_l2_mask
         g &+= 1
+      end
+    end
+
+    # A large chunk grew where it stands from *old_mapped* to its present
+    # `mapped_bytes` (`Heap#grow_large`). Caller holds `@index_lock`, as for an
+    # insert. Still within `RADIX_MAX_GRANULES`, the new granules are
+    # published. Past it, the granules published so far are retracted: the
+    # chunk is now one `radix_remove` skips, so an entry left behind would
+    # outlive the unmap and name a chunk that is gone. A retracted chunk
+    # resolves by the binary search, as a chunk mapped that large always has.
+    protected def radix_grow(chunk : ChunkHeader*, old_mapped : UInt64) : Nil
+      return if @radix_l1.null?
+      base = chunk.address
+      limit = base &+ chunk.value.mapped_bytes
+      if radix_oversize?(base, limit)
+        return if radix_oversize?(base, base &+ old_mapped)
+        @radix_oversize_skips &+= 1
+        radix_each_granule_in(base, base &+ old_mapped) do |l2, idx|
+          l2[idx] = Pointer(ChunkHeader).null if l2[idx] == chunk
+        end
+      else
+        radix_each_granule_in(base &+ old_mapped, limit) { |l2, idx| l2[idx] = chunk }
       end
     end
 

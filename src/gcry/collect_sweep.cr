@@ -105,6 +105,9 @@ module Gcry
       # Kept for the store at the end: whatever `map_chunk` prepends while this
       # walks lands in front of it (`publish_relinked_chunks`).
       walk_head = @chunks
+      # The chunk the rebuild links to *walk_head*, for its back-link
+      # (`publish_relinked_chunks`).
+      walk_head_pred = Pointer(ChunkHeader).null
       chunk = walk_head
       while chunk
         nxt = chunk.value.next
@@ -123,7 +126,8 @@ module Gcry
             note_chunk_fill(0_u64, 1_u64)
           end
           if relink_once ? relink : sweep_relink_now?(after_world)
-            ChunkHeader.set_next(chunk, kept)
+            walk_head_pred = chunk if kept == walk_head
+            ChunkHeader.link(chunk, kept)
             kept = chunk
           end
           chunk = nxt
@@ -381,7 +385,8 @@ module Gcry
           # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
           # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
           if relink_once ? relink : sweep_relink_now?(after_world)
-            ChunkHeader.set_next(chunk, kept)
+            walk_head_pred = chunk if kept == walk_head
+            ChunkHeader.link(chunk, kept)
             kept = chunk
           end
         end
@@ -423,9 +428,10 @@ module Gcry
           if hook = @post_stw_hook
             hook.call(:before_relink_store)
           end
-          @chunk_list_lock.sync { publish_relinked_chunks(walk_head, kept) }
+          @chunk_list_lock.sync { publish_relinked_chunks(walk_head, kept, walk_head_pred) }
         else
           @chunks = kept
+          ChunkHeader.set_back_link(kept, Pointer(ChunkHeader).null)
         end
       end
       with_alloc_lock { @relink_walk = false } if relink_walk
@@ -515,9 +521,23 @@ module Gcry
     #   the shape holds; otherwise this falls back to the plain store, which
     #   loses the prefix exactly as before.
     #
+    # Back-links (`ChunkHeader.large_prev`): *kept* gets the chunk it now
+    # follows, the prefix's last or none. And *walk_head* gets its rebuilt
+    # predecessor, *walk_head_pred*, again: the rebuild wrote it without this
+    # lock, while `map_chunk` and an unlink write the back-link of whatever
+    # heads the list under it, and until the first prepend that was
+    # *walk_head*. The link is rewritten only while *walk_head* is still
+    # indexed, by the argument above: a chunk unlinked during the walk may
+    # already be unmapped.
+    #
     # Allocates nothing. Takes `@index_lock` under this one — list then index,
     # the order `map_chunk` and `unlink_chunk` already use.
-    private def publish_relinked_chunks(walk_head : ChunkHeader*, kept : ChunkHeader*) : Nil
+    private def publish_relinked_chunks(walk_head : ChunkHeader*, kept : ChunkHeader*,
+                                        walk_head_pred : ChunkHeader*) : Nil
+      unless walk_head_pred.null?
+        indexed = @index_lock.sync { indexed_locked?(walk_head) }
+        ChunkHeader.set_back_link(walk_head, walk_head_pred) if indexed
+      end
       head = @chunks
       if head != walk_head && @chunk_list_splice
         # The list was empty when the walk began: everything on it now was
@@ -535,6 +555,7 @@ module Gcry
               # Release, as `map_chunk` publishes: walkers that do not take
               # this lock follow the link into *kept*'s rewritten `next`s.
               Atomic::Ops.store(pointerof(tail.value.@next), kept, :release, true)
+              ChunkHeader.set_back_link(kept, tail)
               return
             end
             tail = nxt
@@ -543,6 +564,7 @@ module Gcry
         end
       end
       Atomic::Ops.store(pointerof(@chunks), kept, :release, true)
+      ChunkHeader.set_back_link(kept, Pointer(ChunkHeader).null)
     end
 
     private def sweep_large_one(chunk : ChunkHeader*, major : Bool, after_world : Bool) : Nil
@@ -618,7 +640,7 @@ module Gcry
         @pending_large_cache = Pointer(Void).null
         while user
           header = BlockHeader.large_header_from_user(user)
-          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          chunk = ChunkHeader.from_large_header(header)
           nxt = header.value.next_free
           cache_large_chunk(chunk, header)
           user = nxt
@@ -675,9 +697,9 @@ module Gcry
       # here: the sweep unlinked these chunks, their index entries survive
       # until the `index_remove` below, and the world is running. Research
       # only (`Heap#post_stw_hook`): a mutator placed here on the collector's
-      # thread reaches it every run — `make occupied-release`. The
-      # `GCRY_EMPTY_FLUSH_DELAY_MS` sleep that used to widen it for thread
-      # churn reached it 0 of 48 on a developer host and is gone.
+      # thread reaches it every run — `make occupied-release`. The sleep that
+      # used to widen it for thread churn reached it 0 of 48 on a developer
+      # host and is gone.
       if hook = @post_stw_hook
         hook.call(:before_flush)
       end
@@ -688,18 +710,12 @@ module Gcry
       # chunk's `next` intact, so a walker standing on one keeps following it
       # into memory this loop is unmapping. Measured as a SIGSEGV in that walk,
       # 1 of 30 children of `make large-cache-race` on an unchanged tree.
-      #
-      # `GCRY_EMPTY_FLUSH_UNLOCKED=1` restores the old behaviour for the gate.
-      if @empty_flush_unlocked
-        flush_pending_empty_chunks_locked(chunk)
-      else
-        with_alloc_lock do
-          # A mutator may have been suspended while searching the list, with
-          # a pointer to a small chunk the STW sweep detached. Wait for that
-          # search to finish before unmapping its queued chunks, just as large
-          # trims wait for list readers before detaching their mappings.
-          @chunk_list_lock.sync { flush_pending_empty_chunks_locked(chunk) }
-        end
+      with_alloc_lock do
+        # A mutator may have been suspended while searching the list, with
+        # a pointer to a small chunk the STW sweep detached. Wait for that
+        # search to finish before unmapping its queued chunks, just as large
+        # trims wait for list readers before detaching their mappings.
+        @chunk_list_lock.sync { flush_pending_empty_chunks_locked(chunk) }
       end
     end
 
@@ -860,17 +876,13 @@ module Gcry
       end
 
       # Back on the live list, so the chunk the mutator is allocating from is a
-      # chunk the sweep will visit again. Only on the locked path: the unlocked
-      # research arm (`GCRY_EMPTY_FLUSH_UNLOCKED=1`) holds no list lock, and
-      # publishing a head from there is the race that arm exists to study — it
-      # leaves the chunk indexed and off the list instead, which costs RSS and
-      # no soundness now that mark clearing walks the index.
+      # chunk the sweep will visit again.
       while keep
         nxt = keep.value.next
-        unless @empty_flush_unlocked
-          ChunkHeader.set_next(keep, @chunks)
-          Atomic::Ops.store(pointerof(@chunks), keep, :release, true)
-        end
+        # `link` gives the old head its back-link; *keep* is a size-class
+        # chunk and keeps none.
+        ChunkHeader.link(keep, @chunks)
+        Atomic::Ops.store(pointerof(@chunks), keep, :release, true)
         keep = nxt
       end
 
@@ -1218,7 +1230,7 @@ module Gcry
           user = @large_freelists[b]
           while user
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             next_user = header.value.next_free
             # Rounds up from `data_start`, not from the chunk base: the base is
             # already page-aligned, so rounding up from it is a no-op and the
@@ -1335,8 +1347,6 @@ module Gcry
 
       freed, live = if @poison_freed
                       sweep_words_poisoning(chunk, class_index, occ, mark, words, payload)
-                    elsif @sweep_occ_audit && !@world_stopped
-                      sweep_words_audited(chunk, occ, mark, words)
                     else
                       @kernels.sweep_words(occ, mark, words)
                     end
@@ -1417,66 +1427,6 @@ module Gcry
       !after_world || relink_chunks_after_world?
     end
 
-    # `Kernels.sweep_words`, word at a time, with one question asked per dead
-    # word: is a mutator mid-allocation inside a block this pass just called
-    # dead? The arithmetic and the store are the kernel's, so turning this on
-    # changes what is *observed* and not what is done.
-    #
-    # `in_flight` is a cursor slot's own answer to "which block am I handing
-    # out right now": set before the occupancy store and cleared once the
-    # block is built, on both allocation paths. A dead bit it points into is a
-    # block that is occupied, live, unmarked and about to be returned to a
-    # caller — the state allocate-black exists to prevent, and the one a
-    # reader of the publish above will suspect first.
-    #
-    # Research only. It walks up to `MAX_CURSOR_SETS` × `POOL_SLOTS` slots per
-    # dead word, so `GCRY_SWEEP_OCC_AUDIT=1` has to ask for it.
-    private def sweep_words_audited(chunk : ChunkHeader*, occ : UInt64*, mark : UInt64*,
-                                    words : Int32) : {UInt64, UInt64}
-      freed = 0_u64
-      live = 0_u64
-      @sweep_occ_audit_words &+= words.to_u64
-      i = 0
-      while i < words
-        o = occ[i]
-        m = mark[i]
-        dead = o & ~m
-        freed &+= dead.popcount.to_u64
-        live &+= m.popcount.to_u64
-        audit_dead_in_flight(chunk, i, dead) if dead != 0
-        occ[i] = m
-        mark[i] = 0_u64
-        i += 1
-      end
-      {freed, live}
-    end
-
-    private def audit_dead_in_flight(chunk : ChunkHeader*, word : Int32, dead : UInt64) : Nil
-      class_index = chunk.value.size_class.to_i32
-      return unless class_index >= 0 && class_index < SIZE_CLASS_COUNT
-      data_start = ChunkHeader.data_start(chunk).address
-      block_bytes = @block_bytes[class_index]
-      return if block_bytes == 0
-      each_cursor_set do |set|
-        next if set.null?
-        j = 0
-        while j < POOL_SLOTS
-          s = CursorSet.slot(set, j)
-          j += 1
-          u = s.value.in_flight
-          next if u.null? || u == CursorSet.sentinel
-          addr = u.address &- BlockHeader::SIZE
-          next if addr < data_start
-          ordinal = (addr &- data_start) // block_bytes
-          next unless (ordinal >> 6) == word.to_u64
-          next if (dead & (1_u64 << (ordinal & 63))) == 0
-          # Same chunk, same word, same block: in flight, and this pass is
-          # about to reclaim it.
-          @sweep_occ_in_flight &+= 1
-        end
-      end
-    end
-
     # `Kernels.sweep_words` with the poison pattern written into every block it
     # reclaims — identical arithmetic, word at a time.
     #
@@ -1510,11 +1460,11 @@ module Gcry
     #   * A bit in `mark` but not in `occ` cannot exist: marking follows
     #     occupancy on both allocation paths.
     #
-    # Measured rather than argued, 2026-09-12: `GCRY_SWEEP_OCC_AUDIT=1` asks,
-    # per dead word, whether any cursor slot is mid-allocation inside a block
-    # this pass just called dead. Zero, over 71 325 words published with
-    # mutators live and twelve threads born per round
-    # (`bench/sweep_occ_race.cr`), and zero across the 240 after-world sweeps
+    # Measured rather than argued, 2026-09-12: an audit (since removed) asked,
+    # per dead word, whether any cursor slot was mid-allocation inside a block
+    # this pass had just called dead. Zero, over 71 325 words published with
+    # mutators live and twelve threads born per round, and zero across the 240
+    # after-world sweeps
     # per run of `make thread-churn-uaf`'s poisoned arm while that harness's
     # use-after-free still fired. So the open live-large-object release is not
     # this. `bench/log/linux/2026-09-12-sweep-occ-publish/FINDINGS.md`
@@ -1532,10 +1482,6 @@ module Gcry
       # cleanliness per chunk"), so the invariant is stated here rather than
       # inherited from another file.
       @freelist_clean[class_index] = false
-      # Same publish, so the same question, counted through the same pair: a
-      # run whose sweeps all went through this arm must not read as one where
-      # the audit never ran.
-      @sweep_occ_audit_words &+= words.to_u64 if @sweep_occ_audit
       data_start = ChunkHeader.data_start(chunk).address
       block_bytes = @block_bytes[class_index]
       i = 0
@@ -1545,7 +1491,6 @@ module Gcry
         dead = o & ~m
         freed &+= dead.popcount.to_u64
         live &+= m.popcount.to_u64
-        audit_dead_in_flight(chunk, i, dead) if @sweep_occ_audit && dead != 0
         occ[i] = m
         mark[i] = 0_u64
         while dead != 0
@@ -1962,7 +1907,6 @@ module Gcry
     # them nothing and turns "remembered to start above the header" from a
     # convention into a checked property.
     private def madvise_range_ok?(chunk : ChunkHeader*, run_start : UInt64, run_end : UInt64) : Bool
-      return true if @madvise_unchecked
       base = chunk.as(Void*).address
       limit = base &+ chunk.value.mapped_bytes
       data_start = ChunkHeader.data_start(chunk).address
@@ -2001,25 +1945,6 @@ module Gcry
             end
           end
           cursor += block_bytes
-        end
-
-        # Research only (`GCRY_PAGE_RELEASE_TEST_STALL_MS`, default 0): hold the
-        # gap between the mask and the syscalls open on purpose.
-        #
-        # The defect this walk has is a window — a mutator allocating into a
-        # page the mask called free before the `madvise` lands — and its natural
-        # rate is both low and unstable: the same binary gave 10 of 40 in one
-        # batch of `dormant_flush_race` and 2 of 40 in the next. Three candidate
-        # fixes were measured against that moving baseline and none of the
-        # readings could be trusted. Widening the window makes the defect
-        # frequent enough to measure a fix against, and a real fix has to hold
-        # it at zero *with the stall on*.
-        if (stall = @page_release_test_stall_ms) > 0
-          ts = uninitialized Gcry::OS::Timespec
-          ts.tv_sec = typeof(ts.tv_sec).new(stall // 1000)
-          ts.tv_nsec = typeof(ts.tv_nsec).new((stall % 1000) * 1_000_000)
-          rem = uninitialized Gcry::OS::Timespec
-          Gcry::OS.nanosleep(pointerof(ts), pointerof(rem))
         end
 
         any = false
@@ -2130,9 +2055,6 @@ module Gcry
     end
 
     private def link_small_to_freelist(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32, class_index : Int32) : Nil
-      if ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64 &+ payload, ThreadListWatch::SITE_SWEEP, header.value.flags)
-        report_thread_list_sweep(header)
-      end
       user = BlockHeader.user_from(header)
       # The chunk's list, as `Heap#free` explains: rebuilds file it there.
       nursery = ChunkHeader.nursery?(chunk)

@@ -13,6 +13,59 @@ module ReallocMoveSpec
   end
 end
 
+{% unless flag?(:win32) %}
+  lib LibC
+    fun mincore(addr : Void*, length : SizeT, vec : UInt8*) : Int
+  end
+{% end %}
+
+module ReservationSpec
+  # Is every page of `[addr, addr + len)` mapped (accessible or not)? Linux
+  # `mincore` refuses an unmapped page (`ENOMEM`); Darwin's answers 0 for one:
+  # on macOS CI it called the first page of a chunk `Heap#destroy` had just
+  # unmapped mapped (2026-10-14, arm64 and x86_64). So on Darwin the region
+  # `mach_vm_region` reports at or after each page must start at or below it.
+  # A page at a time into stack storage: an allocation here could map memory
+  # into a hole just released. Nil on Windows, where the room goes with the
+  # chunk's release instead.
+  def self.mapped?(addr : UInt64, len : UInt64) : Bool?
+    {% if flag?(:win32) %}
+      nil
+    {% else %}
+      page = Gcry::Platform.host_page_size
+      at = addr
+      while at < addr + len
+        return false unless page_mapped?(at)
+        at += page
+      end
+      true
+    {% end %}
+  end
+
+  private def self.page_mapped?(at : UInt64) : Bool
+    {% if flag?(:darwin) %}
+      address = at
+      size = 0_u64
+      info = uninitialized Int32[16]
+      count = Gcry::Platform::VM_REGION_BASIC_INFO_COUNT_64
+      object_name = 0_u32
+      kr = Gcry::Platform::LibMachVM.mach_vm_region(Gcry::Platform::LibMachVM.mach_task_self_,
+        pointerof(address), pointerof(size), Gcry::Platform::VM_REGION_BASIC_INFO_64,
+        info.to_unsafe, pointerof(count), pointerof(object_name))
+      kr == 0 && address <= at && at < address &+ size
+    {% else %}
+      vec = 0_u8
+      LibC.mincore(Pointer(Void).new(at), LibC::SizeT.new(Gcry::Platform.host_page_size), pointerof(vec)) == 0
+    {% end %}
+  end
+
+  # Base of the chunk holding a large block, and the room reserved from it.
+  def self.chunk_of(heap : Gcry::Heap, user : Void*) : {UInt64, UInt64}
+    base = heap.chunk_address_of(user)
+    {base, heap.large_grow_extent(Pointer(Gcry::ChunkHeader).new(base))}
+  end
+end
+
 describe Gcry::Heap do
   it "rounds sizes to size classes" do
     Gcry::Heap.round_size(0).should eq(16)
@@ -370,6 +423,51 @@ describe Gcry::Heap do
     end
   end
 
+  # One chunk leaves the list by its back-link (`ChunkHeader.large_prev`), not
+  # by a walk from the head, wherever it sits: the oldest chunk first, the
+  # deepest, then after a collection whose sweep rebuilt the list in reverse.
+  # Every list store keeps the links; `chunk_back_link_faults` walks the list
+  # and counts the ones that do not name the chunk in front.
+  it "unlinks a large chunk by its back-link wherever it sits in the list" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      heap.large_cache_retain = 0
+      ptrs = Array(Void*).new(48) { heap.malloc(100_000) }
+      heap.chunk_back_link_faults.should eq(0)
+      unlinks = heap.chunk_unlinks
+      steps = heap.unlink_walk_steps
+      # One free and one trim at a time, so each trim has one chunk and takes
+      # `unlink_chunk`.
+      gone = (0...48).step(3).to_a
+      gone.each do |i|
+        heap.free(ptrs[i])
+        heap.trim_large_cache(0)
+      end
+      heap.chunk_unlinks.should eq(unlinks + gone.size)
+      heap.unlink_walk_steps.should eq(steps)
+      heap.chunk_back_link_faults.should eq(0)
+
+      live = (0...48).reject { |i| gone.includes?(i) }.map { |i| ptrs[i] }
+      heap.collect(scan_stack: false, roots: live)
+      live.each { |p| heap.is_heap_ptr(p).should be_true }
+      heap.chunk_back_link_faults.should eq(0)
+      steps = heap.unlink_walk_steps
+      live.each_slice(4).map(&.first).each do |p|
+        heap.free(p)
+        heap.trim_large_cache(0)
+        heap.is_heap_ptr(p).should be_false
+      end
+      heap.unlink_walk_steps.should eq(steps)
+      heap.chunk_back_link_faults.should eq(0)
+      listed = 0
+      heap.each_chunk { listed += 1 }
+      listed.should eq(heap.@chunk_index_count)
+    ensure
+      heap.destroy
+    end
+  end
+
   # `free` lets the cache run up to `LARGE_FREE_TRIM_SLACK` past the retain,
   # then trims all of it in one batch. The collector trims to the retain
   # itself at the end of every collection.
@@ -418,46 +516,233 @@ describe Gcry::Heap do
     end
   end
 
-  # With `realloc_move` on (opt-in), Linux hands a large block's pages to the
-  # grown block instead of copying them (`Heap#move_large_contents`). Every
-  # step of a growth chain has to carry the same bytes, read zeroes past them,
-  # and keep what they point at alive through a collection — the pointers now
-  # live only in pages the kernel moved.
-  it "realloc of a large block keeps contents, zero tail and referents through a growth chain" do
+  # A large block grows by `realloc` without a copy in two ways: in place,
+  # into room reserved past it (`Heap#grow_large`, the default), and with
+  # `realloc_move` on (opt-in), Linux hands its pages to the grown block
+  # (`Heap#move_large_contents`). Every step of a growth chain has to carry
+  # the same bytes, read zeroes past them, and keep what they point at alive
+  # through a collection — the pointers now live only in pages committed in
+  # place, or in pages the kernel moved.
+  {true, false}.each do |in_place|
+    it "realloc of a large block keeps contents, zero tail and referents through a growth chain (#{in_place ? "in place" : "moving"})" do
+      heap = Gcry::Heap.new
+      begin
+        heap.gc_threshold = UInt64::MAX
+        heap.realloc_in_place = in_place
+        heap.realloc_move = !in_place
+        size = 40_000 # words: 320 KB, past REALLOC_MOVE_MIN
+        buf = heap.malloc(size * 8).as(UInt64*)
+        size.times { |i| buf[i] = 0x5EED_0000_0000_u64 | i }
+        referents = 64
+        ReallocMoveSpec.store_referents(heap, buf, referents)
+        12.times do
+          grown = size + size // 2
+          buf = heap.realloc(buf.as(Void*), grown * 8).as(UInt64*)
+          (size...grown).each { |i| buf[i].should eq(0_u64) }
+          (size...grown).each { |i| buf[i] = 0x5EED_0000_0000_u64 | i }
+          size = grown
+        end
+        (referents...size).each { |i| buf[i].should eq(0x5EED_0000_0000_u64 | i) }
+
+        heap.collect
+        # Reuse whatever the collection freed, so a referent it wrongly freed
+        # is overwritten.
+        4096.times { heap.malloc(64).as(UInt64*).value = 0xBAD_u64 }
+        referents.times do |i|
+          obj = Pointer(UInt64).new(buf[i])
+          heap.live?(obj.as(Void*)).should be_true
+          8.times { |w| obj[w].should eq(0xC0DE_0000_u64 | (i &* 8 &+ w)) }
+        end
+        if in_place
+          # The first growth copies (the block came from `malloc`, with no
+          # room), and so does each that outgrows its room; most of the
+          # twelve grow in place.
+          heap.realloc_in_place_grows.should be >= 6
+          heap.realloc_moves.should eq(0)
+        else
+          heap.realloc_in_place_grows.should eq(0)
+          {% if flag?(:linux) %}
+            heap.realloc_moves.should be > 0
+          {% end %}
+        end
+      ensure
+        heap.destroy
+      end
+    end
+  end
+
+  # The first growth of a large block copies into a chunk with room reserved
+  # past it; the next grows into the room where it stands. Only the pages a
+  # growth commits count as mapped, and the room shrinks by as much. A buffer
+  # of a power of two, as `IO::Memory` and `String::Builder` keep, grows
+  # exactly `large_reserve_doublings` times in place, though its headers put
+  # its mapping one page past that power, and the next growth copies.
+  it "realloc grows a large block in place into room an earlier growth reserved" do
     heap = Gcry::Heap.new
     begin
+      heap.chunk_radix = false # its leaves are mapped too: os_mapped_bytes below is exact
       heap.gc_threshold = UInt64::MAX
-      heap.realloc_move = true
-      size = 40_000 # words: 320 KB, past REALLOC_MOVE_MIN
-      buf = heap.malloc(size * 8).as(UInt64*)
-      size.times { |i| buf[i] = 0x5EED_0000_0000_u64 | i }
-      referents = 64
-      ReallocMoveSpec.store_referents(heap, buf, referents)
-      12.times do
-        grown = size + size // 2
-        buf = heap.realloc(buf.as(Void*), grown * 8).as(UInt64*)
-        (size...grown).each { |i| buf[i].should eq(0_u64) }
-        (size...grown).each { |i| buf[i] = 0x5EED_0000_0000_u64 | i }
-        size = grown
-      end
-      (referents...size).each { |i| buf[i].should eq(0x5EED_0000_0000_u64 | i) }
+      heap.large_reserve_doublings = 2
+      page = Gcry::Platform.host_page_size
+      data = Gcry::ChunkHeader.large_data_offset.to_u64
+      first = heap.malloc(1 << 20)
+      grown = heap.realloc(first, 2 << 20)
+      grown.should_not eq(first)
+      heap.large_reservations.should eq(1)
+      base, extent = ReservationSpec.chunk_of(heap, grown)
+      mapped = Gcry::Heap.align_up(data + (2 << 20), page)
+      extent.should eq((8 << 20) + page)
+      heap.large_reserved_bytes.should eq(extent - mapped)
+      grown.as(UInt8*).to_slice(2 << 20).fill(0x5A_u8)
 
-      heap.collect
-      # Reuse whatever the collection freed, so a referent it wrongly freed
-      # is overwritten.
-      4096.times { heap.malloc(64).as(UInt64*).value = 0xBAD_u64 }
-      referents.times do |i|
-        obj = Pointer(UInt64).new(buf[i])
-        heap.live?(obj.as(Void*)).should be_true
-        8.times { |w| obj[w].should eq(0xC0DE_0000_u64 | (i &* 8 &+ w)) }
-      end
-      {% if flag?(:linux) %}
-        heap.realloc_moves.should be > 0
-      {% end %}
+      large_before = heap.large_mapped_bytes
+      heap_before = heap.heap_size
+      os_before = Gcry.os_mapped_bytes
+      heap.realloc(grown, 4 << 20).should eq(grown)
+      same = heap.realloc(grown, 8 << 20)
+      same.should eq(grown)
+      heap.realloc_in_place_grows.should eq(2)
+      committed = Gcry::Heap.align_up(data + (8 << 20), page) - mapped
+      heap.large_mapped_bytes.should eq(large_before + committed)
+      heap.heap_size.should eq(heap_before + committed)
+      Gcry.os_mapped_bytes.should eq(os_before + committed)
+      heap.large_reserved_bytes.should eq(extent - mapped - committed)
+      heap.usable_size(same).should eq(8 << 20)
+      bytes = same.as(UInt8*)
+      bytes.to_slice(2 << 20).all? { |b| b == 0x5A_u8 }.should be_true
+      (bytes + (2 << 20)).to_slice(6 << 20).all?(&.zero?).should be_true
+      # The new pages are the block's: an interior pointer there finds it.
+      heap.find_block(Pointer(Void).new(same.address + (8 << 20) - 1)).should eq(heap.find_block(same))
+      ReservationSpec.mapped?(base, extent).should_not be_false
+
+      # The room is used up: this one copies, into room of its own.
+      heap.realloc(same, 16 << 20).should_not eq(same)
+      heap.realloc_in_place_grows.should eq(2)
+      heap.large_reservations.should eq(2)
     ensure
       heap.destroy
     end
   end
+
+  # The room goes back when the block dies, by `free` or by a collection,
+  # and when the heap does; a cached chunk is only its mapping, so a trim
+  # unmaps all that is left. Each block grows into part of its room, so
+  # both the committed pages and the room past them are there to give back.
+  it "gives the room back when the block is freed" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      page = Gcry::Platform.host_page_size
+      grown = heap.realloc(heap.malloc(1 << 20), 2 << 20)
+      heap.realloc(grown, 3 << 20).should eq(grown)
+      base, extent = ReservationSpec.chunk_of(heap, grown)
+      extent.should be > 0
+      ReservationSpec.mapped?(base + extent - page, page).should_not be_false
+      large_before = heap.large_mapped_bytes
+      heap.free(grown)
+      heap.large_reserved_bytes.should eq(0)
+      heap.large_grow_extent(Pointer(Gcry::ChunkHeader).new(base)).should eq(0)
+      # Cached: the mapping stays, the room past it does not.
+      ReservationSpec.mapped?(base, page).should_not be_false
+      ReservationSpec.mapped?(base + extent - page, page).should_not be_true
+      heap.trim_large_cache(0)
+      ReservationSpec.mapped?(base, page).should_not be_true
+      heap.large_mapped_bytes.should be < large_before
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "gives the room back when a collection frees the block" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      page = Gcry::Platform.host_page_size
+      grown = heap.realloc(heap.malloc(1 << 20), 2 << 20)
+      heap.realloc(grown, 3 << 20).should eq(grown)
+      base, extent = ReservationSpec.chunk_of(heap, grown)
+      extent.should be > 0
+      ReservationSpec.mapped?(base + extent - page, page).should_not be_false
+      heap.collect(scan_stack: false)
+      heap.live?(grown).should be_false
+      heap.large_reserved_bytes.should eq(0)
+      ReservationSpec.mapped?(base + extent - page, page).should_not be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "gives a live block's room back when the heap is destroyed" do
+    heap = Gcry::Heap.new
+    heap.gc_threshold = UInt64::MAX
+    grown = heap.realloc(heap.malloc(1 << 20), 2 << 20)
+    base, extent = ReservationSpec.chunk_of(heap, grown)
+    extent.should be > 0
+    ReservationSpec.mapped?(base, extent).should_not be_false
+    heap.destroy
+    heap.large_reserved_bytes.should eq(0)
+    page = Gcry::Platform.host_page_size
+    ReservationSpec.mapped?(base, page).should_not be_true
+    ReservationSpec.mapped?(base + extent - page, page).should_not be_true
+  end
+
+  # Without room, a growth that still fits the block's last page stays in
+  # place, and what that page held past the block reads zeroes: here the
+  # bytes a larger block wrote into the same cached chunk before it.
+  it "realloc grows a large block within its own last page, clearing what was there" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      heap.large_recycle = false
+      page = Gcry::Platform.host_page_size.to_i32
+      # Two payloads with one mapping: 100 pages and the large header, and as
+      # much of the 101st page as the header leaves.
+      narrow = 100 * page
+      wide = 101 * page - Gcry::ChunkHeader.large_data_offset
+      old = heap.malloc(wide)
+      old.as(UInt8*).to_slice(wide).fill(0xEE_u8)
+      heap.free(old)
+      block = heap.malloc(narrow)
+      block.should eq(old)
+      same = heap.realloc(block, wide)
+      same.should eq(block)
+      heap.realloc_in_place_grows.should eq(1)
+      (same.as(UInt8*) + narrow).to_slice(wide - narrow).all?(&.zero?).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  {% if flag?(:linux) %}
+    # A recycled chunk's pages move into a mapping with room when a growth
+    # takes them; the chunk they came from had its own room returned when
+    # it died, so nothing is left reserved behind it.
+    it "recycles a cached chunk into a growth's room and grows in place from there" do
+      heap = Gcry::Heap.new
+      begin
+        heap.gc_threshold = UInt64::MAX
+        heap.large_recycle = true
+        heap.large_recycle_budget = UInt64::MAX
+        dead = heap.realloc(heap.malloc(1 << 20), 4 << 20)
+        dead.as(UInt8*).to_slice(4 << 20).fill(0xAB_u8)
+        heap.free(dead)
+        heap.large_reserved_bytes.should eq(0)
+
+        small = heap.malloc(4096)
+        recycles = heap.large_recycles
+        grown = heap.realloc(small, 1 << 20)
+        heap.large_recycles.should eq(recycles + 1)
+        _, extent = ReservationSpec.chunk_of(heap, grown)
+        extent.should be > 0
+        grown.as(UInt8*).to_slice(1 << 20).all?(&.zero?).should be_true
+        same = heap.realloc(grown, 2 << 20)
+        same.should eq(grown)
+        same.as(UInt8*).to_slice(2 << 20).all?(&.zero?).should be_true
+      ensure
+        heap.destroy
+      end
+    end
+  {% end %}
 
   # Boehm's `GC_realloc(p, 0)` frees `p` and answers null; null grows from
   # nothing, as `malloc`.

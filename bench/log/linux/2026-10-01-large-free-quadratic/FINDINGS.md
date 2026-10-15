@@ -141,6 +141,10 @@ which is the mutator path the arm is about.
 
 ## Not fixed here
 
+(2026-10-14: a large chunk now leaves the list by a back-link kept in 16
+bytes between its chunk header and its block header, so the single unlink
+no longer walks: `bench/log/linux/2026-10-14-large-free-unlink/`.)
+
 O(1) removal needs a doubly linked chunk list, and `ChunkHeader` is 32 bytes
 with no room. A `prev` field breaks the 16-byte alignment of a large chunk's
 payload, and the "by construction" offsets that rely on `data_offset == SIZE`.

@@ -71,12 +71,32 @@ module Gcry
 
     def bytes_since_gc : UInt64
       credit_all_cursor_sets
-      @bytes_since_gc.get
+      bytes_since_gc_now
     end
 
     def live_objects : UInt64
       credit_all_cursor_sets
-      @live_objects.get
+      # Wrapped below zero only while a free has been subtracted ahead of the
+      # credit for the allocation it pairs with (`live_objects_sub`); zero
+      # until that credit lands.
+      Heap.wrapped_as_zero(@live_objects.get)
+    end
+
+    # A counter that frees subtract from without saturating (`live_objects_sub`,
+    # `bytes_since_gc_sub`) can stand below zero, which as a `UInt64` is a
+    # value above `Int64::MAX` no heap reaches; it reads as zero.
+    @[AlwaysInline]
+    def self.wrapped_as_zero(n : UInt64) : UInt64
+      n > Int64::MAX.to_u64 ? 0_u64 : n
+    end
+
+    # `@bytes_since_gc` as every collection decision reads it: as it stands,
+    # without crediting the cursor sets, and wrapped reading as zero. Every
+    # reader goes through here (or the public reader, which credits first);
+    # the hit path adds its own set's uncredited bytes before clamping.
+    @[AlwaysInline]
+    protected def bytes_since_gc_now : UInt64
+      Heap.wrapped_as_zero(@bytes_since_gc.get)
     end
 
     # Hold `@index_lock` for `ms` milliseconds, so a test can produce the one
@@ -219,7 +239,12 @@ module Gcry
     # what the comment claimed either — on x86_64 `set` compiles to `xchg`,
     # which is locked whether you ask or not, so the plain path was already
     # paying for a locked instruction per counter and losing updates for it.
-    # `GCRY_HEAP_COUNTERS_ATOMIC=0/1` runs the arms side by side.
+    # `GCRY_HEAP_COUNTERS_ATOMIC=0/1` runs the arms side by side — on the header
+    # layout only. The bitmap allocator implies atomic counters
+    # (`counters_atomic?`), so on the default layout this flag decides nothing
+    # but the checker's scope (`counters_may_lose_updates?`), and a "plain" arm
+    # that clears it measures the atomic path twice: `make counter-loss` did,
+    # from the headerless default until 2026-10-14.
     property heap_counters_atomic : Bool = false
 
     # Set when `GCRY_HEAP_COUNTERS_ATOMIC` names a value: an explicit arm must
@@ -227,6 +252,13 @@ module Gcry
     # arms cannot be run side by side and the "plain path loses updates" half of
     # the gate can never be shown.
     property heap_counters_atomic_pinned : Bool = false
+
+    # Research only, and no knob: take the plain `set(get + n)` branch of every
+    # counter update even where the layout implies atomics, so `make
+    # counter-loss` has a red arm that is plain on the default layout. Read on
+    # the locked and free paths only (`counters_atomic?`); the hit path keeps
+    # its own per-set counters and never asks.
+    property debug_plain_counters : Bool = false
     @index_lock = Crystal::SpinLock.new
     # `@chunks` surgery only. Separate from `@index_lock` on purpose: the
     # unlink walks the list to find a predecessor, and holding the index
@@ -258,10 +290,6 @@ module Gcry
     @post_stw_mutex = uninitialized Gcry::OS::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
-    # `GCRY_TLAB_QUIESCE=0` stops the world without first waiting out the TLAB
-    # slots' critical sections, as before 2026-09-27: the A/B arm for
-    # `Heap#lock_tlab_slots_for_stop`.
-    property tlab_quiesce : Bool = true
     # Threads past `MAX_TLABS` that share a TLAB / alloc-batch slot by key.
     @tlab_slots_shared = 0_u64
     @alloc_batch_slots_shared = 0_u64
@@ -451,6 +479,9 @@ module Gcry
         # the whole region, and the next `nxt` read faulted — Windows CI run
         # `36109015597`, `spec/oom_reserve_spec.cr`.
         unless ChunkHeader.reserve?(chunk)
+          # A live large block's room goes first: its unmap below covers
+          # only its mapping (`release_large_reservation`).
+          release_large_reservation(chunk) if ChunkHeader.large?(chunk)
           Gcry.os_unmap(chunk.as(Void*), chunk.value.mapped_bytes.to_u64)
         end
         chunk = nxt
@@ -477,6 +508,7 @@ module Gcry
       @bytes_since_gc.set(0_u64)
       @large_free_bytes = 0_u64
       @large_mapped_bytes = 0_u64
+      @large_reserved_bytes = 0_u64
       @live_objects.set(0_u64)
       @nursery_alloc_bytes.set(0_u64)
       @tlab_hits.set(0_u64)
@@ -720,6 +752,14 @@ module Gcry
         (pointer.as(UInt8*) + new_size).clear(old_size &- new_size) unless atomic
         return pointer
       end
+      # A large block grows where it stands when its mapping has room: the
+      # rest of its last page, or the address space reserved past it when
+      # `realloc` made it (`grow_large`). The old pointer is the new one, so
+      # nothing the caller still reads through it changes.
+      if new_size > old_size && @realloc_in_place && ChunkHeader.large?(rchunk) &&
+         grow_large(rchunk, header, pointer, old_size, new_size, atomic)
+        return pointer
+      end
       # What the new block takes from the old: all of it on a grow, the kept
       # prefix on a moving shrink.
       copy_size = shrink_move ? new_size : old_size
@@ -786,7 +826,9 @@ module Gcry
           # recycled chunk's would be thrown away.
           recycle = !(@realloc_move && ChunkHeader.large?(rchunk) &&
                       rchunk.value.mapped_bytes >= Platform.host_page_size &+ REALLOC_MOVE_MIN)
-          fresh = allocate(new_size, atomic: atomic, clear: !atomic, recycle: recycle)
+          # A growth reserves room past a large block for the next one to
+          # take in place (`large_reserve_extent`); a moving shrink does not.
+          fresh = allocate(new_size, atomic: atomic, clear: !atomic, recycle: recycle, reserve: !shrink_move)
         ensure
           @suppress_collect.sub(1)
         end
@@ -817,14 +859,248 @@ module Gcry
     # (`bench/log/linux/2026-10-06-realloc-page-move/`).
     REALLOC_MOVE_MIN = 262144_u64
 
-    # `realloc` of a large block moves its pages (Linux). Off by default,
-    # every growth copies; `GCRY_REALLOC_MOVE=1` turns it on. Unsafe for a
-    # program that reads a buffer after growing it, and Crystal's stdlib is
-    # one (`move_large_contents`).
+    # `realloc` of a large block moves its pages (Linux). Off by default: a
+    # growth that cannot take place where the block stands (`grow_large`)
+    # copies; `GCRY_REALLOC_MOVE=1` turns it on. Unsafe for a program that
+    # reads a buffer after growing it, and Crystal's stdlib is one
+    # (`move_large_contents`).
     property realloc_move : Bool = false
     # Moves done, and the bytes they did not copy.
     getter realloc_moves : UInt64 = 0_u64
     getter realloc_moved_bytes : UInt64 = 0_u64
+
+    # `realloc` grows a large block where it stands when its mapping has room
+    # (`grow_large`), and a growth that has to copy reserves room past the
+    # block it copies into (`large_reserve_extent`). `GCRY_REALLOC_IN_PLACE=0`
+    # turns both off: every growth copies, as before 2026-10-14.
+    property realloc_in_place : Bool = true
+    # Growths done in place, and the bytes they did not copy.
+    getter realloc_in_place_grows : UInt64 = 0_u64
+    getter realloc_in_place_bytes : UInt64 = 0_u64
+    # Chunks mapped with room reserved past them, and the reserved bytes
+    # still past the live ones (committed bytes leave it as they are taken).
+    getter large_reservations : UInt64 = 0_u64
+    getter large_reserved_bytes : UInt64 = 0_u64
+    # Reservations the system refused, each a fresh mapping without room.
+    getter large_reserve_failures : UInt64 = 0_u64
+
+    # Smallest mapping `realloc` reserves room past, and how many doublings
+    # of it the room holds (`large_reserve_extent`).
+    #
+    # One doubling. Against copying every growth (one binary,
+    # `GCRY_REALLOC_IN_PLACE=0`, 5 interleaved trials): peak RSS −6% on
+    # Revcomp and −17% on JsonParseSerializable and JsonParsePull, minor
+    # faults −7%, −26% and −24%, and the largest address space the process
+    # held (VmPeak) unchanged or smaller, 843 / 739 / 747 MiB against 842 /
+    # 821 / 823. Three doublings took 0-6% fewer faults, the same time and
+    # peak RSS on those rows, and 1.5-1.9× the address space (Revcomp
+    # 1 611 MiB); only JsonGenerate, whose last 256 MiB copy they avoid, ran
+    # 4% faster for it, at 2 433 MiB against 1 673. Two lost Revcomp's RSS
+    # gain, its last copy falling at 128 MiB. The minimum from 64 KiB to
+    # 1 MiB moved no row past its noise
+    # (`bench/log/linux/2026-10-14-realloc-in-place/`).
+    LARGE_RESERVE_MIN       = 262144_u64
+    LARGE_RESERVE_DOUBLINGS =          1
+    property large_reserve_min : UInt64 = LARGE_RESERVE_MIN
+    property large_reserve_doublings : Int32 = LARGE_RESERVE_DOUBLINGS
+
+    # Address space to reserve from the base of a `mapped`-byte large chunk
+    # that `realloc` is growing into, or 0 for none: its first page, and
+    # past it the rest rounded up to a power of two and doubled
+    # `large_reserve_doublings` times (`ChunkHeader.grow_extent_log`).
+    # `IO::Memory` and `String::Builder` grow to powers of two, which the
+    # chunk and block headers (and an atomic block's extra byte) carry one
+    # page past: so a doubling buffer grows that many times in place before
+    # it copies again, and an `Array` (a quarter each step) about three times
+    # as many. Rounding the whole mapping up instead held one doubling fewer
+    # in the same address space: at one doubling, the same faults and peak
+    # RSS for 130-518 MiB more of it (Revcomp 1 099 MiB against 843).
+    #
+    # Only for a growth: `realloc` is how Crystal grows every `Array`,
+    # `IO::Memory` and `String::Builder`, and a block it grew once is one it
+    # tends to grow again, where a block `malloc` sized is most often done.
+    # Only from `large_reserve_min` up: each reservation costs two system
+    # calls more than a mapping (the `mprotect` that commits its front, the
+    # `munmap` of the room it did not use) and a second kernel mapping (Linux
+    # `vm.max_map_count`), which large growths can pay and a stream of small
+    # buffers need not. None under a finite `RLIMIT_AS`: address space is the
+    # budget there, and a reservation would spend it on memory nobody uses.
+    private def large_reserve_extent(mapped : UInt64) : UInt64
+      return 0_u64 unless @realloc_in_place && mapped >= @large_reserve_min
+      doublings = @large_reserve_doublings
+      return 0_u64 if doublings <= 0 || doublings > 16
+      page = Platform.host_page_size
+      return 0_u64 if mapped <= page
+      # log2 of the data pages rounded up to a power of two, then doubled,
+      # within 2^47 (`BlockHeader::LARGE_SIZE_LIMIT` is 2^48).
+      log = 64 - (mapped &- page &- 1).leading_zeros_count + doublings
+      return 0_u64 if log > 47
+      return 0_u64 unless address_space_unlimited?
+      (1_u64 << log) &+ page
+    end
+
+    # Bytes of address space reserved for a large chunk from its base, what
+    # its block may grow to where it stands; 0 when nothing is reserved.
+    # Public for the specs.
+    def large_grow_extent(chunk : ChunkHeader*) : UInt64
+      log = ChunkHeader.grow_extent_log(chunk)
+      log == 0 ? 0_u64 : (1_u64 << log) &+ Platform.host_page_size
+    end
+
+    # No `RLIMIT_AS` on this process (Linux; elsewhere address space is not
+    # limited that way). Asked at each reservation, which already costs a
+    # mapping, so a limit set after start-up is honoured.
+    private def address_space_unlimited? : Bool
+      {% if flag?(:linux) %}
+        rl = uninitialized LibC::Rlimit
+        # 9 is `RLIMIT_AS` on every Linux architecture gcry builds for.
+        return true unless LibC.getrlimit(9, pointerof(rl)) == 0
+        rl.rlim_cur == LibC::RlimT::MAX
+      {% else %}
+        true
+      {% end %}
+    end
+
+    # Address space of *extent* bytes for a large chunk, its first *mapped*
+    # usable (`Gcry.os_reserve`). Null when the system refuses; the caller
+    # maps without room instead.
+    private def reserve_large_mapping(extent : UInt64, mapped : UInt64) : Void*
+      at = Gcry.os_reserve(extent, mapped)
+      if Gcry.mmap_failed?(at)
+        @large_reserve_failures &+= 1
+        return Pointer(Void).null
+      end
+      # The advice `map_chunk` gives the mapped part, over the whole of it,
+      # so the pages `grow_large` commits keep it and join that mapping
+      # instead of starting one of their own.
+      {% if flag?(:linux) %}
+        LibC.madvise(at, LibC::SizeT.new(extent),
+          @hugepages ? Platform::MADV_HUGEPAGE : Platform::MADV_NOHUGEPAGE)
+      {% end %}
+      at
+    end
+
+    # Gives back the room reserved past *chunk* that it never grew into, when
+    # its block dies (`link_free_large`) or the heap goes (`destroy`). From
+    # then on the chunk is as long as it is mapped, so every path that trims,
+    # recycles, guards, quarantines or unmaps a cached chunk releases exactly
+    # `mapped_bytes`, as it did before reservations existed. On Windows the
+    # room cannot go back on its own; it goes with the chunk's release, which
+    # releases a reservation whole.
+    protected def release_large_reservation(chunk : ChunkHeader*) : Nil
+      extent = large_grow_extent(chunk)
+      return if extent == 0_u64
+      mapped = chunk.value.mapped_bytes
+      if extent > mapped
+        Gcry.os_release_reserved(Pointer(Void).new(chunk.address &+ mapped), extent &- mapped)
+        @large_reserved_bytes = sat_sub(@large_reserved_bytes, extent &- mapped)
+      end
+      ChunkHeader.clear_grow_extent(chunk)
+    end
+
+    # Grow the large block at *user*, which `realloc` owns, from *old_size*
+    # to *new_size* where it stands: into the rest of its last page, or into
+    # the room reserved past its mapping, committed now. True when it grew;
+    # false, with the block as it was, when it cannot, and the caller copies.
+    #
+    # This is what `realloc` growth costs without moving anything: no copy,
+    # no fault of fresh pages for the copy to land in, no old block left for
+    # the next sweep, and the pointer the caller still holds is the result.
+    # Revcomp's buffers double from 32 KiB to 126 MiB three times, and each
+    # step mapped, faulted and copied a fresh chunk
+    # (`bench/log/linux/2026-10-04-revcomp-large-realloc/`).
+    #
+    # Concurrency. The chunk's base, its index slot and its list link do not
+    # change, only its extent and the block's size. The growth commits the
+    # pages first, then publishes the extent under `@index_lock`, where
+    # `map_chunk` publishes a chunk (`publish_large_growth`), then the size;
+    # all under `@alloc_lock`, which the after-world sweep holds when it
+    # rewrites a large header. A stopped world can find this thread anywhere
+    # in between: every reader bounds the size by the extent
+    # (`block_payload`), and until `realloc` returns nothing points into the
+    # new bytes, so either answer is right for them. Not on a thread the stop
+    # does not suspend, nor with the world stopped or a write barrier or an
+    # incremental mark running (as `move_large_contents`): a mark would then
+    # run beside the growth, or miss writes to pages the barrier never saw.
+    private def grow_large(chunk : ChunkHeader*, header : BlockHeader*, user : Void*,
+                           old_size : UInt64, new_size : UInt64, atomic : Bool) : Bool
+      return false unless @barrier_backend.none?
+      return false if @incremental_marking || @world_stopped
+      return false if new_size >= BlockHeader::LARGE_SIZE_LIMIT
+      thread = Thread.current?
+      return false if thread.nil? || stw_signal_exempt?(thread)
+      data = ChunkHeader.large_data_offset.to_u64
+      need = align_up(data &+ new_size, Platform.host_page_size)
+      # Neither moves under the owner: only it grows the block, and the room
+      # goes back only when the block is dead.
+      old_mapped = chunk.value.mapped_bytes
+      return false if need > old_mapped && need > large_grow_extent(chunk)
+      # The bytes past the block that its mapping already held may be a
+      # previous object's (a cached chunk) or a shrink's (atomic blocks keep
+      # what a shrink cut off). Fresh pages read zeroes. Atomic growth is
+      # not cleared, as `realloc` into a fresh block does not clear it.
+      unless atomic
+        stale = old_mapped &- data
+        stale = new_size if new_size < stale
+        (user.as(UInt8*) + old_size).clear(stale &- old_size) if stale > old_size
+      end
+      with_alloc_lock do
+        if need > old_mapped
+          grown = need &- old_mapped
+          return false unless Gcry.os_commit(Pointer(Void).new(chunk.address &+ old_mapped), grown)
+          publish_large_growth(chunk, old_mapped, need)
+          @heap_size &+= grown
+          @large_mapped_bytes &+= grown
+          @large_reserved_bytes = sat_sub(@large_reserved_bytes, grown)
+          # Fresh pages, as a fresh mapping's: they spend the recycling
+          # budget (`map_chunk`) and count toward what a major may keep.
+          @large_recycle_budget = sat_sub(@large_recycle_budget, grown)
+          @large_alloc_since_major &+= grown
+          CrystalTrace.heap_resize(self, @heap_size)
+          if hook = @heap_resize_hook
+            hook.call(@heap_size)
+          end
+        end
+        BlockHeader.grow_large_size(header, new_size)
+        trace_large_grow(chunk, old_mapped, new_size) if @trace_large
+      end
+      note_grow_bytes(new_size &- old_size)
+      @realloc_in_place_grows &+= 1
+      @realloc_in_place_bytes &+= old_size
+      true
+    end
+
+    # Publish a large chunk's new extent, *new_mapped* bytes from its base,
+    # its pages already committed: the same `@index_lock` section and the
+    # same readers as `map_chunk`'s `index_insert` and `note_mapped`. The
+    # index stays sorted, since the base does not move and the room is this
+    # chunk's own address space. The extent first: an entry or a bound for an
+    # address past it is a miss until it lands, which nothing can ask about
+    # before `realloc` returns.
+    private def publish_large_growth(chunk : ChunkHeader*, old_mapped : UInt64, new_mapped : UInt64) : Nil
+      note_index_lock_section
+      StwWatchdog.note_index_lock_wait(chunk.address)
+      @index_lock.sync do
+        invalidate_chunk_cache
+        Atomic::Ops.store(pointerof(chunk.value.@mapped_bytes), new_mapped, :release, true)
+        radix_grow(chunk, old_mapped)
+        finish = chunk.address &+ new_mapped
+        @heap_max = finish if finish > @heap_max
+        @heap_span_hi = finish if finish > @heap_span_hi
+      end
+      StwWatchdog.note_index_lock_done
+    end
+
+    # `note_alloc_bytes` for bytes a block grew by: no new object.
+    private def note_grow_bytes(bytes : UInt64) : Nil
+      if counters_atomic?
+        @total_bytes.add(bytes)
+        @bytes_since_gc.add(bytes)
+      else
+        @total_bytes.lazy_set(@total_bytes.lazy_get &+ bytes)
+        @bytes_since_gc.lazy_set(@bytes_since_gc.lazy_get &+ bytes)
+      end
+    end
 
     # Grow a large block by handing the old block's pages to the new one
     # instead of copying them (Linux `mremap`, `Platform.move_pages`). True
@@ -890,7 +1166,6 @@ module Gcry
 
         len = old_mapped &- page
         src = old_chunk.address &+ page
-        ThreadListWatch.check(src, len, ThreadListWatch::SITE_DONTNEED)
         return false unless Platform.move_pages(src, len, new_chunk.address &+ page, new_mapped &- page, @hugepages)
         head = page &- off
         head = old_size if old_size < head
@@ -1188,9 +1463,10 @@ module Gcry
     # `alloc_large`. One slot suffices: large allocation is under `@alloc_lock`.
     @large_alloc_in_flight = Pointer(Void).null
 
-    private def alloc_large_counted(rounded : UInt64, flags : UInt32, recycle : Bool, clear : Bool) : {Void*, UInt64}
+    private def alloc_large_counted(rounded : UInt64, flags : UInt32, recycle : Bool, clear : Bool,
+                                    reserve : Bool) : {Void*, UInt64}
       with_alloc_lock do
-        u, fc = alloc_large(rounded, flags, recycle, clear)
+        u, fc = alloc_large(rounded, flags, recycle, clear, reserve)
         # From here `u` is in the caller's registers or frame, which the scan
         # accepts; the collector's copy is no longer needed.
         @large_alloc_in_flight = Pointer(Void).null
@@ -1253,7 +1529,16 @@ module Gcry
         return Pointer(Void).null
       end
       local = set.value.bytes_local &+ payload
-      if @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited) >= @gc_threshold
+      # Wrapped (a free subtracted ahead of a credit) reads as zero, as it does
+      # for every reader (`bytes_since_gc_now`); with this set's uncredited
+      # bytes added, a wrap this thread's own frees caused is already undone.
+      # The clamp is asked second, and out of line: a clamped value is never
+      # above the raw one, so the raw comparison alone keeps every allocation
+      # under the threshold on the hit path. Inlined, the two comparisons
+      # cost 64-byte allocation-only churn 1.7% (6.465 → 6.575 ns/alloc,
+      # median of 12 interleaved runs); out of line, 6.455 → 6.460.
+      debt = @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited)
+      if debt >= @gc_threshold && debt_at_threshold?(debt)
         @fast_miss_threshold &+= 1
         return Pointer(Void).null
       end
@@ -1300,16 +1585,20 @@ module Gcry
       user
     end
 
+    # The hit path's threshold test for a raw *debt* already at or above the
+    # threshold: true unless it is a wrapped counter, which reads as zero.
+    @[NoInline]
+    private def debt_at_threshold?(debt : UInt64) : Bool
+      Heap.wrapped_as_zero(debt) >= @gc_threshold
+    end
+
     FAST_PATH_MAX = 32768_u64
     @fast_path = false
     @fit_index = uninitialized StaticArray(UInt8, 257)
     @fit_payload = uninitialized StaticArray(UInt32, 257)
 
-    property fast_path_enabled : Bool = true
-
     private def refresh_fast_path : Nil
-      @fast_path = @bitmap_alloc && @fast_path_enabled && !@nursery_enabled && !@destroyed &&
-                   !@birth_grace && !@always_clear &&
+      @fast_path = @bitmap_alloc && !@nursery_enabled && !@destroyed &&
                    !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc) &&
                    !(@oom_test_exhausted && @oom_seen)
     end
@@ -1324,7 +1613,29 @@ module Gcry
       end
     end
 
-    private def allocate(size : UInt64, atomic : Bool, clear : Bool, recycle : Bool = true) : Void*
+    {% if flag?(:win32) && flag?(:gc_none) %}
+      # Never freed: the process exits once the report is printed.
+      @[NoInline]
+      private def crash_report_alloc(size : UInt64, clear : Bool) : Void*
+        ptr = LibC.malloc(size)
+        LibC._exit(1) if ptr.null?
+        ptr.as(UInt8*).clear(size) if clear
+        ptr
+      end
+    {% end %}
+
+    # *reserve*: a large block gets room past it to grow into
+    # (`large_reserve_extent`); `realloc` asks for it when it grows a block.
+    private def allocate(size : UInt64, atomic : Bool, clear : Bool, recycle : Bool = true,
+                         reserve : Bool = false) : Void*
+      {% if flag?(:win32) && flag?(:gc_none) %}
+        # The thread whose fatal exception is being reported allocates from
+        # the C heap (`Gcry::CrashGuard`): it may have faulted holding the lock
+        # this path takes, and a report must not start a collection. Here and
+        # not in `GC.malloc`, where the check stopped `GC.malloc` being inlined
+        # into allocation sites; the hit path takes no lock.
+        return crash_report_alloc(size, clear) if CrashGuard.reporting?
+      {% end %}
       refresh_fast_path
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
       # No mapping can hold it, and the rounding below (a word, the large
@@ -1356,13 +1667,13 @@ module Gcry
       needs_clear = clear
       clear_bytes = rounded
       if class_index < 0
-        user, dirty = alloc_large_counted(rounded, flags, recycle, clear)
+        user, dirty = alloc_large_counted(rounded, flags, recycle, clear, reserve)
         if user.null?
           # `map_chunk` returned null rather than raising under `@alloc_lock`;
           # the lock is gone by now, so the collection and the error both
           # belong here.
           oom!("mmap failed") unless retry_after_emergency_collect?
-          user, dirty = alloc_large_counted(rounded, flags, recycle, clear)
+          user, dirty = alloc_large_counted(rounded, flags, recycle, clear, reserve)
           oom!("mmap failed") if user.null?
         end
         # Only the bytes a previous object wrote: past them a large chunk is
@@ -1401,22 +1712,7 @@ module Gcry
         trim_large_cache(keep, cap: UInt64::MAX) if @large_free_bytes > keep
       end
 
-      # `GCRY_ALWAYS_CLEAR=1` — research arm. Every skip above is a claim that
-      # the bytes are already zero: `MAP_ANONYMOUS` for a fresh chunk,
-      # `@freelist_clean` for a refill that came straight off one. Crystal
-      # relies on that: `Reference.allocate` zeroes nothing itself, so an ivar
-      # the initializer does not assign reads whatever the previous occupant
-      # left. A stale pointer arriving that way is the one story that fits the
-      # acikturkiye crash — nothing referenced the block when it died, and the
-      # mutator writes into it afterwards through a field it never set.
-      if @always_clear && !user.null?
-        needs_clear = true
-        clear_bytes = rounded
-      end
       clear_block(user, clear_bytes) if needs_clear
-      # EXPERIMENT (GCRY_BIRTH_GRACE=1, src/gcry/birth_grace.cr): a block is
-      # unreachable to the collector between here and the caller's store.
-      note_birth(user) if @birth_grace
       user
     end
 
@@ -1441,7 +1737,7 @@ module Gcry
       # The bitmap sweep settles a chunk with one batched subtraction, which
       # needs atomics against other mutators — not against itself: with one
       # mutator the sweep runs on that thread.
-      @heap_counters_atomic || @bitmap_alloc
+      (@heap_counters_atomic || @bitmap_alloc) && !@debug_plain_counters
     end
 
     # Parallel: Atomic RMW. EC1: plain get/set (no LOCK on the alloc hot path).
@@ -1472,16 +1768,27 @@ module Gcry
       end
     end
 
+    # Never saturates, for the reason `live_objects_sub` gives: an allocation
+    # on the hit path reaches `@bytes_since_gc` only when its cursor set is
+    # credited, and a free subtracts at once. Saturating at zero dropped the
+    # bytes freed ahead of their credit from the subtraction but not from the
+    # credit, so the counter stood that much above what was allocated and
+    # held, and the next collection came that much early: one thread
+    # allocating and freeing 819 200 bytes of 64-byte blocks right after a
+    # reset left it at 246 272 instead of 0, 3 of 3 runs
+    # (process_spec/regression/72); eight threads left 1.47 to 1.70 MB.
+    #
+    # Unlike `@live_objects`, this counter is reset at every major, so a free
+    # of a block allocated before the reset also takes it below zero, and it
+    # stays there until as many bytes are allocated again — the counter is
+    # net allocation since the collection. It always was while above zero:
+    # a free was never told apart by the age of its block. Readers see a
+    # wrapped value as zero (`bytes_since_gc_now`).
     private def bytes_since_gc_sub(n : UInt64) : Nil
       if counters_atomic?
-        loop do
-          cur = @bytes_since_gc.get
-          nxt = cur > n ? cur - n : 0_u64
-          break if @bytes_since_gc.compare_and_set(cur, nxt)[1]
-        end
+        @bytes_since_gc.sub(n)
       else
-        cur = @bytes_since_gc.get
-        @bytes_since_gc.set(cur > n ? cur - n : 0_u64)
+        @bytes_since_gc.set(@bytes_since_gc.get &- n)
       end
     end
 
@@ -1493,20 +1800,27 @@ module Gcry
       live_objects_sub(1_u64)
     end
 
+    # Never saturates. An allocation on the hit path reaches `@live_objects`
+    # only when its cursor set is credited (a refill, a stop, a reader), and a
+    # free subtracts at once, so the counter can stand below the blocks that
+    # are live — below the very decrement being applied — and is right again
+    # once the credit lands. Saturating at zero dropped that decrement for
+    # good instead, and the counter stayed that many above the walk. The
+    # credit taken first when the counter read below `n` covered one thread,
+    # not two: both read 1, both skipped it, and the second subtraction found
+    # 0. `make counter-loss` measured the counter 3 to 7 above the walk after
+    # six rounds of 40 threads freeing a quarter of what they allocate,
+    # exactly the number of subtractions that had saturated; 8 threads, each
+    # freeing 51 200 blocks of a class of its own, lost 21 to 68 decrements on
+    # 2 CPUs and 569 to 796 on 12, in 10 of 10 runs each
+    # (process_spec/regression/68). A wrapped counter is transient, and the
+    # public reader reads it as zero.
     private def live_objects_sub(n : UInt64) : Nil
       return if n == 0
-      # A block allocated on a hit path and not yet credited would make this
-      # saturate at zero and lose the decrement for good.
-      credit_all_cursor_sets if @live_objects.get < n
       if @world_stopped || !counters_atomic?
-        cur = @live_objects.get
-        @live_objects.set(cur > n ? cur - n : 0_u64)
-        return
-      end
-      loop do
-        cur = @live_objects.get
-        nxt = cur > n ? cur - n : 0_u64
-        break if @live_objects.compare_and_set(cur, nxt)[1]
+        @live_objects.set(@live_objects.get &- n)
+      else
+        @live_objects.sub(n)
       end
     end
 
@@ -1575,7 +1889,15 @@ module Gcry
 
       # Tight-grow: never collect under the freelist lock (STW vs lock deadlock).
       # If both prefer+global are empty, GC once outside the lock, then refill.
-      if @tight_grow && @tight_grow_gc && !@collecting && @enabled && !@tlab_enabled
+      #
+      # Freelist allocator only. A bitmap heap has no freelist, so `empty`
+      # would be true at every locked allocation; what kept this from
+      # collecting there was `small_free_bytes` reading about 0 on that layout
+      # until 2026-10-14 (`bitmap_credit_capacity`). With the capacity counted
+      # it reads what is free, and the check would fire a collection per
+      # `min_bsg` allocated under `GCRY_TIGHT_GROW=1`, a knob calibrated on the
+      # header allocator and never measured on this one.
+      if @tight_grow && @tight_grow_gc && !@bitmap_alloc && !@collecting && @enabled && !@tlab_enabled
         empty = with_freelist_lock(index, false) do
           @prefer_freelists[index].null? && @freelists[index].null?
         end
@@ -1589,7 +1911,7 @@ module Gcry
         sm = small_mapped_bytes
         sf = small_free_bytes
         sparse = sm > 0 && sf * 100 >= sm * @tight_grow_gc_pct.to_u64
-        if empty && sparse && @bytes_since_gc.get >= min_bsg
+        if empty && sparse && bytes_since_gc_now >= min_bsg
           @tight_grow_collects &+= 1
           collect(scan_stack: true)
         end
@@ -2475,7 +2797,10 @@ module Gcry
     # without it they are not looked for. An exact fit taken in place clears
     # all of its payload, as it always did: zlib's blocks there are written
     # through, and asking the kernel cost the gzip loop 5% for nothing.
-    private def alloc_large(payload : UInt64, flags : UInt32, recycle : Bool, clear : Bool) : {Void*, UInt64}
+    # *reserve*: map with room past the chunk for `grow_large`
+    # (`large_reserve_extent`). A cached chunk taken in place has none.
+    private def alloc_large(payload : UInt64, flags : UInt32, recycle : Bool, clear : Bool,
+                            reserve : Bool = false) : {Void*, UInt64}
       # Past what a large header records, and past what any mapping can hold:
       # the mmap failure it would otherwise be.
       return {Pointer(Void).null, 0_u64} if payload >= BlockHeader::LARGE_SIZE_LIMIT
@@ -2502,14 +2827,13 @@ module Gcry
         header = BlockHeader.large_header_from_user(user)
         # A cached chunk's pages may have been released reusable at the last
         # major; take them back before anything writes the object.
-        lo, hi = large_release_range((header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*))
+        lo, hi = large_release_range(ChunkHeader.from_large_header(header))
         Platform.reuse_released_pages(lo, hi - lo) if hi > lo
         # Root the block until the caller holds its user pointer: a mutator
         # stopped by signal between `set_used_large` and its return holds only
         # `header`/`chunk`, which `base_only` rejects, and the sweep would take
         # the USED, unmarked block for dead (`dormant-flush-race`, 2026-09-04).
         @large_alloc_in_flight = user
-        ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
         BlockHeader.set_used_large(header, payload, flags | BlockHeader::Flags::LARGE)
         heap_set_mark_allocating(header) if @incremental_marking || @collecting
         return {user, payload}
@@ -2519,26 +2843,44 @@ module Gcry
 
       reused = 0_u64
       written = 0_u64
-      at = recycle ? recycle_large_mapping(mapped, clear) : Pointer(Void).null
-      unless at.null?
+      extent = reserve ? large_reserve_extent(mapped) : 0_u64
+      fresh_room = false
+      at = recycle ? recycle_large_mapping(mapped, clear, extent) : Pointer(Void).null
+      if !at.null?
         reused = @recycled_from
         written = @recycled_written
+        extent = @recycled_extent
         # The old chunk's block header is FREE with a stale link. A fresh
         # mapping publishes zeroes there, which the sweep reads as an
         # allocation not yet filled in (`sweep_large_one`).
-        (at.as(UInt8*) + ChunkHeader::SIZE).clear(BlockHeader::LARGE_HEADER_BYTES)
+        (at.as(UInt8*) + ChunkHeader.large_header_offset).clear(BlockHeader::LARGE_HEADER_BYTES)
+      elsif extent > mapped
+        at = reserve_large_mapping(extent, mapped)
+        fresh_room = !at.null?
+        extent = 0_u64 unless fresh_room
+      else
+        extent = 0_u64
       end
-      chunk = map_chunk(mapped, UInt32::MAX, 0_u32, at)
+      room = extent == 0_u64 ? 0_u32 : ChunkHeader.grow_extent_flags((extent &- Platform.host_page_size).trailing_zeros_count.to_i32)
+      chunk = map_chunk(mapped, UInt32::MAX, room, at)
       if chunk.null?
-        # A recycled mapping is off every list, and `map_chunk` leaves it to
-        # its caller; the old chunk's pages it carried leave the heap with it.
+        # A recycled or reserved mapping is off every list, and `map_chunk`
+        # leaves it to its caller; the old chunk's pages it carried leave the
+        # heap with it.
         unless at.null?
+          Gcry.os_release_reserved(Pointer(Void).new(at.address &+ mapped), extent &- mapped) if extent > mapped
           Gcry.os_unmap(at, mapped)
           @unmapped_bytes += reused
         end
         return {Pointer(Void).null, 0_u64}
       end
-      trace_large_map(chunk, mapped, payload, reused) if @trace_large
+      # `map_chunk` spends the recycling budget only on a mapping it made.
+      @large_recycle_budget = sat_sub(@large_recycle_budget, mapped) if fresh_room
+      if extent > mapped
+        @large_reservations &+= 1
+        @large_reserved_bytes &+= extent &- mapped
+      end
+      trace_large_map(chunk, mapped, payload, reused, extent) if @trace_large
       header = ChunkHeader.large_header(chunk)
       @large_alloc_in_flight = ChunkHeader.large_user(chunk)
       BlockHeader.set_used_large(header, payload, flags | BlockHeader::Flags::LARGE)
@@ -2562,6 +2904,8 @@ module Gcry
     # Of those, the front that may hold what the old chunk's objects wrote;
     # the rest reads zeroes (`large_written_bytes`).
     @recycled_written = 0_u64
+    # Bytes of address space reserved from its base, or 0 (`large_grow_extent`).
+    @recycled_extent = 0_u64
     # Cached large bytes recycling may keep: what the last major left in the
     # cache, less every byte mapped fresh since. Without recycling those
     # bytes would have gone back at the sweep, so a cache that gives back
@@ -2599,7 +2943,7 @@ module Gcry
     # go through `guard_release`, and off Linux.
     private def large_written_bytes(base : Void*, len : UInt64) : UInt64
       {% if flag?(:linux) %}
-        return len if @release_quarantine != 0 || @release_ledger || @unmap_guard || @release_holders
+        return len if @release_quarantine != 0 || @release_ledger || @unmap_guard
         meta = align_up(ChunkHeader.large_data_offset.to_u64, Platform.host_page_size)
         return len if len <= meta
         meta &+ Gcry.os_written_prefix(base + meta, len &- meta)
@@ -2630,8 +2974,11 @@ module Gcry
     #
     # *clear*: the allocation zeroes what the old chunk wrote, so
     # `@recycled_written` is that much (`large_written_bytes`), not all it
-    # kept.
-    private def recycle_large_mapping(mapped : UInt64, clear : Bool) : Void*
+    # kept. *extent*: the pages go into a mapping with that much room
+    # reserved (`large_reserve_extent`), or a plain one when the room cannot
+    # be had; `@recycled_extent` says which. A cached chunk has no room of its
+    # own to bring (`release_large_reservation`).
+    private def recycle_large_mapping(mapped : UInt64, clear : Bool, extent : UInt64 = 0_u64) : Void*
       {% if flag?(:linux) %}
         return Pointer(Void).null unless @large_recycle && @large_free_bytes != 0_u64
         # Walks of `@chunks` with the world running read chunk headers without
@@ -2640,21 +2987,25 @@ module Gcry
         return Pointer(Void).null if @live_chunk_walk || @world_stopped || @collecting || @incremental_marking
         return Pointer(Void).null unless @barrier_backend.none?
         # The release audits want every release to go through `guard_release`.
-        return Pointer(Void).null if @release_quarantine != 0 || @release_ledger || @unmap_guard || @release_holders
+        return Pointer(Void).null if @release_quarantine != 0 || @release_ledger || @unmap_guard
         # A thread the stop does not signal could be resizing while the
         # collector walks the list.
         thread = Thread.current?
         return Pointer(Void).null if thread.nil? || stw_signal_exempt?(thread)
         user = take_large_recycle(mapped)
         return Pointer(Void).null unless user
-        old = (BlockHeader.large_header_from_user(user).as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        old = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
         old_mapped = old.value.mapped_bytes
-        ThreadListWatch.check(old.address, old_mapped, ThreadListWatch::SITE_CACHE_OUT)
         @heap_size = sat_sub(@heap_size, old_mapped)
         @large_mapped_bytes = sat_sub(@large_mapped_bytes, old_mapped)
         unlink_chunk(old)
         kept = old_mapped < mapped ? old_mapped : mapped
-        dst = Gcry.os_map(mapped)
+        dst = extent > mapped ? reserve_large_mapping(extent, mapped) : Pointer(Void).null
+        if dst.null?
+          extent = 0_u64
+          dst = Gcry.os_map(mapped)
+        end
+        @recycled_extent = extent
         moved, dst_kept = Gcry.mmap_failed?(dst) ? {false, false} : Gcry.os_move(old.as(Void*), kept, dst, mapped)
         unless moved
           Gcry.os_unmap(old.as(Void*), old_mapped)
@@ -2662,7 +3013,12 @@ module Gcry
           update_heap_bounds_after_unmap
           @recycled_from = 0_u64
           @recycled_written = 0_u64
-          return Pointer(Void).null unless dst_kept
+          unless dst_kept
+            # The front went with the refusal (`Gcry.os_move`); the room past
+            # it is still this heap's.
+            Gcry.os_release_reserved(Pointer(Void).new(dst.address &+ mapped), extent &- mapped) if extent > mapped
+            return Pointer(Void).null
+          end
           @large_recycle_budget = sat_sub(@large_recycle_budget, mapped)
           return dst
         end
@@ -2672,7 +3028,7 @@ module Gcry
           rchunk = Pointer(ChunkHeader).null
           if rest >= LARGE_RECYCLE_SPLIT_MIN
             # FREE before the chunk is published, as the sweep skips it.
-            rheader = (tail &+ ChunkHeader::SIZE).to_u64
+            rheader = (tail &+ ChunkHeader.large_header_offset).to_u64
             Pointer(BlockHeader).new(rheader).value = BlockHeader.large(
               rest &- ChunkHeader.large_data_offset.to_u64,
               BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE)
@@ -2714,7 +3070,7 @@ module Gcry
         prev = Pointer(Void).null
         user = @large_freelists[i]
         while user
-          c = (BlockHeader.large_header_from_user(user).as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          c = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
           m = c.value.mapped_bytes
           if m >= mapped && (best.null? || m < best_mapped) && !ChunkHeader.moved?(c)
             best, best_prev, best_bucket, best_mapped = user, prev, i, m
@@ -2729,7 +3085,7 @@ module Gcry
         prev = Pointer(Void).null
         user = @large_freelists[i]
         while user
-          c = (BlockHeader.large_header_from_user(user).as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          c = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
           m = c.value.mapped_bytes
           if m < mapped && m > best_mapped && !ChunkHeader.moved?(c)
             best, best_prev, best_bucket, best_mapped = user, prev, i, m
@@ -2782,10 +3138,12 @@ module Gcry
     end
 
     # Mark `chunk`'s block FREE and append it to its bucket. Caller holds
-    # `@alloc_lock`.
+    # `@alloc_lock`. The block is dead, so nothing grows it again: the room
+    # reserved past it goes back first, and a cached chunk is only ever its
+    # mapping (`release_large_reservation`).
     private def link_free_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      release_large_reservation(chunk)
       mapped = chunk.value.mapped_bytes
-      ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_IN)
       payload = BlockHeader.large_size(header)
       bucket = self.class.large_bucket(mapped)
       user = BlockHeader.large_user_from_header(header)
@@ -2805,12 +3163,10 @@ module Gcry
         report_large_bucket_cycle(bucket, user, limit) if steps > limit
       end
       poison_payload(user, payload) if @poison_freed
-      ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
       header.value = BlockHeader.large(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE)
       if tail.null?
         @large_freelists[bucket] = user
       else
-        ThreadListWatch.check(BlockHeader.large_header_from_user(tail).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
         th = BlockHeader.large_header_from_user(tail)
         tv = th.value
         tv.next_free = user
@@ -2911,7 +3267,7 @@ module Gcry
       user = @large_freelists[b]
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
         if chunk.value.mapped_bytes == mapped_need && (!freed_only || ChunkHeader.freed?(chunk))
           ChunkHeader.set_freed(chunk, false)
@@ -2922,14 +3278,12 @@ module Gcry
           if prev.null?
             @large_freelists[b] = nxt
           else
-            ThreadListWatch.check(BlockHeader.large_header_from_user(prev).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
             ph = BlockHeader.large_header_from_user(prev)
             pv = ph.value
             pv.next_free = nxt
             ph.value = pv
           end
           mapped = chunk.value.mapped_bytes
-          ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_OUT)
           free_bytes_sub(mapped)
           @large_free_bytes = sat_sub(@large_free_bytes, mapped)
           @large_cache_hits += 1
@@ -2947,7 +3301,7 @@ module Gcry
       user = chain
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
         base = chunk.as(Void*).address
@@ -2965,7 +3319,9 @@ module Gcry
     # `GCRY_TRACE_LARGE=1`. Raw `write(2)`: this runs on the allocation path and
     # must not allocate.
     # *recycled*: mapped bytes of the cached chunk resized into this one.
-    private def trace_large_map(chunk : ChunkHeader*, mapped : UInt64, payload : UInt64, recycled : UInt64) : Nil
+    # *reserved*: the address space reserved from its base, if any.
+    private def trace_large_map(chunk : ChunkHeader*, mapped : UInt64, payload : UInt64, recycled : UInt64,
+                                reserved : UInt64 = 0_u64) : Nil
       return if chunk.null?
       buf = uninitialized UInt8[RawOut::LIMIT]
       p = buf.to_unsafe
@@ -2981,6 +3337,29 @@ module Gcry
         len = RawOut.append(p, len, " recycled=")
         len = RawOut.append_u64(p, len, recycled)
       end
+      if reserved > 0_u64
+        len = RawOut.append(p, len, " reserved=")
+        len = RawOut.append_u64(p, len, reserved)
+      end
+      len = RawOut.append(p, len, "\n")
+      RawOut.flush(p, len)
+    end
+
+    # `GCRY_TRACE_LARGE=1` for a block `grow_large` grew where it stands: its
+    # extent before and after, and the size it grew to.
+    private def trace_large_grow(chunk : ChunkHeader*, old_mapped : UInt64, payload : UInt64) : Nil
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      p = buf.to_unsafe
+      len = RawOut.append(p, 0, "gcry: large grow base=0x")
+      len = RawOut.append_hex(p, len, chunk.as(Void*).address)
+      len = RawOut.append(p, len, " mapped=")
+      len = RawOut.append_u64(p, len, old_mapped)
+      len = RawOut.append(p, len, "->")
+      len = RawOut.append_u64(p, len, chunk.value.mapped_bytes)
+      len = RawOut.append(p, len, " payload=")
+      len = RawOut.append_u64(p, len, payload)
+      len = RawOut.append(p, len, " coll=")
+      len = RawOut.append_u64(p, len, @collections)
       len = RawOut.append(p, len, "\n")
       RawOut.flush(p, len)
     end
@@ -2989,9 +3368,8 @@ module Gcry
       user = chain
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
-        ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
         hv = header.value
         hv.next_free = @pending_large_release
         header.value = hv
@@ -3049,7 +3427,7 @@ module Gcry
           user = @large_freelists[b]
           while user && @large_free_bytes > effective
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             nxt = header.value.next_free
             @large_freelists[b] = nxt
             mapped = chunk.value.mapped_bytes
@@ -3140,7 +3518,7 @@ module Gcry
       user = detached
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
         base = chunk.as(Void*).address
@@ -3178,7 +3556,7 @@ module Gcry
           steps &+= 1
           report_large_bucket_cycle(b, user, walk_limit, "trimming") if steps > walk_limit
           header = BlockHeader.large_header_from_user(user)
-          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          chunk = ChunkHeader.from_large_header(header)
           nxt = header.value.next_free
           @large_freelists[b] = nxt
           mapped = chunk.value.mapped_bytes
@@ -3214,7 +3592,7 @@ module Gcry
           user = @large_freelists[b]
           while user
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             nxt = header.value.next_free
             if ChunkHeader.moved?(chunk)
               if prev.null?
@@ -3323,9 +3701,8 @@ module Gcry
       # and nothing occupied, which is exactly right.
       #
       # Large chunks never get one: they hold a single object, so there is
-      # nothing to amortise, and a bitmap region would move `data_start` and
-      # break the twelve sites that recover a large chunk as
-      # `header - ChunkHeader::SIZE`.
+      # nothing to amortise, and their layout is fixed instead
+      # (`ChunkHeader.large_header_offset`, `ChunkHeader.large_data_offset`).
       bitmap_words = 0_u32
       # Large chunks: `ChunkHeader.large_data_offset`, not bare `ChunkHeader::SIZE`.
       #
@@ -3336,22 +3713,23 @@ module Gcry
       # generation straight into the object's second word — two bytes at
       # `user+4`, which is exactly the corruption this chased.
       #
-      # The header stays at `chunk + ChunkHeader::SIZE`, so the twelve sites that
-      # recover a chunk as `header - ChunkHeader::SIZE` are untouched — it is
-      # `data_start` that moves, not the header.
+      # The header sits at `ChunkHeader.large_header_offset` in both builds,
+      # behind the back-link slot (`ChunkHeader::LARGE_LINK_BYTES`), and every
+      # site that recovers a chunk from it uses `ChunkHeader.from_large_header`
+      # — it is `data_start` that differs between the builds, not the header.
       data_offset = if size_class == UInt32::MAX
                       # Where the chunk's *data* begins, which is not the same
                       # as where its object begins. With headers in front,
-                      # `data_start` IS the block header (offset 32) and the
+                      # `data_start` IS the block header (offset 48) and the
                       # object follows it. Under headerless the header is
                       # reserved between them, so data_start is the object at
-                      # offset 48. `large_data_offset` is the chunk-to-object
-                      # distance — 48 in both builds — and is what sizes the
+                      # offset 64. `large_data_offset` is the chunk-to-object
+                      # distance — 64 in both builds — and is what sizes the
                       # mapping; this is the field, and it differs.
                       {% if !flag?(:gcry_block_headers) %}
-                        (ChunkHeader::SIZE + 16).to_u32
+                        ChunkHeader.large_data_offset.to_u32
                       {% else %}
-                        ChunkHeader::SIZE.to_u32
+                        ChunkHeader.large_header_offset.to_u32
                       {% end %}
                     else
                       ChunkHeader::SIZE.to_u32
@@ -3390,7 +3768,13 @@ module Gcry
         # collections: a heap that has reached its working size stops mapping
         # and stops losing. Free beside an mmap.
         @chunks_mapped &+= 1
-        chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags, data_offset, bitmap_words)
+        head = @chunks
+        chunk.value = ChunkHeader.new(head, bytes, size_class, flags, data_offset, bitmap_words)
+        # The new head has nothing in front of it, and the old head now has
+        # this chunk (`ChunkHeader.large_prev`). A recycled or split mapping
+        # (*at*) carries a stale word in the slot, so it is written either way.
+        ChunkHeader.set_back_link(chunk, Pointer(ChunkHeader).null)
+        ChunkHeader.set_back_link(head, chunk)
         # In flight from here until the index has it, and whose
         # (`@chunk_publishing`). The publisher first: the release store
         # publishes it with the chunk.
@@ -3450,6 +3834,40 @@ module Gcry
       Gcry.os_map(bytes)
     end
 
+    # Calls of `unlink_chunk`, and the steps their predecessor searches
+    # walked down `@chunks`. A large chunk's back-link names its predecessor
+    # (`ChunkHeader.large_prev`), so the search walks only when the link
+    # cannot vouch for it (`back_linked_predecessor_locked`); before the link
+    # it walked to every target, as deep as the target sat.
+    # `process_spec/regression/71_large_unlink_walks_nothing_spec.cr` reads
+    # both.
+    getter chunk_unlinks : UInt64 = 0_u64
+    getter unlink_walk_steps : UInt64 = 0_u64
+
+    # Large chunks on `@chunks` whose back-link does not name the chunk in
+    # front of them (`ChunkHeader.large_prev`). Zero while every list store
+    # keeps the links. `unlink_chunk` checks a link before it trusts it, so
+    # a wrong one costs a walk rather than the list; this is what says one
+    # was wrong. A walk of the list under its lock, for gates and specs
+    # (`make chunk-list-drift`, `process_spec/regression/71`).
+    def chunk_back_link_faults : UInt64
+      faults = 0_u64
+      @chunk_list_lock.sync do
+        # Bounded like `unlink_chunk`'s walk.
+        limit = @chunk_index_count.to_u64 &* 2 &+ 64
+        steps = 0_u64
+        prev = Pointer(ChunkHeader).null
+        c = @chunks
+        while c && steps <= limit
+          faults &+= 1 if ChunkHeader.large?(c) && ChunkHeader.large_prev(c) != prev
+          prev = c
+          c = c.value.next
+          steps &+= 1
+        end
+      end
+      faults
+    end
+
     protected def unlink_chunk(target : ChunkHeader*) : Nil
       # Index removal and the list surgery in one section, for the reason
       # `map_chunk` spells out: the predecessor search reads `@chunks` and
@@ -3459,58 +3877,103 @@ module Gcry
       # removed the chunk from the index but **not** from the list — after
       # which the caller unmaps it and the next walker faults.
       @chunk_list_lock.sync do
-        index_remove(target)
+        @chunk_unlinks &+= 1
+        # `index_remove`, with the back-link's check in the same section: the
+        # check reads the index and, if the chunk the link names is in it,
+        # that chunk's `next`.
+        prev = Pointer(ChunkHeader).null
+        note_index_lock_section
+        StwWatchdog.note_index_lock_wait(target.address)
+        @index_lock.sync do
+          index_remove_locked(target)
+          prev = back_linked_predecessor_locked(target)
+        end
+        StwWatchdog.note_index_lock_done
         if @chunks == target
           @chunks = target.value.next
+          ChunkHeader.set_back_link(@chunks, Pointer(ChunkHeader).null)
         else
-          prev = @chunks
-          # Every chunk on the list is indexed, so a walk more than twice the
-          # index long (slack for chunks mid-flight) has gone round a cycle.
-          # It did once — `pattern_fuzz` seed 20102, spinning here for 900 s
-          # with every other thread asleep (campaign-036, 2026-09-29) — and a
-          # spin says nothing about how the cycle formed. Stop and name it.
-          limit = @chunk_index_count.to_u64 &* 2 &+ 64
-          steps = 0_u64
-          while prev
-            if prev.value.next == target
-              # Flags are updated under the class lock. A whole-header copy
-              # here could overwrite a concurrent cursor/dormant flag change.
-              ChunkHeader.set_next(prev, target.value.next)
-              break
+          if prev.null?
+            c = @chunks
+            # Every chunk on the list is indexed, so a walk more than twice the
+            # index long (slack for chunks mid-flight) has gone round a cycle.
+            # It did once — `pattern_fuzz` seed 20102, spinning here for 900 s
+            # with every other thread asleep (campaign-036, 2026-09-29) — and a
+            # spin says nothing about how the cycle formed. Stop and name it.
+            limit = @chunk_index_count.to_u64 &* 2 &+ 64
+            steps = 0_u64
+            while c
+              if c.value.next == target
+                prev = c
+                break
+              end
+              c = c.value.next
+              steps &+= 1
+              report_chunk_list_cycle(target, limit) if steps > limit
             end
-            prev = prev.value.next
-            steps &+= 1
-            report_chunk_list_cycle(target, limit) if steps > limit
+            @unlink_walk_steps &+= steps
           end
+          # Flags are updated under the class lock. A whole-header copy
+          # here could overwrite a concurrent cursor/dormant flag change.
+          ChunkHeader.link(prev, target.value.next) unless prev.null?
         end
       end
+    end
+
+    # *target*'s predecessor on `@chunks` as its back-link names it
+    # (`ChunkHeader.large_prev`), or null when the link cannot vouch for it
+    # and the caller must search. Caller holds `@chunk_list_lock` and
+    # `@index_lock`, and *target* is on the list.
+    #
+    # Every list store keeps the link, so it names the wrong chunk only where
+    # the list's own `next`s are already in question: a writer frozen inside
+    # its locked section while an in-STW sweep relinks (`Heap#sweep`), or the
+    # `GCRY_TRIM_UNLOCKED` control unlinking under the after-world rebuild.
+    # The chunk a wrong link names may since have been unmapped, so the link
+    # is checked before it is followed. The chunk must be in the index:
+    # nothing unmaps an indexed chunk without taking it out under
+    # `@index_lock` first, and the caller holds that, so its `next` can be
+    # read. And that `next` must be *target*. A chunk off the list is out of
+    # the index — `unlink_chunk` and `unlink_detached_large` take it out of
+    # both in one `@chunk_list_lock` section — or is one the sweep dropped
+    # into its release queue, whose `next` names only chunks queued with it
+    # until the flush takes them out of the index. So an indexed chunk whose
+    # `next` is a listed chunk is that chunk's predecessor on the list.
+    private def back_linked_predecessor_locked(target : ChunkHeader*) : ChunkHeader*
+      none = Pointer(ChunkHeader).null
+      return none unless ChunkHeader.large?(target)
+      prev = ChunkHeader.large_prev(target)
+      return none if prev.null?
+      return none unless indexed_locked?(prev)
+      prev.value.next == target ? prev : none
     end
 
     # Take a trim's detached large chunks (a `next_free` chain of users) off
     # the chunk list and out of the index.
     #
-    # One at a time, `unlink_chunk` walks the list from the head for each
-    # chunk's predecessor and shifts the sorted index down by one: O(k·n) for
-    # k chunks among n. A collection whose sweep frees k large objects trims
-    # all k, holding `@alloc_lock`, so every allocating mutator waited on it:
-    # 2.3 s of `GC.collect` with 40 000 large objects live and 5 000 dying
-    # (2026-10-03). Here the k chunks are flagged, then the index is compacted
-    # in one pass and the list in one pass, O(n + k). One chunk keeps
-    # `unlink_chunk`, whose walk stops at the predecessor.
+    # One at a time, `unlink_chunk` shifts the sorted index down by one per
+    # chunk, and before back-links it also walked the list from the head for
+    # each chunk's predecessor: O(k·n) for k chunks among n. A collection
+    # whose sweep frees k large objects trims all k, holding `@alloc_lock`,
+    # so every allocating mutator waited on it: 2.3 s of `GC.collect` with
+    # 40 000 large objects live and 5 000 dying (2026-10-03). Here the k
+    # chunks are flagged, then the index is compacted in one pass and the
+    # list in one pass, O(n + k). One chunk keeps `unlink_chunk`, which finds
+    # the predecessor by the chunk's back-link.
     #
     # The lock order is `unlink_chunk`'s: list, then index.
     private def unlink_detached_large(chain : Void*, count : Int32) : Nil
       return if chain.null?
       if count == 1
         header = BlockHeader.large_header_from_user(chain)
-        unlink_chunk((header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*))
+        unlink_chunk(ChunkHeader.from_large_header(header))
         return
       end
       first = Pointer(ChunkHeader).null
       user = chain
       while user
         header = BlockHeader.large_header_from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        chunk = ChunkHeader.from_large_header(header)
         first = chunk if first.null?
         ChunkHeader.set_unlinking(chunk)
         user = header.value.next_free
@@ -3523,13 +3986,8 @@ module Gcry
           user = chain
           while user
             header = BlockHeader.large_header_from_user(user)
-            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            chunk = ChunkHeader.from_large_header(header)
             radix_remove(chunk)
-            if ThreadListWatch.check(chunk.address, chunk.value.mapped_bytes, ThreadListWatch::SITE_INDEX_REMOVE) ||
-               (ThreadListWatch.chunk_base != 0 && chunk.address == ThreadListWatch.chunk_base &&
-               ThreadListWatch.check(chunk.address, UInt64::MAX - chunk.address, ThreadListWatch::SITE_INDEX_REMOVE))
-              Gcry::RawOut.print_backtrace
-            end
             user = header.value.next_free
           end
           kept = 0
@@ -3544,7 +4002,6 @@ module Gcry
             i += 1
           end
           @chunk_index_count = kept
-          verify_thread_list_indexed("an index_remove")
         end
         StwWatchdog.note_index_lock_done
 
@@ -3558,8 +4015,9 @@ module Gcry
           if ChunkHeader.unlinking?(c)
             if prev.null?
               @chunks = nxt
+              ChunkHeader.set_back_link(nxt, Pointer(ChunkHeader).null)
             else
-              ChunkHeader.set_next(prev, nxt)
+              ChunkHeader.link(prev, nxt)
             end
             removed += 1
           else
@@ -3866,10 +4324,8 @@ module Gcry
     # contract — see `chunk_set_mark`.
     #
     # Large chunks stay on the header generation under both. They hold exactly
-    # one object, so there is nothing for a bitmap to amortise, and keeping them
-    # on the header avoids a bitmap region that would move `data_start` and
-    # break the twelve sites that recover a large chunk as
-    # `header - ChunkHeader::SIZE`.
+    # one object, so there is nothing for a bitmap to amortise, and their
+    # metadata layout stays fixed (`ChunkHeader.large_header_offset`).
 
     @[AlwaysInline]
     private def chunk_block_ordinal(chunk : ChunkHeader*, addr : UInt64) : UInt64
@@ -3957,7 +4413,7 @@ module Gcry
     # live objects.
 
     # Union read for callers holding only a header: diagnostics, finalizer
-    # liveness, birth-grace, the audits. Pays a chunk lookup, which is why no
+    # liveness, the audits. Pays a chunk lookup, which is why no
     # hot path uses it — `sweep_small_blocks` counts ordinals, and
     # `mark_impl_unlocked` gets its chunk from `find_block_with_chunk`.
     @[AlwaysInline]
@@ -4492,6 +4948,14 @@ module Gcry
       lo
     end
 
+    # Whether *chunk* is in the sorted index, found by its base: reads the
+    # index, never the chunk, so it is safe on a pointer to memory that may be
+    # unmapped. Caller holds `@index_lock`.
+    private def indexed_locked?(chunk : ChunkHeader*) : Bool
+      at = index_lower_bound(chunk.address)
+      at < @chunk_index_count && (@chunk_index + at).value == chunk
+    end
+
     # Does the chunk index still describe the chunks that exist?
     #
     # `GCRY_INDEX_AUDIT=1`, from inside the stopped world so `@chunks` and the
@@ -4632,7 +5096,6 @@ module Gcry
         end
         (@chunk_index + pos).value = chunk
       end
-      verify_thread_list_indexed("an index_insert")
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
@@ -4659,14 +5122,6 @@ module Gcry
         radix_remove(chunk)
         # No cursor drop here. A chunk under a cursor is pinned live by the
         # sweep and never reaches this path — see `bitmap_cursor_on?`.
-        # Range test AND base identity: the hook exists because the entry
-        # vanishes, and a defect that has already rewritten `mapped_bytes`
-        # would blind a range-only test while the base still names the chunk.
-        if ThreadListWatch.check(chunk.address, chunk.value.mapped_bytes, ThreadListWatch::SITE_INDEX_REMOVE) ||
-           (ThreadListWatch.chunk_base != 0 && chunk.address == ThreadListWatch.chunk_base &&
-           ThreadListWatch.check(chunk.address, UInt64::MAX - chunk.address, ThreadListWatch::SITE_INDEX_REMOVE))
-          Gcry::RawOut.print_backtrace
-        end
         pos = index_lower_bound(chunk.address)
         unless pos >= @chunk_index_count || (@chunk_index + pos).value != chunk
           i = pos
@@ -4677,7 +5132,6 @@ module Gcry
           end
           @chunk_index_count -= 1
         end
-        verify_thread_list_indexed("an index_remove")
       end
     end
 

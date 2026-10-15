@@ -138,6 +138,41 @@ describe "Gcry::Heap chunk radix" do
     end
   end
 
+  # A large block that grows in place (`Heap#grow_large`) publishes its new
+  # pages while it still fits the table, and retracts every entry once it
+  # has outgrown it: `radix_remove` skips a chunk that size at its unmap, so
+  # an entry left behind would outlive the mapping.
+  it "follows a large block that grows in place, and retracts it once it outgrows the table" do
+    heap = radix_heap
+    begin
+      heap.gc_threshold = UInt64::MAX
+      # Room for three doublings of what the first growth copies into.
+      heap.large_reserve_doublings = 3
+      max = Gcry::Heap::RADIX_MAX_GRANULES.to_u64 * Gcry::Platform.host_page_size
+      # The first growth copies into a chunk with room; the second takes it.
+      block = heap.realloc(heap.malloc(max // 8), max // 4)
+      block = heap.realloc(block, max // 2)
+      heap.realloc_in_place_grows.should eq(1)
+      header = heap.find_block(block)
+      header.should_not be_nil
+      fast = heap.radix_fast_hits
+      heap.find_block(Pointer(Void).new(block.address + max // 2 - 1)).should eq(header)
+      heap.radix_fast_hits.should eq(fast + 1)
+
+      skips = heap.radix_oversize_skips
+      heap.realloc(block, max * 2).should eq(block)
+      heap.radix_oversize_skips.should eq(skips + 1)
+      fast = heap.radix_fast_hits
+      slow = heap.radix_slow_lookups
+      heap.find_block(block).should eq(header)
+      heap.find_block(Pointer(Void).new(block.address + max * 2 - 1)).should eq(header)
+      heap.radix_fast_hits.should eq(fast)
+      heap.radix_slow_lookups.should eq(slow + 2)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "does not answer for addresses outside the heap" do
     heap = radix_heap
     begin

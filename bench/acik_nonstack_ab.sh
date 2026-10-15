@@ -3,7 +3,7 @@
 # Uses existing exclusive/base/boehm bins; passes through GCRY_* knobs.
 #
 # Usage (gcry root):
-#   SKIP_BUILD=1 KNObs="control auto_layouts scan_caps floor" \
+#   SKIP_BUILD=1 KNOBS="control floor" \
 #     bash bench/acik_nonsstack_ab.sh
 #
 set -euo pipefail
@@ -16,7 +16,7 @@ CONNECTIONS="${WRK_CONNECTIONS:-100}"
 PORT_BASE="${ACIK_PORT_BASE:-3700}"
 OUT="${ACIK_NONSTACK_OUT:-$ROOT/bench/log/linux/$(date +%Y-%m-%d-%H%M%S)-acik-nonstack}"
 BIN_VARIANT="${BIN_VARIANT:-exclusive}" # exclusive|base
-KNOBS="${KNOBS:-control auto_layouts scan_caps floor disable_layout}"
+KNOBS="${KNOBS:-control floor}"
 
 [[ -f "$AT/.env.demo" ]] || { echo "missing $AT/.env.demo"; exit 1; }
 [[ -x "$AT/bin/acikturkiye-$BIN_VARIANT" ]] || { echo "missing bin acikturkiye-$BIN_VARIANT"; exit 1; }
@@ -45,16 +45,9 @@ wait_2xx() {
 apply_knob() {
   case "$1" in
     control) : ;;
-    auto_layouts) export GCRY_AUTO_LAYOUTS=1 ;;
-    scan_caps) export GCRY_SCAN_CAPS=1 ;;
     floor)
       export GCRY_LARGE_CACHE=1048576
       export GCRY_EMPTY_CHUNK_RETAIN=0
-      ;;
-    disable_layout) export GCRY_DISABLE_LAYOUT=1 ;;
-    auto_scan)
-      export GCRY_AUTO_LAYOUTS=1
-      export GCRY_SCAN_CAPS=1
       ;;
     *) echo "unknown knob $1" >&2; return 1 ;;
   esac
@@ -70,7 +63,7 @@ precise_env() {
 }
 
 TSV="$OUT/nonstack.tsv"
-printf "knob\ttrial\trps\trss_kib\tlive_bytes\tprecise\tconservative\tentries\tge75\tlarge_free\tfree_chunks\n" >"$TSV"
+printf "knob\ttrial\trps\trss_kib\tlive_bytes\tge75\tlarge_free\tfree_chunks\n" >"$TSV"
 
 run_one() {
   local knob="$1" trial="$2" is_boehm="${3:-0}"
@@ -106,7 +99,7 @@ run_one() {
   if ! wait_2xx "$base"; then
     echo "FAIL (server)"
     kill -9 "$pid" 2>/dev/null || true
-    printf "%s\t%d\t0\t0\t0\t0\t0\t0\t0\t0\t0\n" "$name" "$trial" >>"$TSV"
+    printf "%s\t%d\t0\t0\t0\t0\t0\t0\n" "$name" "$trial" >>"$TSV"
     return 0
   fi
 
@@ -119,7 +112,7 @@ run_one() {
   if [[ "$non2xx" != "0" ]]; then
     echo "FAIL (Non-2xx=$non2xx)"
     kill -9 "$pid" 2>/dev/null || true
-    printf "%s\t%d\t%s\t0\t0\t0\t0\t0\t0\t0\t0\n" "$name" "$trial" "$rps" >>"$TSV"
+    printf "%s\t%d\t%s\t0\t0\t0\t0\t0\n" "$name" "$trial" "$rps" >>"$TSV"
     return 0
   fi
 
@@ -127,12 +120,12 @@ run_one() {
   sleep 0.5
   curl -sf "${base}/gc-stats" >"$stats" 2>/dev/null || true
 
-  local cpid rss live prec cons ent ge75 lfree fch
+  local cpid rss live ge75 lfree fch
   cpid=$(pgrep -n -f "acikturkiye-(boehm|$BIN_VARIANT)" 2>/dev/null || echo "$pid")
   rss=$(ps -o rss= -p "$cpid" 2>/dev/null | tr -d ' ') || rss=0
   rss=${rss:-0}
 
-  live=0; prec=0; cons=0; ent=0; ge75=0; lfree=0; fch=0
+  live=0; ge75=0; lfree=0; fch=0
   if [[ -s "$stats" ]]; then
     eval "$(python3 - "$stats" <<'PY'
 import json,sys
@@ -141,9 +134,6 @@ def g(k,default=0):
     v=d.get(k,default)
     return int(v) if v is not None else 0
 print(f"live={g('size_class_live_bytes')}")
-print(f"prec={g('layout_precise_scans')}")
-print(f"cons={g('layout_conservative_scans')}")
-print(f"ent={g('layout_entries')}")
 print(f"ge75={g('chunk_fill_ge75')}")
 print(f"lfree={g('large_free_bytes')}")
 print(f"fch={g('fully_free_chunk_bytes')}")
@@ -154,9 +144,9 @@ PY
   kill -9 "$cpid" "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
 
-  printf "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-    "$name" "$trial" "$rps" "$rss" "$live" "$prec" "$cons" "$ent" "$ge75" "$lfree" "$fch" >>"$TSV"
-  echo "${rps} req/s rss=${rss}KiB live=$((live/1024/1024))MiB prec/cons=${prec}/${cons} entries=${ent}"
+  printf "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$name" "$trial" "$rps" "$rss" "$live" "$ge75" "$lfree" "$fch" >>"$TSV"
+  echo "${rps} req/s rss=${rss}KiB live=$((live/1024/1024))MiB"
 }
 
 echo "=== Run ==="
@@ -177,18 +167,18 @@ with open(tsv) as f:
     next(f)
     for line in f:
         p=line.strip().split("\t")
-        if len(p)<11: continue
+        if len(p)<8: continue
         rows.append(p)
 boehm=[r for r in rows if r[0]=="boehm"]
 brss=float(boehm[0][3]) if boehm and float(boehm[0][3])>0 else None
 lines=["# acik non-stack A/B", "",
-       "| knob | thr | RSS KiB | × Boehm | live MiB | prec/cons | layouts |",
-       "|------|----:|--------:|--------:|---------:|----------:|--------:|"]
+       "| knob | thr | RSS KiB | × Boehm | live MiB |",
+       "|------|----:|--------:|--------:|---------:|"]
 for r in rows:
-    name,t,rps,rss,live,prec,cons,ent,ge75,lfree,fch=r
+    name,t,rps,rss,live,ge75,lfree,fch=r
     rss_f=float(rss); live_m=float(live)/1024/1024
     rx=f"{rss_f/brss:.2f}×" if brss and rss_f else "—"
-    lines.append(f"| {name} | {float(rps):.1f} | {rss_f:.0f} | {rx} | {live_m:.0f} | {prec}/{cons} | {ent} |")
+    lines.append(f"| {name} | {float(rps):.1f} | {rss_f:.0f} | {rx} | {live_m:.0f} |")
 lines += ["", f"Source: `{tsv}`", f"Bin variant ambient precise-stack per script.", ""]
 text="\n".join(lines)
 open(out,"w").write(text)

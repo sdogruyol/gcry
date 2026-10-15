@@ -113,12 +113,12 @@ describe "Gcry::Heap mark bitmaps" do
       heap.each_chunk do |chunk|
         if Gcry::ChunkHeader.large?(chunk)
           large_seen += 1
-          # Large chunks keep the constant offset that twelve
-          # `header - ChunkHeader::SIZE` back-references depend on.
+          # Large chunks carry no bitmap region: their layout is fixed
+          # (`ChunkHeader.large_header_offset`, `ChunkHeader.large_data_offset`).
           chunk.value.bitmap_words.should eq(0_u32)
           # The field points at the block header (header build) or at the object
           # itself (headerless, where the large header sits behind the object).
-          large_offset = {% if !flag?(:gcry_block_headers) %} Gcry::ChunkHeader.large_data_offset {% else %} Gcry::ChunkHeader::SIZE {% end %}
+          large_offset = {% if !flag?(:gcry_block_headers) %} Gcry::ChunkHeader.large_data_offset {% else %} Gcry::ChunkHeader.large_header_offset {% end %}
           chunk.value.data_offset.should eq(large_offset.to_u32)
           Gcry::ChunkHeader.mark_bitmap(chunk).should eq(Pointer(UInt64).null)
         else

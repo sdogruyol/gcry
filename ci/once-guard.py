@@ -35,13 +35,15 @@ import pathlib
 import re
 import sys
 
-# Files whose class variables are read from `GC.init` or inside the stopped
-# world. Not a whole-tree rule: everything else in the tree runs after
-# `Crystal.main` and may use whatever initializer reads best.
+# Files whose class variables are read from `GC.init`, inside the stopped
+# world, or inside a fatal exception's dispatch (`crash_guard.cr`, where the
+# hang it exists to end was a `Crystal.once` waited on twice). Not a
+# whole-tree rule: everything else in the tree runs after `Crystal.main` and
+# may use whatever initializer reads best.
 GUARDED = [
     "src/gcry/roots.cr",
-    "src/gcry/layout.cr",
     "src/gcry/stw_slots.cr",
+    "src/gcry/crash_guard.cr",
     "src/gcry/platform/linux_stw.cr",
     "src/gcry/platform/darwin_stw.cr",
     "src/gcry/platform/windows_stw.cr",

@@ -182,7 +182,6 @@ module GC
     # Cost is +4.3% of root work, a few µs per collection (SOUND-DEFAULTS).
     # Escape for measurement: GCRY_ALIGNED_CANDIDATES=1.
     heap.scan_unaligned_candidates = true
-    heap.layout_precise = true
     # One byte past every atomic block, as Boehm gives every block: stdlib
     # byte buffers write there (`Heap#atomic_slack`). Escape for measurement:
     # GCRY_ATOMIC_SLACK=0.
@@ -222,31 +221,6 @@ module GC
     # Boehm's `GC_add_roots` ranges and push-other-roots procedure: their hook
     # goes in now, after the one above, never from inside a `GC_*` call.
     {% unless flag?(:gcry_no_boehm_abi) %} Gcry::CAbi.install_roots_hook {% end %}
-
-    # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
-    # growth under gcry during GC.init SIGSEGVs — Fiber/runtime is not ready yet.
-    # GCRY_DISABLE_LAYOUT is applied here and again in apply_env_config.
-    if env_flag_one?("GCRY_DISABLE_LAYOUT")
-      heap.layout_precise = false
-      Gcry::Layout.enabled = false
-    else
-      Gcry::Layout.register_builtins
-      # Precise whole-program layouts (Reference.all_subclasses). Opt-in via
-      # GCRY_AUTO_LAYOUTS=1 — Linux Kemal /json ~7pp thr vs builtins-only
-      # (bench/log/thr-abis). register() falls back to scan_cap for unsafe ivars;
-      # alloc_size must match before precise/scan_cap (raw-buffer type_id collisions).
-      # Escape when opted in: GCRY_DISABLE_AUTO_LAYOUTS=1.
-      # Curated HTTP::Headers::Key Hash as process default was measured: Kemal
-      # /json thr soft vs builtins-only — keep registration app-side
-      # (bench/nursery_headers.cr) or via GCRY_AUTO_LAYOUTS.
-      if env_flag_one?("GCRY_AUTO_LAYOUTS") && !env_flag_one?("GCRY_DISABLE_AUTO_LAYOUTS")
-        Gcry.register_layouts
-      end
-      # Optional size-class slack caps for all Reference types (GCRY_SCAN_CAPS=1).
-      if env_flag_one?("GCRY_SCAN_CAPS")
-        Gcry::Layout.register_scan_caps
-      end
-    end
 
     # Ordering marker for `GCRY_TRACE_LARGE=1`: everything above is gcry
     # bringing itself up, everything below is the program.
@@ -369,9 +343,9 @@ module GC
   #                            GC.init). Already off for process GC; set here so
   #                            the profile does not rely on that default.
   #
-  # Object-body scan precision (Gcry::Layout, keyed on the payload's first
-  # Int32) is a *separate* axis and is deliberately not touched here — measure
-  # it with GCRY_DISABLE_LAYOUT=1 so the two costs stay attributable.
+  # Object bodies have no precision axis: the mark scans every non-atomic
+  # block conservatively (the removed `Gcry::Layout` keyed on the payload's
+  # first Int32 and collided with mixed-union buffers).
   #
   # Applied before the individual knobs below, so an explicit GCRY_* still
   # wins: `GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1` re-enables scrub.
@@ -723,14 +697,6 @@ module GC
       heap.blacklist_enabled = true
     end
 
-    if env_flag_one?("GCRY_DISABLE_LAYOUT")
-      heap.layout_precise = false
-      Gcry::Layout.enabled = false
-    end
-
-    # GCRY_DISABLE_AUTO_LAYOUTS is handled in GC.init (before apply_env_config).
-    # The env var is listed here for discoverability — GC.init already checked it.
-
     if env_flag_one?("GCRY_DISABLE_SP_CLAMP")
       Gcry::Platform.stw_sp_clamp_enabled = false
     end
@@ -753,6 +719,11 @@ module GC
         Gcry::Platform.move_test_unblocked_us = us
       end
     {% end %}
+
+    # `realloc` grows a large block where it stands, into room reserved past
+    # it when an earlier growth had to copy (`Heap#grow_large`). `0` copies
+    # every growth, as before 2026-10-14.
+    heap.realloc_in_place = false if env_flag_zero?("GCRY_REALLOC_IN_PLACE")
 
     # Large blocks reuse the resident pages of large blocks the last major
     # freed (Linux; `Heap#recycle_large_mapping`). Off: a large block maps
@@ -829,7 +800,6 @@ module GC
       {% end %}
       heap.tlab_enabled = true
     end
-    heap.tlab_quiesce = false if env_flag_zero?("GCRY_TLAB_QUIESCE")
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
     # Amortizes lock vs lazy sweep. Clamped 1..64; ignored when TLAB is on.
     # The batched pop is freelist-only (`alloc_old_small` skips it whenever
@@ -946,11 +916,6 @@ module GC
     if csb = env_u64("GCRY_CLEAR_STACK_BYTES")
       heap.clear_stack_bytes = csb if csb >= 64 && csb <= 1024_u64 * 1024
     end
-    # `GCRY_ALLOC_FAST_PATH=0`: every small allocation takes the locked path
-    # (diagnosis and A/B only).
-    if (v = Gcry::OS.getenv("GCRY_ALLOC_FAST_PATH")) && !v.null? && v.value == 0x30_u8 && (v + 1).value == 0_u8
-      heap.fast_path_enabled = false
-    end
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
       heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
     end
@@ -1048,7 +1013,6 @@ module GC
     # After mark, before sweep: does any marked object point at a block the
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
-    heap.always_clear = true if env_flag_one?("GCRY_ALWAYS_CLEAR")
     if q = env_u64("GCRY_RELEASE_QUARANTINE")
       heap.release_quarantine = q
     end
@@ -1062,25 +1026,12 @@ module GC
     if v = env_u64("GCRY_MARK_TEST_SHORT_TID")
       heap.mark_test_short_tid = v.to_i32
     end
-    if env_flag_one?("GCRY_DYING_REGISTER_AUDIT")
-      heap.mark_audit = true
-      heap.dying_register_audit = true
-    end
-    # Which unowned stack does the crash need — the pooled one or the one in
-    # flight? (src/gcry/unowned_stack_roots.cr). Each window has a rooting arm
-    # and a walk-but-offer-nothing arm, because an arm that roots more can take
-    # a crash rate to zero without being the mechanism.
-    heap.pooled_stack_roots = true if env_flag_one?("GCRY_POOLED_STACK_ROOTS")
-    heap.pooled_stack_noroot = true if env_flag_one?("GCRY_POOLED_STACK_NOROOT")
     # The fix: root the stack a thread is holding for a fiber that is
     # terminating (src/gcry/unowned_stack_roots.cr). **On** by default — it
     # closes a use-after-free, and a root source that ships off is the shape of
     # both defects v0.19.0 had to go back for.
     heap.dead_stack_roots = false if env_flag_zero?("GCRY_DEAD_STACK_ROOTS")
     heap.dead_stack_noroot = true if env_flag_one?("GCRY_DEAD_STACK_NOROOT")
-    heap.maps_inflight_roots = true if env_flag_one?("GCRY_MAPS_INFLIGHT_ROOTS")
-    heap.maps_inflight_noroot = true if env_flag_one?("GCRY_MAPS_INFLIGHT_NOROOT")
-    heap.unowned_coverage_audit = true if env_flag_one?("GCRY_UNOWNED_COVERAGE_AUDIT")
     # Where in the address space does a dying block's value actually live?
     # (src/gcry/address_space_audit.cr). Implies the dying audit: it is that
     # audit's unreferenced branch that asks the question. Off by default and
@@ -1151,9 +1102,6 @@ module GC
     # what the maps parser did before 2026-08-22 and what
     # `make static-bss-roots` uses to show the block dying.
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
-    # Research only: per dead word, ask every cursor set whether it is
-    # mid-allocation inside a block the after-world sweep just called dead.
-    heap.sweep_occ_audit = true if env_flag_one?("GCRY_SWEEP_OCC_AUDIT")
     # Research only: does `@chunk_index` agree with the `@chunks` list? A chunk
     # in one and not the other is never swept and never has its marks cleared.
     heap.chunk_list_audit = true if env_flag_one?("GCRY_CHUNK_LIST_AUDIT")
@@ -1167,11 +1115,6 @@ module GC
     # instead of latching it in the stop. The trigger half of
     # `make mark-clear-index` and `make thread-churn-uaf`.
     heap.sweep_mutator_latch = false if env_flag_zero?("GCRY_SWEEP_MUTATOR_LATCH")
-    # Research only: run the holders search at every large release, so a live
-    # block being let go names its holder then instead of a hundred
-    # collections later at the fault. Walks the heap and every stack per
-    # release, with the world up.
-    heap.release_holders = true if env_flag_one?("GCRY_RELEASE_HOLDERS")
     # The main thread's thread-local storage is a root (Linux 2026-09-12,
     # Darwin and Windows 2026-09-15). Off is the pre-fix behaviour, which
     # `make tls-roots` needs as its red arm. Locating the live block is
@@ -1223,7 +1166,6 @@ module GC
     # what it did before 2026-08-23 (src/gcry/heap.cr `trim_large_cache`).
     heap.trim_unlocked = true if env_flag_one?("GCRY_TRIM_UNLOCKED")
     heap.trim_immediate = true if env_flag_one?("GCRY_TRIM_IMMEDIATE")
-    heap.madvise_unchecked = true if env_flag_one?("GCRY_MADVISE_UNCHECKED")
     heap.large_release_from_base = true if env_flag_one?("GCRY_LARGE_RELEASE_FROM_BASE")
     heap.mark_prefetch = false if env_flag_zero?("GCRY_PREFETCH")
     if pfw = env_u64("GCRY_ALLOC_PFW")
@@ -1233,7 +1175,6 @@ module GC
     heap.release_ledger = true if env_flag_one?("GCRY_RELEASE_LEDGER")
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")
-    heap.empty_flush_unlocked = true if env_flag_one?("GCRY_EMPTY_FLUSH_UNLOCKED")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: let the Darwin free-page walk visit bitmap-allocated
@@ -1334,24 +1275,6 @@ module GC
     # never been shown to share this window — can only be answered where the
     # defect appears. `GCRY_STAGED_WAIT=0` turns it back off.
     heap.staged_wait = false if env_flag_zero?("GCRY_STAGED_WAIT")
-    # EXPERIMENT: root every block for the collection after its birth
-    # (src/gcry/birth_grace.cr). A measurement, not a fix.
-    # Size window for the grace, so it can be aimed at one block shape at a
-    # time (`GCRY_BIRTH_GRACE_MIN` / `_MAX`, payload bytes). Unset means every
-    # size, which is what the 20/48 → 0/48 arm measured.
-    if mn = env_u64("GCRY_BIRTH_GRACE_MIN")
-      heap.birth_size_min = mn.to_u32
-    end
-    if mx = env_u64("GCRY_BIRTH_GRACE_MAX")
-      heap.birth_size_max = mx.to_u32
-    end
-    heap.birth_grace_noroot = true if env_flag_one?("GCRY_BIRTH_GRACE_NOROOT")
-    heap.birth_grace_dummy = true if env_flag_one?("GCRY_BIRTH_GRACE_DUMMY")
-    heap.birth_grace_touch = true if env_flag_one?("GCRY_BIRTH_GRACE_TOUCH")
-    if sp = env_u64("GCRY_POST_MARK_SPIN")
-      heap.post_mark_spin = sp
-    end
-    heap.birth_grace = true if env_flag_one?("GCRY_BIRTH_GRACE")
     # `GCRY_POISON_HOLDERS=1` — after a use-after-free names the block it read
     # out of, search the root set, the live heap and the fiber stacks for
     # whatever still points into it (src/gcry/poison_holders.cr). It implies the
@@ -1375,9 +1298,6 @@ module GC
     # that window on a library heap through `Heap#post_stw_hook`; this is the
     # same control for a process heap.
     heap.release_occupied_anyway = true if env_flag_one?("GCRY_RELEASE_OCCUPIED")
-    # Research only, restores a defect: queue an unreachable finalizable
-    # object without resurrecting it, so its callback runs on a swept block.
-    heap.finalizer_resurrect = false if env_flag_one?("GCRY_FINALIZER_NO_RESURRECT")
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says. The positive control for the kept-chunk ledger and the
     # crash-report line that names it, on a host where the real window does
@@ -1407,26 +1327,14 @@ module GC
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.
-    # Research only: an unlocked walk of the runtime thread list before
-    # `Thread.lock`. See src/gcry/thread_list_tripwire.cr for why it is off by
-    # default.
-    heap.thread_list_tripwire = true if env_flag_one?("GCRY_THREAD_LIST_TRIPWIRE")
     heap.dying_greg_dump = true if env_flag_one?("GCRY_DYING_GREG_DUMP")
     heap.disable_greg_roots = true if env_flag_one?("GCRY_DISABLE_GREG_ROOTS")
     heap.disable_ec_pins = true if env_flag_one?("GCRY_DISABLE_EC_PINS")
-    # After `register_builtins` on purpose: Fiber#proc is one of the holes
-    # this restores, and dropping it at init would take the process down
-    # before `make ivar-layout-roots` could measure its own probes.
-    Gcry::Layout.drop_unclassified = true if env_flag_one?("GCRY_LAYOUT_DROP_UNCLASSIFIED")
-    heap.full_suspended_stack = true if env_flag_one?("GCRY_FULL_SUSPENDED_STACK")
     if sl = env_u64("GCRY_SUSPENDED_SP_SLACK")
       heap.suspended_sp_slack = sl
     end
     if lim = env_u64("GCRY_ADDRESS_SPACE_REPORT_LIMIT")
       heap.address_space_report_limit = lim.to_i32
-    end
-    if st = env_u64("GCRY_PAGE_RELEASE_TEST_STALL_MS")
-      heap.page_release_test_stall_ms = st
     end
     heap.fiber_list_unlocked = true if env_flag_one?("GCRY_FIBER_LIST_UNLOCKED")
     if d = env_u64("GCRY_FIBER_WALK_TEST_DELAY_US")
@@ -1596,6 +1504,7 @@ module GC
       free(pointer)
       return Pointer(Void).null
     end
+    return crash_report_realloc(pointer, size) if Gcry::CrashGuard.reporting?
     if @@gcry_ready
       # One lookup for the whole call: the heap answers null for a pointer it
       # does not own, which is the LibC bootstrap era's.
@@ -1620,6 +1529,18 @@ module GC
     else
       bootstrap_realloc(pointer, size)
     end
+  end
+
+  # `realloc` for the thread being reported (`Gcry::CrashGuard`), which never
+  # enters the allocator: a gcry block is copied into a libc one and left where
+  # it is, and the report's own libc blocks resize in libc. The size lookup is
+  # the one heap call left; it takes no allocation lock.
+  private def self.crash_report_realloc(pointer : Void*, size : LibC::SizeT) : Void*
+    old = @@gcry_ready ? Gcry.default_heap.usable_size(pointer) : 0_u64
+    return bootstrap_realloc(pointer, size) if old == 0
+    fresh = bootstrap_malloc(size, clear: true)
+    fresh.as(UInt8*).copy_from(pointer.as(UInt8*), Math.min(old, size.to_u64))
+    fresh
   end
 
   # Refused while collection is disabled, as Boehm's `GC_gcollect` returns at
@@ -1715,6 +1636,12 @@ module GC
 
   private def self.free_impl(pointer : Void*) : Nil
     return if pointer.null?
+    if Gcry::CrashGuard.reporting?
+      # A gcry block stays where it is (freeing takes its class lock); only
+      # the report's own libc blocks go back.
+      bootstrap_free(pointer) unless @@gcry_ready && Gcry.default_heap.usable_size(pointer) != 0
+      return
+    end
     if @@gcry_ready
       heap = Gcry.default_heap
       result = heap.free_result(pointer)

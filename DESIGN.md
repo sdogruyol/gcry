@@ -85,7 +85,7 @@ Full surface vs Boehm: [docs/INTEGRATION.md](docs/INTEGRATION.md). Comparison ch
 │  Heap ── size classes, TLAB, large cache, chunk release │
 │  Roots ─ stacks, fibers, static maps, type_id gate      │
 │  Collect ─ STW · scan · mark · sweep (split modules)    │
-│  Layout / blacklist / scrub ─ less false retention      │
+│  Blacklist / scrub ─ less false retention               │
 │  Barrier ─ soft-dirty / mprotect (nursery & incremental)│
 │  Finalizer · Metrics · Observability · Platform         │
 └─────────────────────────────────────────────────────────┘
@@ -130,14 +130,14 @@ src/gcry.cr                 # VERSION, public entry
 src/gcry/
   heap.cr                   # arenas, size classes, alloc path
   block.cr · size_classes.cr · tlab.cr · mark_bitmap.cr
-  roots.cr · layout.cr · blacklist.cr · stack_scrub.cr · stack_maps.cr
+  roots.cr · blacklist.cr · stack_scrub.cr · stack_maps.cr
   collect.cr                # orchestration
   collect_stw.cr · collect_scan.cr · collect_mark.cr · collect_sweep.cr
   mark.cr · parallel_mark.cr · barrier.cr
   finalizer.cr · metrics.cr · observability.cr · trace.cr · heap_dump.cr
   gc_override.cr            # module GC reopen
   thread_birth_root.cr      # root a Thread from pthread_create until it publishes
-  unowned_stack_roots.cr · birth_grace.cr   # root arms, each with a no-op twin
+  unowned_stack_roots.cr    # dying-fiber stack roots, with a no-op twin
   invariant.cr · mark_audit.cr · thread_block_audit.cr
   address_space_audit.cr · poison_holders.cr · ec_queue_audit.cr
   segv_report.cr · raw_out.cr · stw_watchdog.cr · monitor_gate.cr
@@ -180,7 +180,7 @@ sweep stays a **supported opt-in**. Default path: EC parallelism **1**,
 | Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64; **dying-fiber stack rooted** (v0.20) |
 | Thread birth window | ✅ `GCRY_STAGED_WAIT` **default-on** — the collector waits for a thread `pthread_create` has returned but Crystal has not published (crashes 6/60 → 0/60, census gaps 3/30 → 0/30, ~1.4% of collections wait at all); `thread_birth_root.cr` roots the `Thread` object across the same window, and since 2026-10-05 holds a dying one until proof it is done. The second UAF that motivated both is closed ([readiness B2](docs/DEFAULT-GC-READINESS.md); the arm race behind it, `process_spec/regression/52_*`) |
 | Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (v0.16 carry); fat-app tip ~**1–1.6×** |
-| Layout / type_id / blacklist | ✅ defaults + escapes |
+| type_id / blacklist | ✅ defaults + escapes |
 | Barriers (soft-dirty / mprotect) | ✅; nursery **opt-in** (default off); soft-dirty Linux-only |
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Crash instruments | ✅ **default-off**, and each rides the gate that caught the defect it was built for: `GCRY_SEGV_REPORT`, `GCRY_POISON_FREED` / `_TAG` / `_HOLDERS`, `GCRY_MARK_AUDIT`, `GCRY_ADDRESS_SPACE_AUDIT`, `GCRY_THREAD_BLOCK_AUDIT`, `GCRY_THREAD_CENSUS`, `GCRY_EC_QUEUE_AUDIT` |
@@ -233,7 +233,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | **Moving / compacting** | After precise roots |
 | **Attribute the residual per-rep spread** | It bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp on post-GC RSS, at 12 reps |
 
-Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object page
+Shard-only polish continues (Parallel thr/RSS, large-object page
 policy). Darwin fat-app RSS closed on the tip re-cut without stack maps, as Linux
 did in v0.18; what still wants them is the Kemal `/json` ceiling. Process-STW
 property tests are no longer frontier — they run in CI on both architectures,
@@ -244,7 +244,7 @@ with TLAB and with nursery.
 | Risk | Mitigation |
 |------|------------|
 | Collector allocates from GC heap | Immortal arenas; hot-path rules; stress specs |
-| Conservative false retention | Size classes, layout, type_id gate, SP clamp, fiber scrub; measure vs Boehm |
+| Conservative false retention | Size classes, type_id gate, SP clamp, fiber scrub; measure vs Boehm |
 | Fiber / MT root bugs | Explicit registry; STW; SP clamp; thread staging + census; dying-fiber and thread-birth roots; CI samples |
 | **A defect only CI can see** | Both recent use-after-frees were named by instruments rather than by reading the collector, and the open one has *never* reproduced locally. So the instruments ship: default-off, riding the gates that caught the defect, counting what they walked so a silence is readable, and each broken on purpose and observed red before its quiet is worth anything |
 | “Just make it precise” expectations | Precise is a separate epic — documented, not blocked |

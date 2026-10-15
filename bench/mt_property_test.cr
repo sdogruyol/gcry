@@ -55,7 +55,6 @@ class MTPropertyTest
     @heap.nursery_threshold = UInt64::MAX
     @heap.nursery_enabled = false
     @heap.release_empty_chunks = true
-    @heap.layout_precise = true
     @heap.tlab_enabled = false      # fibers share one OS thread
     @heap.stop_the_world = false    # library heap: no STW
     @heap.parallel_mark_workers = 2 # parallel mark via Crystal::Thread
@@ -288,9 +287,6 @@ class MTPropertyTest
 
   # ---- Run all worker counts ----
   def run(seed : Int64, iterations : Int32, worker_counts : Array(Int32)) : Bool
-    Gcry::Layout.enabled = true
-    Gcry::Layout.clear
-
     overall_errors = [] of String
 
     worker_counts.each do |wc|

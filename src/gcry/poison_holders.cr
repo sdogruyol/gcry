@@ -120,9 +120,8 @@ module Gcry
     # Counting callers get their own walk, and the duplication is deliberate.
     #
     # The loud form is for one block, after a fault, when the whole process is
-    # already lost. A caller that asks this question *per released chunk* —
-    # `GCRY_RELEASE_HOLDERS=1` and the poisoned-pin path, both from inside a
-    # collection — needs silence on the overwhelming majority that are
+    # already lost. A caller that asks this question repeatedly from inside a
+    # collection — the poisoned-pin path, the EC root census — needs silence on the overwhelming majority that are
     # genuinely dead. The first version got that by gating the printing of the
     # shared walk behind a flag, which put one more call frame on every line of
     # the crash report; `make poison-holders` then failed twice on the x86_64
@@ -139,17 +138,6 @@ module Gcry
       @@entry_sp = value
     end
 
-    # Hits above the entry SP, i.e. in mutator frames the mark phase read.
-    @@live_frame_hits = 0_u64
-
-    def self.live_frame_hits : UInt64
-      @@live_frame_hits
-    end
-
-    def self.reset_live_frame_hits : Nil
-      @@live_frame_hits = 0_u64
-    end
-
     # Research only (`GCRY_DISABLE_HOLDERS_FIND=1`): skip the heap walk
     # `heap_holders_count` uses. A literal, same reason as `@@fault_stage` —
     # written from `GC.init`. The gate's red arm is this skip, not a hand
@@ -164,17 +152,11 @@ module Gcry
       @@skip_heap_count
     end
 
-    # The heap walk alone. `holders_count` sums roots, live blocks and stacks,
-    # and for a question about *the heap walk* that is the wrong total: a
-    # caller's own locals put the address on a stack, so every target looks
+    # The heap walk alone: a caller's own locals put the address on a stack, so
+    # a total over roots, live blocks and stacks would make every target look
     # held. `bench/holders_find.cr` is the control that needs this.
     def self.heap_holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
       return 0_u64 if @@skip_heap_count || user == 0 || size == 0
-      count_heap_holders(heap, user, user &+ size)
-    end
-
-    def self.holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
-      return 0_u64 if user == 0 || size == 0
       count_heap_holders(heap, user, user &+ size)
     end
 
@@ -644,7 +626,7 @@ module Gcry
     #
     # The collector does have those SPs: it records one per thread at every
     # stop (`Platform.thread_sp`), and they stay valid until the next stop —
-    # which includes the whole post-STW section, where `GCRY_RELEASE_HOLDERS`
+    # which includes the whole post-STW section, where the poisoned-pin path
     # asks this question. `[recorded SP, bottom)` is precisely what the mark
     # phase read. A hit in here is a root the collector had and did not
     # follow; a hit only in the wider walk is dead space it is right to
@@ -738,9 +720,6 @@ module Gcry
           a = Pointer(UInt64).new(cursor).value
           if a >= user && a < finish
             hits &+= 1
-            if (entry = @@entry_sp) != 0 && cursor >= entry
-              @@live_frame_hits &+= 1
-            end
             if reported < MAX_REPORTED
               reported += 1
               report_stack_hit(cursor, a, user, tag, fiber_id, stack_top, running)

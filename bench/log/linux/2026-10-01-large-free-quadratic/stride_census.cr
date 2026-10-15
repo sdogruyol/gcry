@@ -57,7 +57,7 @@ def census_and_exit(heap : Gcry::Heap, phase : Int32) : NoReturn
     while !u.null? && steps < 2_000_000
       on_list << u.address
       h = Gcry::BlockHeader.large_header_from_user(u)
-      c = (h.as(UInt8*) - Gcry::ChunkHeader::SIZE).as(Gcry::ChunkHeader*)
+      c = Gcry::ChunkHeader.from_large_header(h)
       list_bytes &+= c.value.mapped_bytes
       list_entries += 1
       u = h.value.next_free
