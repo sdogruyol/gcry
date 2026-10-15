@@ -23,6 +23,30 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 > the fat-app headline is **not** — see
 > [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
 
+## Headline (2026-10-15 — 0.36.0 against 0.35.0, GitHub runners) — macOS aarch64 and x86_64
+
+`bench/log/macos/2026-10-15-0.36-native/`: `perf-ab.yml` with
+`-f os='["macos-latest","macos-15-intel"]'`, Boehm, 0.35.0 and 0.36.0 built
+in the job, process-fresh and interleaved, medians of per-rep paired ratios.
+The first cut of 0.36.0 off Linux.
+
+| `macos-latest` (M1, 3 vCPUs) | 0.35.0 | 0.36.0 |
+|---|---:|---:|
+| Kemal `/json`, % of Boehm | 102.8% [100.1, 103.5] | **102.1%** [101.3, 102.9] |
+| Kemal `/`, % of Boehm | 99.6% [98.0, 100.8] | **100.3%** [99.7, 101.9] |
+| Kemal peak RSS (`ru_maxrss`) × Boehm | 1.97× | **1.94×** (29.2 vs 15.0 MiB) |
+| crystal-metric, % of Boehm | 80–102% | **78–100%** |
+| crystal-metric peak RSS × Boehm | 0.51–1.94× | **0.51–1.88×** |
+
+15 Kemal trials (`wrk -t2 -c50`, 10 s) and 15 crystal-metric reps over 9
+benches. The JSON rows gain 2–5 points from in-place `realloc` growth;
+Primes loses 2, from where its collections fall in a heap that only grows
+(the same change drops one of its collections on Intel and Linux). Peak RSS
+here is resident size, not the `phys_footprint` of the section below, so
+the two Kemal RSS columns do not compare. Intel (`macos-15-intel`): 90–98%
+of Boehm on every crystal-metric row, nothing slower than 0.35.0 beyond the
+spread; Kemal level with Boehm within a ±10-point spread.
+
 ## Headline (2026-09-06 — 0.24.0, the bitmap default) — macOS aarch64
 
 `bench/log/macos/2026-09-06-bitmap-default-ab/` (`f43d2bc`, Crystal 1.21.0,

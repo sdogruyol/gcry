@@ -91,19 +91,33 @@ scrubbing dead stack. Conservative root scans include that red zone.
   is released, since Windows releases a reservation only whole.
 - Crystal's own suites (`spec/std`, `compiler_spec`) are not run on Windows;
   their CI jobs are Linux-only.
-- Workload numbers so far come from one 12-vCPU Windows 11 QEMU/KVM VM, not
-  physical hardware (`bench/log/windows/2026-10-06-vm-validation/`). Windows
-  ARM64 workloads are unmeasured; ARM64 has CI coverage only.
-  - **Throughput.** crystal-metric runs at 87–114% of Boehm's speed, within
-    the Linux band on every row except Binarytrees (112% here). Kemal reaches
-    106.5% of Boehm on `/json` and 102.9% on `/`.
+- Workload numbers come from two places. 0.36.0 was measured natively on
+  GitHub's `windows-latest` runner (AMD EPYC, 4 vCPUs) against 0.35.0 and
+  Boehm, 15 interleaved reps (`bench/log/windows/2026-10-15-0.36-native/`;
+  `perf-ab.yml` with `-f os='["windows-latest"]'` repeats it). Kemal on
+  Windows was last measured in one 12-vCPU Windows 11 QEMU/KVM VM
+  (`bench/log/windows/2026-10-06-vm-validation/`), as the runner has no
+  `wrk`. Windows ARM64 workloads are unmeasured; ARM64 has CI coverage only.
+  - **Throughput.** crystal-metric runs at 94–105% of Boehm's speed on 0.36.0
+    (Knuckeotide 89%), within the Linux band. In the VM, Kemal reached 106.5%
+    of Boehm on `/json` and 102.9% on `/`.
   - **Memory.** Peak working set (`PeakWorkingSetSize`) is not Linux RSS:
-    decommitted pages that are recommitted count again. It is at or below
-    Boehm on 10 of 13 rows. The exceptions are transient peaks, not
-    retention (heaps at exit match Boehm or are small): JsonParsePure 1.14×,
-    Knuckeotide 1.62–1.73× (+39 MiB) and Matmul 1.18×. Kemal is at 1.14×.
-  - **`err` rows.** Eight crystal-metric benches print `err` on Windows under
-    Boehm too, with the same value in every arm, so the A/B compares
+    decommitted pages that are recommitted count again. On 0.36.0 it is
+    under Boehm's on 7 of 9 rows, 0.50–0.94×; in-place `realloc` growth took
+    the buffer-growing rows down 13–17% from 0.35.0 (JsonGenerate 0.70× →
+    0.58×, JsonParseSerializable 0.94× → 0.81×, Revcomp 0.75× → 0.61×). The
+    exceptions are JsonParsePure 1.08× and Knuckeotide 1.67×, a 52 MiB
+    process at the threshold floor and warm budget. Kemal was at 1.14× in
+    the VM.
+  - **Known regressions in 0.36.0.** Revcomp's timed section is 7.7% slower
+    than 0.35.0 (whole-process wall +3.4%). A commit-by-commit A/B puts the
+    step at the large back-link commit but moves ±12% between builds that
+    share Revcomp's code, so it reads as code placement or alignment; the
+    cause is open. Primes is 2.8% slower, with 22% more mark time at the
+    same collection count: in-place growth moves where collections fall in
+    a bench whose live set keeps growing (both in the FINDINGS above).
+  - **`err` rows.** Several crystal-metric benches print `err` on Windows
+    under Boehm too, with the same value in every arm, so the A/B compares
     identical work.
   - **Idle mark helpers.** They wait on `WaitOnAddress` and are woken when
     work is published, as Linux helpers are on a futex. Until 2026-10-08
