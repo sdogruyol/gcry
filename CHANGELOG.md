@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-15
+
 ### Fixed
 
 - **A fatal exception on Windows ends the process instead of hanging in
@@ -7400,7 +7402,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/sdogruyol/gcry/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/sdogruyol/gcry/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/sdogruyol/gcry/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/sdogruyol/gcry/compare/v0.32.0...v0.33.0
