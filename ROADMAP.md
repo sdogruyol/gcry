@@ -4081,6 +4081,11 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       Windows and 1 300 on Linux aarch64/x86_64
       (`bench/log/linux/2026-09-30-cross-platform-stress/`). Open: no
       coverage-guided fuzzer, and no hours on a production workload.
+      2026-10-15, on the 0.36.0 integration: about four hours over 21 loops
+      and 1 822 bounded runs, 0 gcry failures. The 4 stalls captured were all
+      Crystal's Parallel-scheduler deadlock (#17486); 5 earlier, uncaptured
+      timeouts of the same harness stopped at the same point
+      (`bench/log/linux/2026-10-15-0.36-stress/`).
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 
