@@ -42,8 +42,8 @@ compiler PR").
 Two Crystal bugs turned up along the way, both outside gcry: `raises?` is not
 a fixpoint (§1, E3), and `String::Builder#to_s` writes one byte past its
 buffer (`bench/log/linux/2026-10-05-string-builder-terminator/`). Both have
-patches ready for upstream, re-verified on Crystal master `39f3f4d` with the
-issue and PR text in each directory's `UPSTREAM.md` (2026-10-14).
+patches ready, re-verified on Crystal master `39f3f4d`, and are reported
+upstream as crystal-lang/crystal#17644 and crystal-lang/crystal#17645 (2026-10-14).
 
 Each item has an ID so later work can refer to it. Evidence is either
 **observed** (run during this review) or **read** (taken from source or docs
@@ -219,7 +219,7 @@ end
   - **Compiler fix.** It propagates the flag to a fixpoint and adds a codegen
     spec: `bench/log/linux/2026-10-05-raises-cycle/crystal-raises-fixpoint.patch`.
     With it, all three repros rescue and `exception_spec.cr` passes 73/73.
-    It is not upstream yet.
+    Reported upstream as crystal-lang/crystal#17644 (2026-10-14).
   - **Why it still matters for a default.** Until the compiler fix lands, a
     different program can strand a different method.
 
@@ -261,7 +261,7 @@ them. One line per ID, as it read then:
    - E2: `Gcry.usable_size`.
    - E3: `crystal_raises_compat.cr`, plus a compiler patch in
      `bench/log/linux/2026-10-05-raises-cycle/`.
-   - Still open: filing the compiler issue/PR upstream.
+   - Reported upstream as crystal-lang/crystal#17644; the PR waits on it.
 2. **B7: done 2026-10-05.**
    - The CI job `std-spec` runs `spec/std` on 1.21.0 (with a
      `GCRY_STRESS=1` rerun), on `latest` and on `nightly`.
@@ -283,7 +283,9 @@ them. One line per ID, as it read then:
    - M5: races.
    - M6: TSan and fuzzing.
    - M7: knob and research-code reduction.
-   - Upstream: filing the three stdlib/compiler fixes.
+   - Upstream: crystal-lang/crystal#17644 and crystal-lang/crystal#17645 are
+     filed; the PRs wait on them. The `argv` terminator was fixed upstream
+     by crystal-lang/crystal#17184, released in 1.22.0.
 
 ## 6. Limits of this review
 

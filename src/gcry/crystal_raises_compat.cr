@@ -13,7 +13,8 @@
 #
 # `@[Raises]` sets the flag when the method is defined, before the cleanup
 # pass, so no cycle can leave it unset. Shard-only workaround until the
-# compiler propagates the flag to a fixpoint (patch in the findings above).
+# compiler propagates the flag to a fixpoint (patch in the findings above;
+# reported upstream as crystal-lang/crystal#17644).
 class String
   @[Raises]
   def self.new(chars : UInt8*, bytesize, size = 0)

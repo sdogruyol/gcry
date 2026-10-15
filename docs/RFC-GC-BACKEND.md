@@ -150,7 +150,8 @@ Proposed: merge `crystal-raises-fixpoint.patch` (same directory), which
 propagates `raises?` along recorded edges to a fixpoint after
 `cleanup_types` and adds a codegen spec; 73/73 in
 `spec/compiler/codegen/exception_spec.cr` with it. The full compiler suite
-has not been run with the patch. Until then gcry carries
+has not been run with the patch. Reported as crystal-lang/crystal#17644
+(2026-10-14). Until then gcry carries
 `src/gcry/crystal_raises_compat.cr` (`@[Raises]` on the one user-reachable
 method).
 
@@ -161,7 +162,8 @@ method).
 `argv[argc] == NULL`. Boehm hides it because `GC_malloc(16)` usually returns a
 larger zeroed granule; an allocator with exact size classes exposes it as
 `EFAULT` (`src/gcry/crystal_process_compat.cr:1-9`, gcry issue #14).
-Proposed: allocate `args.size + 1`. A one-line fix independent of this RFC.
+Fixed upstream as proposed (`args.size + 1`) by crystal-lang/crystal#17184,
+released in 1.22.0; gcry keeps its shim for 1.21.
 
 ### 3.3 `String::Builder#to_s` writes its terminator past the buffer (stdlib)
 
@@ -183,6 +185,7 @@ Crystal crashes on it under an allocator with no slack
 `-Dgc_none`). Proposed: count the terminator in `increase_capacity_by`
 (`crystal-string-builder-terminator.patch`, same directory; `spec/std`
 `string_builder_spec`, `string_spec` and `io/memory_spec` pass with it).
+Reported as crystal-lang/crystal#17645 (2026-10-14).
 
 ## 4. The interpreter's `GC_*` ABI
 

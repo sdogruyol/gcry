@@ -5,7 +5,8 @@
 # the word after the last arg is accidentally NULL. gcry size classes are
 # exact (16 → 16), so the next word is freelist/other data → EFAULT / Bad address.
 #
-# Shard-only workaround until Crystal allocates `args.size + 1`.
+# Shard-only workaround for compilers before 1.22.0, which allocates
+# `args.size + 1` (crystal-lang/crystal#17184).
 # See https://github.com/sdogruyol/gcry/issues/14
 
 {% if flag?(:unix) %}

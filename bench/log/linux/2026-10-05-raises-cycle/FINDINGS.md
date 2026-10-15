@@ -128,7 +128,7 @@ the in-progress chain. The program is the five-line repro, built
 
 ## Not done
 
-- Nothing is filed upstream yet. The issue and PR text is in `UPSTREAM.md`;
+- Filed 2026-10-14 as crystal-lang/crystal#17644; the issue and PR text is in `UPSTREAM.md`;
   the patch applies unchanged to crystal-lang/crystal master `39f3f4d`
   (1.22.0), where the codegen spec fails without it and passes with it
   (2026-10-14).

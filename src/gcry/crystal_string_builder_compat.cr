@@ -13,7 +13,8 @@
 # and the link failed.
 #
 # Grow by the terminator's byte when the content fills the buffer, before the
-# stdlib writes it. Shard-only workaround until Crystal reserves that byte.
+# stdlib writes it. Shard-only workaround until Crystal reserves that byte
+# (crystal-lang/crystal#17645).
 # `process_spec/regression/22_string_builder_terminator_spec.cr`.
 class String::Builder
   def to_s : String
