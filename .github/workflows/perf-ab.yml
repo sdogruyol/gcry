@@ -1,13 +1,32 @@
 name: Perf A/B
 
-# Manual only. Builds crystal-metric against the dispatched ref and against
-# `base`, runs both interleaved on quiet runners, and prints `AB` lines:
+# Manual only. Builds crystal-metric three ways — gcry at the dispatched ref
+# (`var`), gcry at `base`, and stock Crystal (Boehm) — and runs them
+# process-fresh, interleaved in random order per rep (bench/runner_ab/ab.sh,
+# ab.py). Each job prints a table of speed as % of Boehm and peak memory ×
+# Boehm, `AB` lines for var against base, and uploads the raw runs as the
+# `perf-ab-<os>` artifact:
+#
 #   gh workflow run perf-ab.yml --ref my-branch -f base=origin/master
+#
+# Only `src/` is taken from `base`; the benchmark and scripts come from the
+# dispatched ref, so to measure a release against an older one, dispatch on a
+# branch whose `src/` is the release (a tag can be `base`: `-f base=v0.35.0`).
+#
+# `os` picks the runners, as a JSON list; the default is the Linux pair.
+# macOS and Windows work too:
+#
+#   -f os='["macos-latest","macos-15-intel","windows-latest"]'
+#
+# On Windows the script runs under Git Bash with the native crystal.exe, and
+# memory is PeakWorkingSetSize, not RSS (bench/runner_ab/ab.py). `kemal_trials`
+# above 0 also runs Kemal `/json` and `/` under wrk with the same three arms
+# (Linux and macOS only; Windows has no wrk and skips it).
 on:
   workflow_dispatch:
     inputs:
       base:
-        description: "Revision to compare against"
+        description: "Revision to compare against (branch, tag or sha)"
         default: "origin/master"
       reps:
         description: "Interleaved repetitions per benchmark"
@@ -15,27 +34,62 @@ on:
       benches:
         description: "crystal-metric benchmarks, space-separated"
         default: "Primes JsonParsePure Binarytrees JsonGenerate"
+      os:
+        description: 'Runners, as a JSON list, e.g. ["macos-latest","windows-latest"]'
+        default: '["ubuntu-latest","ubuntu-24.04-arm"]'
+      boehm:
+        description: "Also build and run a stock-Crystal (Boehm) arm: 1 or 0"
+        default: "1"
+      kemal_trials:
+        description: "Kemal /json and / A/B trials per arm (0 = skip; not on Windows)"
+        default: "0"
 
 jobs:
   ab:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        os: ${{ fromJSON(inputs.os) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - timeout-minutes: 5
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
         continue-on-error: true
         run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: "1.21.0"
+      - if: inputs.kemal_trials != '0' && runner.os == 'Linux'
+        run: sudo apt-get install -y -qq wrk
+      - if: inputs.kemal_trials != '0' && runner.os == 'macOS'
+        run: brew install wrk
+      - name: Machine
+        run: |
+          uname -a
+          case "$RUNNER_OS" in
+            Linux) nproc; grep -m1 'model name' /proc/cpuinfo || true; free -m ;;
+            macOS) sysctl -n hw.ncpu machdep.cpu.brand_string hw.memsize ;;
+            Windows) echo "$NUMBER_OF_PROCESSORS cpus"; pwsh -c '(Get-CimInstance Win32_Processor).Name; (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory' ;;
+          esac
       - env:
           AB_BASE: ${{ inputs.base }}
           AB_REPS: ${{ inputs.reps }}
           AB_BENCHES: ${{ inputs.benches }}
+          AB_BOEHM: ${{ inputs.boehm }}
+          AB_KEMAL_TRIALS: ${{ runner.os != 'Windows' && inputs.kemal_trials || '0' }}
+          AB_OUT: bench/log/_ab
         run: bench/runner_ab/ab.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-ab-${{ matrix.os }}
+          path: bench/log/_ab/
+          if-no-files-found: ignore
+          retention-days: 30
