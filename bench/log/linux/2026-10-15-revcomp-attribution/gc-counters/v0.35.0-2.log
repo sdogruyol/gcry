@@ -1,0 +1,3 @@
+Revcomp: err result=1154849210, but expected=2734405216 in 0.574s, award 1.0
+0.5741s, 1.00/1, 1.00
+GCSTATS collections=23 total_pause_ns=2683744 pause_count=23 realloc_moves=0 large_cache_hits=0 large_cache_misses=1 unmapped_bytes=711053312 large_mapped_bytes=465932288 heap_size=469340160 total_bytes=1980050680 large_recycles=23 emergency_collects=0 os_mapped_bytes=483352584
