@@ -93,13 +93,18 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
         os.remove(hwm)
     m = [x for x in LINE.finditer(text) if x.group(1) == bench]
     mark = collections = scanned = None
+    per_collection = []
     if os.path.exists(trace):
         with open(trace) as f:
             ends = [json.loads(l) for l in f if '"collect_end"' in l]
         mark, collections = sum(e["mark_ns"] for e in ends) / 1e6, len(ends)
         scanned = sum(e.get("scanned_bytes", 0) for e in ends)
+        # Where each collection fell: an allocation-bound bench whose live set
+        # grows scans the sum of its live set at those points, so a change
+        # that moves them moves Σ mark without costing anything per byte.
+        per_collection = [e.get("scanned_bytes", 0) for e in ends]
     r = dict(rc=rc, wall=wall, peak=peak, mark=mark, collections=collections, scanned=scanned,
-             time=None, result=None)
+             scanned_per_collection=per_collection, time=None, result=None)
     if m:
         r["time"] = float(m[-1].group(4))
         r["result"] = "ok" if m[-1].group(2) == "ok" else m[-1].group(3).strip()
