@@ -92,12 +92,14 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
             peak = int(f.read().split()[-1]) * 1024
         os.remove(hwm)
     m = [x for x in LINE.finditer(text) if x.group(1) == bench]
-    mark = collections = None
+    mark = collections = scanned = None
     if os.path.exists(trace):
         with open(trace) as f:
             ends = [json.loads(l) for l in f if '"collect_end"' in l]
         mark, collections = sum(e["mark_ns"] for e in ends) / 1e6, len(ends)
-    r = dict(rc=rc, wall=wall, peak=peak, mark=mark, collections=collections, time=None, result=None)
+        scanned = sum(e.get("scanned_bytes", 0) for e in ends)
+    r = dict(rc=rc, wall=wall, peak=peak, mark=mark, collections=collections, scanned=scanned,
+             time=None, result=None)
     if m:
         r["time"] = float(m[-1].group(4))
         r["result"] = "ok" if m[-1].group(2) == "ok" else m[-1].group(3).strip()
@@ -146,15 +148,15 @@ def summarize(rows, benches, arms, floor):
             notes.append(f"- {b}: failed runs (arm, rep): {bad}")
     if "base" in arms and "var" in arms:
         lines += ["", "`var` against `base` (paired, per rep):", "",
-                  "| bench | time (timed section) | wall | peak | Σ mark | collections |",
-                  "|---|---:|---:|---:|---:|---:|"]
+                  "| bench | time (timed section) | wall | peak | Σ mark | collections | Σ scanned |",
+                  "|---|---:|---:|---:|---:|---:|---:|"]
         for b in benches:
             br, vr = by.get((b, "base"), {}), by.get((b, "var"), {})
             reps = sorted(set(br) & set(vr))
             if not reps:
                 continue
             cells = []
-            for k in ("time", "wall", "peak", "mark", "collections"):
+            for k in ("time", "wall", "peak", "mark", "collections", "scanned"):
                 xs = [vr[i][k] / br[i][k] - 1 for i in reps if vr[i][k] and br[i][k]]
                 cells.append("n/a" if not xs else "{1:+.1%} [{0:+.1%}, {2:+.1%}]".format(*quart(xs)))
             lines.append(f"| {b} | " + " | ".join(cells) + " |")
