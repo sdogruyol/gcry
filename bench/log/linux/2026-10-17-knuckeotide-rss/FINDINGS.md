@@ -212,12 +212,12 @@ spread, peak 1.11× → 1.02× (x86), 1.50× → 1.36× (arm), 1.68× → 1.38×
 Attribution run [38955302551](https://github.com/sdogruyol/gcry/actions/runs/38955302551),
 same probe branch, `base` = `5ebcaabf` (kemal), `var_env` =
 `GCRY_PROBE_PACE_STEP=10000` (kemal + idle-kind only). Raw:
-`raw/ci-38955302551/` (macos-15-intel had not finished when this was
-written). Knuckeotide peak base → idle-kind: x86 1.17× → 1.16×, arm
-1.03× → 1.13× (IQRs overlap), M1 1.54× → 1.44×, Windows 1.50× → 1.44×;
-with the pace limit too: 0.99× / 0.99× / 1.44× / 1.36×. JsonParsePure's
-peak drops with idle-kind on every runner (x86 0.81× → 0.70×, arm 1.07× →
-0.94×, M1 1.07× → 0.92×, Windows 1.08× → 0.95×). Speed base → idle-kind is
+`raw/ci-38955302551/`. Knuckeotide peak base → idle-kind: x86 1.17× →
+1.16×, arm 1.03× → 1.13× (IQRs overlap), M1 1.54× → 1.44×, Intel 1.57× →
+1.41×, Windows 1.50× → 1.44×; with the pace limit too: 0.99× / 0.99× /
+1.44× / 1.24× / 1.36×. JsonParsePure's peak drops with idle-kind on every
+runner (x86 0.81× → 0.70×, arm 1.07× → 0.94×, M1 1.07× → 0.92×, Intel
+0.82× → 0.69×, Windows 1.08× → 0.95×). Speed base → idle-kind is
 inside the IQRs on every row except Windows JsonParseSerializable (108% →
 103%, IQRs [104, 110] / [99, 104]); Kemal req/s within the spread.
 
