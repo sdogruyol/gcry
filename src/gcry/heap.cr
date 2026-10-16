@@ -1564,7 +1564,12 @@ module Gcry
       user = Pointer(Void).new(addr &+ BlockHeader::SIZE)
       s.value.in_flight = user
       s.value.free_mask = mask & (mask &- 1)
-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, s.value.occ_word, 1_u64 << bit,
+      # `unsafe_shl`: `mask` is nonzero, so `bit` is 0..63, and `Int#<<`'s
+      # range checks are dead weight. They are not free when the inliner
+      # leaves them out of line: Crystal's macOS release (LLVM 15) called
+      # `UInt64#<<(Int64)` here on every allocation, 3% of Binarytrees on an
+      # M1 (`bench/log/macos/2026-10-16-binarytrees/`).
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, s.value.occ_word, 1_u64.unsafe_shl(bit),
         LLVM::AtomicOrdering::Monotonic, false)
       set.value.bytes_local = local
       set.value.objects_local = set.value.objects_local &+ 1_u64
