@@ -98,6 +98,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **macOS: the allocation hit path no longer reads a `@[ThreadLocal]`.**
+  Crystal reads one through a `NoInline` accessor that on Mach-O calls
+  `tlv_get_addr`: 1.7 ns a read on an M1 and 10 ns on an Intel Mac. The hit
+  path now reads this thread's cursor set from the heap's pthread key slot
+  inline (TPIDRRO_EL0 / %gs, as `pthread_getspecific` does), checked against
+  `pthread_getspecific` when the thread claims its set. The occupancy bit is
+  shifted with `unsafe_shl`: the LLVM 15 of Crystal's macOS release left
+  `UInt64#<<` as a call on every allocation. Binarytrees on `macos-latest`,
+  15 interleaved reps per probe arm: key slot −7.9% wall, shift −3.1%, from
+  81% of Boehm; Intel Mac `pthread_getspecific` −10.9% (93% → 99%). Linux
+  and Windows keep the thread-local. Spec: `cursor_cache_lifetime_spec.cr`
+  (`bench/log/macos/2026-10-16-binarytrees/`).
+
 - **The serial mark drains its stack in batches.** It popped one entry at
   a time through a 16-entry prefetch ring; it now takes up to 1 024 entries
   into a buffer the mark stack maps once and scans them as the parallel
