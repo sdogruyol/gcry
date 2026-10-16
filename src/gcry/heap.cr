@@ -1287,14 +1287,29 @@ module Gcry
         # Clear the `occ` bit and mark the header FREE. No freelist link: the
         # block becomes available the moment its bit is clear, and the pool
         # cursor finds it from `~occ` without a chase through free memory.
-        nursery = BlockHeader.nursery?(header)
-        with_freelist_lock(class_index, nursery) do
-          # `push_size_class_free` poisons on the freelist path and this path
-          # does not go through it, so the knob would be armed and inert.
-          poison_payload(pointer, payload.to_u64) if @poison_freed
-          BlockHeader.set_free(header, Pointer(Void).null)
-          bitmap_free_block(chunk, header)
+        #
+        # Asked again under the lock, and asked exactly: a set `occ` bit may
+        # be a cursor's claim on a block it has not handed out (`bitmap_alloc.cr`,
+        # "Occupancy is claimed a word at a time"), and freeing that — a double
+        # or stale free landing on a claimed word — would clear the bit under
+        # the cursor, which then hands the block out unoccupied, to be handed
+        # out a second time once the cursor moves on. It is refused like the
+        # double free the check above refuses. The lock is the one the
+        # allocator takes for this chunk (a bitmap chunk is never a nursery
+        # chunk, whatever a stale header says), so the chunk's cursor cannot
+        # change hands while `block_allocated_exact?` reads it.
+        freed = false
+        with_freelist_lock(class_index, false) do
+          if block_allocated_exact?(chunk, header)
+            # `push_size_class_free` poisons on the freelist path and this path
+            # does not go through it, so the knob would be armed and inert.
+            poison_payload(pointer, payload.to_u64) if @poison_freed
+            BlockHeader.set_free(header, Pointer(Void).null)
+            bitmap_free_block(chunk, header)
+            freed = true
+          end
         end
+        return FreeResult::NotAllocated unless freed
         free_bytes_add(payload.to_u64)
         bytes_since_gc_sub(payload.to_u64)
         note_explicit_free(payload.to_u64)
@@ -1498,8 +1513,9 @@ module Gcry
     end
 
     # The hit path for a thread-owned bitmap cursor, through the largest
-    # small size class. Ownership removes the class lock; the occupancy OR
-    # remains atomic against cross-thread free. Nursery/collection paths
+    # small size class. Ownership removes the class lock, and the word's
+    # claim (`cursor_claim_word`) removes the per-block occupancy write: a
+    # hand-out stores only to this thread's slot. Nursery/collection paths
     # still use allocate. Any other case returns null and the caller
     # takes `allocate`, which also recomputes `@fast_path` from the current
     # configuration on every slow call, so the first allocation after any
@@ -1569,15 +1585,16 @@ module Gcry
       bit = mask.trailing_zeros_count
       addr = s.value.word_base &+ bit.to_u64 &* @block_bytes[index]
       user = Pointer(Void).new(addr &+ BlockHeader::SIZE)
+      # Rooted before it is handed out, and the compiler fence keeps the two
+      # stores in that order for a stop that lands between them: the block is
+      # then still in the mask, which the settle marks (`cursor_premark_claim`).
       s.value.in_flight = user
-      s.value.free_mask = mask & (mask &- 1)
-      # `unsafe_shl`: `mask` is nonzero, so `bit` is 0..63, and `Int#<<`'s
-      # range checks are dead weight. They are not free when the inliner
-      # leaves them out of line: Crystal's macOS release (LLVM 15) called
-      # `UInt64#<<(Int64)` here on every allocation, 3% of Binarytrees on an
-      # M1 (`bench/log/macos/2026-10-16-binarytrees/`).
-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, s.value.occ_word, 1_u64.unsafe_shl(bit),
-        LLVM::AtomicOrdering::Monotonic, false)
+      Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
+      # The pop is the allocation: the block's `occ` bit has been set since
+      # the claim. Until 2026-10-17 a `lock or` into `occ` followed here, 16%
+      # of Binarytrees on Linux (`bitmap_alloc.cr`, "Occupancy is claimed a
+      # word at a time").
+      CursorSlot.store_mask(s, mask & (mask &- 1))
       set.value.bytes_local = local
       set.value.objects_local = set.value.objects_local &+ 1_u64
       if (pfw = @alloc_pfw) > 0
@@ -1585,13 +1602,13 @@ module Gcry
       end
       header = Pointer(BlockHeader).new(addr)
       BlockHeader.set_used(header, payload, atomic ? BlockHeader::Flags::ATOMIC : 0_u32)
-      # Re-read after the occupancy store, not only at entry: a stop-the-world
-      # that began an incremental cycle while this thread sat between the
-      # sentinel and here pinned the set and rooted nothing (the slot held the
-      # sentinel, or an address the block did not yet occupy), and the cycle's
-      # finishing slice sweeps inside its own stopped world and rescans dirty
-      # pages, not stacks. Every block handed out while marking is black on
-      # the locked path; this makes the hit path keep the same promise.
+      # Re-read after the pop, not only at entry: a stop-the-world that began
+      # an incremental cycle while this thread sat between the sentinel and
+      # here pinned the set, and the cycle's finishing slice sweeps inside its
+      # own stopped world and rescans dirty pages, not stacks. The settle
+      # already marked the block (in the claim it marks, or as `in_flight`);
+      # this keeps the promise the locked path makes per block, that every
+      # block handed out while marking is black, without leaning on that.
       heap_set_mark_allocating(header) if @incremental_marking || @collecting
       clear_block(user, payload.to_u64) unless atomic
       s.value.in_flight = Pointer(Void).null
@@ -4662,9 +4679,11 @@ module Gcry
       end
     end
 
+    # Exact: a block a cursor has claimed and not handed out is not allocated
+    # (`block_allocated_exact?`).
     def diag_allocated?(header : BlockHeader*) : Bool
       if (chunk = diag_chunk(header))
-        block_allocated?(chunk, header)
+        block_allocated_exact?(chunk, header)
       else
         !BlockHeader.free?(header)
       end
@@ -4688,7 +4707,7 @@ module Gcry
       return BlockHeader.large_flags(header).to_u64 if ChunkHeader.large?(chunk)
       {% if !flag?(:gcry_block_headers) %}
         f = 0_u64
-        f |= BlockHeader::Flags::FREE.to_u64 unless block_allocated?(chunk, header)
+        f |= BlockHeader::Flags::FREE.to_u64 unless block_allocated_exact?(chunk, header)
         f |= BlockHeader::Flags::ATOMIC.to_u64 if atomic_of(chunk, header)
         f
       {% else %}
@@ -4743,6 +4762,12 @@ module Gcry
       block_payload(chunk, header)
     end
 
+    # Occupied in `occ`: allocated, or claimed by a cursor and not handed out
+    # yet. What the mark and the sweep read, where a claim is released or
+    # marked before they run, and what a lookup of a pointer a program holds
+    # needs (a block it was handed is never claimed). Callers asking whether
+    # a block is allocated in the program's sense — `free`, `live?`, the
+    # diagnostics — use `block_allocated_exact?`.
     @[AlwaysInline]
     protected def block_allocated?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
       return !BlockHeader.free_large?(header) unless bitmap_alloc_chunk?(chunk)

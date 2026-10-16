@@ -1492,7 +1492,10 @@ module Gcry
         n += occ[i].popcount
         i += 1
       end
-      n
+      # Allocated, not occupied: a cursor's claim on the chunk is blocks it has
+      # not handed out (`chunk_claimed_count`). Such a chunk is refused as one
+      # a cursor stands on, which is what it is, not as one holding a block.
+      n - chunk_claimed_count(chunk).to_i32
     end
 
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
@@ -1883,8 +1886,9 @@ module Gcry
       header, chunk = found
       # `find_object` already required occupancy; this re-asks the same
       # authority rather than the header flag, which is stale on a bitmap chunk
-      # and absent under headerless.
-      block_allocated?(chunk, header)
+      # and absent under headerless — exactly: a block a cursor has claimed and
+      # not handed out is occupied in `occ` and not live.
+      block_allocated_exact?(chunk, header)
     end
 
     # ExecutionContext Monitor must not run process STW — it would signal-suspend

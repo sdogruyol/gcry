@@ -17,17 +17,65 @@ end
 
 module Gcry
   # One (class, kind) allocation cursor: the chunk it stands on, the `occ`
-  # word it is consuming, that word's free bits as a private mask, and the
-  # block it is handing out right now (`in_flight`), which the collector
-  # roots. `in_flight` doubles as the mid-allocation marker: the sentinel from
-  # the path's entry until the block's address is known.
+  # word it is consuming, that word's blocks not handed out yet as a private
+  # mask, and the block it is handing out right now (`in_flight`), which the
+  # collector roots. `in_flight` doubles as the mid-allocation marker: the
+  # sentinel from the path's entry until the block's address is known.
+  #
+  # `free_mask` is also the cursor's *claim*: its bits are already set in
+  # `occ` (`Heap#cursor_claim_word`), so handing a block out writes nothing
+  # another thread reads. Other threads do read `chunk`, `word` and
+  # `free_mask` (`Heap#cursor_claim`), so the owner stores those three
+  # atomically (`store_chunk`, `store_word`, `store_mask`, `publish_mask`), and `free_mask` is
+  # zero whenever `word` or `chunk` changes: a reader that finds a nonzero
+  # mask finds the word it belongs to.
   struct CursorSlot
     property chunk : ChunkHeader* = Pointer(ChunkHeader).null
     property word : Int32 = 0
     property free_mask : UInt64 = 0_u64
     property word_base : UInt64 = 0_u64
-    property occ_word : UInt64* = Pointer(UInt64).null
     property in_flight : Void* = Pointer(Void).null
+
+    # Relaxed stores: plain `mov`/`str`, atomic only so that a reader on
+    # another thread is not racing a non-atomic store (`Heap#cursor_claim`).
+    @[AlwaysInline]
+    def self.store_chunk(s : CursorSlot*, chunk : ChunkHeader*) : Nil
+      Atomic::Ops.store(chunk_field(s), chunk.address, LLVM::AtomicOrdering::Monotonic, false)
+    end
+
+    @[AlwaysInline]
+    def self.store_word(s : CursorSlot*, word : Int32) : Nil
+      Atomic::Ops.store(word_field(s), word, LLVM::AtomicOrdering::Monotonic, false)
+    end
+
+    # A hand-out: it only takes bits away, so relaxed.
+    @[AlwaysInline]
+    def self.store_mask(s : CursorSlot*, mask : UInt64) : Nil
+      Atomic::Ops.store(mask_field(s), mask, LLVM::AtomicOrdering::Monotonic, false)
+    end
+
+    # A new word's mask, or zero before the word or chunk moves: release, so
+    # a reader that sees the mask sees the word stored before it, and one
+    # that sees zero sees the release of the bits before it.
+    @[AlwaysInline]
+    def self.publish_mask(s : CursorSlot*, mask : UInt64) : Nil
+      Atomic::Ops.store(mask_field(s), mask, LLVM::AtomicOrdering::Release, false)
+    end
+
+    @[AlwaysInline]
+    def self.chunk_field(s : CursorSlot*) : UInt64*
+      (s.as(UInt8*) + offsetof(CursorSlot, @chunk)).as(UInt64*)
+    end
+
+    @[AlwaysInline]
+    def self.word_field(s : CursorSlot*) : Int32*
+      (s.as(UInt8*) + offsetof(CursorSlot, @word)).as(Int32*)
+    end
+
+    @[AlwaysInline]
+    def self.mask_field(s : CursorSlot*) : UInt64*
+      (s.as(UInt8*) + offsetof(CursorSlot, @free_mask)).as(UInt64*)
+    end
   end
 
   # Reusable-capacity index for one (class, kind), owned by its class lock.
@@ -105,10 +153,12 @@ module Gcry
     # ## The pool cursor is what makes it affordable
     #
     # Per size class the heap keeps `{chunk, word, free_mask, word_base}`. The
-    # fast path is: `tzcnt` the cached mask, clear that bit from it, set the
-    # `occ` bit, return `word_base + ordinal * block_bytes`. **No chunk lookup,
-    # no freelist chase, no dependent load through free memory.** The size-class
-    # lock is taken once per *word* of 64 blocks rather than once per block.
+    # fast path is: `tzcnt` the cached mask, clear that bit from it, return
+    # `word_base + ordinal * block_bytes`; the block's `occ` bit was set when
+    # the cursor took the word (the claim, below). **No chunk lookup, no
+    # freelist chase, no dependent load through free memory, no shared
+    # write.** The size-class lock is taken once per *chunk* rather than once
+    # per block, and the claim is one atomic per *word* of 64 blocks.
     #
     # That is the whole reason a chunk lookup may never appear here: 2026-08-01's
     # v1 added `chunk_containing` per small allocation and took quiet `/json` to
@@ -130,13 +180,74 @@ module Gcry
     #
     # So the mask is `~occ & tail_mask & usable_mask`, where `usable_mask` is
     # built once per chunk when the chunk enters the pool rather than per word.
+    #
+    # ## Occupancy is claimed a word at a time
+    #
+    # A cursor sets the `occ` bits of all of a word's free blocks when it takes
+    # the word (`cursor_claim_word`, one atomic OR), and hands those blocks out
+    # from its private `free_mask` with no shared write. Until 2026-10-17 each
+    # hand-out was a `lock or` into `occ`, the one locked instruction left on
+    # the hit path: a plain OR in its place took Binarytrees from 88% to 103%
+    # of Boehm on Linux x86-64 and from 77% to 92% on arm64
+    # (`bench/log/macos/2026-10-16-binarytrees/`, the `noatomic` probe). A
+    # plain OR is not sound — a `GC.free` on another thread clears bits of the
+    # same word, and a plain read-modify-write can write a cleared bit back —
+    # and nothing else needs the per-block write.
+    #
+    # So `occ` means *allocated or claimed*: a claimed bit is a block in the
+    # `free_mask` of the slot that holds the chunk (`cursor_claim`). Every
+    # store into an `occ` word, and why the claim survives each of them
+    # (`bench/log/linux/2026-10-17-occupancy-claim/FINDINGS.md`):
+    #
+    # 1. **The claim**, by the owner, on a CURSOR chunk no other cursor can
+    #    take, of bits `chunk_free_mask` found clear. It stores `word`, then
+    #    `free_mask` (release), then marks the bits if a sweep can run before
+    #    the next stop-the-world (point 5), then ORs them into `occ` (release).
+    #    `free_mask` is zero before the word changes, so a stop that freezes
+    #    the owner part-way finds either no claim or the whole mask.
+    # 2. **The hand-out** writes nothing shared: popping the bit from
+    #    `free_mask` is the allocation. `in_flight` is stored before the pop,
+    #    with a compiler fence between them, so a stop that lands at any point
+    #    finds the block still in `free_mask` (and claimed) or rooted.
+    # 3. **The release**: `retire_cursor_slot` clears what is left of
+    #    `free_mask` from `occ` and `mark` (atomic AND) before it clears the
+    #    slot. It runs only with the owner outside its allocation window — at
+    #    a stop for a set not mid-allocation, or on the owner's own thread —
+    #    so the stored mask is exactly the blocks not handed out.
+    # 4. **`free`** (`bitmap_free_block`): any thread, under the class lock,
+    #    atomic AND. A correct program frees only blocks it was handed, never
+    #    in a `free_mask`, and the owner writes `occ` only at a claim, of
+    #    clear bits, so no update is lost either way: that is what the
+    #    per-block `lock or` was for. A double or stale free into a claimed
+    #    block is refused under the lock (`block_allocated_exact?`), which is
+    #    also the lock any change of the chunk's owner takes.
+    # 5. **The sweep's `occ = mark`.** In a stop, the settle runs before the
+    #    mark (`bitmap_settle_cursor_sets`): a set not mid-allocation is
+    #    retired and releases its claims; a set frozen mid-allocation keeps
+    #    its chunks PINNED and the settle sets its claim in `mark` and `occ`,
+    #    so the in-stop sweep keeps the claim and counts none of it freed.
+    #    After the stop the sweep skips PINNED chunks and holds the class
+    #    lock, the lock every other claim made after the restart is made under
+    #    (the hit path is closed while `@collecting`); those claims, and every
+    #    claim made while `@incremental_marking` (whose finishing slice sweeps
+    #    with no settle), are marked when they are made.
+    # 6. **The dormant revive** zeroes a chunk no word of which is claimed
+    #    yet; a fresh chunk is zero from `mmap`.
+    #
+    # Readers: `chunk_free_mask` (`~occ`) never offers a claimed block, which
+    # is the point. The mark reads `occ` raw: a claimed block is released
+    # before it runs, or marked by the settle and so never traced.
+    # `block_allocated_exact?`, `chunk_occupied_count` and the diagnostics on
+    # them subtract the claim, so `free`, the invariant walks and `/gc-stats`
+    # count allocated blocks only. Allocate-black still marks each block on
+    # both paths while a cycle runs, as before.
 
     # Per-thread allocation cursors. Every thread that allocates owns a
     # `CursorSet` — one slot per (class, kind) — and the hit path pops from
     # its own slot with no lock: the chunk under a slot was taken under the
     # class lock and carries `ChunkHeader::Flags::CURSOR`, so no other cursor
     # can be on it, and the only other writer of its `occ` word is a `free`
-    # (atomic, like the set here). Counters are accumulated per set and
+    # (atomic, like the claim). Counters are accumulated per set and
     # credited to the heap on the locked path and at every stop-the-world.
     #
     # This replaced a process-wide "single mutator" flag that skipped the
@@ -206,6 +317,11 @@ module Gcry
     getter fast_miss_threshold : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
     getter bitmap_dormant_revives : UInt64 = 0_u64
+    # Claimed blocks a retiring cursor gave back unused (`cursor_release_claim`):
+    # the cost of claiming a word ahead, and the evidence for the specs that
+    # retirement releases. Plain increments: exact in a stop, best-effort
+    # across classes retiring under their own locks, like the counters above.
+    getter cursor_claims_released : UInt64 = 0_u64
 
     # A failed capacity search remains true until a free, sweep, or retirement
     # publishes capacity for this (class, kind). The same generation invalidates
@@ -506,9 +622,15 @@ module Gcry
       each_cursor_set { |set| credit_cursor_set(set) }
     end
 
+    # Drop the slot's chunk. What is left of its claim goes back first
+    # (`cursor_release_claim`), and only then is the slot cleared. The caller
+    # guarantees the owner is outside its allocation window — a stop with the
+    # set not mid-allocation, or the owner's own thread — so the stored mask
+    # is exactly the blocks not handed out.
     private def retire_cursor_slot(s : CursorSlot*, exhausted : Bool = false) : Nil
       chunk = s.value.chunk
       unless chunk.null?
+        cursor_release_claim(s, chunk)
         ChunkHeader.set_cursor(chunk, false)
         # A concurrent free can restore a bit in a word this cursor already
         # passed. Another thread may have cached "empty" while we still owned
@@ -518,21 +640,109 @@ module Gcry
           bitmap_capacity_changed(chunk)
         end
       end
-      s.value.chunk = Pointer(ChunkHeader).null
-      s.value.free_mask = 0_u64
-      s.value.word = 0
+      CursorSlot.store_chunk(s, Pointer(ChunkHeader).null)
+      CursorSlot.publish_mask(s, 0_u64)
+      CursorSlot.store_word(s, 0)
       s.value.word_base = 0_u64
-      s.value.occ_word = Pointer(UInt64).null
+    end
+
+    # Take *word* of the slot's chunk, whose free blocks are *mask*: point the
+    # slot at it, then claim the blocks in `occ`, one atomic for the word
+    # (point 1 of "Occupancy is claimed a word at a time"). The slot's mask is
+    # zero on entry — the previous word is used up, or the chunk is new — so
+    # the word changes while no claim is published.
+    #
+    # The order is what a stop that freezes the owner part-way relies on:
+    # the mask is in the slot before anything is in `occ` or `mark`, so the
+    # settle finds it and completes the claim itself (`cursor_premark_claim`),
+    # and the flags are read only after the mask is stored, so a claim that
+    # skipped its marks read them before any stop of this cycle and is
+    # settled by it. `mark` before `occ`: the incremental finishing slice
+    # sweeps with no settle, so a stop between the two must find the bits
+    # marked and not yet occupied — which `occ = mark` turns into the claim
+    # — and never occupied and unmarked, which it would reclaim as dead.
+    @[AlwaysInline]
+    private def cursor_claim_word(s : CursorSlot*, chunk : ChunkHeader*, word : Int32,
+                                  mask : UInt64, index : Int32) : Nil
+      CursorSlot.store_word(s, word)
+      s.value.word_base = ChunkHeader.data_start(chunk).address &+
+                          (word.to_u64 << 6) &* @block_bytes[index]
+      CursorSlot.publish_mask(s, mask)
+      Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
+      # A sweep may run before the next stop: the after-world sweep, or the
+      # finishing slice of an incremental cycle. Claimed blocks are not
+      # objects, so they must not be swept as dead ones (allocate-black for
+      # the whole word; the sweep's `live` takes them back out).
+      if @collecting || @incremental_marking || @lazy_sweep_pending
+        mark = ChunkHeader.mark_bitmap(chunk)
+        unless mark.null?
+          Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark + word, mask,
+            LLVM::AtomicOrdering::Monotonic, false)
+        end
+      end
+      # Release: a thread that sees these bits sees the mask that names them
+      # as claimed (`block_allocated_exact?`).
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, ChunkHeader.occ_bitmap(chunk) + word, mask,
+        LLVM::AtomicOrdering::Release, false)
+    end
+
+    # Give back the blocks of the slot's claim it did not hand out: clear them
+    # from `occ`, and from `mark` (claims made while a sweep could run are
+    # marked, and a mark with no occupancy behind it would be resurrected by
+    # the next `occ = mark`). Atomic AND: a `free` may be clearing other bits
+    # of the word. The mask goes to zero after the bits, so a reader that
+    # still finds it finds them already clear (`block_allocated_exact?`).
+    private def cursor_release_claim(s : CursorSlot*, chunk : ChunkHeader*) : Nil
+      mask = s.value.free_mask
+      return if mask == 0_u64
+      word = s.value.word
+      occ = ChunkHeader.occ_bitmap(chunk)
+      unless occ.null?
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, occ + word, ~mask,
+          LLVM::AtomicOrdering::Monotonic, false)
+      end
+      mark = ChunkHeader.mark_bitmap(chunk)
+      unless mark.null?
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, mark + word, ~mask,
+          LLVM::AtomicOrdering::Monotonic, false)
+      end
+      CursorSlot.publish_mask(s, 0_u64)
+      @cursor_claims_released &+= mask.popcount.to_u64
+    end
+
+    # A set frozen mid-allocation keeps its chunks across the stop, and its
+    # claims with them. Mark each claim and complete it in `occ` (the owner
+    # may be frozen between storing its mask and its OR; finishing the OR
+    # here is idempotent with the owner's): the mark makes the in-stop sweep
+    # keep the bits and keeps the trace out of blocks that hold no object
+    # yet, including one the owner has published as `in_flight` but not yet
+    # popped. The mask and the word agree at every point the owner can be
+    # frozen at (`cursor_claim_word`).
+    private def cursor_premark_claim(s : CursorSlot*, chunk : ChunkHeader*) : Nil
+      mask = s.value.free_mask
+      return if mask == 0_u64
+      word = s.value.word
+      mark = ChunkHeader.mark_bitmap(chunk)
+      unless mark.null?
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark + word, mask,
+          LLVM::AtomicOrdering::Monotonic, false)
+      end
+      occ = ChunkHeader.occ_bitmap(chunk)
+      unless occ.null?
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, occ + word, mask,
+          LLVM::AtomicOrdering::Monotonic, false)
+      end
     end
 
     # Stop-the-world, before the roots are marked. Three things, in order:
     # chunks pinned through the previous cycle were skipped by its after-world
     # sweep, so their marks are stale and are zeroed here; every set's
     # counters are credited; then each set is either retired — its chunks go
-    # back to the pool lists, and its owner refills under the lock when it
-    # resumes — or, if its owner is frozen mid-allocation, left alone with its
-    # chunks pinned, because that owner will finish an unlocked `occ` store
-    # into them when it resumes.
+    # back to the pool lists with their claims released, and its owner
+    # refills under the lock when it resumes — or, if its owner is frozen
+    # mid-allocation, left alone with its chunks pinned and its claims
+    # marked, because that owner will finish its allocation from them,
+    # without the class lock, when it resumes.
     protected def bitmap_settle_cursor_sets : Nil
       return unless @bitmap_alloc
       each_chunk do |chunk|
@@ -553,8 +763,12 @@ module Gcry
         if set.value.no_hit_path != 0_u8 || cursor_set_mid_allocation?(set)
           i = 0
           while i < POOL_SLOTS
-            chunk = CursorSet.slot(set, i).value.chunk
-            ChunkHeader.set_pinned(chunk, true) unless chunk.null?
+            s = CursorSet.slot(set, i)
+            chunk = s.value.chunk
+            unless chunk.null?
+              ChunkHeader.set_pinned(chunk, true)
+              cursor_premark_claim(s, chunk)
+            end
             i += 1
           end
           # The out-of-memory reserve's set is never on the hit path, so it is
@@ -643,8 +857,10 @@ module Gcry
       block_marked_in?(chunk, header)
     end
 
+    # Handed out and not freed: a block a cursor has claimed and not handed
+    # out yet is not allocated (`block_allocated_exact?`).
     def block_allocated_public?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
-      block_allocated?(chunk, header)
+      block_allocated_exact?(chunk, header)
     end
 
     def bitmap_alloc_chunk_public?(chunk : ChunkHeader*) : Bool
@@ -652,11 +868,107 @@ module Gcry
     end
 
     # Allocated blocks in a chunk, straight from `occ` — one popcount pass
-    # instead of a header walk.
+    # instead of a header walk — less the blocks its cursor has claimed and
+    # not handed out (`cursor_claim`). Exact on a quiescent heap or in a
+    # stop; with the chunk's owner allocating it is one reading of a moving
+    # count, as any walk is.
     def chunk_occupied_count(chunk : ChunkHeader*) : UInt64
       occ = ChunkHeader.occ_bitmap(chunk)
       return 0_u64 if occ.null?
-      @kernels.popcount_words(occ, chunk.value.bitmap_words.to_i32)
+      n = @kernels.popcount_words(occ, chunk.value.bitmap_words.to_i32)
+      claimed = chunk_claimed_count(chunk)
+      n > claimed ? n - claimed : 0_u64
+    end
+
+    # Blocks of *chunk* its cursor has claimed and not handed out. Zero
+    # unless a cursor holds the chunk.
+    protected def chunk_claimed_count(chunk : ChunkHeader*) : UInt64
+      word, mask = cursor_claim(chunk)
+      return 0_u64 if word < 0 || mask == 0_u64
+      occ = ChunkHeader.occ_bitmap(chunk)
+      return 0_u64 if occ.null?
+      (Atomic::Ops.load(occ + word, LLVM::AtomicOrdering::Acquire, false) & mask).popcount.to_u64
+    end
+
+    # The claim on *chunk*: the word its cursor is on and that word's blocks
+    # not handed out yet, or `{-1, 0}` when no cursor holds the chunk.
+    #
+    # The holder is one slot (CURSOR is exclusive), at the chunk's (class,
+    # kind) index of some set: this thread's set is asked first, which is
+    # the whole search when a thread frees what it allocated. A slot is read
+    # by `slot_claim`, which needs no lock and takes none, so a stop that
+    # freezes the reader holds nothing.
+    protected def cursor_claim(chunk : ChunkHeader*) : {Int32, UInt64}
+      return {-1, 0_u64} unless ChunkHeader.cursor?(chunk)
+      class_index = chunk.value.size_class.to_i32
+      return {-1, 0_u64} if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      slot = ChunkHeader.atomic?(chunk) ? class_index + SIZE_CLASS_COUNT : class_index
+      own = cursor_set_cached
+      unless own.null?
+        word, mask = slot_claim(CursorSet.slot(own, slot), chunk)
+        return {word, mask} if word >= 0
+      end
+      each_cursor_set do |set|
+        # A set appended by another thread is published by its count; the
+        # entry may not be visible yet, and it cannot hold this chunk unless
+        # it took it under the class lock, which then orders the entry.
+        next if set.null? || set == own
+        word, mask = slot_claim(CursorSet.slot(set, slot), chunk)
+        return {word, mask} if word >= 0
+      end
+      {-1, 0_u64}
+    end
+
+    # One slot's claim on *chunk*, `{-1, 0}` when the slot is elsewhere. The
+    # word and the chunk are read on both sides of the mask, with acquire
+    # loads, and read again if either moved. The owner stores the word before
+    # a nonzero mask (release) and zeroes the mask before the word or the
+    # chunk changes (`cursor_claim_word`, `retire_cursor_slot`), so a mask
+    # read between two equal readings belongs to that word.
+    #
+    # Exact with the owner frozen (a stop: nothing moves, one pass), and under
+    # the chunk's class lock (`free`): the owner cannot leave the chunk
+    # without that lock, and within one hold its word only grows, so two
+    # equal readings cannot straddle a change, and the loop ends after at
+    # most one pass per word of the chunk. Anywhere else it is one consistent
+    # reading of a cursor that may have moved on since.
+    @[AlwaysInline]
+    private def slot_claim(s : CursorSlot*, chunk : ChunkHeader*) : {Int32, UInt64}
+      loop do
+        c1 = Atomic::Ops.load(CursorSlot.chunk_field(s), LLVM::AtomicOrdering::Acquire, false)
+        return {-1, 0_u64} unless c1 == chunk.address
+        w1 = Atomic::Ops.load(CursorSlot.word_field(s), LLVM::AtomicOrdering::Acquire, false)
+        mask = Atomic::Ops.load(CursorSlot.mask_field(s), LLVM::AtomicOrdering::Acquire, false)
+        w2 = Atomic::Ops.load(CursorSlot.word_field(s), LLVM::AtomicOrdering::Acquire, false)
+        c2 = Atomic::Ops.load(CursorSlot.chunk_field(s), LLVM::AtomicOrdering::Acquire, false)
+        return {w1, mask} if w1 == w2 && c1 == c2
+      end
+    end
+
+    # `block_allocated?` without the blocks a cursor has claimed and not
+    # handed out: handed out and not freed. What `free`, `live?` and every
+    # diagnostic mean by allocated; the mark and the sweep read `occ` raw
+    # (see "Occupancy is claimed a word at a time").
+    #
+    # `occ` is read before the claim and again after it. Before: a bit a claim
+    # set is seen with that claim's mask, which the owner stored ahead of its
+    # release OR (acquire here), so it is found claimed — or handed out since,
+    # which no reader can tell from a free racing the hand-out, the same race
+    # the per-block OR had. After: a bit a retire released while the claim
+    # was read is found clear. Under the class lock (`free`) nothing else can
+    # change the bit between the two reads.
+    protected def block_allocated_exact?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+      return block_allocated?(chunk, header) unless bitmap_alloc_chunk?(chunk)
+      occ = ChunkHeader.occ_bitmap(chunk)
+      return block_allocated?(chunk, header) if occ.null?
+      ordinal = chunk_block_ordinal(chunk, header.address)
+      word = (ordinal >> 6).to_i32
+      bit = 1_u64 << (ordinal & 63)
+      return false if (Atomic::Ops.load(occ + word, LLVM::AtomicOrdering::Acquire, false) & bit) == 0
+      return true unless ChunkHeader.cursor?(chunk)
+      claim_word, claim_mask = cursor_claim(chunk)
+      return false if claim_word == word && (claim_mask & bit) != 0
+      (Atomic::Ops.load(occ + word, LLVM::AtomicOrdering::Acquire, false) & bit) != 0
     end
 
     # Blocks this chunk actually holds.
@@ -716,7 +1028,7 @@ module Gcry
     # lock. Returns null when the pool could not be refilled.
     #
     # This is the hot path and it is deliberately short: mask test, `tzcnt`,
-    # `blsr`, one `occ` store, one address computation.
+    # `blsr`, one address computation. The `occ` bit was set by the claim.
     protected def bitmap_alloc_locked(index : Int32, payload : UInt32, flags : UInt32) : Void*
       # Kind comes from the request's own flags, so callers are unchanged. The
       # cursor is per (class, kind) because atomic and pointerful blocks live in
@@ -756,25 +1068,21 @@ module Gcry
       end
 
       bit = mask.trailing_zeros_count
-      # `blsr`: clear the lowest set bit. The mask is this thread's own.
-      s.value.free_mask = mask & (mask &- 1)
-
       chunk = s.value.chunk
-      occ = ChunkHeader.occ_bitmap(chunk)
       word = s.value.word
-      bit_mask = 1_u64 << bit
 
-      # Publish the block as a root **before** the `occ` store makes it
-      # allocated. Everything from that store until the caller holds the
-      # pointer is a window in which the block is occupied, unmarked, and
-      # referenced only by a header address the root scan refuses.
+      # Publish the block as a root **before** the pop hands it out: from the
+      # pop until the caller holds the pointer the block is occupied (claimed),
+      # out of the slot's mask, and referenced only by a header address the
+      # root scan refuses. Before the pop it is still in the mask, which a
+      # stop marks (`cursor_premark_claim`). The fence keeps the compiler from
+      # sinking the publication below the pop.
       header_addr = s.value.word_base &+ bit.to_u64 &* @block_bytes[index]
       s.value.in_flight = Pointer(Void).new(header_addr &+ BlockHeader::SIZE)
-
-      # Atomic: a `free` on another thread can clear a bit in this word. Same
-      # hazard as the mark bit, same reasoning — see `chunk_set_mark`.
-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, occ + word, bit_mask,
-        LLVM::AtomicOrdering::Monotonic, false)
+      Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
+      # `blsr`: clear the lowest set bit. The block's `occ` bit has been set
+      # since the claim, so this is the whole allocation.
+      CursorSlot.store_mask(s, mask & (mask &- 1))
 
       # `@freelist_clean` is a freelist-shaped claim — "this class's next block
       # comes straight off a fresh chunk, so `allocate` may skip the memset".
@@ -817,12 +1125,13 @@ module Gcry
     # retired there and never gets here). The one concurrent writer of its
     # occupancy is a `free` clearing a bit, and the locked refill tolerates
     # that the same way — a block freed behind the cursor is found on the
-    # chunk's next pass. The blacklist is written only while marking, when
-    # this thread is stopped. Runs inside the mid-allocation window, so a
-    # stop-the-world that lands during the scan pins the set rather than
-    # retiring the slot under it. Zero when the slot holds no chunk or the
-    # chunk is exhausted; the caller then takes the locked path, which
-    # retires the chunk and takes another from the pool.
+    # chunk's next pass; the claim (`cursor_claim_word`) sets only bits it
+    # found clear, which no `free` touches. The blacklist is written only
+    # while marking, when this thread is stopped. Runs inside the
+    # mid-allocation window, so a stop-the-world that lands during the scan
+    # pins the set rather than retiring the slot under it. Zero when the slot
+    # holds no chunk or the chunk is exhausted; the caller then takes the
+    # locked path, which retires the chunk and takes another from the pool.
     #
     # Measured before this: 96% of locked refills (`bitmap_alloc_refills`
     # 705 k against `bitmap_alloc_chunk_advances` 29 k per 15 s of Kemal
@@ -837,11 +1146,7 @@ module Gcry
       while word < words
         mask = chunk_free_mask(chunk, word, nblocks)
         if mask != 0_u64
-          s.value.word = word
-          s.value.free_mask = mask
-          s.value.word_base = ChunkHeader.data_start(chunk).address &+
-                              (word.to_u64 << 6) &* @block_bytes[index]
-          s.value.occ_word = ChunkHeader.occ_bitmap(chunk) + word
+          cursor_claim_word(s, chunk, word, mask, index)
           @cursor_word_advances &+= 1
           return mask
         end
@@ -862,8 +1167,8 @@ module Gcry
           # In use again: a fully free chunk past the warm budget keeps its
           # one cycle of grace only while nothing takes it.
           ChunkHeader.set_idle(chunk, false) if ChunkHeader.idle?(chunk)
-          s.value.chunk = chunk
-          s.value.word = 0
+          CursorSlot.store_chunk(s, chunk)
+          CursorSlot.store_word(s, 0)
           @bitmap_alloc_chunk_advances &+= 1
         end
 
@@ -873,11 +1178,7 @@ module Gcry
         while word < words
           mask = chunk_free_mask(chunk, word, nblocks)
           if mask != 0_u64
-            s.value.word = word
-            s.value.free_mask = mask
-            s.value.word_base = ChunkHeader.data_start(chunk).address &+
-                                (word.to_u64 << 6) &* @block_bytes[index]
-            s.value.occ_word = ChunkHeader.occ_bitmap(chunk) + word
+            cursor_claim_word(s, chunk, word, mask, index)
             @bitmap_alloc_refills &+= 1
             return true
           end
@@ -1108,8 +1409,6 @@ module Gcry
       {chunk, false}
     end
 
-    # Release one block back to `occ`. The bit is shared with 63 others, so the
-    # clear is atomic for the same reason the set is.
     # Page-run live mask built from `occ` rather than from block headers.
     #
     # The header walk this replaces asks "is this block FREE?" of every block in
@@ -1166,7 +1465,8 @@ module Gcry
     # `mt-property-test`, the counter saturating at zero while the bitmap
     # accumulated resurrected blocks.
     #
-    # Both clears are atomic for the usual reason: 64 blocks share each word.
+    # Both clears are atomic for the usual reason: 64 blocks share each word,
+    # and a cursor's claim and release write other bits of the same word.
     @[AlwaysInline]
     protected def bitmap_free_block(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       occ = ChunkHeader.occ_bitmap(chunk)
@@ -1201,10 +1501,13 @@ module Gcry
     # stopped-world sweep, none from `index_remove`.
     #
     # Pinning closes a second window the drop could not: a mutator frozen
-    # *after* its `occ` store but before the block's address exists in any
-    # register the root scan can see. That block is `occ=1, mark=0`,
+    # *after* its block became occupied but before the block's address exists
+    # in any register the root scan can see. That block is `occ=1, mark=0`,
     # unreachable, and `occ &= mark` would free it under the mutator — which
-    # then returns a dangling pointer. Under the pin the word is not swept.
+    # then returns a dangling pointer. Under the pin the word is not swept
+    # after the stop, and the stop's own sweep keeps it because the settle
+    # marks the pinned set's claim (`cursor_premark_claim`) and roots its
+    # `in_flight` block.
     #
     # The header path's answer to the same situation is
     # `uninitialised_small_block?`: a chunk a frozen mutator is mid-writing is
