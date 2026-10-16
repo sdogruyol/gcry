@@ -7,13 +7,14 @@
 #   AB_BASE=origin/master AB_REPS=10 AB_BENCHES="Primes JsonParsePure" \
 #     bench/runner_ab/ab.sh
 #
-# Output lines start with `AB `; nothing is gated.
+# Output lines start with `AB `; nothing is gated. With AB_JSON=path, every
+# rep's samples also go to that file, for bench/runner_ab/report.py.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 base="${AB_BASE:-origin/master}"
 git fetch -q origin "${base#origin/}" --depth=1 2>/dev/null || true
 rev=$(git rev-parse --verify -q "$base" || git rev-parse FETCH_HEAD)
-rm -rf ../ab-base && git worktree add -q --detach ../ab-base "$rev"
+rm -rf ../ab-base && git worktree prune && git worktree add -q --detach ../ab-base "$rev"
 build() {
   d=$(mktemp -d)
   cp -r bench/crystal_metric/. "$d/"
@@ -23,5 +24,6 @@ build() {
 mkdir -p bin
 build ../ab-base "$PWD/bin/ab-base"
 build . "$PWD/bin/ab-var"
-echo "AB base $(git -C ../ab-base rev-parse --short HEAD) vs $(git rev-parse --short HEAD)"
+export AB_BASE_REV=$(git -C ../ab-base rev-parse --short HEAD) AB_VAR_REV=$(git rev-parse --short HEAD)
+echo "AB base $AB_BASE_REV vs $AB_VAR_REV"
 python3 bench/runner_ab/ab.py "${AB_REPS:-10}" ${AB_BENCHES:-Primes JsonParsePure Binarytrees JsonGenerate}

@@ -36,6 +36,17 @@ make property-test     # property-based test
 
 See `make help` for the full list of targets.
 
+### Performance against master
+
+A PR that touches `src/` gets a **Perf PR** run: crystal-metric built from
+the PR and from its base on the same runner (x86_64 and arm64), run
+interleaved, and posted as one comment on the PR that each push updates. A
+row is 🔴 or 🟢 only when its whole 95% interval is past ±3% wall time (±10%
+Σ mark); ⚪ is noise at that sample size, whatever the point estimate. Timings
+never fail the check; ❌ (PR and base computing different results) does.
+Reproduce locally with
+`AB_BASE=origin/master AB_JSON=ab.json bench/runner_ab/ab.sh && python3 bench/runner_ab/report.py ab.json`.
+
 ## Commit messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
