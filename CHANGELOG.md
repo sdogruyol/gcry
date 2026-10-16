@@ -159,6 +159,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (arm64) examples (run 38721725009 against master's 38709043581;
   `bench/log/windows/2026-10-15-spec-image-delete/`).
 
+### Removed
+
+- **Five more research switches that no gate, spec, CI job or script
+  sets.** `GCRY_DYING_GREG_DUMP` (every captured register word at a
+  dying-type catch; it found the all-zeros capture, since fixed),
+  `GCRY_SEGV_REPORT_STACK` (the alternate-stack margin probe that measured
+  Crystal's 8 192-byte stack with 3 472 bytes used, which the report's own
+  256 KiB stack replaced) and `GCRY_MARK_AUDIT_ALL` (the mark audit over
+  unmarked parents too, which found no dying holder in five crashing runs)
+  are gone with the code only they reached. `GCRY_RELEASE_OCCUPIED` and
+  `GCRY_SCRUB_AUDIT` only set `Heap#release_occupied_anyway` and
+  `Heap#scrub_audit_foreign_sp`, which `make occupied-release --broken`,
+  `bench/scrub_audit.cr` and `bench/scrub_midswap.cr` set themselves; the
+  properties stay. The defaults are unchanged: every removed path was off
+  unless its variable was set, and setting one now does nothing.
+  `/gc-stats` loses `mark_audit_dying_edges`. The other knobs no gate sets
+  stay, each for a reason recorded in `docs/DEFAULT-GC-READINESS.md` M7:
+  tuning knobs and escape hatches, crash-hunting instruments the docs point
+  to, `bench/acik_live_attr.sh`'s pass-through inputs, and
+  `GCRY_HUGEPAGES`. 122 lines of code fewer (+28/−150 in `src/`). The
+  allocation path is unchanged: under callgrind `Heap#malloc` runs
+  77 014 212 instructions for a million 48-byte allocations before and
+  after, and `bench/micro/alloc_ns.cr` over 15 interleaved rounds moves
+  less than its own spread
+  (`bench/log/linux/2026-10-16-knob-reduction-m7b/`).
+
 ## [0.36.0] - 2026-10-15
 
 ### Fixed
