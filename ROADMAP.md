@@ -2093,10 +2093,24 @@ kept finding the rest.
       without the splice) and a window-free arm: a `GC.free` trim in that
       window detached a chunk the rebuild had kept, and the flush unmapped it
       while listed (a fault in the first collection); the trim now declines
-      during the relink walk. Still open, inferred and not reproduced: a list
+      during the relink walk. The in-STW case this left open — a list
       writer frozen inside its locked section by an *in-STW* sweep resumes
       against the rebuilt list (0 of 37 334 mappings under
-      `GCRY_DISABLE_LAZY_SWEEP=1`).
+      `GCRY_DISABLE_LAZY_SWEEP=1` then) — **was real and is
+      closed (2026-10-17, 0.37.0).** The occupancy-claim stress harness
+      (`claim_stress`, two Parallel workers, in-stop sweep) reached it: 31–252
+      chunks indexed and off the list in 14 of 40 2-second runs. Every loss
+      followed a stop that froze `map_chunk` between its head read and its
+      head store (3 of 3; 0 of 9 stops that froze a list reader lost
+      anything): the rebuild reverses the list, so the store it finishes
+      after `start_world` puts the new chunk in front of the old head, now
+      the tail. The in-stop sweep takes `@chunk_list_lock` without waiting and
+      holds it through the store, or leaves the list and its empties alone
+      for that collection (`stop_sweep_relinks_declined`).
+      `process_spec/regression/75` forces the interleaving (0 lost, 55 on the
+      control arm); `claim_stress` after it: 0 of 20 runs with two workers,
+      0 of 10 with four. No default configuration sweeps in the
+      stop: Parallel, EC4 and EC1 sweep after the world on both layouts.
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which

@@ -197,6 +197,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `research_tables_spec.cr`, `make released-range-report`
   (`bench/log/linux/2026-10-17-kemal-rss/`).
 
+- **An in-stop sweep no longer drops most of the chunk list behind a
+  thread it froze mid-prepend.** With the sweep inside the stop
+  (`GCRY_DISABLE_LAZY_SWEEP=1`, `GCRY_PAGE_DONTNEED=1`, `GCRY_TLAB=1`,
+  `GCRY_INCREMENTAL=1`, or `parallel_empty_chunk_munmap`) the sweep rebuilds `@chunks`
+  without `@chunk_list_lock`, reversing it. A `map_chunk` the stop froze
+  between reading the head and storing the new one finished after
+  `start_world` with `new.next` the old head, by then the tail, and every
+  other chunk left the list while staying in the chunk index: never swept
+  again, its blocks counted live and its capacity counted free for good.
+  `claim_stress` (`bench/claim_stress.cr` on the occupancy-claim branch;
+  2 s, two Parallel workers, in-stop sweep) lost 31–252 chunks in 14 of 40
+  runs on the tree before, with walk drift of −331 to −9 084 objects and
+  −3.7 to −30 MB of free bytes, and every loss followed a stop that froze a
+  mapper exactly there (3 of 3; 0 of 9 stops that froze a list reader).
+  The in-stop sweep now takes the list lock without waiting
+  and holds it until the rebuild is published; when a frozen thread holds
+  it, the sweep leaves the list as it is and keeps that collection's empty
+  chunks mapped (`stop_sweep_relinks_declined`). The default lazy sweep
+  never ran this path: Parallel, EC4 and EC1 sweep after the world and
+  publish under the lock, on both layouts.
+  `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr` parks a
+  mapper there (`chunk_publish_hook`) across a `GC.collect`: 0 chunks lost
+  with the fix, 55 with `stop_sweep_list_lock = false` (the code before),
+  every run. The same harness after the fix: 0 of 20 runs with two workers
+  and 0 of 10 with four lost a chunk or drifted, the sweep declining 0–9 of
+  ~1 250 relinks a run; the lazy arm, four workers, 0 of 10 on both trees.
+
 - **The Windows gates jobs no longer fail after their specs pass.** The
   Makefile targets those jobs run still called `crystal spec`, which deletes
   the image it just ran; on the Windows runners a handle on that image can
