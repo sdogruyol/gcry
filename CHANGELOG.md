@@ -98,6 +98,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **macOS: the adaptive threshold floor is 8 MiB, as on every other
+  platform (was 16 MiB).** With pacing on top of it, small processes peaked
+  at about twice Boehm's resident size on macOS, past the 1.1× RSS budget.
+  Both macOS runners, nine crystal-metric rows, 20 interleaved reps, and
+  Kemal 15 trials: Binarytrees' peak 1.79× → 0.96× of Boehm (M1) and
+  1.87× → 0.98× (Intel), Knuckeotide 1.89× → 1.74× and 1.99× → 1.81×, Kemal
+  `/json` 1.93× → 1.69× and 2.19× → 1.56× at the same req/s; no row's wall
+  or user time moved beyond its spread except Intel Binarytrees, +2–4%
+  (still 125% of Boehm). Turning pacing off on Darwin also met the budget
+  for Binarytrees but cost Primes 22–27%. Knuckeotide stays over 1.1× on
+  every platform. Spec: `adaptive_threshold_spec.cr`
+  (`bench/log/macos/2026-10-16-binarytrees/`).
+
 - **macOS: the allocation hit path no longer reads a `@[ThreadLocal]`.**
   Crystal reads one through a `NoInline` accessor that on Mach-O calls
   `tlv_get_addr`: 1.7 ns a read on an M1 and 10 ns on an Intel Mac. The hit

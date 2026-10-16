@@ -3943,6 +3943,14 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       outside the noise while Revcomp goes 0.63× → 0.87×. Knuckeotide (47 MB
       under Boehm) is the one row over 1.1×, at every cap: its peak is the
       threshold floor and warm budget, not the cap.
+      **macOS, 2026-10-16** (`bench/log/macos/2026-10-16-binarytrees/`):
+      measured on both macOS runners, Binarytrees was over too (1.79× M1,
+      1.87× Intel), from pacing on the 16 MiB Darwin floor. The floor is 8
+      MiB there as well for 0.37.0: Binarytrees 0.96× / 0.98×, Kemal 1.69× /
+      1.56×, Intel Binarytrees +2–4% wall the only repeat cost; Darwin pace
+      100 met it too but cost Primes 22–27%. Knuckeotide is still 1.74× /
+      1.81× on macOS (Linux 1.35–1.53×, Windows 1.64–1.67×) and no threshold
+      setting moves it under, so its peak is not the collection schedule.
 - [x] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
@@ -3991,7 +3999,7 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       (`bench/log/{macos,windows}/2026-10-15-0.36-native/`).
       **Narrowed 2026-10-16** (`bench/log/macos/2026-10-16-binarytrees/`):
       not the collector (117 collections to Boehm's 109, Σ pause 5% of the
-      run; a 64 MiB threshold −2%, the Linux 8 MiB floor +10%). Two
+      run; a fixed 64 MiB threshold −2%, a fixed 8 MiB +10%). Two
       Darwin-only costs in the allocation hit path, both fixed for 0.37.0:
       the `@[ThreadLocal]` cursor read (Crystal's `NoInline` accessor plus
       `tlv_get_addr`: 1.7 ns on the M1, 10 ns on Intel; reading the heap's
@@ -4003,9 +4011,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       most of it in `Heap#malloc`'s own body. On Linux the gap is the atomic occupancy OR
       (a plain OR: x86 88% → 103%, arm64 77% → 92%; LSE recovers 7 points
       on arm64), which costs nothing measurable on the M1. Peak RSS 1.79×
-      is pacing on the 16 MiB floor; `GCRY_THRESHOLD_PACE=100` is 0.95× at
-      no measured macOS speed cost but costs Linux 4–7%, and Kemal's macOS
-      numbers were cut on that floor, so it is left for its own decision.
+      was pacing on the 16 MiB Darwin floor; the floor is 8 MiB there too
+      now (0.96×; RSS budget item above).
 - [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
       (2026-10-15) — code placement of gcry's allocation path
       (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.
