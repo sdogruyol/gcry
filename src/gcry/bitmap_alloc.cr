@@ -265,8 +265,10 @@ module Gcry
     # `NoInline` accessor for the variable, then the variable's TLV thunk,
     # `tlv_get_addr`. On the hit path that was 8% of Binarytrees' run time on
     # an M1 (macos-latest: 81% → 87% of Boehm without it) and 11% on an
-    # Intel Mac, where the thunk saves every register
-    # (`bench/log/macos/2026-10-16-binarytrees/`). The heap's pthread key
+    # Intel Mac, where the thunk saves every register. With the unchecked
+    # shift in `fast_alloc`, Binarytrees went 79% → 88% of Boehm on the M1
+    # and 92% → 131% on Intel (`bench/log/macos/2026-10-16-binarytrees/`).
+    # The heap's pthread key
     # already holds the same set — `cursor_set_under_lock` stores it there
     # when the thread claims it, for the exit destructor — so the hit path
     # reads the key's slot directly, as `pthread_getspecific` itself does in

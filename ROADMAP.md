@@ -3997,8 +3997,10 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `tlv_get_addr`: 1.7 ns on the M1, 10 ns on Intel; reading the heap's
       pthread key slot inline is −7.9% wall on the M1, `pthread_getspecific`
       −10.9% on Intel) and `UInt64#<<` left out of line by the LLVM 15 of
-      Crystal's macOS release (−3.1%). Left: [INFERENCE] ~11–13 points in
-      `Heap#malloc`'s own body. On Linux the gap is the atomic occupancy OR
+      Crystal's macOS release (−3.1%). Together (run 38898225086, 15 reps):
+      macos-latest 79% → 88% of Boehm (wall −12.6%), macos-15-intel 92% →
+      131% (−28.7%), Linux and Windows unchanged. Left on the M1: 12 points,
+      most of it in `Heap#malloc`'s own body. On Linux the gap is the atomic occupancy OR
       (a plain OR: x86 88% → 103%, arm64 77% → 92%; LSE recovers 7 points
       on arm64), which costs nothing measurable on the M1. Peak RSS 1.79×
       is pacing on the 16 MiB floor; `GCRY_THRESHOLD_PACE=100` is 0.95× at

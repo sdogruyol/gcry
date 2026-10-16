@@ -105,10 +105,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inline (TPIDRRO_EL0 / %gs, as `pthread_getspecific` does), checked against
   `pthread_getspecific` when the thread claims its set. The occupancy bit is
   shifted with `unsafe_shl`: the LLVM 15 of Crystal's macOS release left
-  `UInt64#<<` as a call on every allocation. Binarytrees on `macos-latest`,
-  15 interleaved reps per probe arm: key slot −7.9% wall, shift −3.1%, from
-  81% of Boehm; Intel Mac `pthread_getspecific` −10.9% (93% → 99%). Linux
-  and Windows keep the thread-local. Spec: `cursor_cache_lifetime_spec.cr`
+  `UInt64#<<` as a call on every allocation. Binarytrees, 15 interleaved
+  reps against the previous tip: `macos-latest` (M1) 79% → 88% of Boehm
+  (wall −12.6%), `macos-15-intel` 92% → 131% (−28.7%); no other macOS row
+  slower beyond its spread, Linux and Windows unchanged (they keep the
+  thread-local). Spec: `cursor_cache_lifetime_spec.cr`
   (`bench/log/macos/2026-10-16-binarytrees/`).
 
 - **The serial mark drains its stack in batches.** It popped one entry at

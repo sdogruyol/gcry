@@ -101,7 +101,7 @@ Run 1, Intel Mac: `getspec` **−10.9% [−14.7, −7.7]** (93% → 99% of Boehm
 `pthread_getspecific` is a call on glibc too and slower than Crystal's TLS
 there (3 ns), so the change is Darwin-only.
 
-## The fix (`6bf33635`, `c59e6406`)
+## The fix (`4391de7e`, `b60b607a`; `6bf33635`, `c59e6406` before the rebase)
 
 - `fast_alloc` shifts with `1_u64.unsafe_shl(bit)` (`bit` is 0..63: `mask`
   is nonzero). No IR change where the inliner already folded it.
@@ -127,14 +127,34 @@ there (3 ns), so the change is Darwin-only.
   the hit path. It is a performance change, so the red arm is the probe
   above (`tip` against `mac_tsd`/`shl`), not a failing assertion.
 
-Before/after on every platform: `Perf A/B` run
-[38898225086](https://github.com/sdogruyol/gcry/actions/runs/38898225086)
-(`macos-binarytrees` at `c59e6406` against `origin/release-0.37.0`, nine
-crystal-metric rows, 15 reps, macOS ×2, Linux ×2, Windows) and CI
-[38898228632](https://github.com/sdogruyol/gcry/actions/runs/38898228632)
-were dispatched; their results were not in when this was written
-[INFERENCE for the expected M1 figure: `mac_tsd` −7.9% and `shl` −3.1% in
-separate arms, so ~87–89% of Boehm].
+### Before/after on every platform
+
+`Perf A/B` run
+[38898225086](https://github.com/sdogruyol/gcry/actions/runs/38898225086):
+`macos-binarytrees` at `c59e6406` (`var`) against `origin/release-0.37.0`
+(`base`, then `4fcee559`), nine crystal-metric rows, 15 interleaved reps,
+five runners (`final-<runner>/summary.md`, `runs.json`). % of Boehm, base →
+var, and var's whole-process wall against base, median [IQR]:
+
+| runner | Binarytrees | wall | other rows |
+|---|---:|---:|---|
+| macos-latest (M1) | 79% → **88%** | −12.6% [−13.8, −7.3] | within ±5%; Primes −4.0%, Knuckeotide −3.4%, RegexDna −2.2% |
+| macos-15-intel | 92% → **131%** | −28.7% [−37.7, −24.4] | Primes −8.8%, JsonGenerate −6.8%; none slower beyond its IQR |
+| ubuntu-latest | 98% → 97% | −0.0% [−0.5, +0.7] | every row within ±0.7% |
+| ubuntu-24.04-arm | 81% → 82% | +0.2% [−0.5, +2.6] | every row within ±0.5% |
+| windows-latest | 115% → 115% | −1.9% [−5.7, +0.5] | within ±3% |
+
+Linux and Windows do not run the changed code (only the unchecked shift,
+which their LLVM already inlined) and move only within their spread. Peak
+RSS is unchanged on every Binarytrees row. Two macOS peak cells moved, both
+far under Boehm's: JsonGenerate on the M1 0.64× → 0.74× (+15.7%, every rep;
+Intel −0.1%), and Revcomp on Intel 0.56× → 0.64× (IQR +1.3 to +21%; M1
+0.0%). Neither code path allocates differently [INFERENCE: placement of
+the large-buffer collections, as for Primes in `../2026-10-15-0.36-native/`].
+
+CI [38898228632](https://github.com/sdogruyol/gcry/actions/runs/38898228632)
+ran on `c59e6406`; after the rebase onto `origin/release-0.37.0` (parallel
+mark batch) CI ran again on the rebased branch (run id in the RSS section).
 
 ## What is left, and what it is
 
@@ -147,11 +167,12 @@ separate arms, so ~87–89% of Boehm].
   instead of once per block, which every off-STW reader of `occ` (`free`,
   interior-pointer and liveness queries) would have to tolerate; not
   attempted here.
-- **macOS after the fix: ~11–13 points** [INFERENCE from the arms], with
-  `Heap#malloc`'s own body the largest remaining share of samples: a
-  12-register frame for the inlined refill, the `clear_block` jump table,
-  and Crystal's own zeroing in `TreeNode.new` after `GC.malloc` already
-  zeroed (Boehm pays that too).
+- **macOS after the fix: 12 points on the M1** (88% of Boehm), Intel above
+  Boehm. The largest remaining share of `sample`'s main-thread samples is
+  `Heap#malloc`'s own body: a 12-register frame for the inlined refill, the
+  `clear_block` jump table, and Crystal's own zeroing in `TreeNode.new`
+  after `GC.malloc` already zeroed (Boehm pays that too). Not attributed
+  further.
 - **Peak RSS.** 1.79× Boehm on M1 and 1.87× on Intel come from pacing on
   the 16 MiB Darwin floor (threshold up to 48.8 MiB); `PACE=100` is 0.95×
   at no measured speed cost on macOS but costs Linux 4–7%, and lowering the
