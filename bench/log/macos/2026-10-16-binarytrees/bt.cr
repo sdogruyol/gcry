@@ -30,37 +30,43 @@ class TreeNode
   end
 end
 
-n = (ARGV[0]? || "18").to_i
-build = Time::Span.zero
-walk = Time::Span.zero
-result = 0
-t_all = Time.instant
-min_depth = 4
-max_depth = Math.max min_depth + 2, n
-t = Time.instant
-stretch = TreeNode.create(0, max_depth + 1)
-build += Time.instant - t
-t = Time.instant
-result += stretch.check
-walk += Time.instant - t
-stretch = nil
-t = Time.instant
-long_lived_tree = TreeNode.create 0, max_depth
-build += Time.instant - t
-min_depth.step(to: max_depth, by: 2) do |depth|
-  iterations = 1 << (max_depth - depth + min_depth)
-  1.upto(iterations) do |i|
-    {i, -i}.each do |item|
-      t = Time.instant
-      tree = TreeNode.create(item, depth)
-      t2 = Time.instant
-      result += tree.check
-      walk += Time.instant - t2
-      build += t2 - t
+# A method, as `Binarytrees#run` is: its `long_lived_tree` is never read
+# again, so the optimiser drops it and neither collector sees it live — the
+# live set stays near zero. Reading it at the end (the first cut of this
+# file did) kept 16 MiB live and tripled the mark work.
+def run_bt(n : Int32) : {Int32, Time::Span, Time::Span}
+  build = Time::Span.zero
+  walk = Time::Span.zero
+  result = 0
+  min_depth = 4
+  max_depth = Math.max min_depth + 2, n
+  t = Time.instant
+  stretch = TreeNode.create(0, max_depth + 1)
+  build += Time.instant - t
+  t = Time.instant
+  result += stretch.check
+  walk += Time.instant - t
+  t = Time.instant
+  long_lived_tree = TreeNode.create 0, max_depth
+  build += Time.instant - t
+  min_depth.step(to: max_depth, by: 2) do |depth|
+    iterations = 1 << (max_depth - depth + min_depth)
+    1.upto(iterations) do |i|
+      {i, -i}.each do |item|
+        t = Time.instant
+        tree = TreeNode.create(item, depth)
+        t2 = Time.instant
+        result += tree.check
+        walk += Time.instant - t2
+        build += t2 - t
+      end
     end
   end
+  {result, build, walk}
 end
-long_lived_tree.check
+
+t_all = Time.instant
+result, build, walk = run_bt((ARGV[0]? || "18").to_i)
 total = Time.instant - t_all
 arm = {{ flag?(:gc_none) ? "gcry" : "boehm" }}
 line = "BT #{arm} result=#{result} total_ms=#{total.total_milliseconds.round(1)} build_ms=#{build.total_milliseconds.round(1)} walk_ms=#{walk.total_milliseconds.round(1)}"

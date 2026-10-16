@@ -49,7 +49,7 @@ class Node
   end
 end
 
-N = (ARGV[0]? || "50000000").to_i
+N   = (ARGV[0]? || "50000000").to_i
 ARM = {{ flag?(:gc_none) ? "gcry" : "boehm" }}
 
 def trial(label, &block : -> UInt64)
@@ -65,7 +65,7 @@ def trial(label, &block : -> UInt64)
 end
 
 key = uninitialized LibC::ProbeKeyT
-LibC.pthread_key_create(pointerof(key), ->(p : Void*) {})
+LibC.pthread_key_create(pointerof(key), ->(p : Void*) { })
 LibC.pthread_setspecific(key, Pointer(Void).new(0x1234_u64))
 Probe.cache_write(0x1234_u128)
 Probe.plain_write(0x1234_u128)
