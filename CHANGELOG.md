@@ -82,6 +82,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without prefetches. The mark stack's high-water mark was unchanged on all
   four (`bench/log/linux/2026-10-15-mark-cost/`).
 
+- **Parallel markers pop 1 024 entries at a time, into mapped buffers.**
+  Each marker, the master included, took up to 256 entries per pop into an
+  array on its own stack; it now takes up to 1 024 (`MARK_POP_BATCH`) into
+  a buffer mapped with its push buffer, under the same lock and the same
+  busy count. The master's array sat in the collector's frame:
+  `run_collection_body` is 1 536 bytes smaller (0xce8 → 0x6e8), and the
+  block addresses it held no longer stay below the mutator's stack pointer
+  for the next collection's scan. ns per marked object pooled over three
+  sessions of 7 interleaved runs, Primes / JsonParsePure / JsonGenerate:
+  four workers −20% / −12% / −20% on 4 CPUs and −3% / −14% / −20% on 12;
+  two workers −1% / −3% / −14%, only JsonGenerate beyond noise. Σ mark at
+  four workers on 4 CPUs −22% / −13% / −17%; wall within noise. Batches of
+  64 were slower than 256 everywhere and 512 to 4 096 no better than
+  1 024; the helpers' share of the work did not move. `Heap#destroy` now
+  unmaps the markers' buffers, which outlived the heap; the
+  `maps the markers' batch buffers and unmaps them on destroy` example in
+  `spec/mt_spec.cr` fails without that
+  (`bench/log/linux/2026-10-16-parallel-mark-batch/`).
+
 - **The `execve` argv reopen applies only before Crystal 1.22.0.** 1.22.0
   allocates the NULL terminator `execve` needs itself
   (crystal-lang/crystal#17184), so on it and later

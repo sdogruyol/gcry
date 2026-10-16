@@ -3999,25 +3999,33 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       code. Code placement or data alignment, open; `GCRY_REALLOC_IN_PLACE=0`
       does not recover it (`bench/log/windows/2026-10-15-0.36-native/`).
 - [ ] **Per-collection mark cost on a large pointer heap (2026-10-03,
-      refreshed 2026-10-15).** With one marker gcry's Σ mark is now 0.37×
+      refreshed 2026-10-16).** With one marker gcry's Σ mark is now 0.37×
       Boehm's single marker on Primes, 0.47× on JsonParsePure, 0.62× on
       JsonGenerate and 0.23× on Binarytrees, but gcry collects about half as
       often on the first three: per collection it is 0.70×, 0.91× and 1.17×
       (`bench/log/linux/2026-10-15-mark-cost/`; Boehm's figure includes its
       root scan, and no per-byte comparison was taken). 0.37.0 drains the
       serial mark stack in batches of 1 024 instead of a 16-entry ring: ns
-      per marked object −11% to −23% with one marker. Parallel mark is on by
-      default (`docs/DEFAULT-GC-READINESS.md` M1): `min(2, CPUs − 1)`
+      per marked object −11% to −23% with one marker. Its parallel markers
+      pop 1 024 entries at a time into mapped buffers instead of 256 on
+      their stacks. ns per marked object, Primes / JsonParsePure /
+      JsonGenerate: four workers −20% / −12% / −20% on 4 CPUs and
+      −3% / −14% / −20% on 12 (where four is the default); two (the default
+      on 3–7 CPUs) −1% / −3% / −14%, only JsonGenerate beyond noise
+      (`bench/log/linux/2026-10-16-parallel-mark-batch/`). Parallel mark is
+      on by default (`docs/DEFAULT-GC-READINESS.md` M1): `min(2, CPUs − 1)`
       workers up to 7 CPUs, then `CPUs / 4 + 1`, at most 8, serial under a
-      32 MiB live floor; with two workers it is 1.3–1.55× the serial drain
-      per marked object on these heaps. What is left, from the 2026-10-15
-      profile of the inline candidate path: the wait for the mark and `occ`
-      words (13–29% of it, two lines per fresh mark where Boehm reads one
-      mark byte), the chunk header (8–16%), the ordinal arithmetic (13–16%)
-      and branch recovery (11–15%). Measured, not taken: a parallel pop batch
-      of 1 024 (−7% to −14% per object with two workers), which needs the
-      master's batch off the collector's stack first, and the size class in
-      each radix entry to skip the header (inside the spread). History:
+      32 MiB live floor; per marked object two workers are now 1.54–1.59×
+      faster than the serial drain on these heaps, four 2.1–2.5×. What is
+      left, from the 2026-10-15 profile of the inline candidate path: the
+      wait for the mark and `occ` words (13–29% of it, two lines per fresh
+      mark where Boehm reads one mark byte), the chunk header (8–16%), the
+      ordinal arithmetic (13–16%) and branch recovery (11–15%). Measured,
+      not taken: the size class in each radix entry to skip the header
+      (inside the spread), and the `occ` and mark words interleaved so the
+      test reads one line (−2% to −7% per object with one marker, mixed
+      with workers, never beyond the spread; every bitmap walker and the
+      four ISAs' sweep kernels would change). History:
       Primes' largest mark was 470 ms against 178 ms for Boehm's one marker
       on 2026-10-03; inline candidate resolution and whole-payload prefetch
       (`bench/log/linux/2026-10-06-mark-cost/`), the parallel-mark
