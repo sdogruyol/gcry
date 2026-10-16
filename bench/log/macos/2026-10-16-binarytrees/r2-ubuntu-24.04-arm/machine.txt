@@ -1,0 +1,3 @@
+4
+Model name:                              Neoverse-N2
+4096
