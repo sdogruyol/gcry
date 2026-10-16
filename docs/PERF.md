@@ -492,6 +492,9 @@ gh workflow run perf-ab.yml --ref my-branch -f base=origin/master
 #           -f os='["macos-latest","macos-15-intel","windows-latest"]'
 #           -f kemal_trials=15   # Kemal /json and / too (Linux, macOS)
 #           -f boehm=0           # skip the Boehm arm
+#           -f var_env=GCRY_REALLOC_IN_PLACE=0   # the ref's binary under extra env
+#           -f pads="p0 p16 p32 p48" # placement probes, one arm per nop count
+#           -f stats=3           # heap counters at exit, 3 runs per bench of base and var
 ```
 
 Each job prints a table of speed (whole-process wall) as % of Boehm and peak
@@ -502,13 +505,40 @@ timed section, which leaves out crystal-metric's setup. Peak memory is GNU
 `time`'s `%M` on Linux (a child of the Python driver would inherit its ~20 MiB
 high-water mark through `exec`), `ru_maxrss` on macOS and `PeakWorkingSetSize`
 on Windows (not RSS: recommitted pages count again); the summary states the
-method's floor. Raw runs are the `perf-ab-<os>` artifact. Only `src/` comes
-from `base`, so a release is measured by dispatching on a branch whose `src/`
-is that release, with the older tag as `base`. The same script runs anywhere,
-Git Bash on Windows included: `AB_BASE=HEAD~1 bench/runner_ab/ab.sh`. Results
-it produced are in `bench/log/linux/2026-10-03-mark-prefilter/` and, for
-0.36.0 against 0.35.0 on macOS and Windows,
-`bench/log/{macos,windows}/2026-10-15-0.36-native/`.
+method's floor. Raw runs are the `perf-ab-<os>` artifact. Each run also
+records its user and kernel CPU time and its page faults (`GetProcessTimes`
+and `PageFaultCount` on Windows, `wait4` rusage elsewhere), and a per-arm
+table lists them. Only `src/` comes from `base`, so a release is measured
+by dispatching on a branch whose `src/` is that release, with the older tag
+as `base`. The same script runs anywhere, Git Bash on Windows included:
+`AB_BASE=HEAD~1 bench/runner_ab/ab.sh`. Results it produced are in
+`bench/log/linux/2026-10-03-mark-prefilter/` and, for 0.36.0 against 0.35.0
+on macOS and Windows, `bench/log/{macos,windows}/2026-10-15-0.36-native/`.
+
+A difference of a few percent between two builds can come from where the
+code landed rather than from what it does, and `pads` tests that on the
+runner itself. Each count adds one arm: the ref's source built with that
+many bytes of nops in a never-inlined function called once. Code emitted
+after the pad moves by it and nothing else changes.
+
+- `N` (arm `padN`) calls the pad first in `main.cr`. That moves the
+  benchmarks and the stdlib code they are first to reach, but not gcry,
+  whose allocation paths are emitted while the prelude is compiled.
+- `pN` (arm `prepadN`) calls it from a prelude that requires the stock one
+  after it. That moves everything, the collector included.
+
+The spread of the pad arms is how far placement alone moves a bench on that
+runner, and a gap inside it isn't a collector cost. `syms/<binary>.txt` in
+the artifact gives every function's address (`nm` on POSIX, the link map on
+Windows), and crystal's `--cross-compile --target x86_64-pc-windows-msvc`
+object reproduces a Windows runner's layout exactly.
+
+`stats` builds `bench/runner_ab/gc_counters.cr` for `base` and `var`. It
+prints the default heap's counters at exit (collections, pauses, in-place
+grows, large reservations, mapped and unmapped bytes) into
+`gc-counters.txt`. Windows Revcomp's 0.36.0 drop was settled this way: it
+is the placement of gcry's own `Heap#malloc_atomic`
+(`bench/log/windows/2026-10-16-revcomp-attribution/`).
 
 ## How to record (Linux)
 

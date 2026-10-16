@@ -196,8 +196,9 @@ object's cache-line phase costs nothing measurable.
 - **The difference between them is not a collector cost.** It sits within
   the ±3% that code placement alone produces on this host.
 
-Out of scope: Windows, whose timed-section regression the [Unreleased]
-CHANGELOG records as open, and macOS. Neither was measured here.
+Out of scope: Windows and macOS, neither measured here. Windows' larger
+timed-section regression turned out to be placement too, of gcry's
+`Heap#malloc_atomic` (`../../windows/2026-10-16-revcomp-attribution/`).
 
 ## Files
 

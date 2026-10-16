@@ -109,13 +109,18 @@ scrubbing dead stack. Conservative root scans include that red zone.
     exceptions are JsonParsePure 1.08× and Knuckeotide 1.67×, a 52 MiB
     process at the threshold floor and warm budget. Kemal was at 1.14× in
     the VM.
-  - **Known regressions in 0.36.0.** Revcomp's timed section is 7.7% slower
-    than 0.35.0 (whole-process wall +3.4%). A commit-by-commit A/B puts the
-    step at the large back-link commit but moves ±12% between builds that
-    share Revcomp's code, so it reads as code placement or alignment; the
-    cause is open. Primes is 2.8% slower, with 22% more mark time at the
-    same collection count: in-place growth moves where collections fall in
-    a bench whose live set keeps growing (both in the FINDINGS above).
+  - **Slower rows in 0.36.0, neither a collector cost.** Revcomp's timed
+    section is 7.7% slower than 0.35.0 (whole-process wall +3.4%). That is
+    code placement: v0.36.0's own source rebuilt with nops ahead of its code
+    runs Revcomp as fast as 0.35.0 in three of ten placements and 11–13%
+    slower in the rest, with the same collector counters. The code whose
+    offset decides it is gcry's `Heap#malloc_atomic`, so any change ahead of
+    it in the binary can move Revcomp ±10% on these runners; the
+    release-0.37.0 tip happens to land fast
+    (`bench/log/windows/2026-10-16-revcomp-attribution/`). Primes is 2.8%
+    slower, with 22% more mark time at the same collection count: in-place
+    growth moves where collections fall in a bench whose live set keeps
+    growing (`bench/log/windows/2026-10-15-0.36-native/`).
   - **`err` rows.** Several crystal-metric benches print `err` on Windows
     under Boehm too, with the same value in every arm, so the A/B compares
     identical work.

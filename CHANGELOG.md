@@ -30,7 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ab.sh` runs under Git Bash. `kemal_trials` adds Kemal `/json` and `/`
   under `wrk` (Linux, macOS), and `var_env` a fourth arm, the ref's binary
   under extra environment, to attribute a change to one default. Each run
-  also records its collections and the bytes each one scanned.
+  also records its collections and the bytes each one scanned, its user and
+  kernel CPU time and page faults (`GetProcessTimes` and `PageFaultCount`
+  on Windows). `pads` adds placement probes: the ref's source rebuilt with N
+  bytes of nops ahead of the benchmarks' code (`16`) or of all of it,
+  gcry's included (`p16`, through a prelude that requires the stock one),
+  each binary's symbol table or link map going into the artifact. `stats`
+  adds the heap's counters at exit for `base` and `var`
+  (`bench/runner_ab/gc_counters.cr`).
 
 - **0.36.0 measured natively on macOS and Windows.** GitHub runners, Boehm,
   0.35.0 and 0.36.0, 15 interleaved reps
@@ -48,9 +55,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is scanned at later points (Σ scanned 509 → 602 MiB on Windows at 8
   collections; on Intel, Linux and another arm64 runner the same shift
   drops a collection instead and Primes runs faster). Windows Revcomp's
-  timed section is +7.7%: a commit-by-commit A/B puts the step at the
-  large back-link commit but swings ±12% between builds that share
-  Revcomp's code, so the cause, code placement or data alignment, is open.
+  timed section is +7.7%: code placement, below.
+
+- **Windows Revcomp's 0.36.0 drop is code placement of gcry's allocation
+  path.** Nine `Perf A/B` runs on `windows-latest`, 15 reps each. On an
+  EPYC 7763, v0.36.0's own source rebuilt with 0–2 096 bytes of nops ahead
+  of all its code runs Revcomp's timed section in 1.254–1.270 s in three of
+  ten placements, as fast as 0.35.0 or faster, and 1.409–1.476 s in the
+  other seven. Two sessions sorted the builds identically, and v0.36.0 as
+  shipped is a slow one. 0.35.0 spans 1.280–1.489 s the same way. The
+  collector does the same work in every build (22 collections, 14 in-place
+  grows, 15 large reservations, 7–13 ms of total pause). 0.36.0 takes 11%
+  fewer page faults than 0.35.0 at the same kernel time and unmaps less, so
+  the Windows large-chunk path costs nothing. Large objects started at
+  0.35.0's offset change nothing (−0.4%). Cross-compiling each build here
+  reproduces the runner's layout exactly. Of the functions on Revcomp's
+  timed path, only gcry's `Heap#malloc_atomic` and `Heap#allocate` have an
+  offset mod 64 consistent with all 61 builds timed on three CPU models.
+  That reads the commit-by-commit A/B: the back-link commit moved
+  `malloc_atomic` from 16 to 48 mod 64. The same rule predicted the
+  release-0.37.0 tip's probes before they ran, 5 of 5 on two CPUs. The tip
+  is 7.5–13.1% faster than v0.36.0 on Revcomp for the same reason, so that
+  gain isn't banked either. Nothing in gcry changes
+  (`bench/log/windows/2026-10-16-revcomp-attribution/`).
 
 - **Revcomp's drop from 0.35.0 to 0.36.0 on Linux (95% → 92% of Boehm)
   is code placement, now with counts.** perf has no counters on the QEMU

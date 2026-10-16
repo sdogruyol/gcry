@@ -3989,15 +3989,24 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       reps: 78% at 1.78× Boehm's 39 MiB peak, 80% on 0.35.0; Intel
       `macos-15-intel` 91%, Windows x86_64 94% at 0.94×
       (`bench/log/{macos,windows}/2026-10-15-0.36-native/`).
-- [ ] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
-      (2026-10-15).** Whole-process wall +3.4%; macOS shows none of it.
-      Against each commit between the releases (12 reps each), the last
-      fast build is `b1cdc0ed`, so the step is `49788b15` (large back-link,
-      large objects 64 bytes into their mapping); but `0a0e3165`, which adds
-      a `Heap` field and a branch to the counters, is as slow as 0.36.0 and
-      the next commit fast again: ±12% between builds that share Revcomp's
-      code. Code placement or data alignment, open; `GCRY_REALLOC_IN_PLACE=0`
-      does not recover it (`bench/log/windows/2026-10-15-0.36-native/`).
+- [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
+      (2026-10-15) — code placement of gcry's allocation path
+      (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.
+      Against each commit between the releases (12 reps each), the step
+      looked like `49788b15` (large back-link), but `0a0e3165` was as slow
+      and the next commit fast again. On an EPYC 7763, v0.36.0's own source
+      rebuilt with nops ahead of all its code runs the timed section in
+      1.254–1.270 s in three of ten placements, as fast as 0.35.0 or
+      faster, and 1.409–1.476 s in the other seven; 0.35.0 spans
+      1.280–1.489 s the same way. Counters, faults and kernel time show no
+      extra work. Of the timed path's functions, only `Heap#malloc_atomic`
+      and `Heap#allocate` have an offset mod 64 consistent with all 61
+      builds timed on three CPU models: `49788b15` moved `malloc_atomic`
+      from 16 to 48, and the rule predicted the 0.37.0 tip's probes 5 of 5.
+      Large objects at 0.35.0's offset: −0.4%. No fix in gcry; making
+      `malloc_atomic` placement-insensitive would need function or loop
+      alignment control Crystal doesn't expose
+      (`bench/log/windows/2026-10-16-revcomp-attribution/`).
 - [ ] **Per-collection mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-16).** With one marker gcry's Σ mark is now 0.37×
       Boehm's single marker on Primes, 0.47× on JsonParsePure, 0.62× on

@@ -63,8 +63,8 @@ Run [38723935225](https://github.com/sdogruyol/gcry/actions/runs/38723935225)
   VM; its IQR is [90, 105].
 - **Revcomp's timed section regressed beyond the spread: +7.7% [+7.1, +10.0]**
   (whole-process wall +3.4%, since in-place growth speeds the setup that
-  builds its input). See below: the step falls on the back-link commit, but
-  not monotonically, and the cause is open.
+  builds its input). The cause is code placement of gcry's allocation path,
+  not collector work (below, and `../2026-10-16-revcomp-attribution/`).
 - **Primes: +2.8% wall [+0.4, +4.5]**, with Σ mark +22% at the same 8
   collections. In-place growth on the same binary accounts for the mark;
   below.
@@ -132,11 +132,28 @@ The last fast build is `b1cdc0ed`, so the step to 0.36.0 is `49788b15`. But
 already as slow as 0.36.0, and the next commit is fast again: the timed
 section moves ±12% between builds whose Revcomp-relevant code is the same.
 That is the signature of code placement or data alignment, not of the
-back-link's per-free store [INFERENCE]. `GCRY_REALLOC_IN_PLACE=0` does not
+back-link's per-free store. `GCRY_REALLOC_IN_PLACE=0` does not
 recover it (timed 1.459 s against 1.447 s for 0.36.0 and 1.290 s for 0.35.0,
 run 38731269921). macOS arm64 shows none of it (−0.7% wall in the main run).
 Linux saw the same shape smaller (`../../linux/2026-10-14-0.36-integration-ab/`:
-Revcomp −3 points, Brainfuck swinging 5% between builds). Cause: **open**.
+Revcomp −3 points, Brainfuck swinging 5% between builds).
+
+**Cause: code placement** (`../2026-10-16-revcomp-attribution/`). On an EPYC
+7763, v0.36.0's own source rebuilt with nops ahead of all its code runs
+Revcomp's timed section in 1.254–1.270 s in three of ten placements, as fast
+as 0.35.0 or faster, and in 1.409–1.476 s in the other seven. 0.35.0 spans
+1.280–1.489 s the same way. The collector's counters are the same in every
+build, and 0.36.0 takes 11% fewer faults at the same kernel time. The code
+whose offset mod 64 decides it is gcry's `Heap#malloc_atomic` (or
+`Heap#allocate` behind it): of the functions on Revcomp's timed path, only
+these two are consistent with all 61 builds timed on three CPU models. The
+same rule predicted the 0.37.0 tip's placement probes, 5 of 5 on two CPUs.
+In this table, `49788b15` moved `malloc_atomic` from 16 to 48 mod 64 and the
+step to `0a0e3165` from 16 to 32. Large objects started at 0.35.0's offset
+change nothing (−0.4%). The 95% cell and the +7.7% stay as measured. The
+six commit runs above were on EPYC 7763 (`123069c3`, `0a0e3165`, `f2f25ea2`,
+`135495f5`) and 9V74 (`bfe05bd3`, `b1cdc0ed`) runners, not the main run's
+9V45.
 
 ## Against the VM (2026-10-06)
 

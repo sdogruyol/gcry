@@ -11,7 +11,9 @@
 # unless AB_BOEHM=0, `boehm` (the same crystal-metric built without
 # `-Dgc_none`, i.e. stock Crystal), so cells read as % of Boehm like the
 # README's tables. Only `src/` differs between `base` and `var`: the bench and
-# this script come from the checkout.
+# this script come from the checkout. Optional: AB_VAR_ENV (`var` under extra
+# environment), AB_PADS (placement probes of `var`), AB_STATS (heap counters
+# of `base` and `var`) and AB_KEMAL_TRIALS; each is described where it's used.
 #
 # Runs on Linux, macOS and Windows (Git Bash; the native `crystal.exe` gets
 # Windows paths, and memory is PeakWorkingSetSize — see ab.py). Raw runs and
