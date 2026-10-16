@@ -1,0 +1,154 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 16c4287c..cdda2253 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -1055,6 +1055,7 @@ module Gcry
+       return true if capacity == pool.value.capacity
+       bytes = capacity.to_u64 * 8
+       memory = Gcry.os_map(bytes)
++      Gcry.probe_name(memory, bytes, "gcry-bitmap-pool") unless Gcry.mmap_failed?(memory)
+       return false if Gcry.mmap_failed?(memory)
+       unless pool.value.addresses.null?
+         Gcry.os_unmap(pool.value.addresses.as(Void*), pool.value.capacity.to_u64 * 8)
+diff --git a/src/gcry/chunk_radix.cr b/src/gcry/chunk_radix.cr
+index 39bbfc5b..850a11c3 100644
+--- a/src/gcry/chunk_radix.cr
++++ b/src/gcry/chunk_radix.cr
+@@ -309,6 +309,7 @@ module Gcry
+     # multi-MiB reservation cheap.
+     private def radix_map_zeroed(bytes : UInt64) : Void*
+       ptr = Gcry.os_map(bytes)
++      Gcry.probe_name(ptr, bytes, "gcry-radix") unless Gcry.mmap_failed?(ptr)
+       return Pointer(Void).null if Gcry.mmap_failed?(ptr)
+       # See the cost note above: one touched entry otherwise faults a whole
+       # 2 MiB huge page and the table's RSS stops tracking the live heap.
+diff --git a/src/gcry/heap.cr b/src/gcry/heap.cr
+index 8c837acc..deecced6 100644
+--- a/src/gcry/heap.cr
++++ b/src/gcry/heap.cr
+@@ -967,6 +967,7 @@ module Gcry
+     # maps without room instead.
+     private def reserve_large_mapping(extent : UInt64, mapped : UInt64) : Void*
+       at = Gcry.os_reserve(extent, mapped)
++      Gcry.probe_name(at, extent, "gcry-large") unless at.null?
+       if Gcry.mmap_failed?(at)
+         @large_reserve_failures &+= 1
+         return Pointer(Void).null
+@@ -3010,6 +3011,7 @@ module Gcry
+         if dst.null?
+           extent = 0_u64
+           dst = Gcry.os_map(mapped)
++          Gcry.probe_name(dst, mapped, "gcry-large") unless Gcry.mmap_failed?(dst)
+         end
+         @recycled_extent = extent
+         moved, dst_kept = Gcry.mmap_failed?(dst) ? {false, false} : Gcry.os_move(old.as(Void*), kept, dst, mapped)
+@@ -3672,6 +3674,9 @@ module Gcry
+                           at : Void* = Pointer(Void).null) : ChunkHeader*
+       ptr = at.null? ? mmap_anonymous(bytes) : at
+       return Pointer(ChunkHeader).null if Gcry.mmap_failed?(ptr)
++      if at.null?
++        Gcry.probe_name(ptr, bytes, size_class == UInt32::MAX ? "gcry-large" : "gcry-small")
++      end
+ 
+       # Linux: disable THP on GC-managed mmaps. THP can inflate RSS by
+       # rounding 128 KiB chunks up to 2 MiB huge pages — madvise on a
+diff --git a/src/gcry/mark.cr b/src/gcry/mark.cr
+index 30d6a3cf..3df675fd 100644
+--- a/src/gcry/mark.cr
++++ b/src/gcry/mark.cr
+@@ -43,6 +43,7 @@ module Gcry
+     def batch_buffer : Void**
+       if @batch.null?
+         ptr = Gcry.os_map(BATCH_ENTRIES.to_u64 * sizeof(Void*))
++        Gcry.probe_name(ptr, BATCH_ENTRIES.to_u64 * sizeof(Void*), "gcry-mark-batch") unless Gcry.mmap_failed?(ptr)
+         @batch = ptr.as(Void**) unless Gcry.mmap_failed?(ptr)
+       end
+       @batch
+@@ -112,6 +113,7 @@ module Gcry
+ 
+     private def grow(bytes : UInt64) : Nil
+       ptr = Gcry.os_map(bytes)
++      Gcry.probe_name(ptr, bytes, "gcry-mark-stack") unless Gcry.mmap_failed?(ptr)
+       raise OutOfMemoryError.new("mark stack mmap failed") if Gcry.mmap_failed?(ptr)
+ 
+       new_capacity = (bytes // sizeof(Void*)).to_i32
+diff --git a/src/gcry/oom_reserve.cr b/src/gcry/oom_reserve.cr
+index a48a0ade..96bc08b3 100644
+--- a/src/gcry/oom_reserve.cr
++++ b/src/gcry/oom_reserve.cr
+@@ -77,6 +77,7 @@ module Gcry
+       bytes -= bytes % @small_chunk_bytes
+       ptr = mmap_anonymous(bytes)
+       return if Gcry.mmap_failed?(ptr)
++      Gcry.probe_name(ptr, bytes, "gcry-oom-reserve")
+       set = alloc_cursor_set
+       if set.null?
+         Gcry.os_unmap(ptr, bytes)
+diff --git a/src/gcry/os_memory.cr b/src/gcry/os_memory.cr
+index fac756e9..5d6f4ea1 100644
+--- a/src/gcry/os_memory.cr
++++ b/src/gcry/os_memory.cr
+@@ -26,6 +26,15 @@ require "./platform/os"
+ {% end %}
+ 
+ module Gcry
++  # PROBE (not for merge): name an anonymous mapping in /proc/<pid>/smaps.
++  lib LibProbe
++    fun prctl(option : Int32, arg2 : UInt64, arg3 : UInt64, arg4 : UInt64, arg5 : UInt64) : Int32
++  end
++
++  def self.probe_name(ptr : Void*, bytes : UInt64, name : String) : Nil
++    LibProbe.prctl(0x53564d41, 0_u64, ptr.address, bytes, name.to_unsafe.address)
++  end
++
+   # A literal, so it is initialised statically: the first `os_map` runs inside
+   # `GC.init`, before `once`-guarded initialisers can run (see `mmap_failed?`).
+   @@os_mapped_bytes = 0_u64
+diff --git a/src/gcry/parallel_mark.cr b/src/gcry/parallel_mark.cr
+index c022beac..d080bd36 100644
+--- a/src/gcry/parallel_mark.cr
++++ b/src/gcry/parallel_mark.cr
+@@ -419,6 +419,7 @@ module Gcry
+       push_bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
+       batch_bytes = MARK_POP_BATCH.to_u64 * sizeof(Void*).to_u64
+       ptr = Gcry.os_map(push_bytes &+ batch_bytes)
++      Gcry.probe_name(ptr, push_bytes &+ batch_bytes, "gcry-pmark-shard") unless Gcry.mmap_failed?(ptr)
+       return false if Gcry.mmap_failed?(ptr)
+       shard[SHARD_BATCH] = ptr.address &+ push_bytes
+       shard[SHARD_BASE] = ptr.address
+diff --git a/src/gcry/platform/linux_roots.cr b/src/gcry/platform/linux_roots.cr
+index 3c56f0b2..c880d40f 100644
+--- a/src/gcry/platform/linux_roots.cr
++++ b/src/gcry/platform/linux_roots.cr
+@@ -554,6 +554,7 @@ module Gcry
+       if @@objects_addr == 0
+         bytes = MAX_OBJECTS.to_u64 * sizeof(LoadedObject)
+         ptr = Gcry.os_map(bytes)
++        Gcry.probe_name(ptr, bytes, "gcry-loaded-objects") unless Gcry.mmap_failed?(ptr)
+         if Gcry.mmap_failed?(ptr)
+           @@static_root_overflow &+= 1
+           return
+diff --git a/src/gcry/segv_report.cr b/src/gcry/segv_report.cr
+index 71d31e97..d8f4c9a8 100644
+--- a/src/gcry/segv_report.cr
++++ b/src/gcry/segv_report.cr
+@@ -144,6 +144,7 @@ module Gcry
+       end
+       if @@alt_stack.null?
+         memory = Gcry.os_map(REPORT_STACK_BYTES.to_u64)
++        Gcry.probe_name(memory, REPORT_STACK_BYTES.to_u64, "gcry-segv-altstack") unless Gcry.mmap_failed?(memory)
+         return false if Gcry.mmap_failed?(memory)
+         @@alt_stack = memory.as(UInt8*)
+       end
+diff --git a/src/gcry/thread_birth_root.cr b/src/gcry/thread_birth_root.cr
+index 28bd89b8..2f075863 100644
+--- a/src/gcry/thread_birth_root.cr
++++ b/src/gcry/thread_birth_root.cr
+@@ -795,6 +795,7 @@ module Gcry
+     # A zeroed segment from the OS, or 0 when the mapping failed.
+     private def self.map_segment : UInt64
+       ptr = Gcry.os_map(segment_bytes)
++      Gcry.probe_name(ptr, segment_bytes, "gcry-thread-birth") unless Gcry.mmap_failed?(ptr)
+       Gcry.mmap_failed?(ptr) ? 0_u64 : ptr.address
+     end
+ 
