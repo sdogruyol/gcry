@@ -1,0 +1,25 @@
+6 builds, 1362 functions in all, mod 64: 309 consistent, 309 of them with agreeing pairs
+functions on Revcomp's timed path:
+  consistent clash=  0 agree=  2 *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  consistent clash=  0 agree=  2 *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  consistent clash=  0 agree=  2 *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  consistent clash=  0 agree=  2 *String#size:Int32
+  excluded   clash=  1 agree=  1 *IO::Memory#write<Slice(UInt8)>:Nil
+  excluded   clash=  1 agree=  1 *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  excluded   clash=  1 agree=  1 *Revcomp#revcomp<String>:Nil
+  excluded   clash=  1 agree=  1 *String#chomp:String
+  excluded   clash=  1 agree=  1 *String#tr<String, String>:String
+  excluded   clash=  1 agree=  1 GC_malloc_atomic
+  excluded   clash=  2 agree=  1 *Gcry::Heap#allocate<UInt64, Bool, Bool, Bool, Bool>:Pointer(Void)
+
+consistent in every set so far (/home/naruto/playground/.scratch/WindowsRevcomp/consistent.txt): 10
+      *Char#printable?:Bool
+      *Fiber::ExecutionContext::ThreadPool@Object#inspect:String
+      *GC::realloc_impl<Pointer(Void), UInt64>:Pointer(Void)
+  HOT *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+      *Gcry::Heap#malloc<UInt64>:Pointer(Void)
+  HOT *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+      *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil
+      *Gcry::Heap::new:Gcry::Heap
+      *String#inspect<String::Builder>:Nil
+      *Unicode::whitespace?<Char>:Bool
