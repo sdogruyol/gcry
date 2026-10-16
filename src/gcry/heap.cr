@@ -287,6 +287,13 @@ module Gcry
     @chunk_publisher = 0_u64
     # Listed-and-unindexed chunks `audit_chunk_list` excused as in flight.
     getter chunk_list_publishing_excused : UInt64 = 0_u64
+    # Research only: called by `map_chunk` under `@chunk_list_lock`, between
+    # reading the list head and storing the new one — on whatever thread is
+    # mapping, so it must not allocate. A hook that parks its thread there
+    # until a stop has come and gone puts the stop's sweep in front of a
+    # prepend it froze half-done, every time
+    # (`process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`).
+    property chunk_publish_hook : Proc(Nil)? = nil
     @post_stw_mutex = uninitialized Gcry::OS::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
@@ -3775,6 +3782,12 @@ module Gcry
         # and stops losing. Free beside an mmap.
         @chunks_mapped &+= 1
         head = @chunks
+        # Research only (`chunk_publish_hook`): a thread parked between its
+        # head read and its head store, which is where a stop that freezes it
+        # leaves the list mid-prepend.
+        if hook = @chunk_publish_hook
+          hook.call
+        end
         chunk.value = ChunkHeader.new(head, bytes, size_class, flags, data_offset, bitmap_words)
         # The new head has nothing in front of it, and the old head now has
         # this chunk (`ChunkHeader.large_prev`). A recycled or split mapping
@@ -3789,7 +3802,12 @@ module Gcry
         # Release store: the in-STW sweep and `each_chunk` walk this list
         # unlocked, and a mutator can be suspended between these two stores.
         # Frozen in SOURCE order the new chunk is merely invisible (it holds
-        # nothing live yet); but nothing except this fence stops the compiler
+        # nothing live yet), and *head* is still the head when it resumes:
+        # the in-stop sweep does not relink the list while this lock is held
+        # (`Heap#sweep`, `stop_sweep_relinks_declined`). Before it checked,
+        # the store below put `@chunks` in front of a head the rebuild had
+        # made the tail, and every other chunk fell off the list. But
+        # nothing except this fence stops the compiler
         # sinking the header init past the head publish, and a frozen thread
         # between the REORDERED stores hands the walker an uninitialised
         # `next`. Same discipline as `index_insert_locked`'s count store.
@@ -3932,9 +3950,11 @@ module Gcry
     # `@index_lock`, and *target* is on the list.
     #
     # Every list store keeps the link, so it names the wrong chunk only where
-    # the list's own `next`s are already in question: a writer frozen inside
-    # its locked section while an in-STW sweep relinks (`Heap#sweep`), or the
+    # the list's own `next`s are already in question: the
     # `GCRY_TRIM_UNLOCKED` control unlinking under the after-world rebuild.
+    # (A writer frozen inside its locked section while an in-STW sweep
+    # relinked was the other until the sweep stopped relinking under one,
+    # `Heap#sweep`.)
     # The chunk a wrong link names may since have been unmapped, so the link
     # is checked before it is followed. The chunk must be in the index:
     # nothing unmaps an indexed chunk without taking it out under
@@ -4111,6 +4131,28 @@ module Gcry
       else
         @chunk_list_lock.sync { yield }
       end
+    end
+
+    # `@chunk_list_lock` if it is free, without waiting: true when this call
+    # took it. For the in-stop sweep, which may not wait on a lock a frozen
+    # thread can hold and must not relink the list under one (`Heap#sweep`).
+    # `Crystal::SpinLock` has no try, so this is its `lock` without the spin,
+    # on its one field; the macro check turns a stdlib change to that layout
+    # into a compile error rather than a store into the wrong word. Under
+    # `-Dwithout_mt` off Windows the lock compiles to nothing and no other
+    # thread can hold it.
+    private def try_lock_chunk_list : Bool
+      {% if flag?(:without_mt) && !flag?(:win32) %}
+        true
+      {% else %}
+        {% ivars = Crystal::SpinLock.instance_vars %}
+        {% unless ivars.size == 1 && ivars[0].name.stringify == "m" && ivars[0].type.stringify == "Atomic(Int32)" %}
+          {% raise "Heap#try_lock_chunk_list: Crystal::SpinLock is no longer one `@m : Atomic(Int32)`" %}
+        {% end %}
+        _, ok = Atomic::Ops.cmpxchg(pointerof(@chunk_list_lock).as(Int32*), 0, 1,
+          LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::SequentiallyConsistent)
+        ok
+      {% end %}
     end
 
     private def each_chunk_for_allocation(& : ChunkHeader* ->) : Nil

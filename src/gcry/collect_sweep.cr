@@ -19,6 +19,14 @@ module Gcry
     # `release_refused_forced` has one: `release_refused_occupied` is the
     # number that says a block was live in a released chunk.
     getter release_refused_cursor : UInt64 = 0_u64
+    # In-stop sweeps that left `@chunks` as they found it because a thread the
+    # stop froze held `@chunk_list_lock` (`Heap#sweep`). Each one also kept
+    # its empty chunks mapped rather than queue them for release.
+    getter stop_sweep_relinks_declined : UInt64 = 0_u64
+    # Research only: false relinks in the stop whoever holds the list lock,
+    # the code before 2026-10-17 — the control arm of
+    # `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`.
+    property stop_sweep_list_lock : Bool = true
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -102,6 +110,32 @@ module Gcry
       relink_walk = after_world && (!relink_once || relink)
       with_alloc_lock { @relink_walk = true } if relink_walk
 
+      # In the stop, the rebuild writes every `next` on the list without
+      # `@chunk_list_lock` — it cannot wait on it, a frozen thread may hold it
+      # (the 0.21.1 hang, below) — and reverses the list as it goes. A thread
+      # the stop froze *inside* that lock is mid-surgery on the list as it was
+      # and finishes after `start_world` against the list as it is: a
+      # `map_chunk` that had read the head stores `@chunks = new` with
+      # `new.next` the old head, which the rebuild made the **tail** — every
+      # other chunk leaves the list and stays in the index, never swept again,
+      # its blocks counted live and its free capacity counted free for good.
+      # An unlink stores `pred.next = target.next` from links the rebuild
+      # rewrote. Measured with `GCRY_DISABLE_LAZY_SWEEP=1` and two mutators
+      # (`claim_stress`, 2 s): 14 of 40 runs lost 31-252 chunks (0 of 30
+      # after), and every loss
+      # followed a stop that froze a mapper between its head read and its
+      # store (3 of 3 such stops lost; 0 of 9 stops that froze a list
+      # *reader* did). The lock is free unless such a thread holds it, so it
+      # is taken here without waiting and held until the rebuild is
+      # published. When a frozen thread holds it the list is left exactly as
+      # it is — no relink, and no empty chunk dropped from it for release —
+      # and the frozen writer's links stay true; the empties stay mapped
+      # until a later major finds the lock free.
+      # `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`.
+      stop_list_held = !after_world && @stop_sweep_list_lock && try_lock_chunk_list
+      list_relinkable = after_world || stop_list_held || !@stop_sweep_list_lock
+      @stop_sweep_relinks_declined &+= 1 unless list_relinkable
+
       # Kept for the store at the end: whatever `map_chunk` prepends while this
       # walks lands in front of it (`publish_relinked_chunks`).
       walk_head = @chunks
@@ -125,7 +159,7 @@ module Gcry
             @size_class_chunk_count += 1
             note_chunk_fill(0_u64, 1_u64)
           end
-          if relink_once ? relink : sweep_relink_now?(after_world)
+          if list_relinkable && (relink_once ? relink : sweep_relink_now?(after_world))
             walk_head_pred = chunk if kept == walk_head
             ChunkHeader.link(chunk, kept)
             kept = chunk
@@ -269,7 +303,7 @@ module Gcry
                       else
                         rebuild_mask |= bit
                       end
-                    elsif munmap_empty_chunks_this_collect?
+                    elsif munmap_empty_chunks_this_collect? && list_relinkable
                       # Queue for post-STW flush. Parallel lazy disables this
                       # path (`sweep_after_world?`); EC1 lazy allows it and
                       # rebuilds `@chunks` under `@block_other_heap`.
@@ -384,7 +418,7 @@ module Gcry
         unless drop
           # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
           # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
-          if relink_once ? relink : sweep_relink_now?(after_world)
+          if list_relinkable && (relink_once ? relink : sweep_relink_now?(after_world))
             walk_head_pred = chunk if kept == walk_head
             ChunkHeader.link(chunk, kept)
             kept = chunk
@@ -393,7 +427,7 @@ module Gcry
         chunk = nxt
       end
 
-      if relink_once ? relink : sweep_relink_now?(after_world)
+      if list_relinkable && (relink_once ? relink : sweep_relink_now?(after_world))
         # Only on the `after_world` path, and the distinction is not a detail.
         #
         # The first version took the lock unconditionally, on the argument that
@@ -412,14 +446,14 @@ module Gcry
         # what the gate exists to catch — the same 40 children crash 5 times on
         # the page-release corruption once they are allowed to finish.
         #
-        # In the stopped world the store needs no lock and has nothing to
+        # In the stopped world the store needs no wait and has nothing to
         # splice: the threads that write `@chunks` are suspended, so the head
-        # is still `walk_head`. (A writer frozen *inside* its locked section is
-        # covered by neither path: it finishes its surgery after `start_world`,
-        # against the list stored here.) The lock is for the `after_world`
-        # path, where they are running, and a prepend that lands during the
-        # walk is in front of `walk_head` — which a plain `@chunks = kept`
-        # took off the list for good.
+        # is still `walk_head`, and none of them was frozen inside its locked
+        # section, or the walk would not be relinking (`stop_list_held`
+        # above). The lock is for the `after_world` path, where they are
+        # running, and a prepend that lands during the walk is in front of
+        # `walk_head` — which a plain `@chunks = kept` took off the list for
+        # good.
         if after_world
           # Research only (`Heap#post_stw_hook`): a mutator on the collector's
           # own thread, between the walk and the store — the window a prepend
@@ -433,6 +467,10 @@ module Gcry
           @chunks = kept
           ChunkHeader.set_back_link(kept, Pointer(ChunkHeader).null)
         end
+      end
+      if stop_list_held
+        @chunk_list_lock.unlock
+        stop_list_held = false
       end
       with_alloc_lock { @relink_walk = false } if relink_walk
 
@@ -484,6 +522,10 @@ module Gcry
           update_heap_bounds_after_unmap
         end
       end
+    ensure
+      # A raise between the try-lock and the store must not leave the list
+      # locked behind a restarted world: every `map_chunk` would spin on it.
+      @chunk_list_lock.unlock if stop_list_held
     end
 
     # Publish the after-world rebuild without losing what was prepended while
