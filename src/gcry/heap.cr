@@ -1512,7 +1512,7 @@ module Gcry
         @fast_miss_size &+= 1
         return Pointer(Void).null
       end
-      set = cursor_set_cached
+      set = cursor_set_hit
       if set.null? || set.value.no_hit_path != 0_u8
         @fast_miss_no_set &+= 1
         return Pointer(Void).null

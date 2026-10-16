@@ -24,6 +24,29 @@ module Gcry
         true
       end
 
+      # `pthread_getspecific(key)` without the call: libpthread's own
+      # `_pthread_getspecific_direct`. The thread's TSD array is at
+      # TPIDRRO_EL0 on arm64, whose low three bits may carry the CPU number
+      # and are masked, and at the %gs base on x86_64; a key is its index.
+      # The asm is volatile so that two reads in one function are never
+      # merged across a fiber switch that moved the fiber to another thread
+      # (the reason Crystal reads `@[ThreadLocal]` through a `NoInline`
+      # call). `Heap#cursor_set_under_lock` checks it against
+      # `pthread_getspecific` before the hit path uses it.
+      @[AlwaysInline]
+      def self.tsd_read(key : UInt64) : Void*
+        {% if flag?(:aarch64) %}
+          base = 0_u64
+          asm("mrs $0, tpidrro_el0" : "=r"(base) :: : "volatile")
+          # Wrapping arithmetic: `Pointer#[]` would check `key` for Int64.
+          Pointer(Pointer(Void)).new((base & ~7_u64) &+ key &* 8_u64).value
+        {% else %}
+          value = 0_u64
+          asm("movq %gs:(,$1,8), $0" : "=r"(value) : "r"(key) : : "volatile")
+          Pointer(Void).new(value)
+        {% end %}
+      end
+
       def self.clear_soft_dirty : Bool
         false
       end

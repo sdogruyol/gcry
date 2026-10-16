@@ -11,6 +11,7 @@ lib LibC
   fun pthread_key_create(key : GcryPthreadKeyT*, destructor : Void* -> Void) : Int
   fun pthread_key_delete(key : GcryPthreadKeyT) : Int
   fun pthread_setspecific(key : GcryPthreadKeyT, value : Void*) : Int
+  fun pthread_getspecific(key : GcryPthreadKeyT) : Void*
 end
 {% end %}
 
@@ -178,6 +179,18 @@ module Gcry
     @[ThreadLocal]
     @@tls_cursor_exiting : UInt8 = 0_u8
 
+    # Darwin: the hit path reads this thread's set from the heap's pthread
+    # key slot (`cursor_set_hit`), 1 + the key once the slot has been checked
+    # against `pthread_getspecific`, 0 before that or after `destroy`. One
+    # word, written under `@cursor_lock` and read without it: a hit path that
+    # sees it nonzero sees the whole key, never a key written apart from its
+    # "ready" flag. `@cursor_tsd_refused` is set if the check ever fails, and
+    # the hit path then stays on the Crystal thread-local for good.
+    {% if flag?(:darwin) %}
+      @cursor_tsd_slot = 0_u64
+      @cursor_tsd_refused = false
+    {% end %}
+
     getter bitmap_locked_allocations : UInt64 = 0_u64
     getter bitmap_alloc_refills : UInt64 = 0_u64
     # Hit-path census. `cursor_word_advances` counts the cursor moving to the
@@ -245,6 +258,54 @@ module Gcry
       Pointer(CursorSet).new(cached.to_u64!)
     end
 
+    # This thread's set for the hit path (`fast_alloc`) alone; everything
+    # else asks `cursor_set_cached`, whose answer includes the fallback set.
+    #
+    # On Darwin a `@[ThreadLocal]` read is two out-of-line calls: Crystal's
+    # `NoInline` accessor for the variable, then the variable's TLV thunk,
+    # `tlv_get_addr`. On the hit path that was 8% of Binarytrees' run time on
+    # an M1 (macos-latest: 81% → 87% of Boehm without it) and 11% on an
+    # Intel Mac, where the thunk saves every register
+    # (`bench/log/macos/2026-10-16-binarytrees/`). The heap's pthread key
+    # already holds the same set — `cursor_set_under_lock` stores it there
+    # when the thread claims it, for the exit destructor — so the hit path
+    # reads the key's slot directly, as `pthread_getspecific` itself does in
+    # libpthread (`_pthread_getspecific_direct`): one register read and one
+    # load (`Platform.tsd_read`). Go's runtime reads its `g` the same way on
+    # darwin/arm64.
+    #
+    # Why the slot is never stale: a slot holds a set only from the owner's
+    # claim, and only its owner reads it. Darwin clears a thread's slot
+    # before it runs the key's exit destructor, and `pthread_key_delete`
+    # (`destroy`) clears it in every thread, so a recycled key starts empty
+    # (libpthread `pthread_tsd.c`). Sets are freed only by `destroy`; a set is
+    # retired and reused only after its owner's destructor ran, or in a fork
+    # child for threads that no longer exist. A null slot — before the
+    # claim, on the fallback set, on an exiting thread — sends the caller to
+    # the locked path, which asks `cursor_set` and is always right.
+    {% if flag?(:darwin) %}
+      @[AlwaysInline]
+      protected def cursor_set_hit : CursorSet*
+        slot = @cursor_tsd_slot
+        return cursor_set_cached if slot == 0_u64
+        Gcry::Platform.tsd_read(slot &- 1).as(CursorSet*)
+      end
+    {% else %}
+      @[AlwaysInline]
+      protected def cursor_set_hit : CursorSet*
+        cursor_set_cached
+      end
+    {% end %}
+
+    # Whether the hit path reads the key slot (`cursor_set_hit`), for specs.
+    def cursor_set_from_tsd? : Bool
+      {% if flag?(:darwin) %}
+        @cursor_tsd_slot != 0_u64
+      {% else %}
+        false
+      {% end %}
+    end
+
     # Never raises and never allocates from the managed heap: it runs under
     # the class lock, and a `raise` there allocates its exception on the same
     # lock — the self-deadlock that hung `process_spec` at the 65th thread.
@@ -295,6 +356,18 @@ module Gcry
       free.value.state = CursorSet::STATE_LIVE
       free.value.no_hit_path = sysmon ? 1_u8 : 0_u8
       Gcry::OS.pthread_setspecific(@cursor_key, free.as(Void*))
+      {% if flag?(:darwin) %}
+        # The direct read is libpthread's layout, not its API: check it
+        # against the API on every claim, and on any disagreement keep the
+        # hit path on the Crystal thread-local for the life of the heap.
+        if Gcry::Platform.tsd_read(@cursor_key.to_u64) == free.as(Void*) &&
+           Gcry::OS.pthread_getspecific(@cursor_key) == free.as(Void*)
+          @cursor_tsd_slot = @cursor_key.to_u64 &+ 1 unless @cursor_tsd_refused
+        else
+          @cursor_tsd_refused = true
+          @cursor_tsd_slot = 0_u64
+        end
+      {% end %}
       free
     end
 
@@ -364,6 +437,11 @@ module Gcry
       end
       # Drop this thread's cache before freeing its sets.
       @@tls_cursor_cache = 0_u128 unless cursor_set_cached.null?
+      {% if flag?(:darwin) %}
+        # Off before the key goes: `pthread_key_delete` empties the slot in
+        # every thread, and nothing may read it by number after that.
+        @cursor_tsd_slot = 0_u64
+      {% end %}
       if @cursor_key_ok
         Gcry::OS.pthread_key_delete(@cursor_key)
         @cursor_key_ok = false
