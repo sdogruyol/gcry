@@ -37,13 +37,19 @@ module Gcry
     # allocates is what the sweep keeps. `GCRY_THRESHOLD` pins a fixed
     # threshold and disables this; `GCRY_THRESHOLD_FACTOR` is the factor in
     # percent (default 100).
-    # Darwin's floor is the 16 MiB its fixed default used to be: the
-    # dense-live growth window under fat apps was measured there, not at 8.
-    {% if flag?(:darwin) %}
-      ADAPTIVE_THRESHOLD_MIN = 16777216_u64 # 16 MiB
-    {% else %}
-      ADAPTIVE_THRESHOLD_MIN = 8388608_u64 # 8 MiB
-    {% end %}
+    # The floor is 8 MiB on every platform. Darwin's was 16 MiB, the fixed
+    # default it used to have, and with pacing on top of it (up to 3×) small
+    # processes peaked at about twice Boehm's resident size there:
+    # Binarytrees 1.79× (M1) / 1.87× (Intel), Kemal 1.94× / 2.20×, past the
+    # 1.1× budget. At 8 MiB (two runs on both macOS runners, 15 and 20
+    # interleaved reps) Binarytrees is 0.96× / 0.98×, Knuckeotide's peak
+    # −8% / −9%, Kemal 1.69× / 1.56× at the same req/s, and the only wall
+    # cost that repeats is Intel Binarytrees, +2–4% (still 125% of Boehm).
+    # Pacing lifts the threshold off the floor wherever collections are
+    # expensive, so the collection-bound rows do not move. Turning pacing off
+    # instead (100) met the budget on Binarytrees but cost Primes 22–27%
+    # (`bench/log/macos/2026-10-16-binarytrees/`, RSS budget).
+    ADAPTIVE_THRESHOLD_MIN =  8388608_u64 # 8 MiB
     ADAPTIVE_THRESHOLD_MAX = 67108864_u64 # 64 MiB
     property adaptive_threshold : Bool = false
     property adaptive_threshold_pct : UInt64 = 100_u64

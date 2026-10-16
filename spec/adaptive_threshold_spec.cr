@@ -9,13 +9,21 @@ end
 
 # The process heap sizes itself from the live set after each major
 # collection (`Heap#adapt_after_sweep`): next threshold = live × factor,
-# floored at 8 MiB (Darwin 16 MiB) and capped at 64 MiB or a third of the
+# floored at 8 MiB on every platform and capped at 64 MiB or a third of the
 # bytes the mark scanned × factor, whichever is larger; the warm-retention
 # budget follows the same live × factor, capped by the threshold, fixed or
 # not. A library heap keeps its fixed threshold unless opted in.
 describe "adaptive collection threshold" do
   min = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
   max = Gcry::Heap::ADAPTIVE_THRESHOLD_MAX
+
+  # Darwin's floor was 16 MiB; with pacing on top it put small processes at
+  # about twice Boehm's peak there (Binarytrees 1.79×, Kemal 1.94× on an M1),
+  # past the 1.1× RSS budget. One floor for every platform
+  # (`bench/log/macos/2026-10-16-binarytrees/`).
+  it "floors at 8 MiB on every platform, Darwin included" do
+    min.should eq(8_u64 * 1024 * 1024)
+  end
 
   it "is off by default and leaves a fixed threshold alone" do
     heap = Gcry::Heap.new
@@ -46,7 +54,7 @@ describe "adaptive collection threshold" do
     begin
       heap.adaptive_threshold = true
       # ~20 MiB live in one size class — above the floor on every platform
-      # (Darwin's is 16 MiB) — rooted explicitly so the stack is not needed.
+      # — rooted explicitly so the stack is not needed.
       # No auto-major while filling: the roots array lives in the spec's own
       # heap, so an automatic collection would not see it.
       heap.gc_threshold = UInt64::MAX
