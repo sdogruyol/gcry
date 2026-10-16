@@ -1,6 +1,8 @@
-# crystal-metric's Binarytrees (n = 18), with the time spent building trees
-# and walking them (`check`) taken apart, and gcry's allocator counters at
-# the end. Build it next to a `lib/gcry/src` like crystal-metric (probe.sh).
+# crystal-metric's Binarytrees (n = 18, the same trees in the same order),
+# with the time spent building trees and walking them (`check`) taken apart,
+# and the collector's counters at the end. Three clock reads per tree (1.4 M
+# trees) are in `total_ms` and not in either part. Build it next to a
+# `lib/gcry/src` like crystal-metric (probe.sh).
 {% if flag?(:gc_none) %}
   require "gcry"
 {% end %}
@@ -48,15 +50,17 @@ build += Time.instant - t
 min_depth.step(to: max_depth, by: 2) do |depth|
   iterations = 1 << (max_depth - depth + min_depth)
   1.upto(iterations) do |i|
-    t = Time.instant
-    tree = TreeNode.create(i, depth)
-    t2 = Time.instant
-    result += tree.check
-    walk += Time.instant - t2
-    build += t2 - t
+    {i, -i}.each do |item|
+      t = Time.instant
+      tree = TreeNode.create(item, depth)
+      t2 = Time.instant
+      result += tree.check
+      walk += Time.instant - t2
+      build += t2 - t
+    end
   end
 end
-result += long_lived_tree.check
+long_lived_tree.check
 total = Time.instant - t_all
 arm = {{ flag?(:gc_none) ? "gcry" : "boehm" }}
 line = "BT #{arm} result=#{result} total_ms=#{total.total_milliseconds.round(1)} build_ms=#{build.total_milliseconds.round(1)} walk_ms=#{walk.total_milliseconds.round(1)}"
