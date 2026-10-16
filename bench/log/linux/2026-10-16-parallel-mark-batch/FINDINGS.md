@@ -268,8 +268,20 @@ mismatch: actual=1 reported=2` line the 2026-10-15 gates already had.
 38893200996 (dispatched with the 5 h soak by default) was cancelled for
 38896277806 (`soak_duration=0`); `perf-ab.yml` run 38896881806 compares it
 with `4fcee559` on `ubuntu-24.04-arm`, `macos-latest` and `windows-latest`
-(10 reps, no Boehm arm). Both were still running when this log was
-committed; their results are not in it.
+(10 reps, no Boehm arm). Run 38896277806 succeeded: 41 jobs, none failed.
+Run 38896881806 succeeded. Its `AB` medians for `50b1315e` against `4fcee559`
+(each runner's default workers; Σ mark, then the timed section):
+
+| runner | Primes | JsonParsePure | JsonGenerate | Binarytrees |
+|---|---|---|---|---|
+| `ubuntu-24.04-arm` | mark −23.0%, time −3.7% | −9.8%, −2.2% | −12.3%, +0.6% | +13.8%, +0.8% |
+| `macos-latest` | −16.8%, +1.5% | −5.1%, −3.3% | −14.5%, +0.5% | −18.0%, −3.5% |
+| `windows-latest` | −5.7%, −1.1% | −3.0%, +0.6% | −11.5%, −0.4% | −18.8%, −0.9% |
+
+Binarytrees' live set is under the 32 MiB floor, so it should mark serially
+there too [INFERENCE: not checked on the runners], which makes its ±14–19%
+that runner's noise on a 33–45 ms Σ; Windows' cells are medians of paired
+ratios with wide interquartile ranges (Primes Σ mark −7.7% to +10.9%).
 
 ## Files
 
