@@ -1,0 +1,24 @@
+claim_stress seconds=5.0 workers=4 seed=1 ring=512 lazy_sweep=false headers=false
+gcry: GC.free ignored 0x7eab3c5a1830: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+  ops=2084810 allocs=2084810 local_frees=690124 remote_frees=689067 drops=689880 checks=6939995
+  collections=1519 claims_released=3350996 sets_pinned=3313 hits=19360957 locked=334057
+  refused_frees=42878 live_objects_drift=1121 free_bytes_drift=-40769856 unlisted_chunks=0
+  FAIL: 42878 legitimate free(s) refused as double frees
+  FAIL: walk against counter drifted (live 1121, free bytes -40769856)
+Invalid memory access (signal 11) at address 0x7eab9b33dffd
+[0x57ba1e1ae9fa] *Exception::CallStack::print_backtrace:Nil +122 in bin/claim_stress_r2
+[0x57ba1e18b4e6] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +278 in bin/claim_stress_r2
+[0x7eab40245cb0] ?? +139273980632240 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7eab403b3650] ?? +139273982129744 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x57ba1e1a5d72] *Pointer(UInt8) +114 in bin/claim_stress_r2
+[0x57ba1e1a5cf1] *Pointer(UInt8) +17 in bin/claim_stress_r2
+[0x57ba1e1a5cd1] *Pointer(UInt8) +17 in bin/claim_stress_r2
+[0x57ba1e193800] *String::interpolation<String, String>:String +1184 in bin/claim_stress_r2
+[0x57ba1e17ebaf] __crystal_main +8847 in bin/claim_stress_r2
+[0x57ba1e2dc7d6] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +6 in bin/claim_stress_r2
+[0x57ba1e2dc71f] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +63 in bin/claim_stress_r2
+[0x57ba1e18696b] main +27 in bin/claim_stress_r2
+[0x7eab4022a601] ?? +139273980519937 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7eab4022a718] __libc_start_main +136 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x57ba1e17c855] _start +37 in bin/claim_stress_r2
+[0x0] ???

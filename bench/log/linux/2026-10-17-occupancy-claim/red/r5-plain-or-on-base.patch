@@ -1,0 +1,15 @@
+diff --git a/src/gcry/heap.cr b/src/gcry/heap.cr
+index 8c837acc..fbca3b1a 100644
+--- a/src/gcry/heap.cr
++++ b/src/gcry/heap.cr
+@@ -1569,8 +1569,8 @@ module Gcry
+       # leaves them out of line: Crystal's macOS release (LLVM 15) called
+       # `UInt64#<<(Int64)` here on every allocation, 3% of Binarytrees on an
+       # M1 (`bench/log/macos/2026-10-16-binarytrees/`).
+-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, s.value.occ_word, 1_u64.unsafe_shl(bit),
+-        LLVM::AtomicOrdering::Monotonic, false)
++      ow = s.value.occ_word
++      ow.value = ow.value | 1_u64.unsafe_shl(bit)
+       set.value.bytes_local = local
+       set.value.objects_local = set.value.objects_local &+ 1_u64
+       if (pfw = @alloc_pfw) > 0

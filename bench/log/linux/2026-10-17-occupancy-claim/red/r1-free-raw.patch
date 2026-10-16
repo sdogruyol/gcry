@@ -1,0 +1,13 @@
+diff --git a/src/gcry/heap.cr b/src/gcry/heap.cr
+index 21088e2a..776b4f02 100644
+--- a/src/gcry/heap.cr
++++ b/src/gcry/heap.cr
+@@ -1293,7 +1293,7 @@ module Gcry
+         # change hands while `block_allocated_exact?` reads it.
+         freed = false
+         with_freelist_lock(class_index, false) do
+-          if block_allocated_exact?(chunk, header)
++          if block_allocated?(chunk, header)
+             # `push_size_class_free` poisons on the freelist path and this path
+             # does not go through it, so the knob would be armed and inert.
+             poison_payload(pointer, payload.to_u64) if @poison_freed

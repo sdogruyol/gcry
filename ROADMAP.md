@@ -4031,11 +4031,22 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       Crystal's macOS release (−3.1%). Together (run 38898225086, 15 reps):
       macos-latest 79% → 88% of Boehm (wall −12.6%), macos-15-intel 92% →
       131% (−28.7%), Linux and Windows unchanged. Left on the M1: 12 points,
-      most of it in `Heap#malloc`'s own body. On Linux the gap is the atomic occupancy OR
+      most of it in `Heap#malloc`'s own body. On Linux the gap was the atomic occupancy OR
       (a plain OR: x86 88% → 103%, arm64 77% → 92%; LSE recovers 7 points
       on arm64), which costs nothing measurable on the M1. Peak RSS 1.79×
       was pacing on the 16 MiB Darwin floor; the floor is 8 MiB there too
-      now (0.96×; RSS budget item above).
+      now (0.96×; RSS budget item above). **2026-10-17, not shipped:** a
+      branch takes the OR off the hit path (a cursor claims a word's free
+      blocks in `occ` with one atomic and hands them out with no shared
+      write; branch `occupancy-plain-or`,
+      `bench/log/linux/2026-10-17-occupancy-claim/`). Binarytrees arm 83% →
+      99% of Boehm, x86 86% → 93%, no row slower; but Knuckeotide's peak
+      rises 21–37% on Linux (a large buffer outlives base's, 28% fewer
+      collections) and M1 JsonGenerate's 0.64× → 0.88×, so it waits on
+      that attribution. Also found there: with the sweep in the stop and
+      several mutators (`GCRY_DISABLE_LAZY_SWEEP=1`), chunks fall off
+      `@chunks` while staying indexed, on the base tree too (5 of 10 runs
+      of `claim_stress`).
 - [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
       (2026-10-15) — code placement of gcry's allocation path
       (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.
