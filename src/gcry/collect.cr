@@ -102,6 +102,28 @@ module Gcry
       @size_class_live_bytes &+ large
     end
 
+    # Atomic bytes count a quarter in the live set that sizes the next
+    # threshold and the warm budget, as in Boehm's `min_bytes_allocd`
+    # (`scan_size = 2 × composite + atomic / 4 + roots`). Live × factor is
+    # there so a major's cost is paid for by a live-sized stretch of
+    # allocation, and an atomic block costs a major next to nothing: it is
+    # marked, never read. Counted whole, a server's I/O buffers set its
+    # schedule. Kemal `/json` holds three 32 KiB `IO::Buffered` buffers per
+    # connection, about 9.4 MB mapped against 0.2 MB of small live objects;
+    # 87% of their pages were never written, yet they put the threshold and
+    # the warm budget at 9.6 MB instead of the floor
+    # (`bench/log/linux/2026-10-17-kemal-rss/`).
+    ATOMIC_LIVE_DIVISOR = 4_u64
+
+    # The live set as it sizes the schedule: what the mark read (every
+    # reached pointerful object, `mark_scanned_bytes`) plus a quarter of the
+    # rest, which is atomic.
+    private def schedule_live_bytes : UInt64
+      live = live_bytes_after_sweep
+      scanned = @mark_scanned_bytes < live ? @mark_scanned_bytes : live
+      scanned &+ (live &- scanned) // ATOMIC_LIVE_DIVISOR
+    end
+
     # Set for the span of an explicit `collect(release_warm: true)`; read by
     # the sweep's retention decision.
     @release_warm_this_collect = false
@@ -174,7 +196,7 @@ module Gcry
     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
     private def adapt_after_sweep(cycle_started_ns : UInt64 = 0_u64) : Nil
       return unless @adaptive_threshold || @warm_retain_follows_live
-      want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
+      want = schedule_live_bytes &* @adaptive_threshold_pct // 100_u64
       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
       if @adaptive_threshold
         cap = adaptive_threshold_cap
