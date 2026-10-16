@@ -204,6 +204,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Monitor's stack is scanned below its birth on Linux.** The Monitor
+  (SYSMON) is never signal-suspended, so a single-mutator stop had no SP
+  for it and scanned from its main fiber's `@context.stack_top`, which a
+  fiber that has never switched holds from `Fiber#initialize`: a few hundred
+  bytes above the loop the Monitor has run since. Crystal 1.22's
+  `Thread.sleep` keeps its `GC.syscall` closure (48 bytes) in those frames;
+  a collection during the sleep swept it, a mutator was handed the block,
+  and the Monitor wrote `ret`/`errno` into bytes 32-39 on waking. That
+  zeroed `bench/pattern_fuzz.cr`'s fifth phase entry: SIGSEGV at 0x20 in
+  `compute_phase_stats` under `GCRY_BITMAP_ALLOC=0` (CI run 38966033174).
+  A thread with no recorded SP is now scanned from its stack's low-water
+  mark. Interleaved on the same CI runners: 31 of 400 runs before (30 of 40
+  on an EPYC 9V74), 0 of 400 after.
+  `process_spec/regression/76_monitor_deep_frame_root_spec.cr` holds a
+  block in a Monitor frame 64 KiB deep across a collection: swept before,
+  in both layouts and on 1.21 and 1.22, kept after.
+
 - **Every gcry process carried 472 KiB of resident memory for research
   knobs that are off.** The unmap guard's and release ledger's record ring,
   the release quarantine and the release map were `StaticArray`s inside

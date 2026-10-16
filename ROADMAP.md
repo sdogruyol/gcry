@@ -61,6 +61,13 @@ v0.25.0 and still does: the main-thread TLS roots and the Darwin `__mcontext`
 reader closed here on 2026-09-15, and the Darwin CI asymmetry below is what
 kept finding the rest.
 
+- [x] **The Monitor's frames below its birth were not roots on Linux — fixed
+      2026-10-17 (0.37.0).** Never signalled, the Monitor had no SP, and the
+      single-mutator scan started at its never-switched main fiber's
+      `stack_top`. Crystal 1.22's `Thread.sleep` closure lived below it, was
+      swept mid-sleep and written after, which crashed `pattern_fuzz` under
+      the freelist (31 of 400 CI runs before, 0 of 400 after). Scanned from
+      the low-water mark now; `process_spec/regression/76`.
 - [x] **Thread-local storage was not a root, on the main thread — fixed
       2026-09-12.** A block whose only reference was a main-thread
       `@[ThreadLocal]` was **collected**. `dl_iterate_phdr` gives the
