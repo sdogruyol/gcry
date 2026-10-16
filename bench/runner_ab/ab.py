@@ -20,6 +20,12 @@ Per run it records:
   Each run's floor is measured by running `true` the same way (`floor` in
   runs.json and the summary);
 - `mark`: Σ `mark_ns` from `GCRY_TRACE` (gcry arms only; Boehm writes none);
+- `utime`, `stime`: user and kernel CPU seconds of the process (Windows
+  `GetProcessTimes`, POSIX `wait4` rusage; on Linux that of GNU `time`, which
+  includes the bench it waited for), and `faults`: page faults (Windows
+  `PageFaultCount`, soft ones included; POSIX minor + major). Equal faults and
+  kernel time with more user time is the mutator's code running slower, not
+  the OS doing more for it;
 - `result`: `ok`, or the value an `err` line printed. Several benches print
   `err` on Crystal >= 1.21 under every collector, Boehm included; a bench whose
   results differ between arms is flagged in the summary, since the arms then
@@ -49,6 +55,12 @@ if WIN:
 
     psapi = ctypes.WinDLL("psapi", use_last_error=True)
     psapi.GetProcessMemoryInfo.argtypes = [wt.HANDLE, ctypes.POINTER(PMC), wt.DWORD]
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetProcessTimes.argtypes = [wt.HANDLE] + [ctypes.POINTER(wt.FILETIME)] * 4
+
+    def filetime_s(ft):
+        # FILETIME durations count 100 ns intervals.
+        return ((ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 1e7
 
 
 def run_one(exe, bench, trace, args=None, extra_env=None):
@@ -73,16 +85,22 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
             wall = time.perf_counter() - t0
             # The handle stays open after exit, so the counters stay readable
             # and nothing has to be polled while the bench runs.
+            handle = wt.HANDLE(int(p._handle))
             pmc = PMC()
             pmc.cb = ctypes.sizeof(PMC)
-            if not psapi.GetProcessMemoryInfo(wt.HANDLE(int(p._handle)), ctypes.byref(pmc), pmc.cb):
+            if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
                 raise OSError(ctypes.get_last_error())
-            peak, rc = pmc.PeakWorkingSetSize, p.returncode
+            peak, rc, faults = pmc.PeakWorkingSetSize, p.returncode, pmc.PageFaultCount
+            ft = [wt.FILETIME() for _ in range(4)]  # creation, exit, kernel, user
+            if not kernel32.GetProcessTimes(handle, *(ctypes.byref(x) for x in ft)):
+                raise OSError(ctypes.get_last_error())
+            stime, utime = filetime_s(ft[2]), filetime_s(ft[3])
         else:
             _, status, ru = os.wait4(p.pid, 0)
             wall = time.perf_counter() - t0
             p.returncode = rc = os.waitstatus_to_exitcode(status)
             peak = ru.ru_maxrss * (1 if sys.platform == "darwin" else 1024)
+            utime, stime, faults = ru.ru_utime, ru.ru_stime, ru.ru_minflt + ru.ru_majflt
         out.seek(0)
         text = out.read().decode("utf-8", "replace")
     if hwm:
@@ -103,8 +121,9 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
         # grows scans the sum of its live set at those points, so a change
         # that moves them moves Σ mark without costing anything per byte.
         per_collection = [e.get("scanned_bytes", 0) for e in ends]
-    r = dict(rc=rc, wall=wall, peak=peak, mark=mark, collections=collections, scanned=scanned,
-             scanned_per_collection=per_collection, time=None, result=None)
+    r = dict(rc=rc, wall=wall, peak=peak, utime=utime, stime=stime, faults=faults, mark=mark,
+             collections=collections, scanned=scanned, scanned_per_collection=per_collection,
+             time=None, result=None)
     if m:
         r["time"] = float(m[-1].group(4))
         r["result"] = "ok" if m[-1].group(2) == "ok" else m[-1].group(3).strip()
@@ -153,18 +172,39 @@ def summarize(rows, benches, arms, floor):
             notes.append(f"- {b}: failed runs (arm, rep): {bad}")
     if "base" in arms and "var" in arms:
         lines += ["", "`var` against `base` (paired, per rep):", "",
-                  "| bench | time (timed section) | wall | peak | Σ mark | collections | Σ scanned |",
-                  "|---|---:|---:|---:|---:|---:|---:|"]
+                  "| bench | time (timed section) | wall | user | kernel | faults | peak | Σ mark | collections | Σ scanned |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
         for b in benches:
             br, vr = by.get((b, "base"), {}), by.get((b, "var"), {})
             reps = sorted(set(br) & set(vr))
             if not reps:
                 continue
             cells = []
-            for k in ("time", "wall", "peak", "mark", "collections", "scanned"):
-                xs = [vr[i][k] / br[i][k] - 1 for i in reps if vr[i][k] and br[i][k]]
+            for k in ("time", "wall", "utime", "stime", "faults", "peak", "mark", "collections", "scanned"):
+                xs = [vr[i][k] / br[i][k] - 1 for i in reps if vr[i].get(k) and br[i].get(k)]
                 cells.append("n/a" if not xs else "{1:+.1%} [{0:+.1%}, {2:+.1%}]".format(*quart(xs)))
             lines.append(f"| {b} | " + " | ".join(cells) + " |")
+    # Every arm on its own, so placement-probe arms (`pad<N>`) and `var_env`
+    # read side by side; the last column pairs each with `var` per rep.
+    pair = "var" if "var" in arms else ref
+    lines += ["", f"Per arm, medians over reps (last column: timed section against `{pair}`, paired per rep):", "",
+              f"| bench | arm | time | wall | user | kernel | faults | collections | time vs {pair} |",
+              "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
+    for b in benches:
+        pr = by.get((b, pair), {})
+        for a in arms:
+            ar = by.get((b, a), {})
+            if not ar:
+                continue
+
+            def m(k, fmt):
+                xs = [r[k] for r in ar.values() if r.get(k) is not None]
+                return fmt.format(med(xs)) if xs else "n/a"
+
+            xs = [ar[i]["time"] / pr[i]["time"] - 1 for i in sorted(set(ar) & set(pr)) if ar[i]["time"] and pr[i]["time"]]
+            vs = "{1:+.1%} [{0:+.1%}, {2:+.1%}]".format(*quart(xs)) if xs and a != pair else "—"
+            lines.append(f"| {b} | {a} | {m('time', '{:.3f}')} | {m('wall', '{:.3f}')} | {m('utime', '{:.3f}')} | "
+                         f"{m('stime', '{:.3f}')} | {m('faults', '{:.0f}')} | {m('collections', '{:.0f}')} | {vs} |")
     if notes:
         lines += ["", "Notes:"] + notes
     return "\n".join(lines) + "\n"
