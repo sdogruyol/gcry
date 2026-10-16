@@ -3951,6 +3951,15 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       100 met it too but cost Primes 22–27%. Knuckeotide is still 1.74× /
       1.81× on macOS (Linux 1.35–1.53×, Windows 1.64–1.67×) and no threshold
       setting moves it under, so its peak is not the collection schedule.
+      **Kemal, 2026-10-17** (`bench/log/linux/2026-10-17-kemal-rss/`): its
+      1.31× (Linux) is the threshold, set at 9.6 MB by mostly unwritten 32 KiB
+      I/O buffers counted whole, plus a 556 KiB `Heap` object resident in
+      every process. Atomic bytes now count a quarter (Kemal 1.38× → 1.27× on
+      the x86 runner, M1 1.67× → 1.37×) and the research tables are mapped
+      only when armed (−472 KiB). A cost floor (down to 4 MiB where a
+      collection costs under 2% of the mutator time) takes Kemal to 1.05× /
+      0.98× locally but costs Linux Binarytrees 2.7–3.3% wall; parked on
+      `kemal-rss-floor` until a lower target is measured.
 - [x] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%

@@ -98,6 +98,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Atomic live bytes count a quarter in the adaptive threshold.** Live ×
+  factor sizes the next threshold and the warm budget; pointer-free bytes
+  (strings, I/O buffers) now enter it at a quarter, as in Boehm's
+  `min_bytes_allocd`, since a major marks them without reading them. Kemal
+  `/json` holds three 32 KiB `IO::Buffered` buffers per connection, 9.4 MB
+  mapped of which 1.2 MB was ever written, against 0.2 MB of small live
+  objects; counted whole they set its threshold at 9.6 MB. Perf A/B run
+  38946440792 (five runners, nine rows, 15 reps, Kemal 15 trials) against
+  `release-0.37.0`: Kemal `/json` peak 1.38× → 1.27× of Boehm (Linux x86),
+  1.19× → 1.08× (arm64), 1.67× → 1.37× (M1), 1.58× → 1.44× (Intel Mac) at
+  the same req/s; Knuckeotide's peak −6 to −13% on four runners (arm64
+  +9% [−3, +13]), RegexDna −7 to −14% on arm64 and Windows. Whole-process
+  wall within its spread on every row and runner except `macos-15-intel`
+  Revcomp +6.1% [+2.9, +11.0] and JsonParsePull +4.9% [+0.7, +10.9], which
+  a second run that includes this change (38951356776, `kemal-rss-floor`) put
+  back inside it (+3.3% [−2.1, +6.1], +0.9% [−2.0, +4.8]). The JSON parse
+  rows collect 15–25% more often and their timed section is +1–5%. Spec: `adaptive_threshold_spec.cr`
+  (`bench/log/linux/2026-10-17-kemal-rss/`).
+
 - **macOS: the adaptive threshold floor is 8 MiB, as on every other
   platform (was 16 MiB).** With pacing on top of it, small processes peaked
   at about twice Boehm's resident size on macOS, past the 1.1× RSS budget.
@@ -167,6 +186,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in 1.22.0.
 
 ### Fixed
+
+- **Every gcry process carried 472 KiB of resident memory for research
+  knobs that are off.** The unmap guard's and release ledger's record ring,
+  the release quarantine and the release map were `StaticArray`s inside
+  `Heap`, and Crystal clears an instance when it allocates one, so all
+  556 KiB of the heap object were resident from boot. They are mapped when
+  `GCRY_UNMAP_GUARD`, `GCRY_RELEASE_LEDGER` or `GCRY_RELEASE_QUARANTINE`
+  arms them; `instance_sizeof(Heap)` is 86 552 bytes (was 569 784). Specs:
+  `research_tables_spec.cr`, `make released-range-report`
+  (`bench/log/linux/2026-10-17-kemal-rss/`).
 
 - **The Windows gates jobs no longer fail after their specs pass.** The
   Makefile targets those jobs run still called `crystal spec`, which deletes
