@@ -965,29 +965,44 @@ module Gcry
     getter? unmap_guard : Bool = false
     getter? release_ledger : Bool = false
 
-    # Arming zeroes the length column, because that column is the read
-    # protocol: `guarded_release_at` skips a slot whose length is zero, which
-    # is how a report walks past a record another thread is still writing.
-    # `uninitialized` gives no such guarantee.
+    # Arming maps the record table (`map_guard_table`) and zeroes its length
+    # column, because that column is the read protocol: `guarded_release_at`
+    # skips a slot whose length is zero, which is how a report walks past a
+    # record another thread is still writing. Re-arming may find old records
+    # there. A table that cannot be mapped leaves the guard off.
     def unmap_guard=(v : Bool) : Bool
-      clear_guard_lengths if v
-      @unmap_guard = v
+      @unmap_guard = v && map_guard_table
     end
 
     # Record every chunk release without holding the address space, so a fault
     # on memory that has since been remapped can still name what used to be
     # there. See the note on `@guard_ring`.
     def release_ledger=(v : Bool) : Bool
-      clear_guard_lengths if v
-      @release_ledger = v
+      @release_ledger = v && map_guard_table
     end
 
-    private def clear_guard_lengths : Nil
+    # Maps the guard's columns and the release map on first use, and clears
+    # the length column. False, with nothing armed, if a mapping fails.
+    private def map_guard_table : Bool
+      return false unless map_release_map
+      if @guard_base.null?
+        n = UNMAP_GUARD_SLOTS.to_u64
+        ptr = Gcry.os_map(n &* GUARD_RECORD_BYTES)
+        return false if Gcry.mmap_failed?(ptr)
+        at = ptr.address
+        @guard_base = Pointer(UInt64).new(at)
+        @guard_len = Pointer(UInt64).new(at &+ n &* 8)
+        @guard_gen = Pointer(UInt64).new(at &+ n &* 16)
+        @guard_tag = Pointer(UInt64).new(at &+ n &* 24)
+        @guard_occ = Pointer(Int32).new(at &+ n &* 32)
+        @guard_kind = Pointer(UInt8).new(at &+ n &* 36)
+      end
       i = 0
       while i < UNMAP_GUARD_SLOTS
         @guard_len[i] = 0_u64
         i += 1
       end
+      true
     end
 
     # Research only: raw-write a line for every large chunk mapped, so a range
@@ -1126,20 +1141,31 @@ module Gcry
     end
 
     UNMAP_GUARD_SLOTS = 8192
+    # Bytes of one record across the columns below: base, len, gen, tag, occ,
+    # kind.
+    GUARD_RECORD_BYTES = 37_u64
 
-    @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
-    @guard_len = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
-    @guard_kind = uninitialized StaticArray(UInt8, UNMAP_GUARD_SLOTS)
-    @guard_gen = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    # The guard's and the ledger's records, and the quarantine and release
+    # map below them, are columns in memory mapped when the knob that uses
+    # them is armed (`map_guard_table`), null until then. They were
+    # `StaticArray`s inside the heap, 472 KiB of a 556 KiB `Heap` that every
+    # process faulted in at boot, since Crystal clears an instance when it
+    # allocates one: half a megabyte of resident memory for research knobs
+    # that are never on by default, 3% of Boehm's whole Kemal process
+    # (`bench/log/linux/2026-10-17-kemal-rss/`).
+    @guard_base = Pointer(UInt64).null
+    @guard_len = Pointer(UInt64).null
+    @guard_kind = Pointer(UInt8).null
+    @guard_gen = Pointer(UInt64).null
     # First eight bytes of the released block's user data, captured while it is
     # still mapped. Under the ledger the range is handed back to the kernel, so
     # by the time a fault reports on it there is nothing left to read — the
     # identity has to be taken at release time or not at all. For a Crystal
     # reference the low four bytes are the type_id.
-    @guard_tag = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    @guard_tag = Pointer(UInt64).null
     # Blocks still allocated in the chunk at release; -1 when the chunk
     # carries no occupancy bitmap. See `guard_occupied`.
-    @guard_occ = uninitialized StaticArray(Int32, UNMAP_GUARD_SLOTS)
+    @guard_occ = Pointer(Int32).null
     # **Atomic, because every writer is a mutator and none of them holds a
     # lock.** `guard_release` runs from `GC.free` → `trim_large_cache` on
     # whichever thread frees, and the old code read this counter twice — once
@@ -1201,13 +1227,29 @@ module Gcry
     # as `munmap` would return them and only the address stays reserved — the
     # cost is address space, not RSS.
     QUARANTINE_SLOTS = 4096
-    @q_base = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
-    @q_len = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
-    @q_gen = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
+    # Base, length and collection columns, mapped when the quarantine is
+    # turned on (see `@guard_base`).
+    @q_base = Pointer(UInt64).null
+    @q_len = Pointer(UInt64).null
+    @q_gen = Pointer(UInt64).null
     @q_head = 0
     @q_count = 0
     # `GCRY_RELEASE_QUARANTINE=<collections>`; 0 disables.
-    property release_quarantine : UInt64 = 0_u64
+    getter release_quarantine : UInt64 = 0_u64
+
+    # Turning it on maps the table; one that cannot be mapped leaves it off.
+    def release_quarantine=(collections : UInt64) : UInt64
+      if collections != 0_u64 && @q_base.null?
+        n = QUARANTINE_SLOTS.to_u64
+        ptr = Gcry.os_map(n &* 24)
+        return @release_quarantine = 0_u64 if Gcry.mmap_failed?(ptr)
+        @q_base = ptr.as(UInt64*)
+        @q_len = @q_base + n
+        @q_gen = @q_len + n
+      end
+      @release_quarantine = collections
+    end
+
     getter quarantined_releases : UInt64 = 0_u64
     getter quarantine_forced_drains : UInt64 = 0_u64
 
@@ -1270,12 +1312,14 @@ module Gcry
     # enough to change the timing of the very race it is looking for.
     # Collisions lose a record; they never invent one.
     RELEASE_MAP_SLOTS = 8192
-    @rel_base = uninitialized StaticArray(UInt64, RELEASE_MAP_SLOTS)
-    @rel_live = uninitialized StaticArray(Bool, RELEASE_MAP_SLOTS)
+    # Mapped with the guard's table, by the same knobs (`map_guard_table`):
+    # nothing else records into it. Zero from the kernel, so a fresh map
+    # needs no clearing.
+    @rel_base = Pointer(UInt64).null
+    @rel_live = Pointer(Bool).null
     # Which path released the base. A double release is only actionable once
     # you know which two paths raced; the pair names the bug.
-    @rel_kind = uninitialized StaticArray(UInt8, RELEASE_MAP_SLOTS)
-    @rel_booted = false
+    @rel_kind = Pointer(UInt8).null
     # Bases released while an earlier release of the same base had not been
     # cancelled by a remap.
     getter release_double : UInt64 = 0_u64
@@ -1287,16 +1331,16 @@ module Gcry
       ((base >> 12) % RELEASE_MAP_SLOTS).to_i32
     end
 
-    private def release_map_boot : Nil
-      return if @rel_booted
-      @rel_booted = true
-      i = 0
-      while i < RELEASE_MAP_SLOTS
-        @rel_base[i] = 0_u64
-        @rel_live[i] = false
-        @rel_kind[i] = 0_u8
-        i += 1
-      end
+    # Maps the release map, once; false if that fails.
+    private def map_release_map : Bool
+      return true unless @rel_base.null?
+      n = RELEASE_MAP_SLOTS.to_u64
+      ptr = Gcry.os_map(n &* 10)
+      return false if Gcry.mmap_failed?(ptr)
+      @rel_live = Pointer(Bool).new(ptr.address &+ n &* 8)
+      @rel_kind = Pointer(UInt8).new(ptr.address &+ n &* 9)
+      @rel_base = ptr.as(UInt64*)
+      true
     end
 
     # Bytes actually handed to the mark as static roots, and the least any
@@ -1350,7 +1394,7 @@ module Gcry
     getter static_scanned_drops : UInt64 = 0_u64
 
     protected def note_release_base(base : UInt64, kind : UInt8 = 0_u8) : Nil
-      release_map_boot
+      return if @rel_base.null?
       i = release_map_slot(base)
       if @rel_live[i] && @rel_base[i] == base
         @release_double &+= 1
@@ -1386,7 +1430,7 @@ module Gcry
     # from ~1 s to ~114 s and the gate read 20 of 20 "failures" that were all
     # timeouts. An instrument that changes the answer is not an instrument.
     protected def released_base_recorded?(base : UInt64) : Bool
-      return false unless @rel_booted
+      return false if @rel_base.null?
       i = release_map_slot(base)
       @rel_live[i] && @rel_base[i] == base
     end
@@ -1394,7 +1438,7 @@ module Gcry
     # The kernel gave this base back, so the release recorded against it is
     # spent. Called from `map_chunk`.
     protected def note_map_base(base : UInt64) : Nil
-      release_map_boot
+      return if @rel_base.null?
       i = release_map_slot(base)
       if @rel_live[i] && @rel_base[i] == base
         @rel_live[i] = false
