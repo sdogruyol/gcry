@@ -197,12 +197,15 @@ All against `base`, 7 interleaved runs (`s1.txt`):
   256-batch run). **Promising, not taken**: the master's pop batch lives in
   `mark_loop_drain`'s frame, inlined into `run_collection_body`, so 8 KiB
   there is the scrub-window problem the serial buffer avoids; it needs the
-  same mapped buffer and its own measurement.
+  same mapped buffer and its own measurement. (Taken on 2026-10-16 with
+  mapped per-marker batches, `../2026-10-16-parallel-mark-batch/`.)
 
 Not attempted, with the attribution that argues for them:
 - Interleaving `occ` and mark words (one line per fresh mark instead of
   two; "after `lock or`" is 13–29% of the inline path). Every bitmap walker
   and the SSE/AVX2/NEON/SVE sweep kernels assume two contiguous arrays.
+  (Measured on 2026-10-16 and not kept: −2% to −7% with one marker, never
+  beyond the spread, `../2026-10-16-parallel-mark-batch/`.)
 - Dropping the `occ` test (Boehm has none): it changes what a stale
   pointer to a free block does (`occ = mark` would resurrect it), which is
   outside "conservative semantics unchanged".

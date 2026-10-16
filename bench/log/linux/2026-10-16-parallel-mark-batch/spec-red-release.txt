@@ -1,0 +1,19 @@
+F
+
+Failures:
+
+  1) Gcry parallel mark knob maps the markers' batch buffers and unmaps them on destroy
+     Failure/Error: heap.mark_shards_mapped.should eq(0)
+
+       Expected: 0
+            got: 2
+
+     # spec/mt_spec.cr:140
+
+Finished in 766 microseconds
+1 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec spec/mt_spec.cr:118 # Gcry parallel mark knob maps the markers' batch buffers and unmaps them on destroy
+exit 1
