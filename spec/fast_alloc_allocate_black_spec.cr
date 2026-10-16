@@ -30,7 +30,8 @@ end
 # world and rescans dirty pages, not stacks, so a white block held only in a
 # frame is reclaimed live. The locked path marks at allocation; the hit
 # path checked the flag once at entry, before the sentinel, and a thread
-# frozen after that check completed its allocation white.
+# frozen after that check completed its allocation white. Since 2026-10-17
+# the word's claim, made inside the same window, is marked whole as well.
 describe "hit-path allocation while marking begins" do
   it "marks the block a cycle started under" do
     heap = Gcry::Heap.new
@@ -52,9 +53,16 @@ describe "hit-path allocation while marking begins" do
       heap.begin_marking_in_hit_path_for_spec.should be_false
       heap.marked_for_spec?(under_marking).should be_true
 
-      # And a block handed out with no cycle running is white, so the mark
-      # above came from the check and not from the chunk's state.
-      heap.marked_for_spec?(heap.malloc(48)).should be_false
+      # A word claimed with no cycle running hands out white blocks, so the
+      # mark above came from the window and not from the chunk's state. (The
+      # rest of the word claimed under marking stays black: the claim marks
+      # the word whole, and the next cycle's clear resets it.)
+      advances = heap.cursor_word_advances
+      white = Pointer(Void).null
+      while heap.cursor_word_advances == advances
+        white = heap.malloc(48)
+      end
+      heap.marked_for_spec?(white).should be_false
     ensure
       heap.destroy
     end

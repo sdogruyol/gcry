@@ -1377,9 +1377,11 @@ module Gcry
       words = ((nblocks + 63) >> 6).to_i32
 
       # Pinned through this stop-the-world: its owner was frozen inside the
-      # unlocked hit path and will store into `occ` here without the class
-      # lock, so the after-world walk leaves the chunk alone (marks stale
-      # until the next stop-the-world zeroes them — `bitmap_settle_cursor_sets`).
+      # unlocked hit path and will hand out blocks here, and claim words of it
+      # (`cursor_claim_word`), without the class lock, so the after-world walk
+      # leaves the chunk alone (marks stale until the next stop-the-world
+      # zeroes them — `bitmap_settle_cursor_sets`). The count leaves the
+      # owner's claim out (`chunk_occupied_count`).
       if !@world_stopped && ChunkHeader.pinned?(chunk)
         occupied = chunk_occupied_count(chunk)
         @sweep_cursor_pinned &+= 1
@@ -1392,6 +1394,20 @@ module Gcry
                     else
                       @kernels.sweep_words(occ, mark, words)
                     end
+
+      # A cursor's claim on this chunk survives the kernel because it is
+      # marked — by the settle for a set pinned in this stop, or when it was
+      # made while a sweep could run (`cursor_claim_word`) — so it is in
+      # `live` and in no part of `freed`. Its blocks hold no objects: take
+      # them back out of `live`, or the live bytes overstate and a chunk whose
+      # only "live" blocks are a claim never reaches the empty-chunk path
+      # below. Exact here: in a stop the owner is frozen; after it this thread
+      # holds the class lock, which a cursor on an unpinned chunk is
+      # allocating under.
+      if ChunkHeader.cursor?(chunk)
+        claimed = chunk_claimed_count(chunk)
+        live = live > claimed ? live - claimed : 0_u64
+      end
 
       # No tail correction, and getting that wrong cost an afternoon: the first
       # version subtracted `(words * 64) - nblocks` from `freed` on the theory
@@ -1480,27 +1496,31 @@ module Gcry
     # SIMD kernel is untouched and remains the shipping path.
     #
     # The whole-word store is kept, and it is not incidental: a per-bit clear
-    # would race a mutator setting a different bit in the same word.
+    # would race a mutator setting other bits in the same word.
     #
     # That sentence says why a per-bit clear is wrong; it does not say why the
     # store is *right*, and read alone it invites the opposite conclusion.
     # `occ[i] = mark[i]` is a read-modify-write of a word the allocator writes
-    # with an atomic OR from a mutator holding no lock — so it looks like it
-    # must erase occupancy published since `mark[i]` was read, which is one
-    # live block per race and a chunk that then reads empty enough to release.
+    # with an atomic OR — a cursor's claim on the word (`cursor_claim_word`) —
+    # from a mutator holding no lock, so it looks like it must erase
+    # occupancy published since `mark[i]` was read, which is up to a word of
+    # blocks per race and a chunk that then reads empty enough to release.
     #
     # It does not, and the argument is three parts, none of which is local to
     # this loop:
     #
     #   * Cursor sets are settled inside the stop (`bitmap_settle_cursor_sets`).
-    #     One frozen mid-allocation keeps its chunks PINNED and this walk skips
-    #     them; an idle one is retired, and its owner must come back through
+    #     One frozen mid-allocation keeps its chunks PINNED, this walk skips
+    #     them, and its claims are marked; an idle one is retired with its
+    #     claims released, and its owner must come back through
     #     `bitmap_alloc_locked` — the class lock this walk also takes.
-    #   * Allocate-black. A block handed out while `@collecting` — which stays
-    #     true through the whole post-STW section, sweep included — carries
-    #     `mark=1`, so it is not in `occ & ~mark` and the store preserves it.
-    #   * A bit in `mark` but not in `occ` cannot exist: marking follows
-    #     occupancy on both allocation paths.
+    #   * Allocate-black. A block handed out, and a word claimed, while
+    #     `@collecting` — which stays true through the whole post-STW section,
+    #     sweep included — carries `mark=1`, so it is not in `occ & ~mark` and
+    #     the store preserves it.
+    #   * A bit in `mark` but not in `occ` is only ever a claim between its
+    #     mark and its OR (`cursor_claim_word` marks first), and the store
+    #     then sets the bit the owner is about to set itself.
     #
     # Measured rather than argued, 2026-09-12: an audit (since removed) asked,
     # per dead word, whether any cursor slot was mid-allocation inside a block
