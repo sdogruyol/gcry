@@ -33,49 +33,15 @@ module Gcry
     # Set when a fault inside the report has already been named, so a third
     # fault cannot turn the report into a loop of its own diagnosis.
     @@second_fault_named = false
-    # Research only: print the alternate-stack margin on the way into and out
-    # of the report (`GCRY_SEGV_REPORT_STACK=1`). A literal, not a constant
-    # reference — a class variable whose initializer names a constant gets a
-    # lazy-init guard that faults when written from `GC.init`.
-    @@stack_probe = false
-
-    def self.probe_stack : Nil
-      @@stack_probe = true
-    end
-
     # Research only (`GCRY_DISABLE_REGION_REPORT=1`): skip the mapping line.
-    # A literal, same reason as `@@stack_probe` — this is read from the
-    # signal handler. The gate's red arm is this skip, not a hand edit of
-    # `report_faulting_region`.
+    # A literal, not a constant reference — a class variable whose initializer
+    # names a constant gets a lazy-init guard that faults when written from
+    # `GC.init`, and this is read from the signal handler. The gate's red arm
+    # is this skip, not a hand edit of `report_faulting_region`.
     @@skip_region = false
 
     def self.skip_region : Nil
       @@skip_region = true
-    end
-
-    # Where this frame sits inside the alternate signal stack, so the report's
-    # own depth is measurable rather than argued about. Signal-safe: one
-    # `sigaltstack` query, static buffer, no allocation.
-    private def self.report_stack_margin(phase : String) : Nil
-      alt = uninitialized LibC::StackT
-      return unless LibC.sigaltstack(Pointer(LibC::StackT).null, pointerof(alt)) == 0
-      base = alt.ss_sp.address.to_u64
-      return if base == 0
-      here = pointerof(alt).address.to_u64
-      buf = uninitialized UInt8[RawOut::LIMIT]
-      len = RawOut.append(buf.to_unsafe, 0, "gcry: report stack — ")
-      len = RawOut.append(buf.to_unsafe, len, phase)
-      len = RawOut.append(buf.to_unsafe, len, ", alt stack 0x")
-      len = RawOut.append_hex(buf.to_unsafe, len, base)
-      len = RawOut.append(buf.to_unsafe, len, " + ")
-      len = RawOut.append_u64(buf.to_unsafe, len, alt.ss_size.to_u64)
-      len = RawOut.append(buf.to_unsafe, len, " B, used ")
-      len = RawOut.append_u64(buf.to_unsafe, len,
-        here > base ? (base &+ alt.ss_size.to_u64) &- here : 0_u64)
-      len = RawOut.append(buf.to_unsafe, len, " B, left ")
-      len = RawOut.append_u64(buf.to_unsafe, len, here > base ? here &- base : 0_u64)
-      len = RawOut.append(buf.to_unsafe, len, " B\n")
-      RawOut.flush(buf.to_unsafe, len)
     end
 
     @@old_segv = uninitialized LibC::Sigaction
@@ -145,8 +111,9 @@ module Gcry
     SA_NODEFER = {% if flag?(:darwin) || flag?(:bsd) %}0x10{% else %}0x40000000{% end %}
 
     # The report's own stack, because Crystal's is not big enough for it and
-    # that is measured, not suspected: `GCRY_SEGV_REPORT_STACK=1` reports an
-    # 8192-byte alternate stack with **3472 bytes already used** when the
+    # that is measured, not suspected: a `sigaltstack` probe on the way into
+    # the report (a research switch, removed in 0.37.0) reported an 8192-byte
+    # alternate stack with **3472 bytes already used** when the
     # handler is entered, leaving 4720 for a report that walks the root set,
     # the heap and every fiber stack, each frame carrying a line buffer of a
     # few hundred bytes — and then asks the same three questions again of the
@@ -206,19 +173,11 @@ module Gcry
     # would mean trusting its flags; this way the kernel dispatches it.
     protected def self.handle(sig : Int32, info : LibC::SiginfoT*, ctx : Void*) : Nil
       unless @@reported
-        # Research only (`GCRY_SEGV_REPORT_STACK=1`): how much alternate signal
-        # stack the report has, and how much of it the report used. The report
-        # is a chain of yielding walks that each carry a line buffer, and this
-        # file already records that adding *one* call frame made
-        # `make poison-holders` fail twice on the x86_64 runner. Whether that is
-        # an overflow or a coincidence is a number, not an argument.
-        report_stack_margin("entering") if @@stack_probe
         @@reported = true
         report(sig, info.null? ? Pointer(Void).null : info.value.si_addr, ctx)
         # After the description of the address, and outside `report`: that has
         # several early returns and the writer is worth having on every one.
         report_writer_frames(ctx)
-        report_stack_margin("leaving") if @@stack_probe
       else
         # A second fault means the report faulted inside itself. With
         # `SA_NODEFER` the handler is re-entered instead of the process being

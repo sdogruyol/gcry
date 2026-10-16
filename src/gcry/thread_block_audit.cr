@@ -163,9 +163,6 @@ module Gcry
       end
     end
 
-    # `GCRY_DYING_GREG_DUMP=1`.
-    property dying_greg_dump : Bool = false
-
     private def report_dying_type_block(addr : UInt64, size : UInt64, watched : UInt32) : Nil
       greg_words = 0_u64
       in_registers = false
@@ -180,38 +177,6 @@ module Gcry
         end
         if greg_words > before
           threads_with_gregs &+= 1
-        end
-      end
-      # `GCRY_DYING_GREG_DUMP=1`: print every captured register word for every
-      # thread. "Not in any register" is a claim about the capture as much as
-      # about the value, and the two have never been told apart here.
-      if @dying_greg_dump
-        Thread.unsafe_each do |thread|
-          dbuf = uninitialized UInt8[480]
-          dlen = 0
-          dlen = RawOut.append(dbuf.to_unsafe, dlen, "gcry:   gregs of thread 0x")
-          dlen = RawOut.append_hex(dbuf.to_unsafe, dlen, thread.to_unsafe.unsafe_as(UInt64))
-          if thread == Thread.current
-            dlen = RawOut.append(dbuf.to_unsafe, dlen, " (the collecting thread)")
-          end
-          if nm = thread.@name
-            dlen = RawOut.append(dbuf.to_unsafe, dlen, " \"")
-            dlen = RawOut.append_bytes(dbuf.to_unsafe, dlen, nm.to_unsafe, nm.bytesize)
-            dlen = RawOut.append(dbuf.to_unsafe, dlen, "\"")
-          else
-            dlen = RawOut.append(dbuf.to_unsafe, dlen, " (unnamed)")
-          end
-          dlen = RawOut.append(dbuf.to_unsafe, dlen, ":")
-          any = false
-          Platform.each_thread_greg(thread.to_unsafe) do |value|
-            any = true
-            if dlen < 400
-              dlen = RawOut.append(dbuf.to_unsafe, dlen, " 0x")
-              dlen = RawOut.append_hex(dbuf.to_unsafe, dlen, value.address)
-            end
-          end
-          dlen = RawOut.append(dbuf.to_unsafe, dlen, any ? "\n" : " (none)\n")
-          RawOut.flush(dbuf.to_unsafe, dlen)
         end
       end
 

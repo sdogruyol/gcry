@@ -1064,10 +1064,6 @@ module GC
     # The off switch for the walk of the resident address space, so the cheap
     # half of either audit can run on its own.
     heap.address_space_audit = false if env_flag_zero?("GCRY_ADDRESS_SPACE_AUDIT")
-    if env_flag_one?("GCRY_MARK_AUDIT_ALL")
-      heap.mark_audit = true
-      heap.mark_audit_all_parents = true
-    end
     # Count the threads the OS has against the ones Crystal's list yields, at
     # every stop_world (src/gcry/platform/linux_thread_census.cr). Off by
     # default: it reads /proc inside the pause.
@@ -1317,17 +1313,10 @@ module GC
       if stage = env_digit("GCRY_POISON_HOLDERS_FAULT")
         Gcry::PoisonHolders.fault_at(stage)
       end
-      # Research only: `GCRY_SEGV_REPORT_STACK=1` prints how much alternate
-      # signal stack the report has and how much of it the report used.
-      Gcry::SegvReport.probe_stack if env_flag_one?("GCRY_SEGV_REPORT_STACK")
     {% end %}
     # Once, before any collection: prime the kernel's page size, which the
     # guard offsets and the pagemap probe read while the world is stopped.
     Gcry::Roots.runtime_page_size
-    # Research only: stall inside the thread-stacks phase with the world stopped,
-    # so the watchdog above has a positive control. Never ship non-zero — it
-    # freezes every mutator for that long, on purpose.
-    heap.dying_greg_dump = true if env_flag_one?("GCRY_DYING_GREG_DUMP")
     heap.disable_greg_roots = true if env_flag_one?("GCRY_DISABLE_GREG_ROOTS")
     heap.disable_ec_pins = true if env_flag_one?("GCRY_DISABLE_EC_PINS")
     if sl = env_u64("GCRY_SUSPENDED_SP_SLACK")
@@ -1340,6 +1329,9 @@ module GC
     if d = env_u64("GCRY_FIBER_WALK_TEST_DELAY_US")
       heap.fiber_walk_test_delay_us = d.clamp(0_u64, 100_000_u64)
     end
+    # Research only: stall inside the thread-stacks phase with the world stopped,
+    # so the watchdog above has a positive control. Never ship non-zero — it
+    # freezes every mutator for that long, on purpose.
     if st = env_u64("GCRY_STW_TEST_STALL_MS")
       heap.stw_test_stall_ms = st if st <= 60_000
     end
