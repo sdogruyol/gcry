@@ -1,0 +1,11 @@
+.F...
+Failures:
+  1) occupancy claimed a word at a time refuses a free of a claimed block, from this thread and another, and hands it out once
+     Failure/Error: expect_raises(ArgumentError, /double free/) { heap.free(q) }
+       Expected ArgumentError but nothing was raised
+     # spec/occupancy_claim_spec.cr:92
+Finished in 2.42 milliseconds
+5 examples, 1 failures, 0 errors, 0 pending
+Failed examples:
+crystal spec spec/occupancy_claim_spec.cr:81 # occupancy claimed a word at a time refuses a free of a claimed block, from this thread and another, and hands it out once
+exit 1

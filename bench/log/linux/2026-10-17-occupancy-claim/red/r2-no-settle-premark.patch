@@ -1,0 +1,12 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 2f4f0b26..6d62aeed 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -767,7 +767,6 @@ module Gcry
+             chunk = s.value.chunk
+             unless chunk.null?
+               ChunkHeader.set_pinned(chunk, true)
+-              cursor_premark_claim(s, chunk)
+             end
+             i += 1
+           end

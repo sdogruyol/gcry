@@ -1,0 +1,25 @@
+claim_stress seconds=5.0 workers=4 seed=2 ring=512 lazy_sweep=false headers=false
+gcry: GC.free ignored 0x7da4d0780c30: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+  ops=1979486 allocs=1979486 local_frees=654265 remote_frees=654297 drops=655548 checks=6589438
+  collections=1520 claims_released=3493819 sets_pinned=3332 hits=18349752 locked=352721
+  refused_frees=43817 live_objects_drift=1110 free_bytes_drift=-50071152 unlisted_chunks=41
+  FAIL: 43817 legitimate free(s) refused as double frees
+  drift not judged: 41 chunk(s) indexed and not on the chunk list
+  ERROR: worker 1 ring pass: block Pointer(Void)@0x7da4d221e2a0 (48 B, owner 1, serial 2) reads 0x1700000001 0x6b726f7700000000 last 0xfffffefffffffffd; live?=true block={found: true, free: false, size: 64, flags: 2, first_word: 98784247809, offset: 0}
+Invalid memory access (signal 11) at address 0x7da52f35dbfd
+[0x57be732fe9fa] *Exception::CallStack::print_backtrace:Nil +122 in bin/claim_stress_r2
+[0x57be732db4e6] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +278 in bin/claim_stress_r2
+[0x7da4d4445cb0] ?? +138146889358512 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7da4d45b3650] ?? +138146890856016 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x57be732f5d72] *Pointer(UInt8) +114 in bin/claim_stress_r2
+[0x57be732f5cf1] *Pointer(UInt8) +17 in bin/claim_stress_r2
+[0x57be732f5cd1] *Pointer(UInt8) +17 in bin/claim_stress_r2
+[0x57be732e3800] *String::interpolation<String, String>:String +1184 in bin/claim_stress_r2
+[0x57be732cebaf] __crystal_main +8847 in bin/claim_stress_r2
+[0x57be7342c7d6] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +6 in bin/claim_stress_r2
+[0x57be7342c71f] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +63 in bin/claim_stress_r2
+[0x57be732d696b] main +27 in bin/claim_stress_r2
+[0x7da4d442a601] ?? +138146889246209 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7da4d442a718] __libc_start_main +136 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x57be732cc855] _start +37 in bin/claim_stress_r2
+[0x0] ???

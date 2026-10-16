@@ -1,0 +1,12 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 2f4f0b26..42554d98 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -630,7 +630,6 @@ module Gcry
+     private def retire_cursor_slot(s : CursorSlot*, exhausted : Bool = false) : Nil
+       chunk = s.value.chunk
+       unless chunk.null?
+-        cursor_release_claim(s, chunk)
+         ChunkHeader.set_cursor(chunk, false)
+         # A concurrent free can restore a bit in a word this cursor already
+         # passed. Another thread may have cached "empty" while we still owned
