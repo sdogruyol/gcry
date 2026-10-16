@@ -1,0 +1,62 @@
+name: Perf PR comment
+
+# Posts the `Perf PR` verdict on its PR, one comment updated in place. Split
+# from that workflow because a fork PR's `pull_request` token cannot comment;
+# a `workflow_run` gets this repository's token and runs this file and
+# `bench/runner_ab/report.py` from master, never from the PR. The artifacts it
+# downloads were written by PR code, so they are data: report.py parses them as
+# JSON and prints only numbers and sanitized names.
+#
+# GitHub reads `workflow_run` workflows from the default branch only, so a
+# change here takes effect after it merges.
+on:
+  workflow_run:
+    workflows: ["Perf PR"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: bench/runner_ab
+      - name: Post or update the PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -p 'perf-pr-*' -D perf-pr || true
+          shopt -s nullglob
+          files=(perf-pr/*/*.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No A/B results to report (both runners failed before measuring)."
+            exit 0
+          fi
+          # `workflow_run.pull_requests` is empty for fork PRs; find the open
+          # PR whose head is the commit that was measured.
+          pr=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f head="$HEAD_OWNER:$HEAD_BRANCH" \
+            --jq '.[] | select(.head.sha == env.HEAD_SHA) | .number' | head -1)
+          if [ -z "$pr" ]; then
+            echo "No open PR has head $HEAD_SHA (pushed over since?); nothing to post."
+            exit 0
+          fi
+          python3 bench/runner_ab/report.py "${files[@]}" > body.md
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$pr/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- gcry-perf-pr -->"))) | .id' | head -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@body.md > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -F body=@body.md > /dev/null
+          fi

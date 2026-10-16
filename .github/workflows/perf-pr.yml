@@ -1,0 +1,77 @@
+name: Perf PR
+
+# Every PR that can move the collector's speed gets an A/B against its base
+# branch: both built on the same runner, run interleaved in random order, and
+# judged with a bootstrap interval over the reps (bench/runner_ab/report.py),
+# so a 6% swing between two identical binaries — which a local A/A of this
+# harness produced — reads as noise rather than a regression. The verdict goes
+# to the job summary and, through `perf-pr-comment.yml`, one PR comment updated
+# in place on every push. This workflow only reads: fork PRs (most outside
+# contributions) get a read-only token here, so the comment is posted by the
+# `workflow_run` that follows it, from master's code.
+#
+# Timings never fail this workflow: shared runners are a review signal, not a
+# gate, until an A/A history says how often they lie. Base and PR computing
+# different results does fail it (deterministic, see bench/runner_ab/ab.py).
+#
+# The manual `perf-ab.yml` stays for ad-hoc revisions and other runners.
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "shard.yml"
+      - "bench/crystal_metric/**"
+      - "bench/runner_ab/**"
+      - ".github/workflows/perf-pr.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      # The merge commit (base + PR), which is what master becomes if this
+      # merges, measured against the base it was merged onto.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - timeout-minutes: 5
+        continue-on-error: true
+        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: A/B against base
+        env:
+          AB_BASE: ${{ github.event.pull_request.base.sha }}
+          AB_REPS: "15"
+          AB_BENCHES: "Binarytrees JsonParsePure Primes Knuckeotide JsonGenerate JsonParseSerializable Revcomp"
+          AB_RUNNER: ${{ matrix.os }}
+          AB_JSON: ${{ runner.temp }}/perf-pr/${{ matrix.os }}.json
+        run: |
+          mkdir -p "$(dirname "$AB_JSON")"
+          bench/runner_ab/ab.sh
+      - name: Summary
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/perf-pr/${{ matrix.os }}.json"
+          if [ -f "$f" ]; then
+            python3 bench/runner_ab/report.py "$f" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: perf-pr-${{ matrix.os }}
+          path: ${{ runner.temp }}/perf-pr/
+          if-no-files-found: ignore
+          retention-days: 30
