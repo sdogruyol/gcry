@@ -58,10 +58,11 @@ median. Taking collections away buys little:
 | `GCRY_DARWIN_REUSABLE=0` | −2.1% [−4.2, −0.5] | | 1.79 |
 
 User CPU is the wall time and system time is Boehm's (0.03 s) in every arm
-(`time -l`). The Darwin 16 MiB floor is not what costs speed (8 MiB is 10%
-slower), and pacing buys nothing measurable on this bench while it is what
-puts the peak at 1.79× Boehm's 39 MiB (`PACE=100`: 0.95×). That RSS is a
-separate decision (below).
+(`time -l`). A *fixed* 8 MiB threshold is 10% slower (pacing cannot lift
+it), and pacing buys nothing measurable on this bench while it is what puts
+the peak at 1.79× Boehm's 39 MiB (`PACE=100`: 0.95×). That RSS is the
+second part of this cut (RSS budget, below): an 8 MiB *adaptive* floor,
+paced as before, is 0.96× at no measured cost.
 
 ## The hit path: two Darwin-specific costs
 
@@ -173,9 +174,94 @@ mark batch) CI ran again on the rebased branch (run id in the RSS section).
   `clear_block` jump table, and Crystal's own zeroing in `TreeNode.new`
   after `GC.malloc` already zeroed (Boehm pays that too). Not attributed
   further.
-- **Peak RSS.** 1.79× Boehm on M1 and 1.87× on Intel come from pacing on
-  the 16 MiB Darwin floor (threshold up to 48.8 MiB); `PACE=100` is 0.95×
-  at no measured speed cost on macOS but costs Linux 4–7%, and lowering the
-  Darwin floor to 8 MiB costs macOS 10%. A Darwin-only pacing cap would fit
-  the 1.1× budget here; it was not changed because Kemal's macOS RSS and
-  throughput were measured on the 16 MiB floor and would need re-measuring.
+- **Peak RSS** was 1.79× Boehm on M1 and 1.87× on Intel, from pacing on the
+  16 MiB Darwin floor (threshold up to 48.8 MiB). Settled below.
+
+## RSS budget on macOS: the adaptive floor is 8 MiB (2026-10-16)
+
+The budget set for 0.36.0 is peak RSS within 1.1× Boehm's on every
+crystal-metric row, measured on Linux. On both macOS runners two rows were
+over: Binarytrees (1.79× M1, 1.87× Intel) and Knuckeotide (1.88×, 2.06×), and
+Kemal sat at 1.94× / 2.20×. Binarytrees' peak is pacing (up to 3×) on the
+16 MiB Darwin floor.
+
+### Candidates
+
+Two dispatches, each with Boehm, `base` (the tip, Darwin floor 16 MiB, pace
+max 300), a `var` build with the candidate in `src/`, and a `var_env` arm;
+nine rows, 15 interleaved reps, Kemal `/json` and `/` 15 trials (`base`
+against `var`):
+
+| run | id | branch | `var` | `var_env` |
+|---|---|---|---|---|
+| A | [38904789885](https://github.com/sdogruyol/gcry/actions/runs/38904789885) | `probe-rss-a` | Darwin pace max 100 | `GCRY_THRESHOLD_PACE=200` |
+| B | [38904793819](https://github.com/sdogruyol/gcry/actions/runs/38904793819) | `probe-rss-b` | Darwin floor 8 MiB | floor 8 MiB, `GCRY_THRESHOLD_PACE=100` |
+
+`base` = `858b9caf`. Tables: `rss-candidates-<runner>.md` (`rss.py`), raw
+`rss-{A,B}-<runner>/`. Wall against `base`, median [IQR] of paired reps,
+and peak × Boehm:
+
+| macos-latest (M1) | pace 200 | pace 100 | floor 8 | floor 8, pace 100 |
+|---|---:|---:|---:|---:|
+| Primes | +7.2% [+1.1, +14.9] | **+27.0%** | +4.9% [−5.2, +8.0] | +32.7% |
+| JsonParsePure | +0.9% | **+10.9%** | −1.8% | +7.3% |
+| JsonGenerate | +1.0% | **+10.7%** | −2.2% | +5.2% |
+| Binarytrees peak | 1.37× | 0.95× | **0.96×** | 0.53× |
+| Binarytrees wall | −0.9% | +2.7% | +0.2% [−3.2, +9.1] | +14.8% |
+| Knuckeotide peak (vs `base`) | 0% | 0% | −4.4% | −11% |
+| Kemal `/json` peak | | 1.95× | **1.69×** | |
+
+| macos-15-intel | pace 200 | pace 100 | floor 8 | floor 8, pace 100 |
+|---|---:|---:|---:|---:|
+| Primes | +5.8% | **+22.5%** | −0.9% | +21.4% |
+| JsonParsePure | −0.4% | +7.4% | +2.3% | +8.8% |
+| JsonGenerate | +0.4% | +8.1% | −0.9% | +6.6% |
+| Binarytrees peak | 1.42× | 0.97× | **0.98×** | 0.53× |
+| Binarytrees wall | −1.1% | +4.4% | +2.4% [−0.1, +4.7] | +8.6% |
+| Knuckeotide peak | 2.05× | 1.91× | **1.81×** | 1.81× |
+| Kemal `/json` peak | | 2.20× | **1.57×** | |
+
+Turning pacing off meets the budget on Binarytrees but costs the
+collection-bound rows 7–33%; a 200% maximum leaves Binarytrees at 1.4× and
+costs Primes 6–7%. An 8 MiB floor, paced as before, takes Binarytrees under
+Boehm's peak, cuts Kemal's peak by 13% / 29% at the same req/s, and costs no
+row beyond its spread. Pacing lifts the threshold off the floor wherever
+collections cost more than a tenth of the mutator time, which is why the
+floor costs nothing on the collection-bound rows where a fixed 8 MiB
+threshold cost Binarytrees 10%.
+
+### The default (`threshold: the adaptive floor is 8 MiB on darwin too`)
+
+`Heap::ADAPTIVE_THRESHOLD_MIN` is 8 MiB on every platform; Linux and Windows
+already had it, so their binaries do not change. Confirmed with
+[38917127750](https://github.com/sdogruyol/gcry/actions/runs/38917127750),
+`macos-binarytrees` at `59bfab8c` against `a6103d9f`, 20 reps, nine rows,
+Kemal 15 trials, `stats=1` (`floor8-<runner>/`). The M1 runner was slower
+and noisier in this run than in the earlier ones (Boehm's Binarytrees 0.96 s
+against 0.80 s), so user CPU is quoted beside wall:
+
+| row | M1 wall | M1 user | M1 peak | Intel wall | Intel user | Intel peak |
+|---|---:|---:|---:|---:|---:|---:|
+| Primes | +1.6% | +0.2% | 0.88× | +0.9% | −0.0% | 0.91× |
+| JsonParsePure | −0.9% | −0.1% | 1.09× | −1.4% | −0.1% | 0.81× |
+| Binarytrees | +1.5% [−5.7, +9.8] | −0.1% | **1.79× → 0.96×** | +4.1% [−1.0, +11.3] | +3.6% | **1.87× → 0.98×** |
+| JsonGenerate | −4.1% | −1.0% | 0.64× | +0.4% | +1.3% | 0.65× |
+| JsonParseSerializable | −0.9% | −0.4% | 0.94× | +2.1% | +2.6% | 0.85× |
+| JsonParsePull | −2.7% | −0.4% | 0.93× | −2.7% | −1.9% | 0.92× |
+| Revcomp | +0.7% | +0.0% | 0.63× | +0.1% | +0.6% | 0.66× |
+| RegexDna | +1.0% | +1.0% | 0.51× | −0.7% | −0.8% | 0.50× |
+| Knuckeotide | +2.4% | +0.3% | 1.89× → 1.74× | +0.9% | +1.1% | 1.99× → 1.81× |
+| Kemal `/json` | 105% → 117% of Boehm | | 1.93× → 1.69× | 110% → 109% | | 2.19× → 1.56× |
+| Kemal `/` | 99% → 98% | | 1.91× → 1.66× | 106% → 104% | | 2.21× → 1.57× |
+
+The one cost that repeats is Intel Binarytrees, +2.4% and +4.1% wall in the
+two runs (still 125–128% of Boehm): 69–82% more collections, each cheap.
+ubuntu-latest and windows-latest ran the same comparison as a control: every
+row within ±1.3% wall and ±1% peak.
+
+**Still over 1.1×:** Knuckeotide (1.74× M1, 1.81× Intel; Linux 1.35–1.53×,
+Windows 1.64–1.67× in the same runs), which no threshold candidate brings
+under (floor 8 and pace 100 together: 1.69× / 1.81×), so its peak is not the
+collection schedule [INFERENCE: its hash tables' large buffers]; and Kemal,
+whose 15 MiB (M1) / 10 MiB (Intel) Boehm process is smaller than the 8 MiB
+floor plus the warm budget it follows. Kemal is not a crystal-metric row.

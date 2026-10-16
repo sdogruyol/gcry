@@ -7,9 +7,10 @@ DIR_A is the `perf-ab-<runner>` artifact of the pacing run (probe-rss-a:
 speed as % of Boehm (whole-process wall, Boehm / arm) and peak resident size
 × Boehm, medians of per-rep paired ratios, and every arm's wall against its
 own run's `base` [IQR]. Boehm and `base` are in both runs; the table uses
-run A's.
+run A's. The archived `rss-*` copies have `runs.json` gzipped; this reads
+either.
 """
-import json, os, statistics, sys
+import gzip, json, os, statistics, sys
 
 med = statistics.median
 
@@ -20,7 +21,8 @@ def quart(xs):
 
 
 def load(d):
-    runs = json.load(open(os.path.join(d, "runs.json")))
+    p = os.path.join(d, "runs.json")
+    runs = json.load(open(p) if os.path.exists(p) else gzip.open(p + ".gz", "rt"))
     by = {}
     for r in runs["runs"]:
         by.setdefault((r["bench"], r["arm"]), {})[r["rep"]] = r
