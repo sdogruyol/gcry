@@ -931,11 +931,6 @@ module GC
     if env_flag_one?("GCRY_DISABLE_SCRUB_FIBERS")
       heap.scrub_fibers_enabled = false
     end
-    # Audit the EC1 foreign-SP exemption in scrub_parked_fiber_stacks. Costs a
-    # thread walk per parked fiber, so it is opt-in — see docs/SOUND-DEFAULTS.md.
-    if env_flag_one?("GCRY_SCRUB_AUDIT")
-      heap.scrub_audit_foreign_sp = true
-    end
     # Parallel parked-fiber scrub window below saved SP (default 512).
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
@@ -1289,11 +1284,6 @@ module GC
     {% if flag?(:unix) || flag?(:win32) %}
       Gcry::PoisonHolders.skip_heap_count if env_flag_one?("GCRY_DISABLE_HOLDERS_FIND")
     {% end %}
-    # Research only: release a chunk the flush found occupied anyway, which
-    # is what this code did before 2026-09-14. `make occupied-release` walks
-    # that window on a library heap through `Heap#post_stw_hook`; this is the
-    # same control for a process heap.
-    heap.release_occupied_anyway = true if env_flag_one?("GCRY_RELEASE_OCCUPIED")
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says. The positive control for the kept-chunk ledger and the
     # crash-report line that names it, on a host where the real window does

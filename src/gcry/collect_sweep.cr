@@ -748,7 +748,7 @@ module Gcry
         GUARD_KIND_EMPTY_CHUNK)
       # Research: `GCRY_REFUSE_EMPTY_RELEASE=<n>` refuses the first n
       # empty-chunk releases whatever the occupancy says. The mirror of
-      # `GCRY_RELEASE_OCCUPIED=1`, and the only way to reach the kept-chunk
+      # `release_occupied_anyway`, and the only way to reach the kept-chunk
       # ledger and its crash-report line on a host where the window does not
       # open - measured 2026-09-14, 0 chunks considered in 120 collections
       # with more than one mutator alive. A budget rather than a flag because
@@ -770,7 +770,7 @@ module Gcry
       # this to a header walk belongs with a measurement rather than here.
       if occ > 0
         @release_refused_occupied &+= 1
-        # `GCRY_RELEASE_OCCUPIED=1` counts the refusal and releases anyway, which
+        # `release_occupied_anyway` counts the refusal and releases anyway, which
         # is what this code did before 2026-09-14. A control arm needs the old
         # behaviour reachable, and a number that says the window was hit either
         # way is what makes the shipped arm's silence attributable.

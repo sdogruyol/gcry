@@ -26,9 +26,10 @@ module Gcry
     # When > 1, only every Nth allocate calls clear_stack (thr trade-off).
     property clear_stack_every : Int32 = 1
     property scrub_fibers_enabled : Bool = false
-    # GCRY_SCRUB_AUDIT=1 — probe whether the parked-fiber wipe ever lands on a
-    # stack an OS thread is still running on. Off by default; the probe walks
-    # every thread per parked fiber.
+    # Probe whether the parked-fiber wipe ever lands on a stack an OS thread is
+    # still running on. Off by default; the probe walks every thread per parked
+    # fiber. Set by `bench/scrub_audit.cr` and `bench/scrub_midswap.cr` (the
+    # env switch, which nothing set, went in 0.37.0).
     #
     # What the probe sees: `Platform.thread_sp` is populated by the STW suspend
     # signal handler, so on its own it knows about *signal-suspended* threads
@@ -77,7 +78,7 @@ module Gcry
     getter fiber_scrub_bytes_total : UInt64 = 0_u64
     getter clear_stack_calls : UInt64 = 0_u64
     getter fiber_scrub_runs : UInt64 = 0_u64
-    # Audit counters (GCRY_SCRUB_AUDIT=1). `overlaps` is the one that decides
+    # Audit counters (`scrub_audit_foreign_sp`). `overlaps` is the one that decides
     # the knob: non-zero means the wipe zeroed memory at or above a suspended
     # thread's SP — live frames — which is the failure mode the whole
     # root-completeness argument against scrub_fibers rests on.
@@ -337,7 +338,7 @@ module Gcry
         # stack — the `running?` check is. See docs/SOUND-DEFAULTS.md.
         #
         # That EC1 exemption is a throughput argument for not applying a safety
-        # check, so GCRY_SCRUB_AUDIT=1 measures what it costs instead of leaving
+        # check, so `scrub_audit_foreign_sp` measures what it costs instead of leaving
         # it to reasoning: it counts the fibers scrubbed with a foreign SP on
         # them, and — the number that decides it — how often the wipe window
         # reaches at or above that SP, i.e. over live frames. Off by default:

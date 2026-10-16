@@ -708,8 +708,8 @@ module Gcry
     getter release_flush_chunks : UInt64 = 0_u64
     getter release_refused_occupied : UInt64 = 0_u64
     # Research only: release an occupied chunk anyway (the pre-2026-09-14
-    # behaviour). `GCRY_RELEASE_OCCUPIED=1` on a process heap; the `--broken`
-    # arm of `make occupied-release` on a library one.
+    # behaviour). The `--broken` arm of `make occupied-release`, on a library
+    # heap; the process-heap env switch, which nothing set, went in 0.37.0.
     property release_occupied_anyway : Bool = false
     # Research only, library heaps: a mutator on the collector's own thread
     # at the two points the window that released an occupied chunk runs
