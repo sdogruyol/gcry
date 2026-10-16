@@ -98,6 +98,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The RSS budget is narrowed: peak within 1.1× Boehm's on every
+  crystal-metric row except Knuckeotide.** Its peak is the collection
+  schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`): dead setup
+  buffers held by stale words in `main`'s live frame, counted whole into
+  live × factor until the atomic quarter above; one paced cycle at
+  240–300% of an 18 MB live set during a hash-table rebuild; and emptied
+  16-byte chunks kept warm after the program moved to 32-byte strings. With
+  the atomic quarter it is 1.24× (x86), 1.26× (arm), 1.56× (M1), 1.70×
+  (Intel) and 1.62× (Windows) of Boehm (Perf A/B 38965963265, 15 reps).
+  Releasing the emptied chunks of a size the last cycle did not allocate
+  takes it to 1.15× / 1.04× / 1.42× / 1.62× / 1.45× and JsonParsePure's
+  peak down 12–15% on every runner, but costs 0.6–1.9% wall beyond the
+  spread on five runner-rows and +0.6–0.9% peak on two arm rows; limiting
+  the pace's rise reaches 1.02× / 0.93× on Linux but costs Primes up to 12
+  points. Both are parked (`knuckeotide-rss-idlekind`,
+  `knuckeotide-rss-pacestep`).
+
 - **Atomic live bytes count a quarter in the adaptive threshold.** Live ×
   factor sizes the next threshold and the warm budget; pointer-free bytes
   (strings, I/O buffers) now enter it at a quarter, as in Boehm's

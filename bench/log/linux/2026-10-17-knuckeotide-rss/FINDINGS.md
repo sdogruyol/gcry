@@ -221,22 +221,52 @@ runner (x86 0.81× → 0.70×, arm 1.07× → 0.94×, M1 1.07× → 0.92×, Inte
 inside the IQRs on every row except Windows JsonParseSerializable (108% →
 103%, IQRs [104, 110] / [99, 104]); Kemal req/s within the spread.
 
+## Final run: idle-kind release alone, against the shipped atomic quarter
+
+Perf A/B [38965963265](https://github.com/sdogruyol/gcry/actions/runs/38965963265),
+`var` = `knuckeotide-rss` at `42144e9e` (atomic quarter + heap tables +
+idle-kind release), `base` = `01b184a6` (`release-0.37.0`: atomic quarter
++ heap tables, no cost floor), 15 reps, nine rows, Kemal 5 trials, counter
+runs 3 (`raw/ci-38965963265/`). This is the headline; the two runs above
+had the parked cost floor in both arms and are context.
+
+Knuckeotide peak × Boehm, base → var:
+
+| runner | base | var | paired peak Δ [IQR] | paired wall Δ [IQR] |
+|---|---:|---:|---:|---:|
+| ubuntu-latest | 1.24× | 1.15× | −12.7% [−18.2, +1.0] | +0.3% [−1.2, +1.9] |
+| ubuntu-24.04-arm | 1.26× | 1.04× | −13.3% [−26.3, −2.9] | +0.0% [−0.9, +1.6] |
+| macos-latest | 1.56× | 1.42× | −9.1% [−10.2, −8.0] | +1.4% [−9.3, +7.4] |
+| macos-15-intel | 1.70× | 1.62× | −6.2% [−9.3, −3.2] | −9.3% [−10.9, +5.8] |
+| windows-latest | 1.62× | 1.45× | −10.0% [−17.7, −3.3] | +0.8% [−2.9, +5.5] |
+
+JsonParsePure's peak −12.4 to −15.4% on every runner, Revcomp −3.4% on
+both Linux runners, Windows JsonParseSerializable −4.4%. But, paired
+var/base with the IQR clear of zero:
+
+- wall: ubuntu JsonParseSerializable +1.6% [+0.8, +2.6], ubuntu Revcomp
+  +0.6% [+0.2, +0.9], arm Binarytrees +1.4% [+0.3, +2.9], arm Revcomp
+  +0.9% [+0.5, +1.1], Windows JsonGenerate +1.9% [+0.5, +5.7];
+- peak: arm JsonParseSerializable +0.6% [+0.3, +1.1], arm JsonParsePull
+  +0.9% [+0.5, +1.1].
+
+Kemal req/s and peak within the spread on all four runners that run it.
+
 ## Decision
 
-KemalRss's final branch keeps only the atomic quarter (`fa51f65f`) and the
-heap tables; the cost floor (`5ebcaabf`) is parked (Linux Binarytrees
-+2.7–3.3% wall). This branch, rebased on `release-0.37.0` (`01b184a6`,
-which includes them), keeps **only the idle-kind release** (`b3c20ea5`):
-RSS-only, no speed cost beyond the spread on the runners. The pace limit
-is parked on `knuckeotide-rss-pacestep` (`a00d66ce`, with its spec): it is
-what brings the Linux runners under 1.1×, but it costs Primes on every
-runner. Local, on the final stack (`raw/knuck2/`, 21 reps; Boehm 47 MB):
-base 1.28×, atomic quarter 1.24×, + idle-kind **1.05×**; all other rows
-within ±3% wall of the atomic quarter alone (`raw/suite2/`, 5 reps).
+The keep rule for this change was: no row's speed beyond its spread on any
+runner and no row's peak worse. It fails that, by 0.6–1.9% wall on five
+runner-rows and under 1% peak on two (arm). So **no default change
+lands**: the idle-kind release is parked on `knuckeotide-rss-idlekind`
+(`b3c20ea5`, with its spec) and the pace limit on
+`knuckeotide-rss-pacestep` (`a00d66ce`, with its spec: Linux 1.02× /
+0.93×, but Primes −1 to −12 points on all five runners). KemalRss's atomic
+quarter, which removes the dead setup buffers from the schedule, is what
+shipped (`fa51f65f`).
 
 **No default change brings Knuckeotide within 1.1× on every runner
-without a speed cost.** What is left at its peak is one paced cycle in the
-18-letter rehash phase on top of a 15–25 MB live set, and that cycle is
-what pacing is for (Primes pays when it is damped). Boehm's own peak here
-swings 39–64 MB with the stale-slot lottery. The budget statement is
-narrowed accordingly: every crystal-metric row except Knuckeotide.
+without a cost.** What is left at its peak is one paced cycle in the
+18-letter rehash phase on top of a 15–25 MB live set — what pacing is for —
+plus the class-bound empties. Boehm's own peak here swings 39–64 MB with
+the stale-slot lottery. The budget statement is narrowed: every
+crystal-metric row except Knuckeotide (ROADMAP, CHANGELOG).

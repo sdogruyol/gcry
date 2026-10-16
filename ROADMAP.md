@@ -3974,6 +3974,24 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       collection costs under 2% of the mutator time) takes Kemal to 1.05× /
       0.98× locally but costs Linux Binarytrees 2.7–3.3% wall; parked on
       `kemal-rss-floor` until a lower target is measured.
+      **Knuckeotide, 2026-10-17** (`bench/log/linux/2026-10-17-knuckeotide-rss/`):
+      its peak is the schedule after all, sized by three things: 21 MB of
+      dead setup buffers held by stale words in `main`'s live frame and
+      counted whole into live × factor (the atomic quarter removes that);
+      one paced cycle at 240–300% of an 18 MB live set while a hash table is
+      rebuilt from an 8 MiB-floor cycle; and emptied 16-byte chunks kept warm
+      after the program moved to 32-byte strings, which only 16-byte blocks
+      can use. Releasing the emptied chunks of a size the last cycle did not
+      allocate (Knuckeotide −6 to −13%, JsonParsePure −12 to −15% on every
+      runner) costs 0.6–1.9% wall beyond the spread on five runner-rows
+      (Perf A/B 38965963265); limiting the pace's rise to 150% a cycle takes
+      the Linux runners to 1.02× / 0.93× but costs Primes up to 12 points.
+      Both are parked (`knuckeotide-rss-idlekind`, `knuckeotide-rss-pacestep`).
+      **The budget holds on every crystal-metric row except Knuckeotide**,
+      1.24× (x86), 1.26× (arm), 1.56× (M1), 1.70× (Intel), 1.62× (Windows)
+      with the atomic quarter: a 40–50 MB process whose Boehm peak itself
+      swings 39–64 MB with the same stale-slot lottery, and whose remaining
+      excess is pacing doing its job on a rehash burst.
 - [x] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
