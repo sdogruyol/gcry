@@ -1,0 +1,29 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index dcc4104a..4b6cdb2a 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -11,6 +11,7 @@ lib LibC
+   fun pthread_key_create(key : GcryPthreadKeyT*, destructor : Void* -> Void) : Int
+   fun pthread_key_delete(key : GcryPthreadKeyT) : Int
+   fun pthread_setspecific(key : GcryPthreadKeyT, value : Void*) : Int
++  fun pthread_getspecific(key : GcryPthreadKeyT) : Void*
+ end
+ {% end %}
+ 
+@@ -240,7 +241,16 @@ module Gcry
+ 
+     @[AlwaysInline]
+     protected def cursor_set_cached : CursorSet*
++      {% if flag?(:gcry_probe_getspec) %}
++        # PROBE: the per-heap key's value instead of the Crystal TLS.
++        return Pointer(CursorSet).null unless @cursor_key_ok
++        return Gcry::OS.pthread_getspecific(@cursor_key).as(CursorSet*)
++      {% end %}
+       cached = @@tls_cursor_cache
++      {% if flag?(:gcry_probe_tls2x) %}
++        # PROBE: a second, redundant TLS read, to price one.
++        return Pointer(CursorSet).null unless @@tls_cursor_cache == cached
++      {% end %}
+       return Pointer(CursorSet).null unless (cached >> 64) == self.as(Void*).address
+       Pointer(CursorSet).new(cached.to_u64!)
+     end
