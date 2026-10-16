@@ -155,7 +155,7 @@ the large-buffer collections, as for Primes in `../2026-10-15-0.36-native/`].
 
 CI [38898228632](https://github.com/sdogruyol/gcry/actions/runs/38898228632)
 ran on `c59e6406`; after the rebase onto `origin/release-0.37.0` (parallel
-mark batch) CI ran again on the rebased branch (run id in the RSS section).
+mark batch) CI ran again on the final branch (below).
 
 ## What is left, and what it is
 
@@ -265,3 +265,15 @@ under (floor 8 and pace 100 together: 1.69× / 1.81×), so its peak is not the
 collection schedule [INFERENCE: its hash tables' large buffers]; and Kemal,
 whose 15 MiB (M1) / 10 MiB (Intel) Boehm process is smaller than the 8 MiB
 floor plus the warm budget it follows. Kemal is not a crystal-metric row.
+
+### CI and probe branches
+
+CI on `c59e6406` (the hit-path fix before the rebase):
+[38898228632](https://github.com/sdogruyol/gcry/actions/runs/38898228632),
+every test job green (darwin native, darwin arm64 and x86_64 gates, Linux,
+musl, Windows); its 5 h soak arms were still running when this was written.
+CI on the final branch, `224522cc` (code identical to this commit):
+[38929173312](https://github.com/sdogruyol/gcry/actions/runs/38929173312).
+A CI run on an intermediate rebase (38904826402) was cancelled as
+superseded. Probe branches `probe-mbt`, `probe-rss-a` and `probe-rss-b` are
+deleted; their runs and commits are listed above.
