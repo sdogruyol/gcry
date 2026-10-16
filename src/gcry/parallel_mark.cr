@@ -307,11 +307,24 @@ module Gcry
       end
     end
 
-    MARK_POP_BATCH = 256
-    # Entries are {header, chunk} pairs, so the flat buffer is twice the count.
-    # Literal, not `MARK_POP_BATCH * 2`: a computed constant initializer runs
-    # before Fiber is up during GC.init (see size_classes.cr).
-    MARK_POP_BATCH_WORDS = 512
+    # Entries a marker takes off the shared stack per `pop_mark_batch`, into
+    # its shard's batch buffer (`SHARD_BATCH`, `ensure_mark_buffers`), and
+    # the depth per parked marker a flush wakes (`flush_pushbuf`).
+    #
+    # 256 until 0.37.0, in an array on each marker's stack. A batch is scanned
+    # with the next entries prefetched (`scan_batch_prefetched`), so a larger
+    # one keeps more lines in flight per lock taken, as the serial drain's
+    # 1 024 does (`MarkStack::BATCH_ENTRIES`). Swept on crystal-metric, ns per
+    # marked object over 7 interleaved runs on CPUs 0-3: at
+    # `GCRY_PARALLEL_MARK=4`, 256 → 1 024 took Primes 6.32 → 4.90,
+    # JsonParsePure 5.43 → 4.71 and JsonGenerate 4.80 → 3.74; with the
+    # default two workers JsonGenerate 6.45 → 5.32 and JsonParsePure
+    # 7.76 → 7.10, Primes within its spread. 64 was slower than 256 on every
+    # cell (Primes 10.32 at four workers), 256 mapped measured the same as 256
+    # on the stack, and 512 to 4 096 were one plateau
+    # (`bench/log/linux/2026-10-16-parallel-mark-batch/`). The helpers' share
+    # of the popped entries did not move with the size.
+    MARK_POP_BATCH = 1024
 
     # Which shard the current OS thread owns. -1 until claimed; the master sets
     # 0 explicitly. Survives across collections, so a pthread keeps its slot.
@@ -327,21 +340,25 @@ module Gcry
     end
 
     # Each worker's shard is its own 128-byte stride of `@mark_pushbuf_slots`:
-    # the push buffer, as base, top and limit addresses, and the bytes the
-    # worker scanned this cycle. No two workers' words share a cache line.
-    # They were two `StaticArray`s indexed by slot — all sixteen counts in one
-    # 64-byte line, written by every worker on every push. Sampled with four
-    # workers on Primes, the count's read was 18.8% of all CPU and the
-    # buffer's 18.5% (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
+    # the push buffer, as base, top and limit addresses, the bytes the worker
+    # scanned this cycle, and its pop batch buffer. No two workers' words
+    # share a cache line. They were two `StaticArray`s indexed by slot — all
+    # sixteen counts in one 64-byte line, written by every worker on every
+    # push. Sampled with four workers on Primes, the count's read was 18.8% of
+    # all CPU and the buffer's 18.5%
+    # (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
     MARK_PUSHBUF_STRIDE = 16
     # Slot 0 the master, 1..15 the helpers (`mark_worker_loop` caps a claim).
     MARK_SHARDS = 16
-    # Words of a shard. Base is 0 until the buffer is mapped, and top and
-    # limit with it, so an unmapped shard reads as full.
+    # Words of a shard. Base is 0 until the buffers are mapped, and top,
+    # limit and batch with it, so an unmapped shard reads as full.
     SHARD_BASE    = 0
     SHARD_TOP     = 1
     SHARD_LIMIT   = 2
     SHARD_SCANNED = 3
+    # The address of `MARK_POP_BATCH` words a pop takes entries into
+    # (`ensure_mark_buffers`).
+    SHARD_BATCH = 4
 
     # A batch scan hands its shard down the scan path (`scan_object` →
     # `scan_payload` → `scan_edges_inline` → `mark_stack_push`); nil means
@@ -384,17 +401,62 @@ module Gcry
       MarkShard.new(@mark_pushbuf_slots.to_unsafe + slot &* MARK_PUSHBUF_STRIDE)
     end
 
-    # Lazily mmap a shard's push buffer. Called by a worker before it drains, and
-    # by the master; mmap during a collection is fine (it is what MarkStack#grow
-    # does), a managed allocation would not be.
-    protected def ensure_pushbuf(shard : MarkShard) : Nil
-      return if shard[SHARD_BASE] != 0_u64
-      bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
-      ptr = Gcry.os_map(bytes)
-      return if Gcry.mmap_failed?(ptr)
+    # Lazily map a shard's push buffer and pop batch, in one mapping; false if
+    # the map failed. Called by a worker before it drains, and by the master;
+    # mmap during a collection is fine (it is what MarkStack#grow does), a
+    # managed allocation would not be.
+    #
+    # The pop batch was a `StaticArray` on each marker's stack until 0.37.0.
+    # The master's sat in `mark_loop_drain`'s frame, which is inlined into
+    # `run_collection_body`, so its size was frame the collection-entry and
+    # exit scrubs have to cover (`Heap#collect_scrub`), and the block
+    # addresses it held stayed below the mutator's SP after the collection
+    # for the next one's scan chain to find. Mapped, the batch can grow past
+    # the 2 KiB it was without either: the serial drain's own batch is mapped
+    # for the same reason (`MarkStack#batch_buffer`).
+    protected def ensure_mark_buffers(shard : MarkShard) : Bool
+      return true if shard[SHARD_BASE] != 0_u64
+      push_bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
+      batch_bytes = MARK_POP_BATCH.to_u64 * sizeof(Void*).to_u64
+      ptr = Gcry.os_map(push_bytes &+ batch_bytes)
+      return false if Gcry.mmap_failed?(ptr)
+      shard[SHARD_BATCH] = ptr.address &+ push_bytes
       shard[SHARD_BASE] = ptr.address
       shard[SHARD_TOP] = ptr.address
-      shard[SHARD_LIMIT] = ptr.address &+ bytes
+      shard[SHARD_LIMIT] = ptr.address &+ push_bytes
+      true
+    end
+
+    # A mapped shard's pop batch (`ensure_mark_buffers`).
+    @[AlwaysInline]
+    private def shard_batch(shard : MarkShard) : Pointer(Void*)
+      Pointer(Void*).new(shard[SHARD_BATCH])
+    end
+
+    # Unmap every shard's buffers (`ensure_mark_buffers`) once no marker can
+    # use them: `Heap#destroy`, after `shutdown_mark_workers` has joined the
+    # helpers. Until 0.37.0 they stayed mapped past the heap, a 4 KiB push
+    # buffer a shard; the pop batch in the same mapping would have tripled it.
+    protected def release_mark_buffers : Nil
+      bytes = (MARK_PUSHBUF_CAP + MARK_POP_BATCH).to_u64 * sizeof(Void*).to_u64
+      MARK_SHARDS.times do |s|
+        shard = mark_shard(s)
+        base = shard[SHARD_BASE]
+        next if base == 0_u64
+        Gcry.os_unmap(Pointer(Void).new(base), bytes)
+        shard[SHARD_BASE] = 0_u64
+        shard[SHARD_TOP] = 0_u64
+        shard[SHARD_LIMIT] = 0_u64
+        shard[SHARD_BATCH] = 0_u64
+      end
+    end
+
+    # Diagnostic: shards whose buffers are mapped (`ensure_mark_buffers`).
+    # Non-zero after a parallel mark, zero after `destroy`.
+    def mark_shards_mapped : Int32
+      n = 0
+      MARK_SHARDS.times { |s| n += 1 if mark_shard(s)[SHARD_BASE] != 0_u64 }
+      n
     end
 
     @[AlwaysInline]
@@ -602,11 +664,9 @@ module Gcry
         @mark_lock.unlock
         return 0
       end
-      n = 0
-      while n < cap && !@mark_stack.empty?
-        into[n] = @mark_stack.pop.as(Void*)
-        n += 1
-      end
+      # Newest first, as that many `pop`s would take them, without a bounds
+      # check per entry inside the critical section every marker contends for.
+      n = @mark_stack.pop_into(into, cap)
       # Paired with the `add(-1)` every caller owes after its scan and flush.
       @mark_workers_busy.add(1) if n > 0 && !@mark_busy_unlocked
       @mark_lock.unlock
@@ -663,12 +723,10 @@ module Gcry
         slot = @mark_slot_claim.add(1)
         slot = 15 if slot > 15
         Heap.mark_worker = slot
-        ensure_pushbuf(mark_shard(slot))
       end
       shard = mark_shard(Heap.mark_worker)
 
       local_epoch = 0_u64
-      batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
       # Between collections a helper has nothing to do, and it used to spin on
       # `@mark_epoch` with `Intrinsics.pause` for as long as the program ran:
       # **a full core per helper, forever** — measured on an idle process,
@@ -708,7 +766,10 @@ module Gcry
         nap = MARK_IDLE_SLEEP_NS
         local_epoch = epoch
         next if @mark_shutdown.get != 0
-        ensure_pushbuf(shard)
+        # A helper whose buffers could not be mapped sits the cycle out: it
+        # has nowhere to pop into, and the other markers take its share.
+        next unless ensure_mark_buffers(shard)
+        batch = shard_batch(shard)
 
         # Stay in the cycle as long as the master says marking is live. A
         # transient empty is a pause, not an exit — the earlier bug was a worker
@@ -727,7 +788,7 @@ module Gcry
         drought = MarkDrought.new(pointerof(@mark_spinners).as(Int32*))
         nap = MARK_STEAL_NAP_NS
         while @mark_parallel && @mark_shutdown.get == 0
-          m = pop_mark_batch(batch.to_unsafe, MARK_POP_BATCH)
+          m = pop_mark_batch(batch, MARK_POP_BATCH)
           if m == 0
             # The drought stays over until a pop succeeds: a wake that finds
             # the stack already taken parks again without another spin.
@@ -747,7 +808,7 @@ module Gcry
           # still push — which is the invariant the master's check rests on.
           begin
             @parallel_mark_stolen &+= m.to_u64
-            scan_batch_local_first(batch.to_unsafe, m, shard)
+            scan_batch_local_first(batch, m, shard)
           ensure
             end_helper_batch
           end
@@ -967,16 +1028,16 @@ module Gcry
       @parallel_mark_runs += 1
 
       ensure_mark_worker_pool
-      # No helpers available (pthread_create failed) → serial.
+      Heap.mark_worker = 0
+      shard = mark_shard(0)
+      # No helpers available (pthread_create failed), or no buffers for the
+      # master to pop into (the map failed) → serial.
       helpers = @mark_pthread_mode ? @mark_pthread_count : @mark_worker_threads.size
-      if helpers == 0
+      if helpers == 0 || !ensure_mark_buffers(shard)
         serial_mark_drain
         return
       end
-
-      Heap.mark_worker = 0
-      shard = mark_shard(0)
-      ensure_pushbuf(shard)
+      batch = shard_batch(shard)
       # Under the lock, which also publishes the master's unlocked pushes
       # above to a worker that sees `true` under it (see `pop_mark_batch`).
       @mark_lock.lock
@@ -984,12 +1045,11 @@ module Gcry
       @mark_lock.unlock
       @mark_epoch.add(1)
       wake_mark_helpers
-      batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
       drought = MarkDrought.new(pointerof(@mark_spinners).as(Int32*))
       nap = MARK_STEAL_NAP_NS
       begin
         loop do
-          m = pop_mark_batch(batch.to_unsafe, MARK_POP_BATCH)
+          m = pop_mark_batch(batch, MARK_POP_BATCH)
           if m > 0
             drought.reset
             nap = MARK_STEAL_NAP_NS
@@ -998,7 +1058,7 @@ module Gcry
             # below — that branch is only reached when the pop came back
             # empty and nothing was counted.
             begin
-              scan_batch_local_first(batch.to_unsafe, m, shard)
+              scan_batch_local_first(batch, m, shard)
             ensure
               @mark_workers_busy.add(-1)
             end

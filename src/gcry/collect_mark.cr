@@ -397,7 +397,7 @@ module Gcry
     #
     # The stack is no longer strictly LIFO, so it can outgrow a depth-first
     # drain's: each batch may push all of its children before any of them is
-    # popped, as the parallel workers' 256-entry pops always could. It is
+    # popped, as the parallel workers' batch pops always could. It is
     # still `mmap`ed, and with one marker its mapped size at exit was the
     # ring's on all four benchmarks (256 KiB to 16 MiB).
     #

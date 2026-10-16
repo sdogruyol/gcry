@@ -461,6 +461,7 @@ module Gcry
       return if @destroyed
       @destroyed = true
       shutdown_mark_workers
+      release_mark_buffers
       flush_all_tlabs
       flush_all_alloc_batches
       # MUST tear down collector state (pending chunk flush, finalizers,
