@@ -218,18 +218,21 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 \*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
-Allocation storms, crystal-metric (process-fresh whole-process wall time, 7 interleaved reps, 12 CPUs, Crystal 1.21.0, 2026-10-14 — `bench/log/linux/2026-10-14-0.36-integration-ab/`; 0.35.0 from the same session in parentheses):
+Allocation storms, crystal-metric (process-fresh whole-process wall time, 11 interleaved reps, 12 CPUs, Crystal 1.21.0, 0.37.0 on 2026-10-18 — `bench/log/linux/2026-10-18-0.37-crystal-metric/`; 0.36.0 from the same session in parentheses):
 
 | Bench | gcry speed vs Boehm | peak RSS × Boehm |
 |-------|--------------------:|-----------------:|
-| Primes | **101%** (97%) | 0.93× |
-| JsonParsePure | **102%** (98%) | 0.80× |
-| Binarytrees | **101%** (102%) | 0.76× |
-| JsonGenerate | **106%** (101%) | 0.63× |
-| JsonParseSerializable | **106%** (102%) | 0.77× |
-| JsonParsePull | **103%** (98%) | 0.79× |
-| Revcomp | 92% (95%) | 0.60× |
-| RegexDna | 98% (100%) | 0.53× |
+| Primes | **106%** (103%) | 0.94× |
+| JsonParsePure | **104%** (101%) | 0.81× |
+| Binarytrees | **101%** (100%) | 0.74× |
+| JsonGenerate | **107%** (107%) | 0.63× |
+| JsonParseSerializable | **105%** (101%) | 0.71× |
+| JsonParsePull | **108%** (106%) | 0.78× |
+| Revcomp | 97% (94%) | 0.60× |
+| RegexDna | 98% (99%) | 0.53× |
+| Knuckeotide | 100% (97%) | 1.47× (1.67×) |
+
+0.37.0 against 0.36.0 is −0.5% to −3.7% wall on every row but RegexDna (+0.7%), each inside its interquartile range; a first, noisier session the same evening agrees within its spread (Brainfuck, which allocates nothing, moved 8.5% between the same two binaries there). Knuckeotide's peak drops 12% with 0.37.0's atomic quarter and is still the one row over the 1.1× budget (`bench/log/linux/2026-10-17-knuckeotide-rss/`).
 
 The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.36.0: it keeps the old pointer valid, unlike the opt-in page move (`GCRY_REALLOC_MOVE=1`, unsafe for programs that read a buffer after growing it — the stdlib does) (`bench/log/linux/2026-10-14-realloc-in-place/`). Revcomp's −3 points are code placement. 0.36.0 executes 0.14% fewer instructions than 0.35.0 on it, gcry's code is 3% of them in both, and Revcomp's own timed section is 4–5% faster. Rebuilding 0.36.0 with nop padding in front of the program's code moves Revcomp by 6% with nothing else changed (`bench/log/linux/2026-10-15-revcomp-attribution/`).
 
