@@ -106,17 +106,19 @@ scrubbing dead stack. Conservative root scans include that red zone.
     under Boehm's on 7 of 9 rows, 0.50–0.94×; in-place `realloc` growth took
     the buffer-growing rows down 13–17% from 0.35.0 (JsonGenerate 0.70× →
     0.58×, JsonParseSerializable 0.94× → 0.81×, Revcomp 0.75× → 0.61×). The
-    exceptions are JsonParsePure 1.08× and Knuckeotide 1.67×, a 52 MiB
-    process at the threshold floor and warm budget. Kemal was at 1.14× in
+    exceptions are JsonParsePure 1.08× and Knuckeotide 1.67×, whose peak
+    is its collection schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`;
+    1.62× with 0.37.0's atomic quarter). Kemal was at 1.14× in
     the VM.
   - **Slower rows in 0.36.0, neither a collector cost.** Revcomp's timed
     section is 7.7% slower than 0.35.0 (whole-process wall +3.4%). That is
     code placement: v0.36.0's own source rebuilt with nops ahead of its code
     runs Revcomp as fast as 0.35.0 in three of ten placements and 11–13%
     slower in the rest, with the same collector counters. The code whose
-    offset decides it is gcry's `Heap#malloc_atomic`, so any change ahead of
-    it in the binary can move Revcomp ±10% on these runners; the
-    release-0.37.0 tip happens to land fast
+    offset decides it is gcry's `Heap#malloc_atomic` (or `Heap#allocate`
+    behind it), so any change ahead of it in the binary can move Revcomp
+    ±10% on these runners; an earlier 0.37.0 build (`4fcee559`) happened
+    to land fast, and 0.37.0's own placement was not measured
     (`bench/log/windows/2026-10-16-revcomp-attribution/`). Primes is 2.8%
     slower, with 22% more mark time at the same collection count: in-place
     growth moves where collections fall in a bench whose live set keeps

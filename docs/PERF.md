@@ -29,7 +29,7 @@ Against the freelist the headerless default is **151.7%** [142.0, 161.4] at
 +6.9 pp of Boehm on throughput (t 4.43 against 1.83 on the Boehm pairing),
 peak RSS 31.2 against 37.5 MB (**−17%**), 1.1 against 2.7 faults per 1 000
 requests, 7% less CPU per request, p99 2.21 against 2.36 ms. The RSS above
-Boehm is the warm-chunk budget (live × `GCRY_THRESHOLD_FACTOR`, capped by
+Boehm is the warm-chunk budget (live × `GCRY_THRESHOLD_FACTOR`, atomic bytes at a quarter since 0.37.0, floored at 8 MiB and capped by
 the threshold): peak = post-GC = 31.2 MB flat on headerless (37.5 MB on the
 header layout) where the freelist spiked to 54 MB and collapsed to 17 MB. An
 explicit `GC.collect` releases the budget on the release tree — Kemal `/json`
@@ -369,7 +369,7 @@ Same host method. Session: `bench/log/linux/2026-07-29-151144/` (`bebedae`). `/j
 
 ### v0.14.0 Linux cut (superseded headline)
 
-Same host method. Session: `bench/log/linux/2026-07-29-035426/` (`015d66d`). `/json` **89.1%** @ **0.79×** RSS; `/` **88.9%** @ **0.78×**.
+Same host method. Session `2026-07-29-035426` (`015d66d`; its log is not in the tree). `/json` **89.1%** @ **0.79×** RSS; `/` **88.9%** @ **0.78×**.
 
 ### v0.12.0-era Linux cut (scrub off; superseded)
 
@@ -391,7 +391,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | pre-0.12 (bitmap A/B) | ~78% | ~82% | ~9.2× | Linux A/B with side bitmap still default (`2026-07-26-171942`) |
 | **0.12.0** | **~90%** | **~89%** | **~0.99×** | in-header MARK default again; side bitmap opt-in (`-Dgcry_side_bitmap`) |
 | **0.13.0** | **~90%** | **~89%** | **~0.95×** *(est.)* | **Linux: scrub default-on** — Kemal/acik RSS estimated; macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
-| **0.14.0** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (`2026-07-29-035426`, scrub on). Thr flat; Kemal RSS better than 0.13 est. Test suite + Trace/dump. Fat-app not re-cut. |
+| **0.14.0** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (session `2026-07-29-035426`, log not in the tree; scrub on). Thr flat; Kemal RSS better than 0.13 est. Test suite + Trace/dump. Fat-app not re-cut. |
 | **0.15.0** | **~86%** | **~86%** | **~0.77×** | Correctness: TLAB+process STW freelist fix + STW MT harness. Kemal re-cut `2026-07-29-151144`; acik ~90% / ~2.54× (`112202`). |
 | **0.16.0** | **~82%** | **~87%** | **~0.80×** | EC1 thr recover after Parallel fallout (cheap STW scans, 4 KiB scrub, non-atomic counters, sweep batch). Cut `2026-08-01-093130` (+ `/` slash-recut). |
 | **0.17.0** | *(carry 0.16)* | *(carry 0.16)* | *(carry)* | Darwin Kemal re-cut; Parallel TLAB-off + lazy **supported opt-in** (~79% EC4 `/json`, ~5.8× RSS). Linux Kemal not re-cut. `2026-08-01-ec4-lazy-sweep/`. |
@@ -408,7 +408,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
 | `GCRY_KEEP_CHUNKS=1` (0.18 campaign re-cut) | **~89%** | **~95%** | **~3.07×** | thr escape only — `2026-08-02-121411/` |
 | `GCRY_TIGHT_GROW=1` (0.18) | **~95%** | **~78%** | **~0.78×** | fat-app RSS win; Kemal thr soft — `2026-08-04-085740/` |
-| side bitmap build flag (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt`. The flag is removed — marks are header-generation by default, per-chunk bitmap under `GCRY_BITMAP=1` |
+| side bitmap build flag (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; session `2026-07-26-171942` (its log and `FINDINGS.txt` are not in the tree). The flag is removed — marks are header-generation by default, per-chunk bitmap under `GCRY_BITMAP=1` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
@@ -537,7 +537,7 @@ object reproduces a Windows runner's layout exactly.
 prints the default heap's counters at exit (collections, pauses, in-place
 grows, large reservations, mapped and unmapped bytes) into
 `gc-counters.txt`. Windows Revcomp's 0.36.0 drop was settled this way: it
-is the placement of gcry's own `Heap#malloc_atomic`
+is the placement of gcry's own `Heap#malloc_atomic` (or `Heap#allocate` behind it)
 (`bench/log/windows/2026-10-16-revcomp-attribution/`).
 
 ## How to record (Linux)
@@ -545,9 +545,10 @@ is the placement of gcry's own `Heap#malloc_atomic`
 Same-day gcry + Boehm, both paths → update **this** file and the README Linux table. Do **not** overwrite these tables with macOS wrk — use [PERF-macos.md](PERF-macos.md).
 
 ```sh
-make bench-kemal-wrk
-LABEL=linux-$(date +%Y%m%d) ./bench/median_kemal_boehm.sh
-LABEL=linux-$(date +%Y%m%d) ./bench/median_acikturkiye_boehm.sh
+make bench-run-kemal   # Kemal + wrk, Boehm vs gcry (bench/run_all.sh kemal)
+make bench-run-acik    # fat app (bench/run_all.sh acik)
+# A/B the previous tag against the tree, History rows:
+# PREV=vX.Y.Z LABEL=A.B.C make bench-kemal-record
 # or: GC=both COUNT=1 TRIALS=3 bash bench/run_all.sh all
 # after wrk: curl …/gc-collect && read RSS
 # secondary: make bench-crystal-metric

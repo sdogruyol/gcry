@@ -22,7 +22,7 @@ Snapshot of gcry **0.36.0** (`shard.yml`, 2026-10-15): sound defaults, parallel 
 | Precise / moving | No (needs compiler) | No |
 | Platforms | **Linux, macOS, Windows** (x86_64 and arm64; soft-dirty Linux-only); other targets fail at compile time (`src/gcry/platform/os.cr`). Windows workloads measured on x86_64 in VMs only (a 12-vCPU QEMU VM, GitHub's `windows-latest` runner), ARM64 unmeasured ([WINDOWS.md](WINDOWS.md)) | Broad |
 | Boehm C ABI | The surface Crystal uses; differences in [INTEGRATION.md § Boehm parity](INTEGRATION.md#boehm-parity) | Full |
-| Crystal `spec/std` | **18 054 / 18 054** pass (1.21.0, Linux x86_64), CI job `std-spec` (`ci/std-spec.sh`); not run on macOS or Windows | 18 054 / 18 054 |
+| Crystal `spec/std` | **18 054 / 18 054** pass (1.21.0, Linux x86_64) and 18 257 on 1.22.0 (CI run 38721725009), CI job `std-spec` (`ci/std-spec.sh`); not run on macOS or Windows | 18 054 / 18 054 |
 | Kemal `/json`, Linux | **105.4%** thr at **1.31×** peak RSS (0.36.0, 2026-10-14) — `bench/log/linux/2026-10-14-0.36-integration-ab/`; 0.88× after `GC.collect` (2026-10-06) | baseline |
 | Kemal `/json`, Windows x86_64 (VM) | **106.5%** thr at 1.14× peak working set — `bench/log/windows/2026-10-06-vm-validation/` | baseline |
 | crystal-metric, Windows x86_64 (`windows-latest`) | **94–105%** of Boehm's speed (Knuckeotide 89%), peak working set 0.50–0.94× on 7 of 9 rows (0.36.0, 2026-10-15) — `bench/log/windows/2026-10-15-0.36-native/` | baseline |

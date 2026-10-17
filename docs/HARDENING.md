@@ -77,7 +77,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_KEEP_CHUNKS=1` | Retain empty chunks (higher thr / RSS) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **0**, Darwin **512 KiB**; library **0**) |
-| `GCRY_EMPTY_CHUNK_WARM_RETAIN` | Bytes of emptied size-class chunks the sweep keeps mapped and resident for reuse. Under the bitmap allocator this defaults to the collection threshold and then follows live × `GCRY_THRESHOLD_FACTOR` after every major (capped by the threshold); `0` releases every emptied chunk |
+| `GCRY_EMPTY_CHUNK_WARM_RETAIN` | Bytes of emptied size-class chunks the sweep keeps mapped and resident for reuse. Under the bitmap allocator this defaults to the collection threshold and then follows live × `GCRY_THRESHOLD_FACTOR` after every major, atomic bytes at a quarter, floored at 8 MiB (capped by the threshold); `0` releases every emptied chunk |
 | `GCRY_TIGHT_GROW=1` | Freelist allocator only (`-Dgcry_block_headers GCRY_BITMAP_ALLOC=0`): sticky newest-chunk freelist + sparse GC-before-grow (fat-app RSS; Kemal thr soft — not default). **Not a no-op on the bitmap default**: it steers nothing there, but with `GCRY_DISABLE_TIGHT_GROW_GC` unset it turns off the inline allocation fast path (`refresh_fast_path`), so every small allocation takes the slower path for no RSS gain |
 | `GCRY_DISABLE_TIGHT_GROW_GC=1` | Prefer-freelist only (no GC-before-grow) |
 | `GCRY_PRECISE_STACK=1` | Load `.llvm_stackmaps` + hybrid precise walker (additive; see [STACK_MAPS.md](STACK_MAPS.md)) |
