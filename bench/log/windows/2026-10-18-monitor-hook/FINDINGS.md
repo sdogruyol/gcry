@@ -165,6 +165,7 @@ probe branch's third one in 39059947481, the same body:
 | 39058010270 | 1c7d2cf3 (probe/win-monitor-hook) | probe v2, pre-fix: windows x64 stall trace; macOS repeat; windows arm64 probe did not build (DbgHelp symbolizer is MSVC-only) |
 | 39059273954 | 66403f30 (probe/win-monitor-hook) | probe v3, with the gate fix and the clamp-only second example: all four platforms, both reverts, full Windows and macOS process suites |
 | 39059947481 | bb61e1b1 (probe/win-monitor-hook) | probe v4: the register-roots-off arm, all four platforms, both reverts |
+| 39060606871 | d073cef2 (win-monitor-hook) | `ci.yml` dispatch, soak off: 37 jobs success, 4 skipped; all eight Windows jobs green, process suites 166 examples (x64 and arm64 default) and 167 (x64 gates), 76 and 77 included |
 
 The probe branch is deleted; its files (v4) are in `scripts/`: copy
 `monitor_probe*.cr` to `bench/`, `monitor_probe_spec.cr` to `process_spec/`,
