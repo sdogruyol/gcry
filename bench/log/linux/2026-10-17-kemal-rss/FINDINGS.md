@@ -86,7 +86,7 @@ What it says:
 
 ## Fixes
 
-Four commits, in order (two kept on `kemal-rss`, two parked as `cost-floor.patch` in this directory; see Decision):
+Four commits, in order (two kept on `kemal-rss`, two parked as `cost-floor.patch` in this directory; see Decision). The branches `kemal-rss` and `probe-kemal-rss-atomic` named here have since been deleted; the commits named are what to look up:
 
 | commit | change | Kemal effect (Linux, local) |
 |---|---|---|

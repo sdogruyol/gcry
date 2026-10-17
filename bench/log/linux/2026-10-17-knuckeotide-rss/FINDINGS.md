@@ -187,7 +187,7 @@ runners decide speed (below).
 ## Runners
 
 Perf A/B run [38948987930](https://github.com/sdogruyol/gcry/actions/runs/38948987930)
-on probe branch `knuckeotide-rss-probe` at `cb536458` (= `4175fae8` + an
+on probe branch `knuckeotide-rss-probe` (branch since deleted; commits named here) at `cb536458` (= `4175fae8` + an
 env-only probe commit, `GCRY_PROBE_PACE_STEP` / `GCRY_PROBE_KIND_IDLE`, that
 the `var_env` arm uses to turn this branch's two changes off: that arm is
 `kemal`). `base` = `e8c0327e`, 10 reps, nine rows, Kemal 5 trials, all five
@@ -224,7 +224,7 @@ inside the IQRs on every row except Windows JsonParseSerializable (108% →
 ## Final run: idle-kind release alone, against the shipped atomic quarter
 
 Perf A/B [38965963265](https://github.com/sdogruyol/gcry/actions/runs/38965963265),
-`var` = `knuckeotide-rss` at `42144e9e` (atomic quarter + heap tables +
+`var` = `knuckeotide-rss` (branch since deleted) at `42144e9e` (atomic quarter + heap tables +
 idle-kind release), `base` = `01b184a6` (`release-0.37.0`: atomic quarter
 + heap tables, no cost floor), 15 reps, nine rows, Kemal 5 trials, counter
 runs 3 (`raw/ci-38965963265/`). This is the headline; the two runs above

@@ -8,7 +8,8 @@ VM (`../2026-10-06-vm-validation/`).
 ## Method
 
 `Perf A/B` (`.github/workflows/perf-ab.yml`, `bench/runner_ab/ab.sh` under
-Git Bash, `ab.py`), dispatched on branch `perf-native-0.36`, whose `src/` is
+Git Bash, `ab.py`), dispatched on branch `perf-native-0.36` (since deleted),
+whose `src/` is
 v0.36.0's (`git diff v0.36.0 -- src` is empty), with `-f base=v0.35.0`. Three
 arms built in the job: Boehm (stock Crystal), 0.35.0 and 0.36.0. Each of 15
 reps runs every bench once per arm, process-fresh, in random order; one

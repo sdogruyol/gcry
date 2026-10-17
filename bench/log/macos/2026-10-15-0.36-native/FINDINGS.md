@@ -13,7 +13,8 @@ nothing in 0.36.0 had been measured off Linux.
 ## Method
 
 `Perf A/B` (`.github/workflows/perf-ab.yml`, `bench/runner_ab/ab.sh`,
-`ab.py`, `kemal_ab.py`), dispatched on branch `perf-native-0.36`, whose
+`ab.py`, `kemal_ab.py`), dispatched on branch `perf-native-0.36` (since
+deleted), whose
 `src/` is v0.36.0's (`git diff v0.36.0 -- src` is empty), with
 `-f base=v0.35.0`. Three arms built in the job: Boehm (stock Crystal), 0.35.0
 and 0.36.0. crystal-metric: 15 reps, every bench once per arm per rep,
