@@ -1847,25 +1847,13 @@ module Gcry
         end
       end
 
-      # SP unknown: the thread is running on this fiber, and nothing says how
-      # deep. Its `@context.stack_top` cannot say either — it is written only
-      # on a context switch, and the thread that lands here every collection
-      # is the Monitor, whose main fiber has never switched: its `stack_top`
-      # is the SP `Fiber#initialize` read in the thread's birth, a few hundred
-      # bytes above the frames of the loop it has run ever since. Scanning
-      # from there missed those frames, and on Crystal 1.22 the `GC.syscall`
-      # closure of the Monitor's `Thread.sleep` was swept while it slept and
-      # written after it woke, into whatever the block had become
-      # (`process_spec/regression/76_monitor_deep_frame_root_spec.cr`). So the
-      # whole stack, from its low-water mark: the Monitor's touched stack is
-      # a few pages, and the skip keeps the untouched rest unread — the 8 MiB
-      # read from `guard` that the stack_top clamp was avoiding is not what
-      # this does (`bench/log/linux/2026-09-26-sysmon-guard-scan/`).
-      # Counted as a fallback so samples/stw_sp_clamp (and metrics) see the
-      # scan — aarch64/Darwin land here too when a suspend SP is outside the
-      # fiber and pthread bounds; skipping the counter made CI abort.
+      # Idle / SP unknown: cheap stack_top clamp (not full 8 MiB).
+      # Count as fallback so samples/stw_sp_clamp (and metrics) see the scan —
+      # aarch64/Darwin often land here when suspend SP is outside fiber/pthread
+      # bounds; skipping the counter made CI abort after the EC1 cheap path.
       if guard < bottom
-        top = low_water_or_guard(fiber, guard)
+        top = fiber.@context.stack_top.address
+        top = guard if top < guard
         if top < bottom
           @sp_clamp_fallbacks += 1
           Roots.scan_stack(top, bottom, stack.pointer.address, bottom) do |candidate|
