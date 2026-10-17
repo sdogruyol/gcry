@@ -205,6 +205,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version: their upstream issues (crystal-lang/crystal#17645, #17644) are
   still open in 1.22.0.
 
+- **README, COMPARISON and WINDOWS carry 0.37.0's macOS, Windows and Linux
+  arm64 numbers,** from `perf-ab.yml` against v0.36.0 and Boehm on all five
+  runners (`bench/log/{linux,macos,windows}/2026-10-18-0.37-runners/`).
+  macOS arm64: crystal-metric 98–105% of Boehm on 7 of 9 rows (Binarytrees
+  78% → 87%), Kemal `/json` 103.5% at 1.39× peak RSS (0.36.0: 1.98×);
+  Windows: 94–108%, no row slower than 0.36.0 beyond its spread. One row
+  is: Kemal `/json` on GitHub's `ubuntu-latest` runner, 2–7% below 0.36.0
+  in three runs, bisected to a975d5cd (the research tables leaving the
+  `Heap`), which adds no work; no fix.
+
 ### Fixed
 
 - **The Monitor's stack is scanned below its birth on Linux.** The Monitor
