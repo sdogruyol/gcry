@@ -207,7 +207,7 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **105.4%** *(0.36.0, 2026-10-14; 0.37.0 is level with 0.36.0: −0.7% / +0.4% in two sessions on 2026-10-18)* |
+| Kemal `/json` throughput | **105.4%** *(0.36.0, 2026-10-14. 0.37.0 against 0.36.0: −0.7% / +0.4% on this 12-vCPU host, but −2.3% to −6.6% in three runs on GitHub's 4-vCPU `ubuntu-latest`, bisected to the commit that maps the research tables lazily, which removes work; layout or placement suspected, not proven — `bench/log/linux/2026-10-18-0.37-runners/`)* |
 | Kemal `/json` peak RSS | **1.21×** *(0.37.0, 19.7 vs 16.2 MB; 0.36.0: 1.31× in the same sessions)* |
 | Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB, 2026-10-06)* |
 | Kemal `/` throughput | level with Boehm *(0.36.0: 99.9% on 2026-10-14; 0.37.0 against 0.36.0 +0.3% / −2.8% on 2026-10-18; not GC-bound — the GC is 0.3% of the run, and this row moves with code placement alone)* |
@@ -363,7 +363,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Conservative bodies** | Every non-atomic block is word-scanned; no type map narrows a scan since 2026-10-04 (a union buffer's first tag reads as a type id — `docs/SOUND-DEFAULTS.md`) |
-| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **105.4%** of Boehm (0.36.0, 2026-10-14; 0.37.0 level with it) at **1.21×** its peak RSS (0.37.0, 2026-10-18), 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
+| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **105.4%** of Boehm (0.36.0, 2026-10-14; 0.37.0 within 2–7% of it) at **1.21×** its peak RSS (0.37.0, 2026-10-18), 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
 | **Bitmap allocator** | Process default since 0.24.0 and forced on by the headerless layout — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors. `GCRY_BITMAP_ALLOC=0` is the freelist escape, on `-Dgcry_block_headers` only |
 | **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR` (atomic bytes at a quarter, floored at 8 MiB); an explicit `GC.collect`, the idle collector and the collection before an `OutOfMemoryError` release them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal). Multi-threaded programs too since 0.30.0: Kemal at 4 workers reads 20 MB after `GC.collect`, 85 MB before |
 | **macOS reclaim** | `MADV_FREE_REUSABLE` at host page size (16 KiB on Apple Silicon), with `MADV_FREE_REUSE` before reuse, so released pages leave `phys_footprint` at once |
