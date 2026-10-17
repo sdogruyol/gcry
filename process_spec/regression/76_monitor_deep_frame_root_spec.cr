@@ -35,7 +35,7 @@ require "spec"
   module MonitorDeepRoot
     CANARY = 0x6d6f_6e69_746f_7221_u64
     MASK   = 0xa5a5_a5a5_a5a5_a5a5_u64
-    WORDS  = 6
+    WORDS  =                         6
 
     @@armed = Atomic(Int32).new(0)
     @@addr = Atomic(UInt64).new(0_u64)
