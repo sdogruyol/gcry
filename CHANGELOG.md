@@ -226,6 +226,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the Monitor never reaches the spec's hook)
   (`bench/log/linux/2026-10-17-monitor-low-water/`).
 
+- **A library heap's collection no longer shuts the runtime's Monitor
+  out.** `stop_world_quiescing_roots` closed the Monitor gate for every
+  heap, and only `start_world` opens it again — which returns at once for
+  a heap that never stopped the world, i.e. every `Gcry::Heap.new`. The
+  Monitor then waited in `MonitorGate.enter` until the process heap's next
+  collection and did none of its work: no scheduler blocked on a syscall
+  handed to another thread, no parallel context grown, no fiber stack
+  collected. On windows-latest it waited from the end of
+  `process_spec/regression/72`'s library collection to the end of the run,
+  which is why spec 76 never reached its hook on any Windows job of CI run
+  39028591028 (probe: CI run 39058010270). The gate is now closed only by
+  a heap that stops the world.
+  `process_spec/regression/77_library_collect_monitor_gate_spec.cr`: the
+  gate still closed after a library collection and no Monitor pass in 5 s
+  before, open and passing after
+  (`bench/log/windows/2026-10-18-monitor-hook/`).
+
 - **Every gcry process carried 472 KiB of resident memory for research
   knobs that are off.** The unmap guard's and release ledger's record ring,
   the release quarantine and the release map were `StaticArray`s inside
