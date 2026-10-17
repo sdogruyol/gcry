@@ -4081,6 +4081,19 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       from a shifted collection schedule rather than the claim, which no
       mark reaches. Kept on branch `occupancy-plain-or` with its findings
       (`bench/log/linux/2026-10-17-occupancy-claim/` there).
+- [ ] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
+      0.36.0 (2026-10-18).** Three paired runs: −2.3% [−3.9, −0.6], −6.6%
+      [−8.0, −1.6], −2.4% [−4.8, −0.9]; peak −10%. On the 12-vCPU QEMU host
+      the same comparison is −0.7% / +0.4%, and macOS and Linux arm64 are
+      level or faster. A bisect over the 0.37 commits on that runner puts the
+      step at `a975d5cd` (the research tables mapped only when armed), alone
+      −2.5% to −4.1% on three runners, every other step within its spread.
+      That commit removes work: the `Heap` shrinks by 472 KiB and the default
+      no longer records the release map. Putting a 472 KiB pad back reads
+      +0.1% to +2.9% with every IQR across zero, so layout or code placement
+      is suspected and not shown. Next: a `pads` placement probe on that
+      runner, as for Revcomp (`bench/log/linux/2026-10-18-0.37-runners/`,
+      `kemal-bisect/`).
 - [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
       (2026-10-15) — code placement of gcry's allocation path
       (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.
