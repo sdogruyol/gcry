@@ -108,8 +108,15 @@ describe "Regression: an in-stop sweep keeps the chunks a frozen mapper would dr
   {"fixed", "control"}.each do |arm|
     it "#{arm} arm in a process of its own" do
       captured = IO::Memory.new
+      # The control arm drops chunks from the list on purpose, so its counters
+      # drift, and under `GCRY_DEBUG_INVARIANTS=1` the checker rightly aborts
+      # the child (`live_objects mismatch: actual=2 reported=211`, 2 of 2
+      # runs of process_spec with the checker on). The fixed arm keeps the
+      # checker, which is one more witness that it leaves the heap consistent.
+      env = {"GCRY_FROZEN_MAPPER_CHILD" => arm} of String => String?
+      env["GCRY_DEBUG_INVARIANTS"] = nil if arm == "control"
       status = Process.run(Process.executable_path.not_nil!, ["-e", "stop-sweep-frozen-mapper child #{arm}"],
-        env: {"GCRY_FROZEN_MAPPER_CHILD" => arm}, output: captured, error: captured)
+        env: env, output: captured, error: captured)
       fail "child #{status.inspect}:\n#{captured}" unless status.success?
       captured.to_s.should contain("1 examples, 0 failures")
     end
