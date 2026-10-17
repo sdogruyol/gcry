@@ -54,13 +54,15 @@ Crystal >= 1.21. Linux (x86_64 + aarch64), macOS (arm64 + x86_64), and
 [Windows x86_64 + ARM64](docs/WINDOWS.md).
 
 Crystal's own standard-library suite passes under gcry on Linux x86_64: all
-18 054 examples of `spec/std` (Crystal 1.21.0), held in CI by the `std-spec`
-job ([`ci/std-spec.sh`](ci/std-spec.sh)). macOS and Windows run gcry's own
-gates, not Crystal's suites.
+18 054 examples of `spec/std` on Crystal 1.21.0 and 18 257 on 1.22.0, held in
+CI by the `std-spec` job ([`ci/std-spec.sh`](ci/std-spec.sh)). macOS and
+Windows run gcry's own gates, not Crystal's suites.
 
 The Crystal compiler, built with gcry, also builds itself, and `compiler_spec`
 built with gcry as its GC passes: 13 640 examples, 0 failures, 18 pending
-([CI run 37437660646](https://github.com/sdogruyol/gcry/actions/runs/37437660646)).
+([CI run 37437660646](https://github.com/sdogruyol/gcry/actions/runs/37437660646));
+13 764 on Crystal 1.22.0
+([CI run 38721725009](https://github.com/sdogruyol/gcry/actions/runs/38721725009)).
 `crystal i` runs in the gcry-built compiler too, because gcry exports the part
 of Boehm's `GC_*` C ABI Crystal uses
 ([differences](docs/INTEGRATION.md#boehm-parity)). CI holds both on Linux
@@ -241,7 +243,7 @@ The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.3
 | Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
 | Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
-\*Kemal rows: `bench/log/macos/2026-10-15-0.36-native/` — GitHub `macos-latest` runner (Apple M1, 3 vCPUs), Boehm, 0.35.0 and 0.36.0 in random order per trial, 15 trials, `wrk -t2 -c50` 10 s after a 3 s warm-up, medians of per-trial paired ratios [IQR]. Every gcry arm sits at the 16 MiB Darwin threshold floor plus the warm-chunk budget against a 15 MiB Boehm process. The earlier paired A/B on an M2 Pro laptop (0.24.x, `bench/log/macos/2026-09-06-bitmap-default-ab/`, 20 rotated rounds, null at 100.9% [99.1, 102.6]) measured peak *footprint*, which leaves out the pages Darwin may reclaim: 101.9% at 1.50×, 0.4 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 2.9 against 5.2 ms. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+\*Kemal rows: `bench/log/macos/2026-10-15-0.36-native/` — GitHub `macos-latest` runner (Apple M1, 3 vCPUs), Boehm, 0.35.0 and 0.36.0 in random order per trial, 15 trials, `wrk -t2 -c50` 10 s after a 3 s warm-up, medians of per-trial paired ratios [IQR]. Every gcry arm sat at 0.36.0's 16 MiB Darwin threshold floor (8 MiB since 0.37.0) plus the warm-chunk budget against a 15 MiB Boehm process. The earlier paired A/B on an M2 Pro laptop (0.24.x, `bench/log/macos/2026-09-06-bitmap-default-ab/`, 20 rotated rounds, null at 100.9% [99.1, 102.6]) measured peak *footprint*, which leaves out the pages Darwin may reclaim: 101.9% at 1.50×, 0.4 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 2.9 against 5.2 ms. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 Allocation storms, crystal-metric (same runner and run, process-fresh whole-process wall time, 15 interleaved reps, Crystal 1.21.0; 0.35.0 in parentheses):
 
@@ -257,9 +259,9 @@ Allocation storms, crystal-metric (same runner and run, process-fresh whole-proc
 | RegexDna | 97% (98%) | 0.51× |
 | Knuckeotide | 89% (88%) | 1.88× |
 
-The JSON rows gain from 0.36.0's in-place `realloc` growth, as on Linux. Primes's −2 points are where its collections happen to fall in a heap that only grows, not more work per byte: on another runner the same change dropped a collection and scanned 37% less. Binarytrees and Knuckeotide are small processes (39 and 47 MiB under Boehm), where the 16 MiB Darwin threshold floor and the warm budget weigh most; neither moved between the releases. On Intel (`macos-15-intel`, i7-8700B) every row is at 90–98% of Boehm, none slower than 0.35.0 beyond the spread, and Kemal is level with Boehm within that runner's ±10-point spread.
+The JSON rows gain from 0.36.0's in-place `realloc` growth, as on Linux. Primes's −2 points are where its collections happen to fall in a heap that only grows, not more work per byte: on another runner the same change dropped a collection and scanned 37% less. Binarytrees is a small process (39 MiB under Boehm), where 0.36.0's 16 MiB Darwin threshold floor and the warm budget weigh most; Knuckeotide's peak is its collection schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`). Neither moved between the releases. On Intel (`macos-15-intel`, i7-8700B) every row is at 90–98% of Boehm, none slower than 0.35.0 beyond the spread, and Kemal is level with Boehm within that runner's ±10-point spread.
 
-**Since 0.36.0 (release-0.37.0 tip, 2026-10-16, `bench/log/macos/2026-10-16-binarytrees/`):** the allocation hit path no longer reads a `@[ThreadLocal]` on Darwin (two out-of-line calls there): Binarytrees 79% → 88% of Boehm on `macos-latest`, 92% → 131% on `macos-15-intel`. And the adaptive threshold floor is 8 MiB on Darwin as everywhere else, which the RSS budget (peak within 1.1× Boehm's on every crystal-metric row) asked for: Binarytrees' peak 1.79× → 0.96× (Intel 1.87× → 0.98×), Knuckeotide 1.89× → 1.74× (1.99× → 1.81×), Kemal `/json` 1.93× → 1.69× (2.19× → 1.56×) at the same req/s, and no other row's speed or peak moved beyond its spread (Intel Binarytrees +2–4% wall). Knuckeotide is the one crystal-metric row still over 1.1× on macOS, as on Linux and Windows; no threshold setting brings it under.
+**Since 0.36.0 (release-0.37.0 tip, 2026-10-16, `bench/log/macos/2026-10-16-binarytrees/`):** the allocation hit path no longer reads a `@[ThreadLocal]` on Darwin (two out-of-line calls there): Binarytrees 79% → 88% of Boehm on `macos-latest`, 92% → 131% on `macos-15-intel`. And the adaptive threshold floor is 8 MiB on Darwin as everywhere else, which the RSS budget (peak within 1.1× Boehm's on every crystal-metric row except Knuckeotide, whose peak is its collection schedule, `bench/log/linux/2026-10-17-knuckeotide-rss/`) asked for: Binarytrees' peak 1.79× → 0.96× (Intel 1.87× → 0.98×), Knuckeotide 1.89× → 1.74× (1.99× → 1.81×), Kemal `/json` 1.93× → 1.69× (2.19× → 1.56×) at the same req/s, and no other row's speed or peak moved beyond its spread (Intel Binarytrees +2–4% wall). Knuckeotide is the one crystal-metric row still over 1.1× on macOS, as on Linux and Windows.
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
@@ -360,7 +362,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Conservative bodies** | Every non-atomic block is word-scanned; no type map narrows a scan since 2026-10-04 (a union buffer's first tag reads as a type id — `docs/SOUND-DEFAULTS.md`) |
 | **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **101.8%** of Boehm at **1.43×** its peak RSS, 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
 | **Bitmap allocator** | Process default since 0.24.0 and forced on by the headerless layout — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors. `GCRY_BITMAP_ALLOC=0` is the freelist escape, on `-Dgcry_block_headers` only |
-| **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR`; an explicit `GC.collect`, the idle collector and the collection before an `OutOfMemoryError` release them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal). Multi-threaded programs too since 0.30.0: Kemal at 4 workers reads 20 MB after `GC.collect`, 85 MB before |
+| **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR` (atomic bytes at a quarter, floored at 8 MiB); an explicit `GC.collect`, the idle collector and the collection before an `OutOfMemoryError` release them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal). Multi-threaded programs too since 0.30.0: Kemal at 4 workers reads 20 MB after `GC.collect`, 85 MB before |
 | **macOS reclaim** | `MADV_FREE_REUSABLE` at host page size (16 KiB on Apple Silicon), with `MADV_FREE_REUSE` before reuse, so released pages leave `phys_footprint` at once |
 | **Observability** | `Gcry.metrics`, `prometheus_text`, `Observability.json_stats` |
 | **Fork** | `pthread_atfork` reinit (default); see [POLICY](docs/POLICY.md) |
@@ -414,9 +416,9 @@ Defaults tuned for process GC. Change after you measure:
 | `GCRY_SOUND=1` | Force the whole root-complete profile ahead of any individual knob. The defaults have been that profile since 2026-10-05 ([SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md)) |
 | `GCRY_STW_STACK_LAG` / `GCRY_STW_PTHREAD_LAG` | Bytes; default 0 (whole touched stack). A non-zero lag bounds the multi-mutator stack scan and its pause, and can miss a live pointer deeper than the lag. At 0, Linux CI EC4 pause is 4.55 against 3.07 ms at 256 KiB, req/s unchanged (2026-09-26) |
 | `GCRY_BITMAP_ALLOC=0` | Freelist allocator, the pre-0.24.0 default (Kemal `/json` ~75% of Boehm at 1.87× peak RSS on Linux; ~85% on macOS). Needs `-Dgcry_block_headers`; on the headerless default it warns and is ignored. Not the RSS escape it used to be — the default layout is the lowest-RSS of the three |
-| `GCRY_THRESHOLD_FACTOR` | Warm-chunk budget and adaptive threshold, % of live (default 100). 50 → Kemal 0.95× peak RSS at unchanged throughput, but −12 pp on the fat app |
+| `GCRY_THRESHOLD_FACTOR` | Warm-chunk budget and adaptive threshold, % of live, atomic bytes at a quarter (default 100). 50 → Kemal 0.95× peak RSS at unchanged throughput, but −12 pp on the fat app |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks (freelist-era knob: ~95% `/json` thr, ~3x RSS on the freelist) |
-| `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), floored at 8 MiB, capped at 64 MiB (`GCRY_THRESHOLD_MAX`) or a third of the bytes the mark scanned, and paced up to 3× while collections take more than a tenth of the mutator time (`GCRY_THRESHOLD_PACE`) |
+| `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major (atomic bytes at a quarter) × `GCRY_THRESHOLD_FACTOR`% (default 100), floored at 8 MiB, capped at 64 MiB (`GCRY_THRESHOLD_MAX`) or a third of the bytes the mark scanned, and paced up to 3× while collections take more than a tenth of the mutator time (`GCRY_THRESHOLD_PACE`) |
 | `GCRY_THRESHOLD_PACE` | Most the adaptive threshold is paced up, % (default 300; 100 = off). Collection-bound phases get fewer majors (crystal-metric Primes −25%, JsonParsePure −22%, Binarytrees −9% wall, RSS under Boehm's); Kemal `/json` is not collection-bound and is unchanged |
 | `GCRY_NURSERY=<bytes>` | Opt-in nursery with that minor threshold (e.g. `262144`; off by default, and unsound without a write barrier). Needs `-Dgcry_block_headers`; on the headerless default it warns and is ignored. `0` = off |
 | `GCRY_PARALLEL_MARK=N` | Mark workers (default `max(min(2, CPUs − 1), min(CPUs / 4 + 1, CPUs − 1, 8))` — two up to 7 CPUs, four at 12 — serial below 32 MiB live; `1` = serial) |
@@ -460,8 +462,8 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 ```sh
 make spec             # unit specs under Boehm
 make samples          # -Dgc_none samples -> bin/
-make bench            # library-heap churn
-make bench-kemal-wrk  # Kemal + wrk on / and /json
+make bench-run-kemal  # Kemal + wrk, Boehm vs gcry (bench/run_all.sh kemal)
+make bench-crystal-metric  # crystal-metric allocation storms
 make format-check
 ```
 
