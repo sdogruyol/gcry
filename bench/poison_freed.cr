@@ -153,19 +153,77 @@ def run(control : Bool) : Int32
   # So the arm is about reclaim, not about the pattern: churn, and require the
   # heap to stop growing. It runs in both arms because the plateau must hold
   # with the knob off too, or the number it is compared against means nothing.
+  #
+  # *Stop* growing, not *never* grow, because a healthy heap may grow once.
+  # One string in 500 survives, so every chunk of their class (80 B, atomic)
+  # that a cycle fills keeps a few survivors and is never released: the heap
+  # after a round is the most such chunks any one cycle so far has needed,
+  # and a cycle is as long as the threshold. Pacing raises the threshold up
+  # to 3× when a collection costs more than a tenth of the mutator time
+  # before it, so one paced cycle steps the heap up for good, and every later
+  # round reuses what it mapped. macos-15-intel read 9.4 → 10.1 → 16.4 → 16.4
+  # MB that way (run 39073579395), and the test this replaced — last round
+  # minus first, more than 4 MB — failed it; a probe run with the same shape
+  # had the class's chunks go from 13 to 38 in the round a 300% pace made one
+  # cycle three times as long, then stay there for eight more rounds. 0.37.0's
+  # 8 MiB Darwin floor halves the mutator time between collections (a cycle
+  # every 40 960 iterations here, 80 896 at 16 MiB) without halving the
+  # collection: on the two macOS runners the control arm paced in 11 of
+  # 1 280 rounds, and in none of 800 at v0.36.0; with pacing off or the old
+  # 16 MiB floor fixed, none of 400 runs stepped. The shipped test failed 2
+  # control runs in 440 there and 2 knob-on runs in 200
+  # (`bench/log/macos/2026-10-18-poison-freed-step/`).
+  #
+  # Such a step is a running maximum: it rises only in a round whose longest
+  # cycle beats every earlier one, and no further than the paced threshold
+  # allocates — at most +7.0 MB over four rounds in 1 440 runs on those
+  # runners and the failing one, 16.9 MB the highest any round read. The
+  # defect grows the heap in *every* round by what the round allocated:
+  # +15.5 MB a round then, +40 MB a round with the stand-down restored on the
+  # 0.37.0 tree. So the heap test fails when each round after the first grew
+  # by more than 4 MB: three of those are more than 12 MB, beyond any
+  # schedule measured, and the defect clears each one tenfold.
+  #
+  # Arms 1-3 leave garbage behind; collect it, so that the occupancy baseline
+  # below is what survives into the churn and nothing else.
+  GC.collect
+  occupied_before = occupied_blocks
   rounds = churn_rounds(ROUNDS, COUNTERS)
   sizes = rounds.map(&.heap_mb)
   churned = rounds.sum(&.poisoned)
   keep_size = rounds.last.kept
   puts "heap MB per round: #{sizes.map(&.round(1)).join(" -> ")} " \
        "(#{keep_size} kept, #{churned} poisoned)"
-  growth = sizes.last - sizes.first
-  # ~1 600 strings stay live, so the heap has nothing to grow for. Before the
-  # fix this arm went 18.1 → 64.7 MB.
-  if growth > 4.0
-    failures << "the heap grew #{growth.round(1)} MB over four churn rounds " \
-                "(#{sizes.map(&.round(1)).join(" -> ")}) — reclaimed blocks are " \
-                "not being handed out again"
+  # ~1 600 strings stay live, so the heap has nothing to grow for round on
+  # round. Before the fix this arm went 18.1 → 64.7 MB.
+  deltas = (1...sizes.size).map { |i| sizes[i] - sizes[i - 1] }
+  if (least = deltas.min?) && least > 4.0
+    failures << "the heap grew by more than 4 MB in every churn round " \
+                "(#{sizes.map(&.round(1)).join(" -> ")}, at least +#{least.round(1)} MB " \
+                "each) — reclaimed blocks are not being handed out again"
+  end
+
+  # The heap reads a leak only once it outgrows what the schedule can do, and
+  # a leak that levels off never reads as one: with an eighth of every
+  # reclaim left occupied (a scratch build, FINDINGS) the chunks fill with
+  # lost blocks until the other seven eighths suffice, and the heap went
+  # 22.7 → 26.5 → 28.6 → 29.6 MB, which the test above passes. So the
+  # defect's mechanism is read as well, and that does not depend on the
+  # schedule: `occ`, the bitmap the allocator reads to call a block taken,
+  # may gain no more set bits over the churn than twice the strings kept —
+  # the margin is for a block a conservative root retains. Read after the
+  # last round's `GC.collect`, so every dead block has been swept. The tip
+  # gains the kept strings plus 5 to 8; an eighth left occupied gains 50 700,
+  # a sixty-fourth 6 100, the defect 2.4 million. The header allocator has
+  # no `occ` and reads 0, which passes.
+  occupied = rounds.map(&.occupied)
+  added = occupied.last.to_i64 - occupied_before.to_i64
+  puts "occupied blocks per round: #{occupied_before} before -> #{occupied.join(" -> ")} " \
+       "(#{keep_size} strings kept)"
+  if added > 2 * keep_size
+    failures << "#{added} more blocks are occupied after the churn than before it, for " \
+                "#{keep_size} strings kept — reclaimed blocks are staying occupied, and the " \
+                "allocator will not hand them out"
   end
   if on && churned == 0
     failures << "the knob is on and no block was poisoned during the churn, so " \
@@ -193,7 +251,20 @@ def run(control : Bool) : Int32
 end
 
 # One churn round's numbers, read after its closing `GC.collect`.
-record Round, heap_mb : Float64, poisoned : UInt64, kept : Int32, live_intact : Bool
+record Round, heap_mb : Float64, occupied : UInt64, poisoned : UInt64, kept : Int32,
+  live_intact : Bool
+
+# Occupied blocks over every size-class chunk, popcounted from `occ`. A header
+# chunk has no `occ` and counts 0; a dormant one is skipped, its pages are
+# released and it is empty by construction.
+def occupied_blocks : UInt64
+  total = 0_u64
+  HEAP.each_chunk do |chunk|
+    next if Gcry::ChunkHeader.large?(chunk) || Gcry::ChunkHeader.dormant?(chunk)
+    total += HEAP.chunk_occupied_count(chunk)
+  end
+  total
+end
 
 # What a churn round leaves in the size-class chunks, per (class, kind), read
 # after `GC.collect` with no other thread allocating — so the chunk list is
@@ -266,8 +337,9 @@ def churn_rounds(rounds : Int32, counters : Bool) : Array(Round)
     end
     GC.collect
     heap = HEAP.heap_size
-    out << Round.new(heap / 1_048_576.0, HEAP.poisoned_blocks - poisoned_before, keep.size,
-      keep.all?(&.starts_with?("poison-arm4-")))
+    occupied = occupied_blocks
+    out << Round.new(heap / 1_048_576.0, occupied, HEAP.poisoned_blocks - poisoned_before,
+      keep.size, keep.all?(&.starts_with?("poison-arm4-")))
     if counters
       print_round(r + 1, heap, peak, cycles, HEAP.major_collections - majors_before,
         HEAP.chunks_mapped - mapped_before, HEAP.unmapped_bytes - unmapped_before)
