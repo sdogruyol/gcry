@@ -1,7 +1,8 @@
 # Upstream draft: `String::Builder#to_s` writes one byte past its buffer
 
 Prepared 2026-10-14 against crystal-lang/crystal master `39f3f4d` (1.22.0).
-Not filed. `crystal-string-builder-terminator.patch` in this directory is the
+Filed 2026-10-14 as crystal-lang/crystal#17645 (open; no PR opened).
+`crystal-string-builder-terminator.patch` in this directory is the
 fix alone; `crystal-string-builder-terminator-pr.patch` is the PR (fix + spec).
 
 ## Issue

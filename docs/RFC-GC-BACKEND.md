@@ -27,7 +27,8 @@ private runtime state and reopening runtime classes. This RFC proposes:
   GCRY_STRESS_EVERY=256`, 0 unexpected failures, with one allowlisted example
   (`ci/std-spec-stress-allow.txt`: `spec/std/log/builder_spec.cr:230` reads
   WeakRef-only objects after a possible collection, by design); 1.21.1:
-  18 068, 0 failures (`docs/DEFAULT-GC-READINESS.md` §1). CI runs it on every
+  18 068, 0 failures (`docs/DEFAULT-GC-READINESS.md` §1); 1.22.0: 18 257,
+  0 failures (CI run 38721725009). CI runs it on every
   push (`ci/std-spec.sh`, job `std-spec` in `.github/workflows/ci.yml`),
   against the `spec/std` of the compiler's own commit.
 - **Root-complete defaults.** Since 2026-10-05 no default knob can decline a
@@ -50,7 +51,8 @@ private runtime state and reopening runtime classes. This RFC proposes:
   itself and runs `crystal i` (3 of 3 programs). `compiler_spec`, built by
   the host compiler with gcry linked in (`-Dgc_none`, `require "gcry"`) and
   run with gcry as the process GC, passes 13 640 examples, 0 failures,
-  18 pending (`bench/log/linux/2026-10-06-compiler-spec/`).
+  18 pending (`bench/log/linux/2026-10-06-compiler-spec/`); on Crystal
+  1.22.0 13 764 examples, 0 failures (CI run 38721725009).
   - CI job `compiler-gcry` (`ci/compiler-spec.sh`): self-host and `crystal i`
     on every push and pull request, `compiler_spec` on pull requests,
     schedule and dispatch.
@@ -62,11 +64,12 @@ private runtime state and reopening runtime classes. This RFC proposes:
 
 What is **not** evidenced yet:
 
-- Allocation-storm throughput is measured only on Linux x86_64 (READINESS
+- Allocation-storm throughput is measured on Linux x86_64 (READINESS
   M2: Primes 100%, JsonParsePure 91%, Binarytrees 94% of Boehm's speed on
-  12 CPUs; buffer-growth rows such as Revcomp 84%) and once on Windows
-  x86_64 in a 12-vCPU VM (87–114%); arm64 (macOS, Linux, Windows) and macOS
-  have not been re-measured since.
+  12 CPUs; buffer-growth rows such as Revcomp 84%), and for 0.36.0 natively
+  on GitHub's macOS arm64, macOS x86_64 and Windows x86_64 runners
+  (`bench/log/{macos,windows}/2026-10-15-0.36-native/`); Windows ARM64 is
+  unmeasured.
 - Crystal's suites have run under gcry only on Linux x86_64.
 - TLAB, under Parallel ExecutionContext, remains a research arm (B3,
   [POLICY.md](POLICY.md)).
@@ -146,7 +149,7 @@ Crystal and close new cycles back into the stdlib; under gcry
 the five-line repro: Boehm 15, gcry 29, either with the fix 0
 (`FINDINGS.md`, "Counting it").
 
-Proposed: merge `crystal-raises-fixpoint.patch` (same directory), which
+Filed as crystal-lang/crystal#17644 (open). Proposed: merge `crystal-raises-fixpoint.patch` (same directory), which
 propagates `raises?` along recorded edges to a fixpoint after
 `cleanup_types` and adds a codegen spec; 73/73 in
 `spec/compiler/codegen/exception_spec.cr` with it. The full compiler suite
@@ -161,7 +164,6 @@ method).
 `argv[argc] == NULL`. Boehm hides it because `GC_malloc(16)` usually returns a
 larger zeroed granule; an allocator with exact size classes exposes it as
 `EFAULT` (`src/gcry/crystal_process_compat.cr:1-9`, gcry issue #14).
-Proposed: allocate `args.size + 1`. A one-line fix independent of this RFC.
 Fixed in Crystal 1.22.0 (crystal-lang/crystal#17184); gcry's reopen now
 applies only below that version.
 
@@ -182,7 +184,7 @@ read them up to the next NUL, declared `…\01` functions, and failed to link
 `process_spec/regression/22_string_builder_terminator_spec.cr`). Stock
 Crystal crashes on it under an allocator with no slack
 (`bench/log/linux/2026-10-05-string-builder-terminator/builder_overflow.cr`,
-`-Dgc_none`). Proposed: count the terminator in `increase_capacity_by`
+`-Dgc_none`). Filed as crystal-lang/crystal#17645 (open). Proposed: count the terminator in `increase_capacity_by`
 (`crystal-string-builder-terminator.patch`, same directory; `spec/std`
 `string_builder_spec`, `string_spec` and `io/memory_spec` pass with it).
 
