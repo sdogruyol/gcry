@@ -257,9 +257,10 @@ Kemal req/s and peak within the spread on all four runners that run it.
 The keep rule for this change was: no row's speed beyond its spread on any
 runner and no row's peak worse. It fails that, by 0.6–1.9% wall on five
 runner-rows and under 1% peak on two (arm). So **no default change
-lands**: the idle-kind release is parked on `knuckeotide-rss-idlekind`
-(`b3c20ea5`, with its spec) and the pace limit on
-`knuckeotide-rss-pacestep` (`a00d66ce`, with its spec: Linux 1.02× /
+lands**: the idle-kind release is parked as `idle-kind-release.patch`
+(`b3c20ea5`, with its spec) and the pace limit as
+`pace-step-limit.patch` (`a00d66ce`, with its spec; both in this directory,
+`git am` applies them: Linux 1.02× /
 0.93×, but Primes −1 to −12 points on all five runners). KemalRss's atomic
 quarter, which removes the dead setup buffers from the schedule, is what
 shipped (`fa51f65f`).

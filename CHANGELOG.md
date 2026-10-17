@@ -112,8 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peak down 12–15% on every runner, but costs 0.6–1.9% wall beyond the
   spread on five runner-rows and +0.6–0.9% peak on two arm rows; limiting
   the pace's rise reaches 1.02× / 0.93× on Linux but costs Primes up to 12
-  points. Both are parked (`knuckeotide-rss-idlekind`,
-  `knuckeotide-rss-pacestep`).
+  points. Both are parked as patches in
+  `bench/log/linux/2026-10-17-knuckeotide-rss/`.
 
 - **Atomic live bytes count a quarter in the adaptive threshold.** Live ×
   factor sizes the next threshold and the warm budget; pointer-free bytes
@@ -129,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   +9% [−3, +13]), RegexDna −7 to −14% on arm64 and Windows. Whole-process
   wall within its spread on every row and runner except `macos-15-intel`
   Revcomp +6.1% [+2.9, +11.0] and JsonParsePull +4.9% [+0.7, +10.9], which
-  a second run that includes this change (38951356776, `kemal-rss-floor`) put
+  a second run that includes this change (38951356776, with the parked cost floor) put
   back inside it (+3.3% [−2.1, +6.1], +0.9% [−2.0, +4.8]). The JSON parse
   rows collect 15–25% more often and their timed section is +1–5%. Spec: `adaptive_threshold_spec.cr`
   (`bench/log/linux/2026-10-17-kemal-rss/`).

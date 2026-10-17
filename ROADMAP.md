@@ -3979,8 +3979,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the x86 runner, M1 1.67× → 1.37×) and the research tables are mapped
       only when armed (−472 KiB). A cost floor (down to 4 MiB where a
       collection costs under 2% of the mutator time) takes Kemal to 1.05× /
-      0.98× locally but costs Linux Binarytrees 2.7–3.3% wall; parked on
-      `kemal-rss-floor` until a lower target is measured.
+      0.98× locally but costs Linux Binarytrees 2.7–3.3% wall; parked as
+      `bench/log/linux/2026-10-17-kemal-rss/cost-floor.patch` until a lower target is measured.
       **Knuckeotide, 2026-10-17** (`bench/log/linux/2026-10-17-knuckeotide-rss/`):
       its peak is the schedule after all, sized by three things: 21 MB of
       dead setup buffers held by stale words in `main`'s live frame and
@@ -3993,7 +3993,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       runner) costs 0.6–1.9% wall beyond the spread on five runner-rows
       (Perf A/B 38965963265); limiting the pace's rise to 150% a cycle takes
       the Linux runners to 1.02× / 0.93× but costs Primes up to 12 points.
-      Both are parked (`knuckeotide-rss-idlekind`, `knuckeotide-rss-pacestep`).
+      Both are parked as patches (`bench/log/linux/2026-10-17-knuckeotide-rss/idle-kind-release.patch`,
+      `bench/log/linux/2026-10-17-knuckeotide-rss/pace-step-limit.patch`).
       **The budget holds on every crystal-metric row except Knuckeotide**,
       1.24× (x86), 1.26× (arm), 1.56× (M1), 1.70× (Intel), 1.62× (Windows)
       with the atomic quarter: a 40–50 MB process whose Boehm peak itself
@@ -4060,7 +4061,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       (a plain OR: x86 88% → 103%, arm64 77% → 92%; LSE recovers 7 points
       on arm64), which costs nothing measurable on the M1. Peak RSS 1.79×
       was pacing on the 16 MiB Darwin floor; the floor is 8 MiB there too
-      now (0.96×; RSS budget item above).
+      now (0.96×; RSS budget item above). **2026-10-17, not shipped:** a
+      cursor that claims a word's free blocks in `occ` with one atomic and
+      hands them out with no shared write takes the OR off the hit path. It
+      is sound by its stress harness (`claim_stress`, five red arms caught,
+      200 release `stw-mt` runs clean) and gives Binarytrees +4 to +16
+      points of Boehm (arm64 84% → 97%, Windows 94% → 110%), but on the
+      0.37 base it fails the keep rule: x86 JSON rows +3.0–4.5% wall and
+      Knuckeotide's peak on arm64 1.09× → 1.43× (Perf A/B 38966029947),
+      from a shifted collection schedule rather than the claim, which no
+      mark reaches. Kept on branch `occupancy-plain-or` with its findings
+      (`bench/log/linux/2026-10-17-occupancy-claim/` there).
 - [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
       (2026-10-15) — code placement of gcry's allocation path
       (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.

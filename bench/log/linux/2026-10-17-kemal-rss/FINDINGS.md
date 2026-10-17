@@ -86,7 +86,7 @@ What it says:
 
 ## Fixes
 
-Four commits, in order (two kept on `kemal-rss`, two parked on `kemal-rss-floor`; see Decision):
+Four commits, in order (two kept on `kemal-rss`, two parked as `cost-floor.patch` in this directory; see Decision):
 
 | commit | change | Kemal effect (Linux, local) |
 |---|---|---|
@@ -147,7 +147,7 @@ Tables: `ci/<run>-<runner>/summary.md`, `kemal-summary.md`, raw `runs.json`.
 | run | id | `var` |
 |---|---|---|
 | atomic | [38946440792](https://github.com/sdogruyol/gcry/actions/runs/38946440792) | `fa51f65f` (atomic quarter only), branch `probe-kemal-rss-atomic` |
-| floor | [38951356776](https://github.com/sdogruyol/gcry/actions/runs/38951356776) | `41457821` (all four commits), branch `kemal-rss` at the time, now `kemal-rss-floor` |
+| floor | [38951356776](https://github.com/sdogruyol/gcry/actions/runs/38951356776) | `41457821` (all four commits), branch `kemal-rss` at the time, now `cost-floor.patch` |
 | superseded | 38946444226 (`5ebcaabf`), 38947823275 (`6776e84a`) | cancelled: the floor was revised (start low, two-cycle cost) |
 
 Kemal `/json` peak RSS × Boehm (req/s % of Boehm), base → var:
@@ -196,7 +196,7 @@ Timed sections (not the % of Boehm cells): the JSON parse rows collect
   are Intel macOS ones the second run does not reproduce; the second
   changes no schedule.
 - **Not kept on `kemal-rss`:** `5ebcaabf` and `41457821` (the cost floor),
-  parked on `kemal-rss-floor`. They are what takes Kemal to Boehm's peak
+  parked as `cost-floor.patch` in this directory (`git am` applies it). They are what takes Kemal to Boehm's peak
   (Linux x86 1.05×, local 0.98×) but cost Linux Binarytrees 2.7–3.3% wall,
   beyond its spread. A lower target (1% instead of 2%, floor = cost × 100)
   would keep Kemal at 4 MiB (median cost 33 KB → 3.3 MB) and halve the
