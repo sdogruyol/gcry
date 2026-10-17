@@ -73,10 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timed path, only gcry's `Heap#malloc_atomic` and `Heap#allocate` have an
   offset mod 64 consistent with all 61 builds timed on three CPU models.
   That reads the commit-by-commit A/B: the back-link commit moved
-  `malloc_atomic` from 16 to 48 mod 64. The same rule predicted the
-  release-0.37.0 tip's probes before they ran, 5 of 5 on two CPUs. The tip
-  is 7.5–13.1% faster than v0.36.0 on Revcomp for the same reason, so that
-  gain isn't banked either. Nothing in gcry changes
+  `malloc_atomic` from 16 to 48 mod 64. The same rule predicted the probes
+  of an earlier 0.37.0 build (`4fcee559`) before they ran, 5 of 5 on two
+  CPUs; that build is 7.5–13.1% faster than v0.36.0 on Revcomp for the
+  same reason, so the gain isn't banked: 0.37.0's own placement was not
+  measured. Nothing in gcry changes
   (`bench/log/windows/2026-10-16-revcomp-attribution/`).
 
 - **Revcomp's drop from 0.35.0 to 0.36.0 on Linux (95% → 92% of Boehm)
@@ -102,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crystal-metric row except Knuckeotide.** Its peak is the collection
   schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`): dead setup
   buffers held by stale words in `main`'s live frame, counted whole into
-  live × factor until the atomic quarter above; one paced cycle at
+  live × factor until the atomic quarter below; one paced cycle at
   240–300% of an 18 MB live set during a hash-table rebuild; and emptied
   16-byte chunks kept warm after the program moved to 32-byte strings. With
   the atomic quarter it is 1.24× (x86), 1.26× (arm), 1.56× (M1), 1.70×
@@ -111,8 +112,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes it to 1.15× / 1.04× / 1.42× / 1.62× / 1.45× and JsonParsePure's
   peak down 12–15% on every runner, but costs 0.6–1.9% wall beyond the
   spread on five runner-rows and +0.6–0.9% peak on two arm rows; limiting
-  the pace's rise reaches 1.02× / 0.93× on Linux but costs Primes up to 12
-  points. Both are parked as patches in
+  the pace's rise as well, on top of the idle-kind release and the parked
+  cost floor, reached 1.02× / 0.93× on Linux (Perf A/B 38948987930) but
+  costs Primes up to 12 points. Both are parked as patches in
   `bench/log/linux/2026-10-17-knuckeotide-rss/`.
 
 - **Atomic live bytes count a quarter in the adaptive threshold.** Live ×
@@ -129,9 +131,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   +9% [−3, +13]), RegexDna −7 to −14% on arm64 and Windows. Whole-process
   wall within its spread on every row and runner except `macos-15-intel`
   Revcomp +6.1% [+2.9, +11.0] and JsonParsePull +4.9% [+0.7, +10.9], which
-  a second run that includes this change (38951356776, with the parked cost floor) put
-  back inside it (+3.3% [−2.1, +6.1], +0.9% [−2.0, +4.8]). The JSON parse
-  rows collect 15–25% more often and their timed section is +1–5%. Spec: `adaptive_threshold_spec.cr`
+  a second run that includes this change (38951356776, with the parked
+  cost floor) put back inside it (+3.3% [−2.1, +6.1], +0.9% [−2.0, +4.8]).
+  The JSON parse rows collect 15–25% more often and their timed section is
+  +1–5%. Spec: `adaptive_threshold_spec.cr`
   (`bench/log/linux/2026-10-17-kemal-rss/`).
 
 - **macOS: the adaptive threshold floor is 8 MiB, as on every other
@@ -168,8 +171,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per marked object over 7 interleaved runs: Primes −23%, JsonParsePure
   −15%, JsonGenerate −11%, Binarytrees −18% (Σ mark 205 → 157 ms on
   Primes, wall 1.01 → 0.89 s). Default workers use it below the 32 MiB live
-  floor (Binarytrees −15%). `GCRY_PREFETCH=0` now scans the same batches
-  without prefetches. The mark stack's high-water mark was unchanged on all
+  floor (Binarytrees −12%). `GCRY_PREFETCH=0` now scans the same batches
+  without prefetches. The mark stack's mapped size was unchanged on all
   four (`bench/log/linux/2026-10-15-mark-cost/`).
 
 - **Parallel markers pop 1 024 entries at a time, into mapped buffers.**
@@ -199,8 +202,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the terminator slot lies inside argv's own block and is NULL for one to
   eight arguments; with the reopen removed it fails on 1.21.0 and passes on
   1.22.0. The `String::Builder` and `@[Raises]` reopens stay on every
-  version: their upstream fixes (crystal-lang/crystal#17645, #17644) are not
-  in 1.22.0.
+  version: their upstream issues (crystal-lang/crystal#17645, #17644) are
+  still open in 1.22.0.
 
 ### Fixed
 
@@ -233,14 +236,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **An in-stop sweep no longer drops most of the chunk list behind a
   thread it froze mid-prepend.** With the sweep inside the stop
-  (`GCRY_DISABLE_LAZY_SWEEP=1`, `GCRY_PAGE_DONTNEED=1`, `GCRY_TLAB=1`,
-  `GCRY_INCREMENTAL=1`, or `parallel_empty_chunk_munmap`) the sweep rebuilds `@chunks`
+  `GCRY_INCREMENTAL=1`, or `parallel_empty_chunk_munmap`) the sweep
+  rebuilds `@chunks` without `@chunk_list_lock`, reversing it. A
+  `map_chunk` the stop froze
   without `@chunk_list_lock`, reversing it. A `map_chunk` the stop froze
   between reading the head and storing the new one finished after
   `start_world` with `new.next` the old head, by then the tail, and every
   other chunk left the list while staying in the chunk index: never swept
   again, its blocks counted live and its capacity counted free for good.
-  `claim_stress` (`bench/claim_stress.cr` on the occupancy-claim branch;
+  `claim_stress` (`bench/claim_stress.cr` on the `occupancy-plain-or` branch;
   2 s, two Parallel workers, in-stop sweep) lost 31–252 chunks in 14 of 40
   runs on the tree before, with walk drift of −331 to −9 084 objects and
   −3.7 to −30 MB of free bytes, and every loss followed a stop that froze a
