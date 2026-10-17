@@ -61,6 +61,15 @@ v0.25.0 and still does: the main-thread TLS roots and the Darwin `__mcontext`
 reader closed here on 2026-09-15, and the Darwin CI asymmetry below is what
 kept finding the rest.
 
+- [x] **The Monitor's frames below its birth were not roots on Linux — fixed
+      2026-10-17 (0.37.0).** Never signalled, the Monitor had no SP, and the
+      single-mutator scan started at its never-switched main fiber's
+      `stack_top`. Crystal 1.22's `Thread.sleep` closure lived below it, was
+      swept mid-sleep and written after, which crashed `pattern_fuzz` under
+      the freelist (31 of 400 CI runs before, 0 of 400 after, run
+      38981006387). Scanned from the low-water mark now;
+      `process_spec/regression/76` (not run on Windows);
+      `bench/log/linux/2026-10-17-monitor-low-water/FINDINGS.md`.
 - [x] **Thread-local storage was not a root, on the main thread — fixed
       2026-09-12.** A block whose only reference was a main-thread
       `@[ThreadLocal]` was **collected**. `dl_iterate_phdr` gives the
@@ -289,7 +298,7 @@ kept finding the rest.
       complete" means *surviving objects have no dangling edges*, not *nothing
       dangling survives*.
       **Audited from the other side, and the answer is neither.**
-      `GCRY_MARK_AUDIT_ALL=1` walks every used block as a parent, marked or not,
+      `GCRY_MARK_AUDIT_ALL=1` (removed in 0.37.0) walks every used block as a parent, marked or not,
       and across five crashing runs reports **nothing**: when the buffer is
       freed, no pointer to it exists anywhere in the used heap. At fault time
       the holder search finds it on a **running fiber's stack** (17 hits, all
@@ -1055,7 +1064,7 @@ kept finding the rest.
       each time printing the holders header and nothing else, which read as a
       search that found nothing; green on a re-run of the same commit; never
       reproducible locally in 80+ runs including single- and two-CPU ones.
-      Measured with `GCRY_SEGV_REPORT_STACK=1`: the alternate signal stack is
+      Measured with `GCRY_SEGV_REPORT_STACK=1` (removed in 0.37.0): the alternate signal stack is
       **8 192 B with 3 472 already used** on entry, leaving 4 720 for a report
       that walks roots, heap and every fiber stack with a line buffer per frame
       and then repeats all three for the holder it found. Nothing said so
@@ -2093,10 +2102,27 @@ kept finding the rest.
       without the splice) and a window-free arm: a `GC.free` trim in that
       window detached a chunk the rebuild had kept, and the flush unmapped it
       while listed (a fault in the first collection); the trim now declines
-      during the relink walk. Still open, inferred and not reproduced: a list
+      during the relink walk. The in-STW case this left open — a list
       writer frozen inside its locked section by an *in-STW* sweep resumes
       against the rebuilt list (0 of 37 334 mappings under
-      `GCRY_DISABLE_LAZY_SWEEP=1`).
+      `GCRY_DISABLE_LAZY_SWEEP=1` then) — **was real and is
+      closed (2026-10-17, 0.37.0).** The `claim_stress` harness on branch
+      `occupancy-plain-or`
+      (two Parallel workers, in-stop sweep) reached it: 31–252
+      chunks indexed and off the list in 14 of 40 2-second runs. Every loss
+      followed a stop that froze `map_chunk` between its head read and its
+      head store (3 of 3; 0 of 9 stops that froze a list reader lost
+      anything): the rebuild reverses the list, so the store it finishes
+      after `start_world` puts the new chunk in front of the old head, now
+      the tail. The in-stop sweep takes `@chunk_list_lock` without waiting and
+      holds it through the store, or leaves the list and its empties alone
+      for that collection (`stop_sweep_relinks_declined`).
+      `process_spec/regression/75` forces the interleaving (0 lost, 55 on the
+      control arm); `claim_stress` after it: 0 of 20 runs with two workers,
+      0 of 10 with four. No default configuration sweeps in the
+      stop: Parallel, EC4 and EC1 sweep after the world on both layouts
+      (`bench/log/linux/2026-10-17-in-stop-sweep/FINDINGS.md`, which also
+      reconciles the branch's own 5-of-10-seeds count).
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which
@@ -3918,7 +3944,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `process_spec/regression/50_collector_lock_fairness_spec.cr` failed 20
       of 20 before and passes on one and two CPUs after.
 - [x] **Decide the RSS budget for large live sets (2026-10-03) — decided
-      2026-10-14: within 1.1× Boehm's peak, cap floor stays 64 MiB.** The
+      2026-10-14: within 1.1× Boehm's peak, cap floor stays 64 MiB; narrowed
+      2026-10-17 (0.37.0) to every crystal-metric row except Knuckeotide.** The
       adaptive threshold's cap now follows a third of the bytes the mark
       scanned (Primes −17%, peak RSS unchanged everywhere). Primes is still
       2.1× and JsonParsePure 2.3× Boehm's process time, and the rest of that
@@ -3943,6 +3970,45 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       outside the noise while Revcomp goes 0.63× → 0.87×. Knuckeotide (47 MB
       under Boehm) is the one row over 1.1×, at every cap: its peak is the
       threshold floor and warm budget, not the cap.
+      **macOS, 2026-10-16** (`bench/log/macos/2026-10-16-binarytrees/`):
+      measured on both macOS runners, Binarytrees was over too (1.79× M1,
+      1.87× Intel), from pacing on the 16 MiB Darwin floor. The floor is 8
+      MiB there as well for 0.37.0: Binarytrees 0.96× / 0.98×, Kemal 1.69× /
+      1.56×, Intel Binarytrees +2–4% wall the only repeat cost; Darwin pace
+      100 met it too but cost Primes 22–27%. Knuckeotide is still 1.74× /
+      1.81× on macOS (Linux 1.35–1.53×, Windows 1.64–1.67×) and no single
+      adaptive-threshold knob takes it under; what sizes its peak is below
+      (Knuckeotide, 2026-10-17).
+      **Kemal, 2026-10-17** (`bench/log/linux/2026-10-17-kemal-rss/`): its
+      1.31× (Linux) is the threshold, set at 9.6 MB by mostly unwritten 32 KiB
+      I/O buffers counted whole, plus a 556 KiB `Heap` object resident in
+      every process. Atomic bytes now count a quarter (Kemal 1.38× → 1.27× on
+      the x86 runner, M1 1.67× → 1.37×) and the research tables are mapped
+      only when armed (−472 KiB). A cost floor (down to 4 MiB where a
+      collection costs under 2% of the mutator time) takes Kemal to 1.05× on
+      the x86 runner and 0.98× locally but costs Linux Binarytrees 2.7–3.3% wall; parked as
+      `bench/log/linux/2026-10-17-kemal-rss/cost-floor.patch` until a lower target is measured.
+      **Knuckeotide, 2026-10-17** (`bench/log/linux/2026-10-17-knuckeotide-rss/`):
+      its peak is the schedule after all, sized by three things: 21 MB of
+      dead setup buffers held by stale words in `main`'s live frame and
+      counted whole into live × factor (the atomic quarter removes that);
+      one paced cycle at 240–300% of an 18 MB live set while a hash table is
+      rebuilt from an 8 MiB-floor cycle; and emptied 16-byte chunks kept warm
+      after the program moved to 32-byte strings, which only 16-byte blocks
+      can use. Releasing the emptied chunks of a size the last cycle did not
+      allocate (Knuckeotide −6 to −13%, JsonParsePure −12 to −15% on every
+      runner) costs 0.6–1.9% wall beyond the spread on five runner-rows
+      (Perf A/B 38965963265); limiting the pace's rise by at most 1.5× a
+      cycle as well, on top of the idle-kind release and the parked cost
+      floor, reached 1.02× / 0.93× on Linux (Perf A/B 38948987930) but costs
+      Primes up to 12 points.
+      Both are parked as patches (`bench/log/linux/2026-10-17-knuckeotide-rss/idle-kind-release.patch`,
+      `bench/log/linux/2026-10-17-knuckeotide-rss/pace-step-limit.patch`).
+      **The budget holds on every crystal-metric row except Knuckeotide**,
+      1.24× (x86), 1.26× (arm), 1.56× (M1), 1.70× (Intel), 1.62× (Windows)
+      with the atomic quarter: a 40–50 MB process whose Boehm peak itself
+      swings 39–64 MB with the same stale-slot lottery, and whose remaining
+      excess is pacing doing its job on a rehash burst.
 - [x] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
@@ -3965,39 +4031,120 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       −24% on the JSON parse rows, now fewer faults than Boehm; Revcomp −6% /
       −7%. Revcomp's remaining ~55k faults over Boehm come from fresh large
       `String` allocations, not realloc chains.
-- [ ] **macOS: Binarytrees runs at ~80% of Boehm (2026-10-03, narrowed
-      2026-10-05).** User CPU equals wall time and system time is the same as
+- [x] **Revcomp's 95% → 92% of Boehm from 0.35.0 to 0.36.0 on Linux
+      (2026-10-14) — code placement, settled 2026-10-15.** perf has no
+      counters on the QEMU host (no PMU, `perf_event_paranoid` 4), so the
+      evidence is instruction counts and a placement probe. In callgrind,
+      0.36.0 runs 0.14% fewer instructions than 0.35.0, and gcry's code is
+      2.8–3.0% of them in every build. gcry's counters are identical across
+      the 0.36.0 commits: 22 collections, 2.1–2.4 ms of total pause.
+      v0.36.0's own source, padded with 16 or 2 096 bytes of nops ahead of
+      the program's code, reads 2.144 and 2.019 s (6.2%) in two sessions.
+      The back-link's 64-byte object start costs nothing: rebuilt at 96 and
+      112 it reads within 0.4%
+      (`bench/log/linux/2026-10-15-revcomp-attribution/`).
+- [ ] **macOS: Binarytrees runs at 88% of Boehm on M1 since 0.37.0 (was
+      ~80%; Intel 131%) (2026-10-03, narrowed 2026-10-05).** User CPU equals wall time and system time is the same as
       Boehm's, so nothing blocks; parallel mark does not help (four workers
       cost 14 points). A 64 MiB threshold takes it to ~90% at twice Boehm's
       peak RSS (and Linux to 106%), so most of the gap is the RSS-budget
       decision above; ~5-10% of mutator time is left, with the allocation fast
       path faster than Boehm's in isolation
-      (`bench/log/macos/2026-10-03-binarytrees-mutator/`).
+      (`bench/log/macos/2026-10-03-binarytrees-mutator/`). Re-measured on
+      0.36.0 on the `macos-latest` runner (M1, 3 vCPUs), 15 interleaved
+      reps: 78% at 1.78× Boehm's 39 MiB peak, 80% on 0.35.0; Intel
+      `macos-15-intel` 91%, Windows x86_64 94% at 0.94×
+      (`bench/log/{macos,windows}/2026-10-15-0.36-native/`).
+      **Narrowed 2026-10-16** (`bench/log/macos/2026-10-16-binarytrees/`):
+      not the collector (117 collections to Boehm's 109, Σ pause 5% of the
+      run; a fixed 64 MiB threshold −2%, a fixed 8 MiB +10%). Two
+      Darwin-only costs in the allocation hit path, both fixed for 0.37.0:
+      the `@[ThreadLocal]` cursor read (Crystal's `NoInline` accessor plus
+      `tlv_get_addr`: 1.7 ns on the M1, 10 ns on Intel; reading the heap's
+      pthread key slot inline is −7.9% wall on the M1, `pthread_getspecific`
+      −10.9% on Intel) and `UInt64#<<` left out of line by the LLVM 15 of
+      Crystal's macOS release (−3.1%). Together (run 38898225086, 15 reps):
+      macos-latest 79% → 88% of Boehm (wall −12.6%), macos-15-intel 92% →
+      131% (−28.7%), Linux and Windows unchanged. Left on the M1: 12 points,
+      most of it in `Heap#malloc`'s own body. On Linux the gap is the atomic occupancy OR
+      (a plain OR: x86 88% → 103%, arm64 77% → 92%; LSE recovers 7 points
+      on arm64), which costs nothing measurable on the M1. Peak RSS 1.79×
+      was pacing on the 16 MiB Darwin floor; the floor is 8 MiB there too
+      now (0.96×; RSS budget item above). **2026-10-17, not shipped:** a
+      cursor that claims a word's free blocks in `occ` with one atomic and
+      hands them out with no shared write takes the OR off the hit path. It
+      is sound by its stress harness (`claim_stress`, five red arms caught,
+      200 release `stw-mt` runs clean) and gives Binarytrees +4 to +16
+      points of Boehm (arm64 84% → 97%, Windows 94% → 110%), but on the
+      0.37 base it fails the keep rule: x86 JSON rows +3.0–4.5% wall and
+      Knuckeotide's peak on arm64 1.09× → 1.43× (Perf A/B 38966029947),
+      from a shifted collection schedule rather than the claim, which no
+      mark reaches. Kept on branch `occupancy-plain-or` with its findings
+      (`bench/log/linux/2026-10-17-occupancy-claim/` there).
+- [ ] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
+      0.36.0 (2026-10-18).** Three paired runs: −2.3% [−3.9, −0.6], −6.6%
+      [−8.0, −1.6], −2.4% [−4.8, −0.9]; peak −10%. On the 12-vCPU QEMU host
+      the same comparison is −0.7% / +0.4%, and macOS and Linux arm64 are
+      level or faster. A bisect over the 0.37 commits on that runner puts the
+      step at `a975d5cd` (the research tables mapped only when armed), alone
+      −2.5% to −4.1% on three runners, every other step within its spread.
+      That commit removes work: the `Heap` shrinks by 472 KiB and the default
+      no longer records the release map. Putting a 472 KiB pad back reads
+      +0.1% to +2.9% with every IQR across zero, so layout or code placement
+      is suspected and not shown. Next: a `pads` placement probe on that
+      runner, as for Revcomp (`bench/log/linux/2026-10-18-0.37-runners/`,
+      `kemal-bisect/`).
+- [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
+      (2026-10-15) — code placement of gcry's allocation path
+      (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.
+      Against each commit between the releases (12 reps each), the step
+      looked like `49788b15` (large back-link), but `0a0e3165` was as slow
+      and the next commit fast again. On an EPYC 7763, v0.36.0's own source
+      rebuilt with nops ahead of all its code runs the timed section in
+      1.254–1.270 s in three of ten placements, as fast as 0.35.0 or
+      faster, and 1.409–1.476 s in the other seven; 0.35.0 spans
+      1.280–1.489 s the same way. Counters, faults and kernel time show no
+      extra work. Of the timed path's functions, only `Heap#malloc_atomic`
+      and `Heap#allocate` have an offset mod 64 consistent with all 61
+      builds timed on three CPU models: `49788b15` moved `malloc_atomic`
+      from 16 to 48, and the rule predicted the 0.37.0 tip's probes 5 of 5.
+      Large objects at 0.35.0's offset: −0.4%. No fix in gcry; making
+      `malloc_atomic` placement-insensitive would need function or loop
+      alignment control Crystal doesn't expose
+      (`bench/log/windows/2026-10-16-revcomp-attribution/`).
 - [ ] **Per-collection mark cost on a large pointer heap (2026-10-03,
-      refreshed 2026-10-06).** One marker now costs about Boehm's single
-      marker on JsonParsePure and 1.3× on Primes, after inline candidate
-      resolution and whole-payload prefetch (`bench/log/linux/2026-10-06-mark-cost/`),
-      and parallel mark is on by default (`docs/DEFAULT-GC-READINESS.md` M1).
-      The history: Primes' largest mark was 470 ms
-      against 178 ms for Boehm with one marker (`GC_MARKERS=1`) after the
-      heap-span prefilter. Boehm's default is a marker per CPU, which takes
-      that collection to 46 ms on 12 vCPUs. gcry's parallel mark made
-      these marks slower at every worker count until three shared writes were
-      removed (2026-10-04); with 4 workers it is now −21% to −62% Σ mark on
-      4-vCPU runners (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
-      It is the default since 2026-10-05
-      (`bench/log/linux/2026-10-05-parallel-mark-default/`): two workers with
-      the 32 MiB floor gain 8–16 points of Boehm's speed on the GC-heavy rows
-      on x86-64, arm64 and macOS; four beat two only on arm64 and cost up to
-      2× the CPU elsewhere. The shipped count is `min(2, CPUs − 1)` up to 7
-      CPUs, then `CPUs / 4 + 1`, at most 8; `GCRY_PARALLEL_MARK_MIN_LIVE`
-      (serial below a live-set floor) and the helpers' idle backoff (since
-      replaced by parking) left Kemal at its one-worker throughput with four
-      workers. Before the 2026-10-06 inline resolution, a SIGPROF profile
-      puts it in candidate resolution (radix → chunk header → occupancy and
-      mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
-      instruction-level trims have stopped paying on this host
-      (`bench/log/linux/2026-10-03-mark-prefilter/`).
+      refreshed 2026-10-16).** With one marker gcry's Σ mark is now 0.37×
+      Boehm's single marker on Primes, 0.47× on JsonParsePure, 0.62× on
+      JsonGenerate and 0.23× on Binarytrees, but gcry collects about half as
+      often on the first three: per collection it is 0.70×, 0.91× and 1.17×
+      (`bench/log/linux/2026-10-15-mark-cost/`; Boehm's figure includes its
+      root scan, and no per-byte comparison was taken). 0.37.0 drains the
+      serial mark stack in batches of 1 024 instead of a 16-entry ring: ns
+      per marked object −11% to −23% with one marker. Its parallel markers
+      pop 1 024 entries at a time into mapped buffers instead of 256 on
+      their stacks. ns per marked object, Primes / JsonParsePure /
+      JsonGenerate: four workers −20% / −12% / −20% on 4 CPUs and
+      −3% / −14% / −20% on 12 (where four is the default); two (the default
+      on 3–7 CPUs) −1% / −3% / −14%, only JsonGenerate beyond noise
+      (`bench/log/linux/2026-10-16-parallel-mark-batch/`). Parallel mark is
+      on by default (`docs/DEFAULT-GC-READINESS.md` M1): `min(2, CPUs − 1)`
+      workers up to 7 CPUs, then `CPUs / 4 + 1`, at most 8, serial under a
+      32 MiB live floor; per marked object two workers are now 1.54–1.59×
+      faster than the serial drain on these heaps, four 2.1–2.5×. What is
+      left, from the 2026-10-15 profile of the inline candidate path: the
+      wait for the mark and `occ` words (13–29% of it, two lines per fresh
+      mark where Boehm reads one mark byte), the chunk header (8–16%), the
+      ordinal arithmetic (13–16%) and branch recovery (11–15%). Measured,
+      not taken: the size class in each radix entry to skip the header
+      (inside the spread), and the `occ` and mark words interleaved so the
+      test reads one line (−2% to −7% per object with one marker, mixed
+      with workers, never beyond the spread; every bitmap walker and the
+      four ISAs' sweep kernels would change). History:
+      Primes' largest mark was 470 ms against 178 ms for Boehm's one marker
+      on 2026-10-03; inline candidate resolution and whole-payload prefetch
+      (`bench/log/linux/2026-10-06-mark-cost/`), the parallel-mark
+      shared-write fixes (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`)
+      and the 0.36 pacing came between.
 - [x] **Decide what to do with `Gcry::Layout` registration — removed in
       0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
       collided with registered maps
@@ -4063,7 +4210,12 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       ceiling" above (Darwin acik ~18×; Linux tip ~1–1.6× via finalizer + retain=0,
       freelist residual; spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md))
 - [x] **Windows x86_64 + ARM64 process GC** — native backend + unit/process/sample CI
-- [x] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows x86_64 + ARM64
+- [x] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows x86_64 + ARM64.
+      Compilers: 1.21.0 pinned everywhere; since 2026-10-15 also 1.22.0 for
+      the unit and process specs, `std_spec` and the gcry-built compiler.
+      On 1.22.0 the execve argv reopen is gated off (fixed upstream); the
+      `String::Builder` and `@[Raises]` reopens still fail their specs without
+      them (`bench/log/linux/2026-10-15-crystal-1.22/`)
 - [x] **Benchmark regression alerts** — comparator gating against a measured baseline since 2026-09-13 (Linux; Darwin needs a baseline of its own)
 - [ ] **Crystal compiler PR: `-Dgc_gcry` flag** — opt-in flag recognized by the compiler
       (no-op alias for `-Dgc_none`; ecosystem signal that gcry is real)
@@ -4087,6 +4239,12 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       Crystal's Parallel-scheduler deadlock (#17486); 5 earlier, uncaptured
       timeouts of the same harness stopped at the same point
       (`bench/log/linux/2026-10-15-0.36-stress/`).
+      2026-10-18, on the 0.37.0 integration: about 3.5 hours over 23 loops
+      and 1 148 bounded runs, 0 gcry failures; the 6 stalls were all the
+      same scheduler deadlock, classified from captures, and the only red
+      runs were spec 75's control arm under the invariant checker, which
+      caught the drift that arm creates on purpose (spec fixed)
+      (`bench/log/linux/2026-10-18-0.37-stress/`).
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 
@@ -4486,7 +4644,7 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `GCRY INVARIANT FAILURE … actual=1 reported=2` line in that log is
       `spec/invariant_spec.cr:211` planting a +1 drift and expecting the raise.
       `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
-- [x] **Parallel mark** — on by default above 32 MiB live since 2026-10-05 (`CHANGELOG.md` `[Unreleased]`)
+- [x] **Parallel mark** — on by default above 32 MiB live since 2026-10-05 (`CHANGELOG.md` `[0.35.0]`)
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
 - [x] **Benchmark leaderboard** — per-release transparent perf tracking in `bench/leaderboard.md`
@@ -4506,7 +4664,7 @@ Target: Crystal compiler defaults to gcry on Linux.
 - [ ] **Crystal defaults to gcry on Linux** — no `-Dgc_none` required
 - [ ] **Full concurrent collection** — no STW pause at any heap size
 - [ ] **Moving / compacting collector** — after precise roots are stable
-- [ ] **Windows parity** — process GC ships since #38 (x86_64 MSVC, ARM64 GNU); parity still needs the incremental barrier (no soft-dirty), workload benchmarks, and fork/signal-diagnostic equivalents
+- [ ] **Windows parity** — process GC ships since #38 (x86_64 MSVC, ARM64 GNU); parity still needs the incremental barrier (no soft-dirty), workload benchmarks on physical hardware and on ARM64, Kemal on a native Windows host (x86_64 crystal-metric is measured on the `windows-latest` runner since 2026-10-15: 94–105% of Boehm on 0.36.0, `bench/log/windows/2026-10-15-0.36-native/`), and fork/signal-diagnostic equivalents
 - [ ] **Conference talks** — CrystalConf, FOSDEM, local meetups
 - [ ] **MacOS default consideration** — platform-by-platform rollout
 

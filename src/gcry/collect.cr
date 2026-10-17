@@ -37,13 +37,19 @@ module Gcry
     # allocates is what the sweep keeps. `GCRY_THRESHOLD` pins a fixed
     # threshold and disables this; `GCRY_THRESHOLD_FACTOR` is the factor in
     # percent (default 100).
-    # Darwin's floor is the 16 MiB its fixed default used to be: the
-    # dense-live growth window under fat apps was measured there, not at 8.
-    {% if flag?(:darwin) %}
-      ADAPTIVE_THRESHOLD_MIN = 16777216_u64 # 16 MiB
-    {% else %}
-      ADAPTIVE_THRESHOLD_MIN = 8388608_u64 # 8 MiB
-    {% end %}
+    # The floor is 8 MiB on every platform. Darwin's was 16 MiB, the fixed
+    # default it used to have, and with pacing on top of it (up to 3×) small
+    # processes peaked at about twice Boehm's resident size there:
+    # Binarytrees 1.79× (M1) / 1.87× (Intel), Kemal 1.94× / 2.20×, past the
+    # 1.1× budget. At 8 MiB (two runs on both macOS runners, 15 and 20
+    # interleaved reps) Binarytrees is 0.96× / 0.98×, Knuckeotide's peak
+    # −8% / −9%, Kemal 1.69× / 1.56× at the same req/s, and the only wall
+    # cost that repeats is Intel Binarytrees, +2–4% (still 125% of Boehm).
+    # Pacing lifts the threshold off the floor wherever collections are
+    # expensive, so the collection-bound rows do not move. Turning pacing off
+    # instead (100) met the budget on Binarytrees but cost Primes 22–27%
+    # (`bench/log/macos/2026-10-16-binarytrees/`, RSS budget).
+    ADAPTIVE_THRESHOLD_MIN =  8388608_u64 # 8 MiB
     ADAPTIVE_THRESHOLD_MAX = 67108864_u64 # 64 MiB
     property adaptive_threshold : Bool = false
     property adaptive_threshold_pct : UInt64 = 100_u64
@@ -94,6 +100,28 @@ module Gcry
     private def live_bytes_after_sweep : UInt64
       large = @large_mapped_bytes > @large_free_bytes ? @large_mapped_bytes - @large_free_bytes : 0_u64
       @size_class_live_bytes &+ large
+    end
+
+    # Atomic bytes count a quarter in the live set that sizes the next
+    # threshold and the warm budget, as in Boehm's `min_bytes_allocd`
+    # (`scan_size = 2 × composite + atomic / 4 + roots`). Live × factor is
+    # there so a major's cost is paid for by a live-sized stretch of
+    # allocation, and an atomic block costs a major next to nothing: it is
+    # marked, never read. Counted whole, a server's I/O buffers set its
+    # schedule. Kemal `/json` holds three 32 KiB `IO::Buffered` buffers per
+    # connection, about 9.4 MB mapped against 0.2 MB of small live objects;
+    # 87% of their pages were never written, yet they put the threshold and
+    # the warm budget at 9.6 MB instead of the floor
+    # (`bench/log/linux/2026-10-17-kemal-rss/`).
+    ATOMIC_LIVE_DIVISOR = 4_u64
+
+    # The live set as it sizes the schedule: what the mark read (every
+    # reached pointerful object, `mark_scanned_bytes`) plus a quarter of the
+    # rest, which is atomic.
+    private def schedule_live_bytes : UInt64
+      live = live_bytes_after_sweep
+      scanned = @mark_scanned_bytes < live ? @mark_scanned_bytes : live
+      scanned &+ (live &- scanned) // ATOMIC_LIVE_DIVISOR
     end
 
     # Set for the span of an explicit `collect(release_warm: true)`; read by
@@ -168,7 +196,7 @@ module Gcry
     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
     private def adapt_after_sweep(cycle_started_ns : UInt64 = 0_u64) : Nil
       return unless @adaptive_threshold || @warm_retain_follows_live
-      want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
+      want = schedule_live_bytes &* @adaptive_threshold_pct // 100_u64
       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
       if @adaptive_threshold
         cap = adaptive_threshold_cap
@@ -708,8 +736,8 @@ module Gcry
     getter release_flush_chunks : UInt64 = 0_u64
     getter release_refused_occupied : UInt64 = 0_u64
     # Research only: release an occupied chunk anyway (the pre-2026-09-14
-    # behaviour). `GCRY_RELEASE_OCCUPIED=1` on a process heap; the `--broken`
-    # arm of `make occupied-release` on a library one.
+    # behaviour). The `--broken` arm of `make occupied-release`, on a library
+    # heap; the process-heap env switch, which nothing set, went in 0.37.0.
     property release_occupied_anyway : Bool = false
     # Research only, library heaps: a mutator on the collector's own thread
     # at the two points the window that released an occupied chunk runs
@@ -937,29 +965,44 @@ module Gcry
     getter? unmap_guard : Bool = false
     getter? release_ledger : Bool = false
 
-    # Arming zeroes the length column, because that column is the read
-    # protocol: `guarded_release_at` skips a slot whose length is zero, which
-    # is how a report walks past a record another thread is still writing.
-    # `uninitialized` gives no such guarantee.
+    # Arming maps the record table (`map_guard_table`) and zeroes its length
+    # column, because that column is the read protocol: `guarded_release_at`
+    # skips a slot whose length is zero, which is how a report walks past a
+    # record another thread is still writing. Re-arming may find old records
+    # there. A table that cannot be mapped leaves the guard off.
     def unmap_guard=(v : Bool) : Bool
-      clear_guard_lengths if v
-      @unmap_guard = v
+      @unmap_guard = v && map_guard_table
     end
 
     # Record every chunk release without holding the address space, so a fault
     # on memory that has since been remapped can still name what used to be
     # there. See the note on `@guard_ring`.
     def release_ledger=(v : Bool) : Bool
-      clear_guard_lengths if v
-      @release_ledger = v
+      @release_ledger = v && map_guard_table
     end
 
-    private def clear_guard_lengths : Nil
+    # Maps the guard's columns and the release map on first use, and clears
+    # the length column. False, with nothing armed, if a mapping fails.
+    private def map_guard_table : Bool
+      return false unless map_release_map
+      if @guard_base.null?
+        n = UNMAP_GUARD_SLOTS.to_u64
+        ptr = Gcry.os_map(n &* GUARD_RECORD_BYTES)
+        return false if Gcry.mmap_failed?(ptr)
+        at = ptr.address
+        @guard_base = Pointer(UInt64).new(at)
+        @guard_len = Pointer(UInt64).new(at &+ n &* 8)
+        @guard_gen = Pointer(UInt64).new(at &+ n &* 16)
+        @guard_tag = Pointer(UInt64).new(at &+ n &* 24)
+        @guard_occ = Pointer(Int32).new(at &+ n &* 32)
+        @guard_kind = Pointer(UInt8).new(at &+ n &* 36)
+      end
       i = 0
       while i < UNMAP_GUARD_SLOTS
         @guard_len[i] = 0_u64
         i += 1
       end
+      true
     end
 
     # Research only: raw-write a line for every large chunk mapped, so a range
@@ -1098,20 +1141,31 @@ module Gcry
     end
 
     UNMAP_GUARD_SLOTS = 8192
+    # Bytes of one record across the columns below: base, len, gen, tag, occ,
+    # kind.
+    GUARD_RECORD_BYTES = 37_u64
 
-    @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
-    @guard_len = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
-    @guard_kind = uninitialized StaticArray(UInt8, UNMAP_GUARD_SLOTS)
-    @guard_gen = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    # The guard's and the ledger's records, and the quarantine and release
+    # map below them, are columns in memory mapped when the knob that uses
+    # them is armed (`map_guard_table`), null until then. They were
+    # `StaticArray`s inside the heap, 472 KiB of a 556 KiB `Heap` that every
+    # process faulted in at boot, since Crystal clears an instance when it
+    # allocates one: half a megabyte of resident memory for research knobs
+    # that are never on by default, 3% of Boehm's whole Kemal process
+    # (`bench/log/linux/2026-10-17-kemal-rss/`).
+    @guard_base = Pointer(UInt64).null
+    @guard_len = Pointer(UInt64).null
+    @guard_kind = Pointer(UInt8).null
+    @guard_gen = Pointer(UInt64).null
     # First eight bytes of the released block's user data, captured while it is
     # still mapped. Under the ledger the range is handed back to the kernel, so
     # by the time a fault reports on it there is nothing left to read — the
     # identity has to be taken at release time or not at all. For a Crystal
     # reference the low four bytes are the type_id.
-    @guard_tag = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    @guard_tag = Pointer(UInt64).null
     # Blocks still allocated in the chunk at release; -1 when the chunk
     # carries no occupancy bitmap. See `guard_occupied`.
-    @guard_occ = uninitialized StaticArray(Int32, UNMAP_GUARD_SLOTS)
+    @guard_occ = Pointer(Int32).null
     # **Atomic, because every writer is a mutator and none of them holds a
     # lock.** `guard_release` runs from `GC.free` → `trim_large_cache` on
     # whichever thread frees, and the old code read this counter twice — once
@@ -1173,13 +1227,29 @@ module Gcry
     # as `munmap` would return them and only the address stays reserved — the
     # cost is address space, not RSS.
     QUARANTINE_SLOTS = 4096
-    @q_base = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
-    @q_len = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
-    @q_gen = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
+    # Base, length and collection columns, mapped when the quarantine is
+    # turned on (see `@guard_base`).
+    @q_base = Pointer(UInt64).null
+    @q_len = Pointer(UInt64).null
+    @q_gen = Pointer(UInt64).null
     @q_head = 0
     @q_count = 0
     # `GCRY_RELEASE_QUARANTINE=<collections>`; 0 disables.
-    property release_quarantine : UInt64 = 0_u64
+    getter release_quarantine : UInt64 = 0_u64
+
+    # Turning it on maps the table; one that cannot be mapped leaves it off.
+    def release_quarantine=(collections : UInt64) : UInt64
+      if collections != 0_u64 && @q_base.null?
+        n = QUARANTINE_SLOTS.to_u64
+        ptr = Gcry.os_map(n &* 24)
+        return @release_quarantine = 0_u64 if Gcry.mmap_failed?(ptr)
+        @q_base = ptr.as(UInt64*)
+        @q_len = @q_base + n
+        @q_gen = @q_len + n
+      end
+      @release_quarantine = collections
+    end
+
     getter quarantined_releases : UInt64 = 0_u64
     getter quarantine_forced_drains : UInt64 = 0_u64
 
@@ -1242,12 +1312,14 @@ module Gcry
     # enough to change the timing of the very race it is looking for.
     # Collisions lose a record; they never invent one.
     RELEASE_MAP_SLOTS = 8192
-    @rel_base = uninitialized StaticArray(UInt64, RELEASE_MAP_SLOTS)
-    @rel_live = uninitialized StaticArray(Bool, RELEASE_MAP_SLOTS)
+    # Mapped with the guard's table, by the same knobs (`map_guard_table`):
+    # nothing else records into it. Zero from the kernel, so a fresh map
+    # needs no clearing.
+    @rel_base = Pointer(UInt64).null
+    @rel_live = Pointer(Bool).null
     # Which path released the base. A double release is only actionable once
     # you know which two paths raced; the pair names the bug.
-    @rel_kind = uninitialized StaticArray(UInt8, RELEASE_MAP_SLOTS)
-    @rel_booted = false
+    @rel_kind = Pointer(UInt8).null
     # Bases released while an earlier release of the same base had not been
     # cancelled by a remap.
     getter release_double : UInt64 = 0_u64
@@ -1259,16 +1331,16 @@ module Gcry
       ((base >> 12) % RELEASE_MAP_SLOTS).to_i32
     end
 
-    private def release_map_boot : Nil
-      return if @rel_booted
-      @rel_booted = true
-      i = 0
-      while i < RELEASE_MAP_SLOTS
-        @rel_base[i] = 0_u64
-        @rel_live[i] = false
-        @rel_kind[i] = 0_u8
-        i += 1
-      end
+    # Maps the release map, once; false if that fails.
+    private def map_release_map : Bool
+      return true unless @rel_base.null?
+      n = RELEASE_MAP_SLOTS.to_u64
+      ptr = Gcry.os_map(n &* 10)
+      return false if Gcry.mmap_failed?(ptr)
+      @rel_live = Pointer(Bool).new(ptr.address &+ n &* 8)
+      @rel_kind = Pointer(UInt8).new(ptr.address &+ n &* 9)
+      @rel_base = ptr.as(UInt64*)
+      true
     end
 
     # Bytes actually handed to the mark as static roots, and the least any
@@ -1322,7 +1394,7 @@ module Gcry
     getter static_scanned_drops : UInt64 = 0_u64
 
     protected def note_release_base(base : UInt64, kind : UInt8 = 0_u8) : Nil
-      release_map_boot
+      return if @rel_base.null?
       i = release_map_slot(base)
       if @rel_live[i] && @rel_base[i] == base
         @release_double &+= 1
@@ -1358,7 +1430,7 @@ module Gcry
     # from ~1 s to ~114 s and the gate read 20 of 20 "failures" that were all
     # timeouts. An instrument that changes the answer is not an instrument.
     protected def released_base_recorded?(base : UInt64) : Bool
-      return false unless @rel_booted
+      return false if @rel_base.null?
       i = release_map_slot(base)
       @rel_live[i] && @rel_base[i] == base
     end
@@ -1366,7 +1438,7 @@ module Gcry
     # The kernel gave this base back, so the release recorded against it is
     # spent. Called from `map_chunk`.
     protected def note_map_base(base : UInt64) : Nil
-      release_map_boot
+      return if @rel_base.null?
       i = release_map_slot(base)
       if @rel_live[i] && @rel_base[i] == base
         @rel_live[i] = false

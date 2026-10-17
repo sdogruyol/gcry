@@ -12,7 +12,7 @@
 #
 # So at EC1 the collector knowingly scrubs a stack a thread is parked on, on the
 # theory that the wipe window sits below that thread's live frames. This checks
-# the theory. `GCRY_SCRUB_AUDIT=1` records, per collection:
+# the theory. `Heap#scrub_audit_foreign_sp` records, per collection:
 #
 #   fiber_scrub_foreign_sp_scrubs    fibers scrubbed with a foreign SP on them
 #   fiber_scrub_live_frame_overlaps  ...where the wipe reached at or above it
@@ -29,8 +29,7 @@
 #
 # Build: crystal build -Dgc_none -Dpreview_mt -Dexecution_context \
 #          bench/scrub_audit.cr -o bin/scrub_audit
-# Run:   GCRY_SCRUB_AUDIT=1 ./bin/scrub_audit [--fibers=64] [--collects=200]
-#                                             [--parallelism=1]
+# Run:   ./bin/scrub_audit [--fibers=64] [--collects=200] [--parallelism=1]
 
 require "../src/gcry"
 
@@ -61,7 +60,7 @@ end
 {% end %}
 
 # The audit is a property of this run, not of the environment — set it directly
-# so a forgotten GCRY_SCRUB_AUDIT=1 cannot turn the check into a silent pass.
+# so a forgotten switch cannot turn the check into a silent pass.
 HEAP.scrub_fibers_enabled = true
 HEAP.scrub_audit_foreign_sp = true
 # Positive control: with the mid-swap guard off, the counters are *expected* to

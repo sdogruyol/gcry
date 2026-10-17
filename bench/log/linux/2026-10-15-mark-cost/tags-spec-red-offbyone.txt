@@ -1,0 +1,34 @@
+.........F..Failed to raise an exception: END_OF_STACK
+[0x5adc0aff2d9a] *Exception::CallStack::print_backtrace:Nil +122 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0af82d64] __crystal_raise +52 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0af83afa] ?? +99901123345146 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0af83a7f] .?? +99901123345023 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0b0fe4a0] 
+
+Failures:
+
+  1) /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/event_loop/polling
+*Thread::Mutex#unlock:Nil +64 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0b0fe89a] *Thread::LinkedList(Thread) +58 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0b0c5bee] *Thread#start:(Exception+ | Nil) +30 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0b0c9857]      Failure/Error: heap.radix_tag_of(first).should eq(expected)
+
+       Expected: 96
+            got: 97
+
+*Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void) +55 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x5adc0af83cb6]      # spec/chunk_radix_spec.cr:285
+
+Finished in 18.21 milliseconds
+31637 examples, 2 failures, 31623 errors, 0 pending
+
+Failed examples:
+
+crystal spec spec/chunk_radix_spec.cr:253 # /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/event_loop/polling
+~procProc(Pointer(Void), Pointer(Void)) +6 in /home/naruto/.cache/crystal/crystal-run-spec.tmp
+[0x7b87832a3dfa] ?? +135821951385082 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7b87833375cc] ?? +135821951989196 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x0] ???
+
+Tried to raise:: pthread_mutex_unlock: Invalid argument (RuntimeError)
+exit 1

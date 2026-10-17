@@ -1,0 +1,34 @@
+E
+
+Failures:
+
+  1) rescue around a String.new that raises catches the ArgumentError for a null pointer with a nonzero size
+
+       Cannot create a string with a null pointer and a non-zero (3) bytesize (ArgumentError)
+         from ?? in 'new'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/string.cr:233:3 in 'new'
+         from process_spec/regression/13_rescue_string_new_null_spec.cr:20:7 in '->'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/spec/example.cr:50:13 in 'internal_run'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/spec/example.cr:38:16 in 'run'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/spec/context.cr:20:23 in 'internal_run'
+         from ?? in 'run'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/spec/context.cr:20:23 in 'internal_run'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/spec/context.cr:173:7 in 'run'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/spec/dsl.cr:219:7 in 'execute_examples'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/spec/dsl.cr:194:13 in '->'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/crystal/at_exit_handlers.cr:26:17 in 'run'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/crystal/main.cr:108:14 in 'exit'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/crystal/main.cr:94:5 in 'main'
+         from /home/naruto/.local/share/mise/installs/crystal/1.22.0/share/crystal/src/crystal/system/unix/main.cr:9:3 in 'main'
+         from /usr/lib/x86_64-linux-gnu/libc.so.6 in '??'
+         from /usr/lib/x86_64-linux-gnu/libc.so.6 in '__libc_start_main'
+         from /home/naruto/playground/.scratch/CiHygiene/cache/crystal-run-spec.tmp in '_start'
+       
+
+Finished in 188 microseconds
+1 examples, 0 failures, 1 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/13_rescue_string_new_null_spec.cr:18 # rescue around a String.new that raises catches the ArgumentError for a null pointer with a nonzero size
+exit 1

@@ -1,0 +1,19 @@
+## /json
+boehm    req/s median     44494 (min 43507 max 44938, n=9)  100.0% of first arm  peak RSS   15.9 MB (1.00x)
+final    req/s median     45542 (min 41072 max 48660, n=9)  102.4% of first arm  peak RSS   15.7 MB (0.98x)
+base     req/s median     45511 (min 43942 max 46663, n=9)  102.3% of first arm  peak RSS   21.1 MB (1.32x)
+## /
+boehm    req/s median     67512 (min 64996 max 72708, n=9)  100.0% of first arm  peak RSS   16.1 MB (1.00x)
+final    req/s median     69685 (min 63932 max 79895, n=9)  103.2% of first arm  peak RSS   15.6 MB (0.97x)
+base     req/s median     67533 (min 63717 max 73670, n=9)  100.0% of first arm  peak RSS   21.0 MB (1.31x)
+AB-DONE
+## /
+boehm    req/s median     67512 (min 64996 max 72708, n=9)  100.0% of first arm  peak RSS   16.1 MB (1.00x)
+final    req/s median     69685 (min 63932 max 79895, n=9)  103.2% of first arm  peak RSS   15.6 MB (0.97x)
+base     req/s median     67533 (min 63717 max 73670, n=9)  100.0% of first arm  peak RSS   21.0 MB (1.31x)
+AB-DONE
+
+Paired per trial, final / base, quartiles [q1, median, q3]:
+/json req/s [0.973, 0.986, 1.020], VmHWM [0.742, 0.745, 0.756]
+/     req/s [1.007, 1.049, 1.074], VmHWM [0.742, 0.745, 0.747]
+base = e8c0327e (release-0.37.0), final = 41457821

@@ -1,0 +1,12 @@
+
+ab-base
+  0x01400f34e0  mod64=32  *Revcomp#revcomp<String>:Nil
+
+ab-stats-base
+  0x01400f41c0  mod64= 0  *Revcomp#revcomp<String>:Nil
+
+ab-stats-var
+  0x01400f41c0  mod64= 0  *Revcomp#revcomp<String>:Nil
+
+ab-var
+  0x01400f34e0  mod64=32  *Revcomp#revcomp<String>:Nil

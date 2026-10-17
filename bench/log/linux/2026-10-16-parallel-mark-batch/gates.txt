@@ -1,0 +1,51 @@
+# gates.sh 50b1315e — each under the heavy lock and taskset -c 0-3; last lines of each log
+
+== spec
+GCRY INVARIANT FAILURE: live_objects mismatch: actual=1 reported=2
+282 examples, 0 failures, 0 errors, 0 pending
+exit 0
+
+== spec-headers
+GCRY INVARIANT FAILURE: live_objects mismatch: actual=1 reported=2
+304 examples, 0 failures, 0 errors, 0 pending
+exit 0
+
+== process
+200 examples, 0 failures, 0 errors, 0 pending
+exit 0
+
+== process-headers-freelist
+201 examples, 0 failures, 0 errors, 0 pending
+exit 0
+
+== parallel-mark-termination
+fixed: exit=0 child runs=60 stolen=439128 ok
+unlocked: exit=1 child runs=2 stolen=128 damage=chain 18 node 264: tag "chain-18-146" FAIL
+ok — the mark cycle does not end while a worker holds a batch
+exit 0
+
+== parallel-mark-process
+workers=4 runs 0->4 stolen 0->356569 wakes 0->31 chain=199936
+workers=1 runs 0->0 stolen 0->0 wakes 0->0 chain=199936
+ok — serial mark kept the chain and stole nothing
+exit 0
+
+== mark-audit
+hold: 1011 edges walked, 199 missed
+clean: 1409 edges walked, 0 missed
+ok — the audit names a planted edge the mark does not follow, and reports none on the same workload without it
+hold: 0 edges walked, 0 missed
+clean: 0 edges walked, 0 missed
+ok — with the knob off nothing is walked, so the other run's edge counts are attributable to the audit
+exit 0
+
+== lint
+[32m224 inspected, 0 failures[39m
+exit 0
+
+== windows-typecheck
+ok — the Windows build type-checks on both targets
+exit 0
+
+== darwin-typecheck
+exit 0

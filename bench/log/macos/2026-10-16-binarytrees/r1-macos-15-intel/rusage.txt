@@ -1,0 +1,285 @@
+ARM boehm rep 1
+Binarytrees: ok in 2.241s, award 1.0
+2.2409s, 1.00/1, 1.00
+        2.26 real         2.24 user         0.08 sys
+            38232064  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                9632  page reclaims
+                   4  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   5  voluntary context switches
+                1907  involuntary context switches
+            37253120  peak memory footprint
+ARM tip rep 1
+Binarytrees: ok in 2.417s, award 1.0
+2.4168s, 1.00/1, 1.00
+        2.46 real         2.38 user         0.10 sys
+            71450624  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               26500  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   1  voluntary context switches
+                 526  involuntary context switches
+            70111232  peak memory footprint
+ARM getspec rep 1
+Binarytrees: ok in 2.030s, award 1.0
+2.0296s, 1.00/1, 1.00
+        2.04 real         1.98 user         0.07 sys
+            71446528  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               25117  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 410  involuntary context switches
+            70111232  peak memory footprint
+ARM boehm rep 2
+Binarytrees: ok in 2.241s, award 1.0
+2.2407s, 1.00/1, 1.00
+        2.25 real         2.26 user         0.08 sys
+            38223872  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                9635  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2041  involuntary context switches
+            37244928  peak memory footprint
+ARM tip rep 2
+Binarytrees: ok in 2.367s, award 1.0
+2.3674s, 1.00/1, 1.00
+        2.38 real         2.32 user         0.08 sys
+            71450624  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               27253  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 491  involuntary context switches
+            70111232  peak memory footprint
+ARM getspec rep 2
+Binarytrees: ok in 2.031s, award 1.0
+2.0307s, 1.00/1, 1.00
+        2.05 real         1.99 user         0.07 sys
+            71434240  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               24247  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 444  involuntary context switches
+            70098944  peak memory footprint
+ARM boehm rep 3
+Binarytrees: ok in 2.244s, award 1.0
+2.2436s, 1.00/1, 1.00
+        2.25 real         2.27 user         0.09 sys
+            38219776  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                9632  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2173  involuntary context switches
+            37240832  peak memory footprint
+ARM tip rep 3
+Binarytrees: ok in 2.531s, award 1.0
+2.5312s, 1.00/1, 1.00
+        2.55 real         2.48 user         0.09 sys
+            71450624  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               29526  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 513  involuntary context switches
+            70111232  peak memory footprint
+ARM getspec rep 3
+Binarytrees: ok in 2.084s, award 1.0
+2.0836s, 1.00/1, 1.00
+        2.10 real         2.04 user         0.07 sys
+            71454720  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               23240  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 415  involuntary context switches
+            70119424  peak memory footprint
+ARM boehm rep 4
+Binarytrees: ok in 2.295s, award 1.0
+2.2949s, 1.00/1, 1.00
+        2.30 real         2.31 user         0.09 sys
+            38195200  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                9628  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2269  involuntary context switches
+            37216256  peak memory footprint
+ARM tip rep 4
+Binarytrees: ok in 2.485s, award 1.0
+2.4850s, 1.00/1, 1.00
+        2.50 real         2.43 user         0.08 sys
+            71438336  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               22841  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 562  involuntary context switches
+            70098944  peak memory footprint
+ARM getspec rep 4
+Binarytrees: ok in 2.107s, award 1.0
+2.1072s, 1.00/1, 1.00
+        2.12 real         2.04 user         0.09 sys
+            71458816  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               24542  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 546  involuntary context switches
+            70123520  peak memory footprint
+ARM boehm rep 5
+Binarytrees: ok in 2.168s, award 1.0
+2.1675s, 1.00/1, 1.00
+        2.17 real         2.19 user         0.08 sys
+            38227968  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                9635  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                2274  involuntary context switches
+            37249024  peak memory footprint
+ARM tip rep 5
+Binarytrees: ok in 2.258s, award 1.0
+2.2581s, 1.00/1, 1.00
+        2.27 real         2.21 user         0.07 sys
+            71450624  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               17792  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 484  involuntary context switches
+            70111232  peak memory footprint
+ARM getspec rep 5
+Binarytrees: ok in 1.928s, award 1.0
+1.9282s, 1.00/1, 1.00
+        1.94 real         1.89 user         0.06 sys
+            71450624  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               18282  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 393  involuntary context switches
+            70115328  peak memory footprint

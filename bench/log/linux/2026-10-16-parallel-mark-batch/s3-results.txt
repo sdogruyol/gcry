@@ -1,0 +1,78 @@
+Pidigits base exit=0 Pidigits: ok
+Pidigits kept exit=0 Pidigits: ok
+Pidigits keptil exit=0 Pidigits: ok
+Binarytrees base exit=0 Binarytrees: ok
+Binarytrees kept exit=0 Binarytrees: ok
+Binarytrees keptil exit=0 Binarytrees: ok
+Brainfuck base exit=0 Brainfuck: ok
+Brainfuck kept exit=0 Brainfuck: ok
+Brainfuck keptil exit=0 Brainfuck: ok
+Brainfuck2 base exit=0 Brainfuck2: ok
+Brainfuck2 kept exit=0 Brainfuck2: ok
+Brainfuck2 keptil exit=0 Brainfuck2: ok
+Fannkuchredux base exit=0 Fannkuchredux: ok
+Fannkuchredux kept exit=0 Fannkuchredux: ok
+Fannkuchredux keptil exit=0 Fannkuchredux: ok
+Fasta base exit=0 Fasta: ok
+Fasta kept exit=0 Fasta: ok
+Fasta keptil exit=0 Fasta: ok
+Knuckeotide base exit=1 Knuckeotide: err result=2880861202, but expected=1459386462
+Knuckeotide kept exit=1 Knuckeotide: err result=2880861202, but expected=1459386462
+Knuckeotide keptil exit=1 Knuckeotide: err result=2880861202, but expected=1459386462
+Mandelbrot base exit=0 Mandelbrot: ok
+Mandelbrot kept exit=0 Mandelbrot: ok
+Mandelbrot keptil exit=0 Mandelbrot: ok
+Matmul base exit=0 Matmul: ok
+Matmul kept exit=0 Matmul: ok
+Matmul keptil exit=0 Matmul: ok
+Nbody base exit=0 Nbody: ok
+Nbody kept exit=0 Nbody: ok
+Nbody keptil exit=0 Nbody: ok
+RegexDna base exit=1 RegexDna: err result=1186400986, but expected=2813760484
+RegexDna kept exit=1 RegexDna: err result=1186400986, but expected=2813760484
+RegexDna keptil exit=1 RegexDna: err result=1186400986, but expected=2813760484
+Revcomp base exit=1 Revcomp: err result=1154849210, but expected=2734405216
+Revcomp kept exit=1 Revcomp: err result=1154849210, but expected=2734405216
+Revcomp keptil exit=1 Revcomp: err result=1154849210, but expected=2734405216
+Spectralnorm base exit=0 Spectralnorm: ok
+Spectralnorm kept exit=0 Spectralnorm: ok
+Spectralnorm keptil exit=0 Spectralnorm: ok
+Threadring base exit=0 Threadring: ok
+Threadring kept exit=0 Threadring: ok
+Threadring keptil exit=0 Threadring: ok
+Base64Encode base exit=0 Base64Encode: ok
+Base64Encode kept exit=0 Base64Encode: ok
+Base64Encode keptil exit=0 Base64Encode: ok
+Base64Decode base exit=0 Base64Decode: ok
+Base64Decode kept exit=0 Base64Decode: ok
+Base64Decode keptil exit=0 Base64Decode: ok
+Primes base exit=0 Primes: ok
+Primes kept exit=0 Primes: ok
+Primes keptil exit=0 Primes: ok
+JsonGenerate base exit=1 JsonGenerate: err result=3931493865, but expected=1584466874
+JsonGenerate kept exit=1 JsonGenerate: err result=3931493865, but expected=1584466874
+JsonGenerate keptil exit=1 JsonGenerate: err result=3931493865, but expected=1584466874
+JsonParsePure base exit=1 JsonParsePure: err result=JsonParsePure::Coordinate(@x=0.49995358947126856, @y=0.5000557786699196, @z=0.5007583687182323), but expected=JsonParsePure::Coordinate(@x=0.4999535894712113, @y=0.5000557786698896, @z=0.5007583687182091)
+JsonParsePure kept exit=1 JsonParsePure: err result=JsonParsePure::Coordinate(@x=0.49995358947126856, @y=0.5000557786699196, @z=0.5007583687182323), but expected=JsonParsePure::Coordinate(@x=0.4999535894712113, @y=0.5000557786698896, @z=0.5007583687182091)
+JsonParsePure keptil exit=1 JsonParsePure: err result=JsonParsePure::Coordinate(@x=0.49995358947126856, @y=0.5000557786699196, @z=0.5007583687182323), but expected=JsonParsePure::Coordinate(@x=0.4999535894712113, @y=0.5000557786698896, @z=0.5007583687182091)
+JsonParseSerializable base exit=1 JsonParseSerializable: err result=JsonParseSerializable::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParseSerializable::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882)
+JsonParseSerializable kept exit=1 JsonParseSerializable: err result=JsonParseSerializable::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParseSerializable::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882)
+JsonParseSerializable keptil exit=1 JsonParseSerializable: err result=JsonParseSerializable::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParseSerializable::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882)
+JsonParsePull base exit=1 JsonParsePull: err result=JsonParsePull::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParsePull::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882)
+JsonParsePull kept exit=1 JsonParsePull: err result=JsonParsePull::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParsePull::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882)
+JsonParsePull keptil exit=1 JsonParsePull: err result=JsonParsePull::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParsePull::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882)
+Mandelbrot2 base exit=0 Mandelbrot2: ok
+Mandelbrot2 kept exit=0 Mandelbrot2: ok
+Mandelbrot2 keptil exit=0 Mandelbrot2: ok
+Noise base exit=0 Noise: ok
+Noise kept exit=0 Noise: ok
+Noise keptil exit=0 Noise: ok
+Sudoku base exit=0 Sudoku: ok
+Sudoku kept exit=0 Sudoku: ok
+Sudoku keptil exit=0 Sudoku: ok
+TextRaytracer base exit=0 TextRaytracer: ok
+TextRaytracer kept exit=0 TextRaytracer: ok
+TextRaytracer keptil exit=0 TextRaytracer: ok
+NeuralNet base exit=0 NeuralNet: ok
+NeuralNet kept exit=0 NeuralNet: ok
+NeuralNet keptil exit=0 NeuralNet: ok

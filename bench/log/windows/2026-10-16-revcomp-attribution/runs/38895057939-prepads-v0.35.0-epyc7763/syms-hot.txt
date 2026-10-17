@@ -1,0 +1,152 @@
+
+ab-base
+  0x01400f34e0  mod64=32  *Revcomp#revcomp<String>:Nil
+  0x0140069ee0  mod64=32  *String#tr<String, String>:String
+  0x01400e9a90  mod64=16  *String#chomp:String
+  0x0140018040  mod64= 0  *String#size:Int32
+  0x01400179a0  mod64=32  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x0140059750  mod64=16  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x0140058bf0  mod64=48  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x01400519f0  mod64=48  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001a700  mod64= 0  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400aa790  mod64=16  GC_malloc_atomic
+  0x01400aa860  mod64=32  GC_realloc
+
+ab-prepad0
+  0x01400f7190  mod64=16  *Revcomp#revcomp<String>:Nil
+  0x014006c9f0  mod64=48  *String#tr<String, String>:String
+  0x01400ed740  mod64= 0  *String#chomp:String
+  0x0140018520  mod64=32  *String#size:Int32
+  0x0140017e80  mod64= 0  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005ae30  mod64=48  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a2d0  mod64=16  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x01400538e0  mod64=32  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001abd0  mod64=16  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad1e0  mod64=32  GC_malloc_atomic
+  0x01400ad2b0  mod64=48  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad1040
+  0x01400f75a0  mod64=32  *Revcomp#revcomp<String>:Nil
+  0x014006ce00  mod64= 0  *String#tr<String, String>:String
+  0x01400edb50  mod64=16  *String#chomp:String
+  0x0140018930  mod64=48  *String#size:Int32
+  0x0140018290  mod64=16  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005b240  mod64= 0  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a6e0  mod64=32  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x0140053cf0  mod64=48  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001afe0  mod64=32  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad5f0  mod64=48  GC_malloc_atomic
+  0x01400ad6c0  mod64= 0  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad112
+  0x01400f7200  mod64= 0  *Revcomp#revcomp<String>:Nil
+  0x014006ca60  mod64=32  *String#tr<String, String>:String
+  0x01400ed7b0  mod64=48  *String#chomp:String
+  0x0140018590  mod64=16  *String#size:Int32
+  0x0140017ef0  mod64=48  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005aea0  mod64=32  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a340  mod64= 0  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x0140053950  mod64=16  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001ac40  mod64= 0  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad250  mod64=16  GC_malloc_atomic
+  0x01400ad320  mod64=32  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad16
+  0x01400f71a0  mod64=32  *Revcomp#revcomp<String>:Nil
+  0x014006ca00  mod64= 0  *String#tr<String, String>:String
+  0x01400ed750  mod64=16  *String#chomp:String
+  0x0140018530  mod64=48  *String#size:Int32
+  0x0140017e90  mod64=16  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005ae40  mod64= 0  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a2e0  mod64=32  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x01400538f0  mod64=48  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001abe0  mod64=32  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad1f0  mod64=48  GC_malloc_atomic
+  0x01400ad2c0  mod64= 0  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad2096
+  0x01400f79c0  mod64= 0  *Revcomp#revcomp<String>:Nil
+  0x014006d220  mod64=32  *String#tr<String, String>:String
+  0x01400edf70  mod64=48  *String#chomp:String
+  0x0140018d50  mod64=16  *String#size:Int32
+  0x01400186b0  mod64=48  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005b660  mod64=32  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005ab00  mod64= 0  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x0140054110  mod64=16  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001b400  mod64= 0  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ada10  mod64=16  GC_malloc_atomic
+  0x01400adae0  mod64=32  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad32
+  0x01400f71b0  mod64=48  *Revcomp#revcomp<String>:Nil
+  0x014006ca10  mod64=16  *String#tr<String, String>:String
+  0x01400ed760  mod64=32  *String#chomp:String
+  0x0140018540  mod64= 0  *String#size:Int32
+  0x0140017ea0  mod64=32  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005ae50  mod64=16  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a2f0  mod64=48  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x0140053900  mod64= 0  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001abf0  mod64=48  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad200  mod64= 0  GC_malloc_atomic
+  0x01400ad2d0  mod64=16  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad48
+  0x01400f71c0  mod64= 0  *Revcomp#revcomp<String>:Nil
+  0x014006ca20  mod64=32  *String#tr<String, String>:String
+  0x01400ed770  mod64=48  *String#chomp:String
+  0x0140018550  mod64=16  *String#size:Int32
+  0x0140017eb0  mod64=48  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005ae60  mod64=32  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a300  mod64= 0  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x0140053910  mod64=16  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001ac00  mod64= 0  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad210  mod64=16  GC_malloc_atomic
+  0x01400ad2e0  mod64=32  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad64
+  0x01400f71d0  mod64=16  *Revcomp#revcomp<String>:Nil
+  0x014006ca30  mod64=48  *String#tr<String, String>:String
+  0x01400ed780  mod64= 0  *String#chomp:String
+  0x0140018560  mod64=32  *String#size:Int32
+  0x0140017ec0  mod64= 0  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005ae70  mod64=48  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a310  mod64=16  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x0140053920  mod64=32  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001ac10  mod64=16  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad220  mod64=32  GC_malloc_atomic
+  0x01400ad2f0  mod64=48  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-prepad80
+  0x01400f71e0  mod64=32  *Revcomp#revcomp<String>:Nil
+  0x014006ca40  mod64= 0  *String#tr<String, String>:String
+  0x01400ed790  mod64=16  *String#chomp:String
+  0x0140018570  mod64=48  *String#size:Int32
+  0x0140017ed0  mod64=16  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005ae80  mod64= 0  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a320  mod64=32  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x0140053930  mod64=48  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001ac20  mod64=32  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad230  mod64=48  GC_malloc_atomic
+  0x01400ad300  mod64= 0  GC_realloc
+  0x0140005970  mod64=48  *__placement_pad:Void
+
+ab-var
+  0x01400f7180  mod64= 0  *Revcomp#revcomp<String>:Nil
+  0x014006c9e0  mod64=32  *String#tr<String, String>:String
+  0x01400ed730  mod64=48  *String#chomp:String
+  0x0140018510  mod64=16  *String#size:Int32
+  0x0140017e70  mod64=48  *Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)
+  0x014005ae20  mod64=32  *IO::Memory#write<Slice(UInt8)>:Nil
+  0x014005a2c0  mod64= 0  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+  0x01400538d0  mod64=16  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+  0x014001abc0  mod64= 0  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)
+  0x01400ad1d0  mod64=16  GC_malloc_atomic
+  0x01400ad2a0  mod64=32  GC_realloc

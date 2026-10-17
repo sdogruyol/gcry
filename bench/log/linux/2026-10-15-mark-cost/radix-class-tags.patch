@@ -1,0 +1,410 @@
+diff --git a/spec/chunk_radix_spec.cr b/spec/chunk_radix_spec.cr
+index 8dd0fa34..f60a9d06 100644
+--- a/spec/chunk_radix_spec.cr
++++ b/spec/chunk_radix_spec.cr
+@@ -240,6 +240,103 @@ describe "Gcry::Heap chunk radix" do
+   end
+ end
+ 
++# A radix entry's low bits carry its chunk's size class and kind
++# (`Heap::RADIX_TAG_MASK`), and the mark's inline candidate path
++# (`Heap#scan_edges_inline`) resolves a tagged candidate from the tag and its
++# class's geometry without reading the chunk header. A tag that disagreed with
++# its chunk would resolve candidates against the wrong class — the wrong
++# block, the wrong `occ` and mark words, an atomic block pushed or a
++# pointerful one never scanned — and nothing would announce it. That path
++# runs only with the world stopped, so these examples pin what it reads: every
++# entry of every chunk, against that chunk's own header.
++describe "chunk radix class tags" do
++  it "tags every size-class bitmap chunk with its class and kind, and its geometry matches" do
++    heap = Gcry::Heap.new
++    begin
++      heap.chunk_radix = true
++      heap.bitmap_alloc = true
++      heap.gc_threshold = UInt64::MAX
++      kept = [] of Void*
++      [16, 48, 100, 512, 2000, 8000].each do |size|
++        200.times do
++          kept << heap.malloc(size.to_u64)
++          kept << heap.malloc_atomic(size.to_u64)
++        end
++      end
++      kept << heap.malloc(1_u64 << 20)
++
++      tagged = 0
++      large = 0
++      kinds = Set(Bool).new
++      heap.each_chunk do |chunk|
++        first = Pointer(Void).new(chunk.address)
++        last = Pointer(Void).new(chunk.address + chunk.value.mapped_bytes - 1)
++        if Gcry::ChunkHeader.large?(chunk)
++          heap.radix_tag_of(first).should eq(0_u64)
++          heap.radix_tag_of(last).should eq(0_u64)
++          large += 1
++          next
++        end
++        cls = chunk.value.size_class
++        atomic = Gcry::ChunkHeader.atomic?(chunk)
++        kinds << atomic
++        expected = (cls.to_u64 + 1) | (atomic ? Gcry::Heap::RADIX_TAG_ATOMIC : 0_u64)
++        # Every granule of the chunk, the first and the last.
++        heap.radix_tag_of(first).should eq(expected)
++        heap.radix_tag_of(last).should eq(expected)
++
++        geom = heap.@radix_class_geom[cls.to_i32]
++        block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(cls.to_i32).to_u64
++        (geom & 0xFFFF_u64).should eq(chunk.value.data_offset.to_u64)
++        ((geom >> 16) & 0xFFFF_u64).should eq(chunk.value.bitmap_words.to_u64)
++        (geom >> 32).should eq(Gcry::Heap.chunk_block_count(block_bytes, chunk.value.mapped_bytes, chunk.value.data_offset))
++        tagged += 1
++      end
++      tagged.should be >= 12
++      large.should be > 0
++      kinds.size.should eq(2)
++
++      # And the lookups every other reader makes still name the chunk.
++      kept.each { |ptr| heap.find_block(ptr).should_not be_nil }
++    ensure
++      heap.destroy
++    end
++  end
++
++  # `radix_remove` clears only an entry that still names the chunk, and a
++  # tagged entry is not the bare chunk pointer: compared whole, every tagged
++  # entry would outlive its unmap.
++  it "clears a tagged chunk's entries when the chunk is unmapped" do
++    heap = Gcry::Heap.new
++    begin
++      heap.chunk_radix = true
++      heap.bitmap_alloc = true
++      heap.gc_threshold = UInt64::MAX
++      # Unmap fully free chunks at once; the knobs are `empty_chunk_grace_spec`'s,
++      # for the same reason (another example's thread must not turn the release
++      # path off).
++      heap.release_empty_chunks = true
++      heap.parallel_empty_chunk_dormant = true
++      heap.parallel_empty_chunk_munmap = true
++      heap.empty_chunk_warm_retain = 0_u64
++      heap.empty_chunk_retain = 0_u64
++      200.times { heap.malloc(4096) }
++      bases = [] of UInt64
++      heap.each_chunk { |chunk| bases << chunk.address unless Gcry::ChunkHeader.large?(chunk) }
++      bases.each { |base| heap.radix_tag_of(Pointer(Void).new(base)).should_not eq(0_u64) }
++      # The second major unmaps what the first kept for its grace cycle.
++      2.times { heap.collect(scan_stack: false) }
++      owned = Set(UInt64).new
++      heap.each_chunk { |chunk| owned << chunk.address }
++      released = bases.reject { |base| owned.includes?(base) }
++      released.should_not be_empty
++      released.each { |base| heap.radix_tag_of(Pointer(Void).new(base)).should eq(0_u64) }
++    ensure
++      heap.destroy
++    end
++  end
++end
++
+ # `realloc` and `free` resolve the pointer they are handed through the table
+ # with no index lock (`Heap#chunk_for_owned`): the caller owns the block, so
+ # its chunk cannot be unmapped under the lookup. The fresh block of a growing
+diff --git a/src/gcry/chunk_radix.cr b/src/gcry/chunk_radix.cr
+index 39bbfc5b..f99e3d76 100644
+--- a/src/gcry/chunk_radix.cr
++++ b/src/gcry/chunk_radix.cr
+@@ -113,6 +113,37 @@ module Gcry
+     # the right price.
+     RADIX_MAX_GRANULES = 1024
+ 
++    # ## A class tag in each entry's low bits
++    #
++    # Chunk bases are page-aligned, so the low 12 bits of an entry are free
++    # (`RADIX_TAG_MASK`; pages are at least 4 KiB everywhere gcry runs). An
++    # entry for a size-class bitmap chunk outside the nursery carries its size
++    # class + 1 there (`RADIX_TAG_CLASS_MASK`), with `RADIX_TAG_ATOMIC` if the
++    # chunk is atomic, and every other entry carries 0. The rest of what the
++    # mark needs to resolve a block in such a chunk — data offset, bitmap
++    # words, block count — is the same for every chunk of the class, and sits
++    # in `@radix_class_geom`: written by the first chunk of the class to be
++    # tagged, compared by every later one, which stays untagged if it differs
++    # (`radix_tag`).
++    #
++    # That is for `scan_edges_inline`. It went from a candidate word to the
++    # radix slot, from the slot to the chunk header's line, and only from the
++    # header (data offset, bitmap words, class) to the `occ` and mark words:
++    # three dependent loads, the header's ~8% of that function's samples on
++    # Primes. A tagged slot names the bitmap words itself
++    # (`bench/log/linux/2026-10-15-mark-cost/`).
++    #
++    # Everything a tag stands for is fixed when the chunk is mapped:
++    # `map_chunk` writes the header before `index_insert` publishes the
++    # entries, and nothing writes the class, the bitmap geometry, the size or
++    # the ATOMIC and NURSERY flags of a size-class chunk afterwards. Entries
++    # are cleared with the chunk's index entry (`radix_remove`), so a tag
++    # cannot outlive the chunk it describes. Every other reader goes through
++    # `radix_entry`, which masks the tag off.
++    RADIX_TAG_MASK       = 0xFFF_u64
++    RADIX_TAG_CLASS_MASK =  0x3F_u64
++    RADIX_TAG_ATOMIC     =  0x40_u64
++
+     @radix_l1 : Pointer(Pointer(ChunkHeader*)) = Pointer(Pointer(ChunkHeader*)).null
+     @radix_granule_shift : Int32 = 0
+     @radix_l2_mask : UInt64 = 0_u64
+@@ -191,10 +222,11 @@ module Gcry
+       Heap.radix_entry(l1, @radix_granule_shift, @radix_l2_mask, addr)
+     end
+ 
+-    # The two loads, from a table the caller has already read out of `self`.
+-    # The mark's inline candidate path (`scan_edges_inline`) keeps the three in
+-    # registers for a whole payload; through `self` they would be reloaded per
+-    # candidate, after every mark-bit write and push.
++    # The two loads, from a table the caller has already read out of `self`,
++    # with the entry's tag masked off. The mark's inline candidate path
++    # (`scan_edges_inline`) keeps the three in registers for a whole payload;
++    # through `self` they would be reloaded per candidate, after every
++    # mark-bit write and push.
+     #
+     # `unsafe_shr`, not `>>`: with a variable amount `Int#>>` guards against a
+     # negative or oversized shift, and Crystal emitted that as an out-of-line
+@@ -203,9 +235,16 @@ module Gcry
+     # `radix_init`.
+     @[AlwaysInline]
+     protected def self.radix_entry(l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64, addr : UInt64) : ChunkHeader*
++      Pointer(ChunkHeader).new(radix_slot(l1, shift, l2_mask, addr) & ~RADIX_TAG_MASK)
++    end
++
++    # `radix_entry` with the tag kept: the chunk's address OR its tag, 0 for
++    # no entry.
++    @[AlwaysInline]
++    protected def self.radix_slot(l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64, addr : UInt64) : UInt64
+       l2 = l1[addr.unsafe_shr(RADIX_L1_SHIFT) & RADIX_L1_MASK]
+-      return Pointer(ChunkHeader).null if l2.null?
+-      l2[addr.unsafe_shr(shift) & l2_mask]
++      return 0_u64 if l2.null?
++      l2[addr.unsafe_shr(shift) & l2_mask].address
+     end
+ 
+     # Not while a parallel mark is running. Every worker resolves every
+@@ -224,9 +263,30 @@ module Gcry
+       @radix_slow_lookups &+= 1 unless @mark_parallel
+     end
+ 
+-    # Publish a chunk. Caller holds the lock that guards the sorted index.
++    # The tag `chunk`'s entries carry (see the note on `RADIX_TAG_MASK`).
++    # Caller holds the lock that guards the sorted index, which is also what
++    # makes the first write of a class's geometry single-writer.
++    private def radix_tag(chunk : ChunkHeader*) : UInt64
++      cls = chunk.value.size_class
++      return 0_u64 if cls >= SIZE_CLASS_COUNT || cls >= RADIX_TAG_CLASS_MASK
++      words = chunk.value.bitmap_words.to_u64
++      return 0_u64 if words == 0 || words > 0xFFFF_u64 || ChunkHeader.nursery?(chunk)
++      offset = chunk.value.data_offset.to_u64
++      return 0_u64 if offset > 0xFFFF_u64
++      nblocks = chunk_block_count(chunk)
++      return 0_u64 if nblocks == 0 || nblocks > UInt32::MAX
++      geom = offset | (words << 16) | (nblocks << 32)
++      index = cls.to_i32
++      @radix_class_geom[index] = geom if @radix_class_geom[index] == 0_u64
++      return 0_u64 unless @radix_class_geom[index] == geom
++      (cls.to_u64 &+ 1) | (ChunkHeader.atomic?(chunk) ? RADIX_TAG_ATOMIC : 0_u64)
++    end
++
++    # Publish a chunk, tagged. Caller holds the lock that guards the sorted
++    # index.
+     protected def radix_insert(chunk : ChunkHeader*) : Nil
+-      radix_each_granule(chunk) { |l2, idx| l2[idx] = chunk }
++      entry = Pointer(ChunkHeader).new(chunk.address | radix_tag(chunk))
++      radix_each_granule(chunk) { |l2, idx| l2[idx] = entry }
+     end
+ 
+     # Retract a chunk, before the caller's `munmap`.
+@@ -239,10 +299,24 @@ module Gcry
+         # path for its whole life. The ordering that makes that impossible
+         # (remove, then munmap, then any remap) is a property of the callers, so
+         # this does not rely on it.
+-        l2[idx] = Pointer(ChunkHeader).null if l2[idx] == chunk
++        l2[idx] = Pointer(ChunkHeader).null if radix_names?(l2[idx], chunk)
+       end
+     end
+ 
++    # Whether a stored entry, tag and all, is *chunk*'s.
++    @[AlwaysInline]
++    private def radix_names?(entry : ChunkHeader*, chunk : ChunkHeader*) : Bool
++      (entry.address & ~RADIX_TAG_MASK) == chunk.address
++    end
++
++    # Diagnostic: the tag of the entry for *pointer*'s granule; 0 for an
++    # untagged entry, no entry, or no table.
++    def radix_tag_of(pointer : Void*) : UInt64
++      l1 = @radix_l1
++      return 0_u64 if l1.null?
++      Heap.radix_slot(l1, @radix_granule_shift, @radix_l2_mask, pointer.address) & RADIX_TAG_MASK
++    end
++
+     private def radix_each_granule(chunk : ChunkHeader*, & : (ChunkHeader**, UInt64) ->) : Nil
+       return if @radix_l1.null?
+       base = chunk.address
+@@ -288,6 +362,8 @@ module Gcry
+     # chunk is now one `radix_remove` skips, so an entry left behind would
+     # outlive the unmap and name a chunk that is gone. A retracted chunk
+     # resolves by the binary search, as a chunk mapped that large always has.
++    # A large chunk's entries carry no tag, so the new ones are the bare
++    # chunk.
+     protected def radix_grow(chunk : ChunkHeader*, old_mapped : UInt64) : Nil
+       return if @radix_l1.null?
+       base = chunk.address
+@@ -296,7 +372,7 @@ module Gcry
+         return if radix_oversize?(base, base &+ old_mapped)
+         @radix_oversize_skips &+= 1
+         radix_each_granule_in(base, base &+ old_mapped) do |l2, idx|
+-          l2[idx] = Pointer(ChunkHeader).null if l2[idx] == chunk
++          l2[idx] = Pointer(ChunkHeader).null if radix_names?(l2[idx], chunk)
+         end
+       else
+         radix_each_granule_in(base &+ old_mapped, limit) { |l2, idx| l2[idx] = chunk }
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index d8a86028..0b1e362a 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -665,6 +665,16 @@ module Gcry
+     # `occ` line is never touched. Every candidate this does not handle in
+     # full — not in the table, outside the chunk's blocks, a large or nursery
+     # chunk — goes to `mark_impl`, which stays the authority.
++    #
++    # The radix slot's class tag (chunk_radix.cr) stands in for the chunk
++    # header here: the class, the atomic kind and, through the class,
++    # `@radix_class_geom`'s data offset, bitmap words and block count, which
++    # are what the header was read for. So a tagged candidate costs the slot
++    # and the bitmap words, and the header's line is read only for an
++    # untagged slot (`scan_edge_by_header`). Σ mark per live object over 7
++    # interleaved runs: one marker −4% to −12%, default workers −2% to −11%
++    # on Primes, JsonParsePure and JsonGenerate
++    # (`bench/log/linux/2026-10-15-mark-cost/`).
+     private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
+       lo = @heap_min
+       hi = @heap_max
+@@ -678,44 +688,83 @@ module Gcry
+         w = p.value
+         p += 1
+         next if w < lo || w >= hi
+-        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+-        if chunk.null?
+-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++        slot = Heap.radix_slot(l1, shift, l2_mask, w)
++        tag = slot & RADIX_TAG_CLASS_MASK
++        if tag == 0
++          scan_edge_by_header(w, Pointer(ChunkHeader).new(slot & ~RADIX_TAG_MASK), base_only, shard)
+           next
+         end
+-        cls = chunk.value.size_class
+-        bitmap_words = chunk.value.bitmap_words.to_u64
+-        data_start = chunk.address &+ chunk.value.data_offset
+-        chunk_end = chunk.address &+ chunk.value.mapped_bytes
+-        # `size_class` past the table covers large chunks (`UInt32::MAX`).
+-        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
+-           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
++        chunk = slot & ~RADIX_TAG_MASK
++        index = tag.to_i32 &- 1
++        geom = @radix_class_geom.unsafe_fetch(index)
++        data_start = chunk &+ (geom & 0xFFFF_u64)
++        # Into the chunk's header or bitmaps.
++        if w < data_start
+           mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+           next
+         end
+         hits &+= 1
+-        index = cls.to_i32
+-        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
+-        block_bytes = @block_bytes.unsafe_fetch(index)
+-        header_addr = data_start &+ ordinal &* block_bytes
+-        # The chunk's tail past its last whole block.
+-        next if header_addr &+ block_bytes > chunk_end
+-        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
++        # `Heap.block_ordinal` without its overflow check, which cannot fire
++        # inside a chunk (`Heap.block_magic`).
++        ordinal = ((w &- data_start) &* @block_magic.unsafe_fetch(index)) >> RECIPROCAL_SHIFT
++        # The chunk's tail past its last whole block: the entry is exact, so
++        # `w` is inside the chunk, and only an ordinal past the block count
++        # names no block.
++        next if ordinal >= (geom >> 32)
++        header_addr = data_start &+ ordinal &* @block_bytes.unsafe_fetch(index)
++        occ = Pointer(UInt64).new(chunk &+ ChunkHeader::SIZE) + (ordinal >> 6)
+         bit = 1_u64 << (ordinal & 63)
+-        mark = occ + bitmap_words
++        mark = occ + ((geom >> 16) & 0xFFFF_u64)
+         next if (mark.value & bit) != 0
+         next if (occ.value & bit) == 0
+         header = Pointer(BlockHeader).new(header_addr)
+         next if base_only && w != BlockHeader.user_from(header).address
+         # `chunk_set_mark` with its relaxed pre-check already done above.
+         Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+-        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+-        mark_stack_push(mark_entry(chunk, header), shard)
++        next if (slot & RADIX_TAG_ATOMIC) != 0 || BlockHeader.atomic?(header)
++        # `mark_entry`: the tag is the class + 1 it carries.
++        mark_stack_push(Pointer(BlockHeader).new(header_addr | (tag << MARK_ENTRY_TAG_SHIFT)), shard)
+       end
+       # `radix_note_fast_hit`, once per payload.
+       @radix_fast_hits &+= hits unless @mark_parallel
+     end
+ 
++    # `scan_edges_inline` for a candidate whose radix slot has no class tag:
++    # the chunk's header supplies what the tag would have, and anything but
++    # a size-class bitmap chunk outside the nursery goes to `mark_impl`.
++    private def scan_edge_by_header(w : UInt64, chunk : ChunkHeader*, base_only : Bool, shard : MarkShard?) : Nil
++      if chunk.null?
++        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++        return
++      end
++      cls = chunk.value.size_class
++      bitmap_words = chunk.value.bitmap_words.to_u64
++      data_start = chunk.address &+ chunk.value.data_offset
++      chunk_end = chunk.address &+ chunk.value.mapped_bytes
++      # `size_class` past the table covers large chunks (`UInt32::MAX`).
++      if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
++         (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
++        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++        return
++      end
++      index = cls.to_i32
++      ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
++      block_bytes = @block_bytes.unsafe_fetch(index)
++      header_addr = data_start &+ ordinal &* block_bytes
++      # The chunk's tail past its last whole block.
++      return if header_addr &+ block_bytes > chunk_end
++      occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
++      bit = 1_u64 << (ordinal & 63)
++      mark = occ + bitmap_words
++      return if (mark.value & bit) != 0
++      return if (occ.value & bit) == 0
++      header = Pointer(BlockHeader).new(header_addr)
++      return if base_only && w != BlockHeader.user_from(header).address
++      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++      return if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
++      mark_stack_push(mark_entry(chunk, header), shard)
++    end
++
+     # Scan length for one object, derived from its **chunk** (Phase 7.6).
+     #
+     # This used to read `header.value.size` and clamp it against the chunk, then
+diff --git a/src/gcry/heap.cr b/src/gcry/heap.cr
+index 0c023cae..fd1788b1 100644
+--- a/src/gcry/heap.cr
++++ b/src/gcry/heap.cr
+@@ -201,6 +201,10 @@ module Gcry
+     @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+     # Magic reciprocals for `offset / block_bytes` — see `Heap.block_magic`.
+     @block_magic = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
++    # Per size class, the geometry of its tagged chunks, `data_offset |
++    # bitmap_words << 16 | block count << 32`; 0 until the first one is
++    # published (`Heap#radix_tag`, chunk_radix.cr).
++    @radix_class_geom = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+     @destroyed = false
+     @nursery_alloc_bytes = Atomic(UInt64).new(0_u64)
+     # Lazily rebuilt address-sorted index (mark / static exclusion).
+@@ -392,6 +396,7 @@ module Gcry
+       @pause_hdr = StaticArray(UInt64, PAUSE_HDR_BUCKETS).new(0_u64)
+       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
+       @block_magic = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
++      @radix_class_geom = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
+       SIZE_CLASS_COUNT.times do |i|
+         @block_bytes[i] = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
+         @block_magic[i] = Heap.block_magic(@block_bytes[i])

@@ -1,0 +1,217 @@
+From b3c20ea5f8c3028f6aaa0b67dcbd19b43c5032a8 Mon Sep 17 00:00:00 2001
+From: Serdar Dogruyol <990485+sdogruyol@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 21:38:58 +0300
+Subject: [PATCH] sweep: emptied chunks of a size the last cycle did not
+ allocate are released
+
+---
+ spec/empty_chunk_grace_spec.cr | 66 ++++++++++++++++++++++++++++++++++
+ src/gcry/bitmap_alloc.cr       | 27 ++++++++++++++
+ src/gcry/collect.cr            |  4 +++
+ src/gcry/collect_sweep.cr      | 20 +++++++++--
+ 4 files changed, 115 insertions(+), 2 deletions(-)
+
+diff --git a/spec/empty_chunk_grace_spec.cr b/spec/empty_chunk_grace_spec.cr
+index 618acba7..cf897040 100644
+--- a/spec/empty_chunk_grace_spec.cr
++++ b/spec/empty_chunk_grace_spec.cr
+@@ -28,6 +28,17 @@ private def grace_heap : Gcry::Heap
+   heap
+ end
+ 
++# Chunks of *class_index* and atomicity on *heap*.
++private def kind_chunks(heap : Gcry::Heap, class_index : Int32, atomic : Bool) : Int32
++  n = 0
++  heap.each_chunk do |chunk|
++    next if Gcry::ChunkHeader.large?(chunk)
++    next unless chunk.value.size_class == class_index.to_u32
++    n += 1 if Gcry::ChunkHeader.atomic?(chunk) == atomic
++  end
++  n
++end
++
+ describe "empty chunk grace" do
+   it "unmaps a fully free chunk past the budget at the second major, not the first" do
+     heap = grace_heap
+@@ -85,4 +96,59 @@ describe "empty chunk grace" do
+       heap.destroy
+     end
+   end
++
++  # A program that stops allocating one size and allocates another: its
++  # emptied chunks of the old size can serve nothing else, and the warm
++  # budget used to keep them while the new size mapped its own (Knuckeotide,
++  # 16- then 32-byte `String`s: `bench/log/linux/2026-10-17-knuckeotide-rss/`).
++  # `Heap#release_idle_kind_chunks`.
++  it "releases the emptied chunks of a size the last cycle did not allocate, within the warm budget" do
++    [true, false].each do |release|
++      heap = grace_heap
++      begin
++        heap.empty_chunk_warm_retain = 64_u64 * 1024 * 1024
++        heap.release_idle_kind_chunks = release
++        # 16-byte atomic blocks, several chunks of them, all garbage.
++        40_000.times { heap.malloc_atomic(8) }
++        sixteen = kind_chunks(heap, 0, true)
++        sixteen.should be >= 3
++        # Still allocated in the cycle this ends: kept warm either way.
++        heap.collect(scan_stack: false)
++        kind_chunks(heap, 0, true).should eq sixteen
++        # A cycle of 32-byte blocks only.
++        4_000.times { heap.malloc_atomic(24) }
++        heap.collect(scan_stack: false)
++        left = kind_chunks(heap, 0, true)
++        if release
++          if left != 0
++            fail "16-byte chunks kept after a cycle that allocated none — left=#{left} of #{sixteen} " \
++                 "heap_size=#{heap.heap_size} released_bytes=#{heap.released_chunk_bytes} " \
++                 "flush_considered=#{heap.release_flush_chunks} refused_occupied=#{heap.release_refused_occupied}"
++          end
++          # The size in use keeps its emptied chunk warm, as before.
++          kind_chunks(heap, 1, true).should be >= 1
++        else
++          left.should eq sixteen
++        end
++      ensure
++        heap.destroy
++      end
++    end
++  end
++
++  it "keeps the emptied chunks of a size the last cycle allocated" do
++    heap = grace_heap
++    begin
++      heap.empty_chunk_warm_retain = 64_u64 * 1024 * 1024
++      40_000.times { heap.malloc_atomic(8) }
++      sixteen = kind_chunks(heap, 0, true)
++      heap.collect(scan_stack: false)
++      # One more 16-byte block in this cycle: the size is still in use.
++      heap.malloc_atomic(8)
++      heap.collect(scan_stack: false)
++      kind_chunks(heap, 0, true).should eq sixteen
++    ensure
++      heap.destroy
++    end
++  end
+ end
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 16c4287c..407ba9eb 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -215,6 +215,14 @@ module Gcry
+     @bitmap_pool_indexes = uninitialized StaticArray(BitmapPoolIndex, POOL_SLOTS)
+     @bitmap_search_counts = uninitialized StaticArray(UInt64, POOL_SLOTS)
+     @bitmap_search_skip_counts = uninitialized StaticArray(UInt64, POOL_SLOTS)
++    # Which (class, kind) slots took a chunk since the last stop-the-world:
++    # set by `bitmap_refill_pool` under the slot's class lock, and every
++    # cursor set is retired at each stop, so an allocating slot takes at
++    # least one chunk per cycle. `bitmap_settle_cursor_sets` moves it to
++    # `@bitmap_slot_took_last_cycle` (the world stopped, so no store is lost
++    # or torn) for the sweep's warm decision (`collect_sweep.cr`).
++    @bitmap_slot_took = uninitialized StaticArray(Bool, POOL_SLOTS)
++    @bitmap_slot_took_last_cycle = uninitialized StaticArray(Bool, POOL_SLOTS)
+ 
+     def bitmap_pool_searches : UInt64
+       @bitmap_search_counts.sum
+@@ -229,6 +237,15 @@ module Gcry
+     # `make pool-refill-cost --disabled` is the red arm. Never a product setting.
+     property pool_index_disabled : Bool = false
+ 
++    # Did *chunk*'s (class, kind) take a chunk in the cycle the current
++    # collection ended? Read by the sweep, from the snapshot the settle took.
++    protected def bitmap_slot_active?(chunk : ChunkHeader*) : Bool
++      slot = chunk.value.size_class.to_i32
++      return true if slot < 0 || slot >= SIZE_CLASS_COUNT
++      slot += SIZE_CLASS_COUNT if ChunkHeader.atomic?(chunk)
++      @bitmap_slot_took_last_cycle[slot]
++    end
++
+     private def bitmap_capacity_changed(chunk : ChunkHeader*) : Nil
+       slot = chunk.value.size_class.to_i32
+       slot += SIZE_CLASS_COUNT if ChunkHeader.atomic?(chunk)
+@@ -249,6 +266,9 @@ module Gcry
+       @bitmap_empty_versions = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
+       @bitmap_search_counts = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
+       @bitmap_search_skip_counts = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
++      @bitmap_slot_took = StaticArray(Bool, POOL_SLOTS).new(false)
++      # Every slot counts as active until a cycle has been watched.
++      @bitmap_slot_took_last_cycle = StaticArray(Bool, POOL_SLOTS).new(true)
+     end
+ 
+     @[AlwaysInline]
+@@ -535,6 +555,10 @@ module Gcry
+     # into them when it resumes.
+     protected def bitmap_settle_cursor_sets : Nil
+       return unless @bitmap_alloc
++      # The cycle that ends here: which slots took a chunk in it. Copied with
++      # every mutator stopped, before any of them retires into a new cycle.
++      @bitmap_slot_took_last_cycle = @bitmap_slot_took
++      @bitmap_slot_took = StaticArray(Bool, POOL_SLOTS).new(false)
+       each_chunk do |chunk|
+         next if ChunkHeader.large?(chunk)
+         next unless ChunkHeader.pinned?(chunk)
+@@ -862,6 +886,9 @@ module Gcry
+           # In use again: a fully free chunk past the warm budget keeps its
+           # one cycle of grace only while nothing takes it.
+           ChunkHeader.set_idle(chunk, false) if ChunkHeader.idle?(chunk)
++          # This (class, kind) is allocating: its emptied chunks stay warm
++          # (`collect_sweep.cr`, `bitmap_slot_active?`).
++          @bitmap_slot_took[atomic ? index + SIZE_CLASS_COUNT : index] = true unless reserve
+           s.value.chunk = chunk
+           s.value.word = 0
+           @bitmap_alloc_chunk_advances &+= 1
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 27cb1897..8e5ea21c 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -256,6 +256,10 @@ module Gcry
+     # for reuse. Takes priority over empty_chunk_retain. Opt-in via
+     # GCRY_EMPTY_CHUNK_WARM_RETAIN — thr middle path vs KEEP_CHUNKS.
+     property empty_chunk_warm_retain : UInt64 = 0_u64
++    # Emptied bitmap chunks of a (class, kind) that took no chunk in the
++    # cycle just ended are released rather than kept warm or graced
++    # (`collect_sweep.cr`). Only a spec turns it off, to show what it does.
++    property release_idle_kind_chunks : Bool = true
+     # Bytes of fully-free chunks to keep dormant (DONTNEED) for reuse.
+     property empty_chunk_retain : UInt64 = DEFAULT_EMPTY_CHUNK_RETAIN
+     # MADV_DONTNEED free pages in partially-live chunks after major (Linux).
+diff --git a/src/gcry/collect_sweep.cr b/src/gcry/collect_sweep.cr
+index 37767a01..29fc1fce 100644
+--- a/src/gcry/collect_sweep.cr
++++ b/src/gcry/collect_sweep.cr
+@@ -210,7 +210,23 @@ module Gcry
+                     # without page-fault on reuse). Unbounded Parallel dormant
+                     # remains opt-in via parallel_empty_chunk_dormant_all.
+                     warm_cap = @release_warm_this_collect ? 0_u64 : @empty_chunk_warm_retain
+-                    within_warm = warm_cap > 0 && (warm_budget_used + mapped <= warm_cap)
++                    # An emptied chunk whose (class, kind) took no chunk in the
++                    # cycle just ended is neither warm nor graced: the program
++                    # has stopped allocating that size, and nothing but that
++                    # size can reuse the chunk. Kept, it holds the warm budget
++                    # while the sizes the program does allocate map fresh
++                    # chunks beside it. Knuckeotide moves from 2-byte to
++                    # 3-byte `String`s, 16 to 32-byte blocks (12 + n + 1 bytes
++                    # and the one-byte atomic slack): 21 MB of emptied 16-byte
++                    # chunks stayed warm while 13.5 MB of 32-byte ones were
++                    # mapped in one cycle, and 7 MB of the 16-byte ones were
++                    # still resident at its peak 0.4 s later
++                    # (`bench/log/linux/2026-10-17-knuckeotide-rss/`). A slot
++                    # that allocates at all takes a chunk every cycle (each
++                    # stop retires the cursors), so a class in use keeps its
++                    # empties exactly as before.
++                    stale_kind = @release_idle_kind_chunks && bitmap_alloc_chunk?(chunk) && !bitmap_slot_active?(chunk)
++                    within_warm = !stale_kind && warm_cap > 0 && (warm_budget_used + mapped <= warm_cap)
+                     within_retain = @empty_chunk_retain > 0 &&
+                                     (dormant_budget_used + mapped <= @empty_chunk_retain)
+                     can_dormant = within_retain ||
+@@ -257,7 +273,7 @@ module Gcry
+                     # threshold, and a process that went idle kept them for
+                     # good: 78.7 MB RSS against 6.3 MB after `GC.collect`. The
+                     # knife edge above is a chunk or two, far inside this cap.
+-                    grace = !within_warm && !can_dormant && munmap_empty_chunks_this_collect? &&
++                    grace = !stale_kind && !within_warm && !can_dormant && munmap_empty_chunks_this_collect? &&
+                             bitmap_alloc_chunk?(chunk) && !ChunkHeader.idle?(chunk) &&
+                             !@release_warm_this_collect &&
+                             (@unmap_grace_unbounded || grace_budget_used + mapped <= @gc_threshold)
+-- 
+2.53.0
+

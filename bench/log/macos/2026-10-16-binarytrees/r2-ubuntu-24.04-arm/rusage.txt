@@ -1,0 +1,400 @@
+ARM boehm rep 1
+Binarytrees: ok in 0.990s, award 1.0
+0.9903s, 1.00/1, 1.00
+	Command being timed: "bin/main-boehm Binarytrees"
+	User time (seconds): 0.98
+	System time (seconds): 0.03
+	Percent of CPU this job got: 102%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.99
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 50580
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 12077
+	Voluntary context switches: 2153
+	Involuntary context switches: 6
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM tip rep 1
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xffd231fe0120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.190s, award 1.0
+1.1898s, 1.00/1, 1.00
+	Command being timed: "bin/main-tip Binarytrees"
+	User time (seconds): 1.17
+	System time (seconds): 0.02
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.19
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 38068
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 17059
+	Voluntary context switches: 417
+	Involuntary context switches: 13
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM getspec_shl rep 1
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xff002009c120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.102s, award 1.0
+1.1018s, 1.00/1, 1.00
+	Command being timed: "bin/main-getspec_shl Binarytrees"
+	User time (seconds): 1.09
+	System time (seconds): 0.01
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.10
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 37940
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 14118
+	Voluntary context switches: 385
+	Involuntary context switches: 12
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM boehm rep 2
+Binarytrees: ok in 1.032s, award 1.0
+1.0316s, 1.00/1, 1.00
+	Command being timed: "bin/main-boehm Binarytrees"
+	User time (seconds): 1.03
+	System time (seconds): 0.02
+	Percent of CPU this job got: 102%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.03
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 50720
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 12080
+	Voluntary context switches: 2204
+	Involuntary context switches: 7
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM tip rep 2
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xff2480dc0120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.187s, award 1.0
+1.1866s, 1.00/1, 1.00
+	Command being timed: "bin/main-tip Binarytrees"
+	User time (seconds): 1.16
+	System time (seconds): 0.03
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.19
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 38068
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 16901
+	Voluntary context switches: 433
+	Involuntary context switches: 9
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM getspec_shl rep 2
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xfff972acc120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.144s, award 1.0
+1.1440s, 1.00/1, 1.00
+	Command being timed: "bin/main-getspec_shl Binarytrees"
+	User time (seconds): 1.11
+	System time (seconds): 0.03
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.14
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 37956
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 21127
+	Voluntary context switches: 388
+	Involuntary context switches: 14
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM boehm rep 3
+Binarytrees: ok in 0.994s, award 1.0
+0.9936s, 1.00/1, 1.00
+	Command being timed: "bin/main-boehm Binarytrees"
+	User time (seconds): 0.99
+	System time (seconds): 0.02
+	Percent of CPU this job got: 102%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.00
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 50704
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 12077
+	Voluntary context switches: 2120
+	Involuntary context switches: 8
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM tip rep 3
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xfff0b015c120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.140s, award 1.0
+1.1403s, 1.00/1, 1.00
+	Command being timed: "bin/main-tip Binarytrees"
+	User time (seconds): 1.12
+	System time (seconds): 0.02
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.14
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 38068
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 10564
+	Voluntary context switches: 374
+	Involuntary context switches: 14
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM getspec_shl rep 3
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xffa62ec5c120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.106s, award 1.0
+1.1057s, 1.00/1, 1.00
+	Command being timed: "bin/main-getspec_shl Binarytrees"
+	User time (seconds): 1.09
+	System time (seconds): 0.02
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.11
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 37956
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 18501
+	Voluntary context switches: 375
+	Involuntary context switches: 9
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM boehm rep 4
+Binarytrees: ok in 1.017s, award 1.0
+1.0167s, 1.00/1, 1.00
+	Command being timed: "bin/main-boehm Binarytrees"
+	User time (seconds): 1.02
+	System time (seconds): 0.02
+	Percent of CPU this job got: 101%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.02
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 50716
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 12079
+	Voluntary context switches: 2062
+	Involuntary context switches: 16
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM tip rep 4
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xffe32be3c120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.119s, award 1.0
+1.1188s, 1.00/1, 1.00
+	Command being timed: "bin/main-tip Binarytrees"
+	User time (seconds): 1.10
+	System time (seconds): 0.02
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.12
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 38068
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 14116
+	Voluntary context switches: 383
+	Involuntary context switches: 7
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM getspec_shl rep 4
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xffd31d05c120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.131s, award 1.0
+1.1307s, 1.00/1, 1.00
+	Command being timed: "bin/main-getspec_shl Binarytrees"
+	User time (seconds): 1.11
+	System time (seconds): 0.02
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.13
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 37956
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 16550
+	Voluntary context switches: 379
+	Involuntary context switches: 13
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM boehm rep 5
+Binarytrees: ok in 1.030s, award 1.0
+1.0297s, 1.00/1, 1.00
+	Command being timed: "bin/main-boehm Binarytrees"
+	User time (seconds): 1.02
+	System time (seconds): 0.03
+	Percent of CPU this job got: 101%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.03
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 50720
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 12079
+	Voluntary context switches: 2126
+	Involuntary context switches: 8
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM tip rep 5
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xff527099c120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.175s, award 1.0
+1.1750s, 1.00/1, 1.00
+	Command being timed: "bin/main-tip Binarytrees"
+	User time (seconds): 1.15
+	System time (seconds): 0.02
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.18
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 38068
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 13862
+	Voluntary context switches: 389
+	Involuntary context switches: 12
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 8
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+ARM getspec_shl rep 5
+gcry: an execution-context pin site cannot see its object — `thread.@scheduler` computed slot address 0xff315bf3c120, which is not an address. Skipped; nothing lives there to mark
+Binarytrees: ok in 1.135s, award 1.0
+1.1352s, 1.00/1, 1.00
+	Command being timed: "bin/main-getspec_shl Binarytrees"
+	User time (seconds): 1.11
+	System time (seconds): 0.02
+	Percent of CPU this job got: 100%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.14
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 38076
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 19142
+	Voluntary context switches: 388
+	Involuntary context switches: 11
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

@@ -1,0 +1,271 @@
+diff -r kept/src/gcry/bitmap_alloc.cr keptil/src/gcry/bitmap_alloc.cr
+--- kept/src/gcry/bitmap_alloc.cr	2026-10-16 14:19:18.000000000 +0300
++++ keptil/src/gcry/bitmap_alloc.cr	2026-10-16 14:19:26.395187019 +0300
+@@ -463,7 +463,7 @@
+           words = chunk.value.bitmap_words.to_i32
+           i = 0
+           while i < words
+-            mark[i] = 0_u64
++            mark[i * 2] = 0_u64
+             i += 1
+           end
+         end
+@@ -576,7 +576,14 @@
+     def chunk_occupied_count(chunk : ChunkHeader*) : UInt64
+       occ = ChunkHeader.occ_bitmap(chunk)
+       return 0_u64 if occ.null?
+-      @kernels.popcount_words(occ, chunk.value.bitmap_words.to_i32)
++      acc = 0_u64
++      n = chunk.value.bitmap_words.to_i32
++      i = 0
++      while i < n
++        acc &+= occ[i * 2].popcount.to_u64
++        i += 1
++      end
++      acc
+     end
+ 
+     # Blocks this chunk actually holds.
+@@ -594,7 +601,7 @@
+     protected def chunk_free_mask(chunk : ChunkHeader*, word : Int32, nblocks : UInt64) : UInt64
+       occ = ChunkHeader.occ_bitmap(chunk)
+       return 0_u64 if occ.null?
+-      mask = ~occ[word]
++      mask = ~occ[word * 2]
+       last_word = ((nblocks - 1) >> 6).to_i32
+       mask &= Heap.tail_mask(nblocks) if word == last_word
+       mask &= blacklist_free_mask(chunk, word, mask) if @blacklist_enabled && mask != 0_u64
+@@ -693,7 +700,7 @@
+ 
+       # Atomic: a `free` on another thread can clear a bit in this word. Same
+       # hazard as the mark bit, same reasoning — see `chunk_set_mark`.
+-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, occ + word, bit_mask,
++      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, occ + word * 2, bit_mask,
+         LLVM::AtomicOrdering::Monotonic, false)
+ 
+       # `@freelist_clean` is a freelist-shaped claim — "this class's next block
+@@ -761,7 +768,7 @@
+           s.value.free_mask = mask
+           s.value.word_base = ChunkHeader.data_start(chunk).address &+
+                               (word.to_u64 << 6) &* @block_bytes[index]
+-          s.value.occ_word = ChunkHeader.occ_bitmap(chunk) + word
++          s.value.occ_word = ChunkHeader.occ_bitmap(chunk) + word * 2
+           @cursor_word_advances &+= 1
+           return mask
+         end
+@@ -797,7 +804,7 @@
+             s.value.free_mask = mask
+             s.value.word_base = ChunkHeader.data_start(chunk).address &+
+                                 (word.to_u64 << 6) &* @block_bytes[index]
+-            s.value.occ_word = ChunkHeader.occ_bitmap(chunk) + word
++            s.value.occ_word = ChunkHeader.occ_bitmap(chunk) + word * 2
+             @bitmap_alloc_refills &+= 1
+             return true
+           end
+@@ -1020,8 +1027,8 @@
+       mark = ChunkHeader.mark_bitmap(chunk)
+       i = 0
+       while i < words
+-        occ[i] = 0_u64
+-        mark[i] = 0_u64
++        occ[i * 2] = 0_u64
++        mark[i * 2] = 0_u64
+         i += 1
+       end
+       @bitmap_dormant_revives &+= 1
+@@ -1057,7 +1064,7 @@
+       mask = 0_u64
+       w = 0
+       while w < words
+-        bits = occ[w]
++        bits = occ[w * 2]
+         while bits != 0_u64
+           bit = bits.trailing_zeros_count
+           bits &= bits &- 1
+@@ -1094,11 +1101,11 @@
+       ordinal = chunk_block_ordinal(chunk, header.address)
+       word = ordinal >> 6
+       clear = ~(1_u64 << (ordinal & 63))
+-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, occ + word, clear,
++      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, occ + word * 2, clear,
+         LLVM::AtomicOrdering::Monotonic, false)
+       mark = ChunkHeader.mark_bitmap(chunk)
+       return if mark.null?
+-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, mark + word, clear,
++      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, mark + word * 2, clear,
+         LLVM::AtomicOrdering::Monotonic, false)
+       bitmap_capacity_changed(chunk)
+     end
+diff -r kept/src/gcry/block.cr keptil/src/gcry/block.cr
+--- kept/src/gcry/block.cr	2026-10-16 14:19:18.000000000 +0300
++++ keptil/src/gcry/block.cr	2026-10-16 14:19:26.395384412 +0300
+@@ -508,6 +508,13 @@
+       (chunk.as(UInt8*) + chunk.value.data_offset).as(Void*)
+     end
+ 
++    # PROTOTYPE (measured, not kept): `occ` and `mark` interleaved word by
++    # word, `occ[w]` at `2w` and `mark[w]` at `2w + 1`, so a candidate's two
++    # words share one 16-byte pair and so one cache line. Both accessors
++    # return the first word of a stride-`BITMAP_STRIDE` view: index `w` is
++    # `ptr[w * BITMAP_STRIDE]`.
++    BITMAP_STRIDE = 2
++
+     # `occ` — allocated blocks. Null until Phase 3 gives it a consumer.
+     def self.occ_bitmap(chunk : ChunkHeader*) : UInt64*
+       return Pointer(UInt64).null if chunk.value.bitmap_words == 0
+@@ -515,12 +522,11 @@
+     end
+ 
+     # `mark` — reachable blocks, authoritative when the bitmap representation
+-    # is on. Sits immediately after `occ`, so one chunk's metadata is one
+-    # contiguous run and the sweep streams both together.
++    # is on. Interleaved with `occ` (`BITMAP_STRIDE`).
+     def self.mark_bitmap(chunk : ChunkHeader*) : UInt64*
+       words = chunk.value.bitmap_words
+       return Pointer(UInt64).null if words == 0
+-      (chunk.as(UInt8*) + SIZE).as(UInt64*) + words
++      (chunk.as(UInt8*) + SIZE).as(UInt64*) + 1
+     end
+ 
+     def self.data_end(chunk : ChunkHeader*) : Void*
+diff -r kept/src/gcry/collect.cr keptil/src/gcry/collect.cr
+--- kept/src/gcry/collect.cr	2026-10-16 14:19:18.000000000 +0300
++++ keptil/src/gcry/collect.cr	2026-10-16 14:19:26.395667536 +0300
+@@ -1417,7 +1417,7 @@
+       n = 0
+       i = 0
+       while i < words
+-        n += occ[i].popcount
++        n += occ[i * 2].popcount
+         i += 1
+       end
+       n
+diff -r kept/src/gcry/collect_mark.cr keptil/src/gcry/collect_mark.cr
+--- kept/src/gcry/collect_mark.cr	2026-10-16 14:19:18.000000000 +0300
++++ keptil/src/gcry/collect_mark.cr	2026-10-16 14:19:26.395917589 +0300
+@@ -700,9 +700,9 @@
+         header_addr = data_start &+ ordinal &* block_bytes
+         # The chunk's tail past its last whole block.
+         next if header_addr &+ block_bytes > chunk_end
+-        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
++        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + ((ordinal >> 6) << 1)
+         bit = 1_u64 << (ordinal & 63)
+-        mark = occ + bitmap_words
++        mark = occ + 1
+         next if (mark.value & bit) != 0
+         next if (occ.value & bit) == 0
+         header = Pointer(BlockHeader).new(header_addr)
+@@ -928,7 +928,7 @@
+         i = 0
+         dirty = false
+         while i < words
+-          if mark[i] != 0
++          if mark[i * ChunkHeader::BITMAP_STRIDE] != 0
+             dirty = true
+             break
+           end
+diff -r kept/src/gcry/collect_sweep.cr keptil/src/gcry/collect_sweep.cr
+--- kept/src/gcry/collect_sweep.cr	2026-10-16 14:19:18.000000000 +0300
++++ keptil/src/gcry/collect_sweep.cr	2026-10-16 14:19:26.396118132 +0300
+@@ -1348,7 +1348,7 @@
+       freed, live = if @poison_freed
+                       sweep_words_poisoning(chunk, class_index, occ, mark, words, payload)
+                     else
+-                      @kernels.sweep_words(occ, mark, words)
++                      sweep_words_interleaved(occ, words)
+                     end
+ 
+       # No tail correction, and getting that wrong cost an afternoon: the first
+@@ -1427,6 +1427,25 @@
+       !after_world || relink_chunks_after_world?
+     end
+ 
++    # PROTOTYPE: `Kernels.sweep_words` over interleaved `{occ, mark}` pairs
++    # (`ChunkHeader::BITMAP_STRIDE`), one pair per word of the bitmaps. Plain
++    # Crystal: the SIMD kernels assume two contiguous arrays.
++    private def sweep_words_interleaved(pairs : UInt64*, n : Int32) : {UInt64, UInt64}
++      freed = 0_u64
++      live = 0_u64
++      i = 0
++      while i < n
++        o = pairs[2 * i]
++        m = pairs[2 * i + 1]
++        freed &+= (o & ~m).popcount.to_u64
++        live &+= m.popcount.to_u64
++        pairs[2 * i] = m
++        pairs[2 * i + 1] = 0_u64
++        i += 1
++      end
++      {freed, live}
++    end
++
+     # `Kernels.sweep_words` with the poison pattern written into every block it
+     # reclaims — identical arithmetic, word at a time.
+     #
+@@ -1486,13 +1505,13 @@
+       block_bytes = @block_bytes[class_index]
+       i = 0
+       while i < words
+-        o = occ[i]
+-        m = mark[i]
++        o = occ[i * 2]
++        m = mark[i * 2]
+         dead = o & ~m
+         freed &+= dead.popcount.to_u64
+         live &+= m.popcount.to_u64
+-        occ[i] = m
+-        mark[i] = 0_u64
++        occ[i * 2] = m
++        mark[i * 2] = 0_u64
+         while dead != 0
+           bit = dead.trailing_zeros_count
+           dead &= dead &- 1
+@@ -1877,7 +1896,7 @@
+         b0 = cursor.address
+         if b0 + block_bytes > run_start && b0 < run_end
+           allocated = if bitmap
+-                        ((occ[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
++                        ((occ[(ordinal >> 6) * 2] >> (ordinal & 63)) & 1_u64) != 0
+                       else
+                         !BlockHeader.free?(cursor.as(BlockHeader*))
+                       end
+diff -r kept/src/gcry/heap.cr keptil/src/gcry/heap.cr
+--- kept/src/gcry/heap.cr	2026-10-16 14:19:18.000000000 +0300
++++ keptil/src/gcry/heap.cr	2026-10-16 14:19:26.396458966 +0300
+@@ -4339,7 +4339,7 @@
+     private def chunk_marked?(chunk : ChunkHeader*, ordinal : UInt64) : Bool
+       mark = ChunkHeader.mark_bitmap(chunk)
+       return false if mark.null?
+-      ((mark[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
++      ((mark[(ordinal >> 6) * 2] >> (ordinal & 63)) & 1_u64) != 0
+     end
+ 
+     # Set one block's mark bit.
+@@ -4360,7 +4360,7 @@
+     private def chunk_set_mark(chunk : ChunkHeader*, ordinal : UInt64) : Nil
+       mark = ChunkHeader.mark_bitmap(chunk)
+       return if mark.null?
+-      word = mark + (ordinal >> 6)
++      word = mark + (ordinal >> 6) * 2
+       bit = 1_u64 << (ordinal & 63)
+       return if (word.value & bit) != 0
+       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, word, bit,
+@@ -4381,7 +4381,7 @@
+       words = chunk.value.bitmap_words.to_i32
+       i = 0
+       while i < words
+-        mark[i] = 0_u64
++        mark[i * 2] = 0_u64
+         i += 1
+       end
+     end
+@@ -4702,7 +4702,7 @@
+       occ = ChunkHeader.occ_bitmap(chunk)
+       return !BlockHeader.free_large?(header) if occ.null?
+       ordinal = chunk_block_ordinal(chunk, header.address)
+-      ((occ[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
++      ((occ[(ordinal >> 6) * 2] >> (ordinal & 63)) & 1_u64) != 0
+     end
+ 
+     # Chunks whose *allocation* is bitmap-driven, i.e. whose `occ` is
+Only in keptil/src/gcry: heap.cr.orig

@@ -1,0 +1,4 @@
+Crystal 1.21.0 [57cf7da50] (2026-07-16)
+
+LLVM: 20.1.8
+Default target: aarch64-unknown-linux-gnu

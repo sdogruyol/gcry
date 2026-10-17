@@ -3,8 +3,8 @@
 What gcry is missing to become Crystal's **default** collector, in place of
 Boehm in `crystal-lang/crystal`. Reviewed on 2026-10-04 against gcry 0.34.0
 (`6650b80`), Crystal 1.21.0 (`57cf7da50`), Linux x86_64. The perf rows were
-refreshed on 2026-10-05; the status table was last updated on 2026-10-12,
-after PR #47 and #48.
+refreshed on 2026-10-05; the status table was last updated on 2026-10-17,
+for 0.37.0 (M1, M5, M7, B4, B7, D1).
 
 **Verdict at review time (2026-10-04).** gcry was a solid opt-in shard on
 Linux, macOS and Windows (x86_64/aarch64) under the default ExecutionContext
@@ -17,15 +17,15 @@ compiler PR").
 
 | ID | Status | Where |
 |----|--------|-------|
-| E1–E3 | **Fixed** | `layout.cr` resolve check; `Gcry.usable_size`; `crystal_raises_compat.cr` + compiler patch in `bench/log/linux/2026-10-05-raises-cycle/` |
+| E1–E3 | **Fixed** | `layout.cr` resolve check (removed in 0.36.0); `Gcry.usable_size`; `crystal_raises_compat.cr` + compiler patch in `bench/log/linux/2026-10-05-raises-cycle/` |
 | B1 | **Fixed**: defaults are root-complete (STW lags 0) | `collect_scan.cr`; `process_spec/regression/14` |
 | B2 | **Closed**: a dying `Thread` is held until proof it is done, on every platform; the root-table race is fixed | `thread_birth_root.cr`; `make thread-death-window`; `process_spec/regression/23` |
 | B3 | **Mostly closed**: parallel mark on by default; the compiler (Parallel EC at CPU count, mt codegen) builds, self-hosts and passes `compiler_spec` under gcry. TLAB stays an unsupported research arm | `gc_override.cr`; `ci/compiler-spec.sh` |
-| B4 | **Fixed**: compiler self-hosts with gcry, and `crystal i` runs in the gcry-built compiler (3 of 3). `compiler_spec`, built by the host compiler with gcry linked in (`-Dgc_none`, `require "gcry"`) and run with gcry as the process GC: 13 640 examples, 0 failures, 18 pending (CI run 37437660646). Linux x86_64 only | `c_abi.cr`, `crystal_string_builder_compat.cr`; CI job `compiler-gcry` (`ci/compiler-spec.sh` `step_spec`); `bench/log/linux/2026-10-06-compiler-spec/` |
+| B4 | **Fixed**: compiler self-hosts with gcry, and `crystal i` runs in the gcry-built compiler (3 of 3). `compiler_spec`, built by the host compiler with gcry linked in (`-Dgc_none`, `require "gcry"`) and run with gcry as the process GC: 13 640 examples, 0 failures, 18 pending (CI run 37437660646); 13 764 examples, 0 failures on Crystal 1.22.0 (CI run 38721725009). Linux x86_64 only | `c_abi.cr`, `crystal_string_builder_compat.cr`; CI job `compiler-gcry` (`ci/compiler-spec.sh` `step_spec`); `bench/log/linux/2026-10-06-compiler-spec/` |
 | B5 | **Scoped**: unsupported targets fail at compile time with the reason | `platform/os.cr` |
 | B6 | **Proposed**: upstream interface written up | `docs/RFC-GC-BACKEND.md` |
-| B7 | **Fixed**: `spec/std` 18 054 / 0 failures in CI on 1.21.0, `latest` and nightly (Linux x86_64 only). The `GCRY_STRESS=1` rerun has 0 unexpected failures; one example is allowlisted (`spec/std/log/builder_spec.cr:230`, by design: it reads WeakRef-only objects after a possible collection; failed 1 of 5 255 in CI run 37592592091) | `ci/std-spec.sh`, `ci/std-spec-stress-allow.txt`, job `std-spec` |
-| M1 | **Fixed**: parallel mark on by default, 32 MiB floor. Workers: `min(2, CPUs−1)` up to 7 CPUs, then `CPUs/4+1`, at most 8. Idle markers, the master included, wait on one word and are woken when work is published: a futex on Linux, `__ulock_wait` on macOS, `WaitOnAddress` on Windows (until 2026-10-08 the last two sleep-polled and their helpers took almost no work; `process_spec/regression/45`). Large objects are split across workers. The scan loop resolves candidates inline; one marker now costs about Boehm's single marker on JsonParsePure and 1.3× on Primes | `parallel_mark.cr`, `collect_mark.cr`; `bench/log/linux/2026-10-06-mark-cost/` |
+| B7 | **Fixed**: `spec/std` 18 054 / 0 failures in CI on 1.21.0, and 18 257 / 0 failures on 1.22.0 (CI run 38721725009), `latest` and nightly (Linux x86_64 only). The `GCRY_STRESS=1` rerun has 0 unexpected failures; one example is allowlisted (`spec/std/log/builder_spec.cr:230`, by design: it reads WeakRef-only objects after a possible collection; failed 1 of 5 255 in CI run 37592592091) | `ci/std-spec.sh`, `ci/std-spec-stress-allow.txt`, job `std-spec` |
+| M1 | **Fixed**: parallel mark on by default, 32 MiB floor. Workers: `min(2, CPUs−1)` up to 7 CPUs, then `CPUs/4+1`, at most 8. Idle markers, the master included, wait on one word and are woken when work is published: a futex on Linux, `__ulock_wait` on macOS, `WaitOnAddress` on Windows (until 2026-10-08 the last two sleep-polled and their helpers took almost no work; `process_spec/regression/45`). Large objects are split across workers. The scan loop resolves candidates inline. One marker against Boehm's single marker (0.37.0's batched drain): Σ mark 0.37× on Primes and 0.47× on JsonParsePure, per collection 0.70× and 0.91× (JsonGenerate 1.17×), gcry collecting about half as often | `parallel_mark.cr`, `collect_mark.cr`; `bench/log/linux/2026-10-15-mark-cost/`, `bench/log/linux/2026-10-16-parallel-mark-batch/` |
 | M2 | **Partly fixed** on Linux x86_64: crystal-metric, 12 CPUs, 11 trials, % of Boehm's speed (master → branch): Primes 42→100%, JsonParsePure 42→91%, Binarytrees 81→94%, JsonGenerate 105→105%; JsonParseSerializable (88%), JsonParsePull (91%) and Revcomp (84%) are where master was — their fault-bound gap needs the `realloc` page move, which is opt-in because it is unsafe for the stdlib. Peak RSS under Boehm's on every GC-bound row on Linux. Windows x86_64 (12-vCPU VM): 87–114% of Boehm; peak working set above Boehm's on JsonParsePure (1.14×), Knuckeotide (1.73×) and Matmul (1.18×), transient peaks, not retention | `bench/log/linux/2026-10-06-pr-benchmarks/after-review/`; `bench/log/windows/2026-10-06-vm-validation/` |
 | M3 | **Fixed**: every loaded shared object's writable data is a root (Linux, macOS, Windows) | `platform/*_roots.cr`; `process_spec/regression/16`, `34` (Linux), `36` (Windows: 20 of 20, control arm collects) |
 | M4 | **Fixed**: Boehm's ignore-self finalization order; dangling weak links dropped | `collect_mark.cr`; `process_spec/regression/17`, `20` |
@@ -34,10 +34,10 @@ compiler PR").
 | m7 | **Mitigated**: one byte of slack on atomic blocks, as under Boehm; the argv patch stays | `heap.cr`; `process_spec/regression/24` |
 | m8 | **Fixed**: docs refreshed; `INTEGRATION.md` lists Windows as in scope only, and its Boehm parity table names what differs; `COMPARISON.md` describes the current tree | `README.md`, `docs/*` |
 | m9 | **Fixed**: `rbp`/`x29` captured unmangled | `roots.cr`; `process_spec/regression/15` |
-| M5 | **Partly closed** (readiness-2): chunk index/list drift is closed (the relink store splices back what was mapped during the walk, and a `GC.free` trim no longer detaches during it; `make chunk-list-drift` cap 0); the Windows collector-lock livelock is fixed in the product (the collection section hands over in arrival order and `GC.collect` is answered by any full collection that began after it; the roots lock lets waiting mutators in ahead of a stop; `process_spec/regression/50`). Counter loss closed (0.36.0): the macos-15-intel sighting was the checker reading a runtime thread's birth allocation in flight (`69`); a real lost decrement, `live_objects_sub` saturating at zero, is fixed (`68`); `make counter-loss` has a red arm that is actually plain and runs on Darwin again. Still open: `dormant_flush` (unreproduced), the `@index_lock` holder in a stop (policy), O(n) single large unlink. Large `realloc` grows in place since 0.36.0 (`66`) | `collect_sweep.cr`, `collect.cr`, `roots_lock.cr`; `ROADMAP.md` |
+| M5 | **Partly closed** (readiness-2): chunk index/list drift is closed (the relink store splices back what was mapped during the walk, and a `GC.free` trim no longer detaches during it; `make chunk-list-drift` cap 0); the Windows collector-lock livelock is fixed in the product (the collection section hands over in arrival order and `GC.collect` is answered by any full collection that began after it; the roots lock lets waiting mutators in ahead of a stop; `process_spec/regression/50`). Counter loss closed (0.36.0): the macos-15-intel sighting was the checker reading a runtime thread's birth allocation in flight (`69`); a real lost decrement, `live_objects_sub` saturating at zero, is fixed (`68`); `make counter-loss` has a red arm that is actually plain and runs on Darwin again. A single large unlink is O(1) since 0.36.0 (`71`). Still open: `dormant_flush` (unreproduced), the `@index_lock` holder in a stop (policy). Large `realloc` grows in place since 0.36.0 (`66`) | `collect_sweep.cr`, `collect.cr`, `roots_lock.cr`; `ROADMAP.md` |
 | M6 | **Open**: TSan/fuzzing | §2–4 below; `ROADMAP.md` |
-| M7 | **Partly closed** (0.36.0): `Gcry::Layout` and its registration API removed (6 knobs, −2 200 lines), 22 research-only or defect-restoring knobs no gate set (−1 140 lines), and the `GCRY_THREAD_LIST_TRIPWIRE` instrument family, whose `0x18` crash (`index_insert_locked`'s publication order) was fixed on 2026-08-27 (−530 lines). Still open: the research arms no gate sets, e.g. `GCRY_DYING_GREG_DUMP` | `CHANGELOG.md` `[Unreleased]` |
-| D1 | **Fixed** (PR #47, #48; not in the 2026-10-04 review): 11 defects on the default path. #47: a `Thread`'s birth root armed after its thread could end, `EINTR` and `errno` from the stop signals, stacks deeper than 64 MiB, the probe pipe under fd pressure, a parked finalizer blocking collection, a forked child's first stop. #48: chunk-index OOM hang, `realloc` shrink-then-grow stale bytes, `GC.free` of finalizers and of disappearing links, `GC.stop_world` without the collection's locks, release of a chunk holding an allocation cursor. Since then the stop calls no C heap function on Windows and macOS | `CHANGELOG.md` `[Unreleased]`; `process_spec/regression/52`–`63` |
+| M7 | **Partly closed** (0.36.0): `Gcry::Layout` and its registration API removed (6 knobs, −2 200 lines), 22 research-only or defect-restoring knobs no gate set (−1 140 lines), and the `GCRY_THREAD_LIST_TRIPWIRE` instrument family, whose `0x18` crash (`index_insert_locked`'s publication order) was fixed on 2026-08-27 (−530 lines). A second pass in 0.37.0 removed `GCRY_DYING_GREG_DUMP`, `GCRY_SEGV_REPORT_STACK`, `GCRY_MARK_AUDIT_ALL` and the process-heap switches `GCRY_RELEASE_OCCUPIED` / `GCRY_SCRUB_AUDIT` (−122 lines of code). Still open, by choice: what remains unset by any gate is a tuning knob or escape hatch for a shipped default, an instrument the docs send crash hunts to (`GCRY_ADDRESS_SPACE_AUDIT`, `GCRY_MARK_AUDIT_EVERY`, `GCRY_DYING_AUDIT_MIN_BYTES`, `GCRY_ADDRESS_SPACE_REPORT_LIMIT`, `GCRY_RELEASE_QUARANTINE`), an input `bench/acik_live_attr.sh` passes through (`GCRY_STACKMAP_MISS_LOG`, `GCRY_STACKMAP_NEAR_DELTA`, `GCRY_LIVE_ATTR_WATCH_TID`, `GCRY_DISABLE_FIBER_FP_FILL`), or `GCRY_HUGEPAGES`, kept as the hook for the reserved arena | `CHANGELOG.md` `[Unreleased]` |
+| D1 | **Fixed** (PR #47, #48; not in the 2026-10-04 review): 11 defects on the default path. #47: a `Thread`'s birth root armed after its thread could end, `EINTR` and `errno` from the stop signals, stacks deeper than 64 MiB, the probe pipe under fd pressure, a parked finalizer blocking collection, a forked child's first stop. #48: chunk-index OOM hang, `realloc` shrink-then-grow stale bytes, `GC.free` of finalizers and of disappearing links, `GC.stop_world` without the collection's locks, release of a chunk holding an allocation cursor. Since then the stop calls no C heap function on Windows and macOS | `CHANGELOG.md` `[0.35.0]`; `process_spec/regression/52`–`63` |
 
 Two Crystal bugs turned up along the way, both outside gcry: `raises?` is not
 a fixpoint (§1, E3), and `String::Builder#to_s` writes one byte past its
@@ -138,8 +138,9 @@ Log objects held only by WeakRefs after a collection may have run, so it can
 fail by design; it failed 1 of 5 255 in CI run 37592592091.
 
 CI job `std-spec` runs the suite on Linux x86_64: on 1.21.0, including a
-`GCRY_STRESS=1` rerun with that allowlist, on `latest`, and on `nightly`,
-which is allowed to fail.
+`GCRY_STRESS=1` rerun with that allowlist, on 1.22.0 (18 257 examples, 0
+failures, CI run 38721725009), on `latest`, and on `nightly`, which is
+allowed to fail.
 
 ### E1: the private recursive alias that breaks compilation
 
@@ -261,10 +262,10 @@ them. One line per ID, as it read then:
    - E2: `Gcry.usable_size`.
    - E3: `crystal_raises_compat.cr`, plus a compiler patch in
      `bench/log/linux/2026-10-05-raises-cycle/`.
-   - Still open: filing the compiler issue/PR upstream.
+   - Filed upstream as crystal-lang/crystal#17644 (open); PR not opened.
 2. **B7: done 2026-10-05.**
    - The CI job `std-spec` runs `spec/std` on 1.21.0 (with a
-     `GCRY_STRESS=1` rerun), on `latest` and on `nightly`.
+     `GCRY_STRESS=1` rerun), on 1.22.0, on `latest` and on `nightly`.
    - The job `compiler-gcry` builds the compiler with gcry and runs
      `compiler_spec`.
 3. **B1: done.** The sound profile is the default.
@@ -283,12 +284,14 @@ them. One line per ID, as it read then:
    - M5: races.
    - M6: TSan and fuzzing.
    - M7: knob and research-code reduction.
-   - Upstream: filing the three stdlib/compiler fixes.
+   - Upstream: `raises?` and `String::Builder` filed as
+     crystal-lang/crystal#17644 / #17645 (open), PRs not opened; the argv
+     terminator is fixed in Crystal 1.22.0 (#17184).
 
 ## 6. Limits of this review
 
-- std_spec ran in full on Linux x86_64 with Crystal 1.21.0, 1.21.1 and
-  nightly.
+- std_spec ran in full on Linux x86_64 with Crystal 1.21.0, 1.21.1, 1.22.0
+  and nightly.
 - compiler_spec and `crystal i` ran on Linux x86_64 only.
 - macOS and Windows run gcry's own gates in CI, but not Crystal's suites.
 - Most "read" items come from source and doc reading at the cited lines;

@@ -1,0 +1,64 @@
+# PROBE ONLY (branch probe/win-monitor-hook): why spec 76's Monitor hook is
+# not reached on Windows, and whether the Monitor's deep frames are scanned on
+# Windows and macOS with and without the scan_other_thread_fiber_ec1 fix.
+name: probe-win-monitor
+on:
+  push:
+    branches: [probe/win-monitor-hook]
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: standalone probe and spec 76 alone, fixed and not
+        shell: pwsh
+        run: ./probe/run.ps1
+      - name: full process suite with the stall detector
+        shell: pwsh
+        if: false
+        run: ./ci/windows.ps1 -Variant default -Suite specs
+
+  windows-arm64:
+    runs-on: windows-11-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: CLANGARM64
+          update: true
+      - name: Install ARM64 linker and libraries
+        shell: msys2 {0}
+        run: ./ci/windows-arm64-msys2.sh
+      - name: Install pinned native ARM64 Crystal
+        shell: pwsh
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: ./ci/install-windows-arm64.ps1 -Msys2Location $env:MSYS2_LOCATION
+      - name: standalone probe and spec 76 alone, fixed and not
+        shell: pwsh
+        run: ./probe/run.ps1
+      - name: full process suite with the stall detector
+        shell: pwsh
+        if: false
+        run: ./ci/windows.ps1 -Architecture aarch64 -Variant default -Suite specs
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: standalone probe and spec 76 alone, fixed and not
+        run: bash probe/run.sh

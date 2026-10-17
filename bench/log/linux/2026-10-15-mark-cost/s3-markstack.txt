@@ -1,0 +1,16 @@
+Primes base serial MARKSTACK mapped=262144 gcs=8
+Primes base default MARKSTACK mapped=262144 gcs=8
+Primes sbprod serial MARKSTACK mapped=262144 gcs=8
+Primes sbprod default MARKSTACK mapped=262144 gcs=8
+JsonParsePure base serial MARKSTACK mapped=8388608 gcs=12
+JsonParsePure base default MARKSTACK mapped=2097152 gcs=13
+JsonParsePure sbprod serial MARKSTACK mapped=8388608 gcs=13
+JsonParsePure sbprod default MARKSTACK mapped=2097152 gcs=13
+JsonGenerate base serial MARKSTACK mapped=16777216 gcs=13
+JsonGenerate base default MARKSTACK mapped=1048576 gcs=14
+JsonGenerate sbprod serial MARKSTACK mapped=16777216 gcs=13
+JsonGenerate sbprod default MARKSTACK mapped=2097152 gcs=13
+Binarytrees base serial MARKSTACK mapped=262144 gcs=217
+Binarytrees base default MARKSTACK mapped=262144 gcs=231
+Binarytrees sbprod serial MARKSTACK mapped=262144 gcs=219
+Binarytrees sbprod default MARKSTACK mapped=262144 gcs=230

@@ -1,0 +1,97 @@
+--- arms/base/src/gcry/collect_mark.cr	2026-10-15 11:54:32.000000000 +0300
++++ arms/mask/src/gcry/collect_mark.cr	2026-10-15 13:49:34.130330367 +0300
+@@ -672,46 +672,58 @@
+       l1 = @radix_l1
+       shift = @radix_granule_shift
+       l2_mask = @radix_l2_mask
++      span = hi &- lo
+       hits = 0_u64
+       p = cursor
+-      finish = cursor + words
+-      while p < finish
+-        w = p.value
+-        p += 1
+-        next if w < lo || w >= hi
+-        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+-        if chunk.null?
+-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+-          next
++      remaining = words
++      while remaining > 0
++        n = remaining < 64 ? remaining : 64_u64
++        mask = 0_u64
++        i = 0_u64
++        while i < n
++          mask |= ((p[i] &- lo) < span ? 1_u64 : 0_u64) << i
++          i &+= 1
+         end
+-        cls = chunk.value.size_class
+-        bitmap_words = chunk.value.bitmap_words.to_u64
+-        data_start = chunk.address &+ chunk.value.data_offset
+-        chunk_end = chunk.address &+ chunk.value.mapped_bytes
+-        # `size_class` past the table covers large chunks (`UInt32::MAX`).
+-        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
+-           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
+-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+-          next
++        while mask != 0
++          j = mask.trailing_zeros_count
++          mask &= mask &- 1
++          w = p[j]
++          chunk = Heap.radix_entry(l1, shift, l2_mask, w)
++          if chunk.null?
++            mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++            next
++          end
++          cls = chunk.value.size_class
++          bitmap_words = chunk.value.bitmap_words.to_u64
++          data_start = chunk.address &+ chunk.value.data_offset
++          chunk_end = chunk.address &+ chunk.value.mapped_bytes
++          # `size_class` past the table covers large chunks (`UInt32::MAX`).
++          if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
++             (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
++            mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++            next
++          end
++          hits &+= 1
++          index = cls.to_i32
++          ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
++          block_bytes = @block_bytes.unsafe_fetch(index)
++          header_addr = data_start &+ ordinal &* block_bytes
++          # The chunk's tail past its last whole block.
++          next if header_addr &+ block_bytes > chunk_end
++          occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
++          bit = 1_u64 << (ordinal & 63)
++          mark = occ + bitmap_words
++          next if (mark.value & bit) != 0
++          next if (occ.value & bit) == 0
++          header = Pointer(BlockHeader).new(header_addr)
++          next if base_only && w != BlockHeader.user_from(header).address
++          # `chunk_set_mark` with its relaxed pre-check already done above.
++          Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++          next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
++          mark_stack_push(mark_entry(chunk, header), shard)
+         end
+-        hits &+= 1
+-        index = cls.to_i32
+-        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
+-        block_bytes = @block_bytes.unsafe_fetch(index)
+-        header_addr = data_start &+ ordinal &* block_bytes
+-        # The chunk's tail past its last whole block.
+-        next if header_addr &+ block_bytes > chunk_end
+-        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+-        bit = 1_u64 << (ordinal & 63)
+-        mark = occ + bitmap_words
+-        next if (mark.value & bit) != 0
+-        next if (occ.value & bit) == 0
+-        header = Pointer(BlockHeader).new(header_addr)
+-        next if base_only && w != BlockHeader.user_from(header).address
+-        # `chunk_set_mark` with its relaxed pre-check already done above.
+-        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+-        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+-        mark_stack_push(mark_entry(chunk, header), shard)
++        p += n
++        remaining &-= n
+       end
+       # `radix_note_fast_hit`, once per payload.
+       @radix_fast_hits &+= hits unless @mark_parallel

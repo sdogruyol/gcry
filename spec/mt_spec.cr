@@ -112,6 +112,37 @@ describe "Gcry parallel mark knob" do
     end
   end
 
+  # Each marker pops into a mapped batch beside its push buffer
+  # (`Heap#ensure_mark_buffers`), the master included, and `destroy` gives
+  # the mappings back. Until 0.37.0 they outlived the heap.
+  it "maps the markers' batch buffers and unmaps them on destroy" do
+    heap = Gcry::Heap.new
+    destroyed = false
+    begin
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      heap.parallel_mark_workers = 2
+      root = heap.malloc(64)
+      heap.add_root(root)
+      cursor = root
+      200.times do
+        child = heap.malloc(32)
+        cursor.as(Void**).value = child
+        cursor = child
+      end
+      heap.mark_shards_mapped.should eq(0)
+      heap.collect(scan_stack: false)
+      heap.parallel_mark_runs.should be > 0
+      heap.live?(cursor).should be_true
+      heap.mark_shards_mapped.should be >= 1
+      heap.destroy
+      destroyed = true
+      heap.mark_shards_mapped.should eq(0)
+    ensure
+      heap.destroy unless destroyed
+    end
+  end
+
   # The adaptive threshold's cap grows with `mark_scanned_bytes`; a parallel
   # cycle that counted nothing left it at its floor exactly on the large heaps
   # where parallel mark runs by default.

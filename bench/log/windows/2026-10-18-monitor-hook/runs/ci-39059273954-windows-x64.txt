@@ -1,0 +1,105 @@
+2026-10-17T18:42:45.5613489Z === probe fixed ===
+2026-10-17T18:42:51.8440040Z monitor_probe windows x86_64 crystal=1.21.0 threads=DEFAULT-0
+2026-10-17T18:42:52.8446298Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x518d200000,0x518da00000) stack_top=0x518d9ff7a4 threads=DEFAULT-0,IOCP,SYSMON
+2026-10-17T18:42:52.8447429Z after 1 s: transfer=69/69 increase=69/69 collect=69/69 last_transfer_ms_ago=7 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:42:52.8448435Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffcfdb22e74 sp=0x518d9ff558 depth=2728 image=[0x7ff633fd0000,+0x1d5000)
+2026-10-17T18:42:52.8736102Z     pc 0x7ffcfdb22e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:42:52.8753667Z     sp+16 0x7ff6340eefdb new:seconds:nanoseconds D:\a\_temp\crystal-1.21.0-true-undefined\src\time\span.cr:66
+2026-10-17T18:42:52.8755197Z     sp+192 0x7ff634007faa sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:104
+2026-10-17T18:42:52.8756495Z     sp+288 0x7ff634007cad sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:197
+2026-10-17T18:42:52.8758300Z     sp+368 0x7ff63412e8f5 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:55
+2026-10-17T18:42:52.8759041Z     sp+672 0x7ff6340073c2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:42:52.8759761Z     sp+768 0x7ff63412e8a8 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:42:52.8760831Z     sp+800 0x7ff63400731c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:42:52.8763992Z     sp+816 0x7ff633fd914c -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:42:52.8770211Z     sp+856 0x7ff63417bf10 _real D:\a\gcry\gcry\bin\monitor_probe.exe +1752848:0
+2026-10-17T18:42:52.8770857Z     sp+864 0x7ff634007184 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:42:52.8771791Z     sp+936 0x7ff633fd9140 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:42:52.8772378Z     sp+1000 0x7ff63417bf10 _real D:\a\gcry\gcry\bin\monitor_probe.exe +1752848:0
+2026-10-17T18:42:52.8772903Z     sp+1040 0x7ff634007eb5 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:42:52.8773569Z     sp+1104 0x7ff633fd2359 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:42:52.8854416Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[2, 2, 3] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x518d9ef520", "0x518d9ef5a0", "0x518d9ef5a0"] pad=0x518d9ef648 stack_top=0x518d9ff7a4 stack=[0x518d200000,0x518da00000) exempt=true
+2026-10-17T18:42:52.8937931Z clamp=off: KEPT found=true free=false intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[2, 2, 2] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x518d9ef648 stack_top=0x518d9ff7a4 stack=[0x518d200000,0x518da00000) exempt=true
+2026-10-17T18:42:52.8940120Z end: transfer=73/73 increase=73/73 collect=73/73 last_transfer_ms_ago=5 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:42:52.9010794Z === probe fixed: exit=0
+2026-10-17T18:42:52.9017502Z === spec76 alone fixed ===
+2026-10-17T18:42:59.8710472Z 2 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:42:59.8742525Z === spec76 alone fixed: exit=0
+2026-10-17T18:42:59.8749433Z === spec77 alone fixed ===
+2026-10-17T18:43:05.1490983Z 1 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:43:05.1525151Z === spec77 alone fixed: exit=0
+2026-10-17T18:43:05.1859462Z === probe scan-nofix ===
+2026-10-17T18:43:07.6511181Z monitor_probe windows x86_64 crystal=1.21.0 threads=DEFAULT-0
+2026-10-17T18:43:08.6514928Z   MONPROBE SYSMON exempt=true fiber=main stack=[0xeab9a00000,0xeaba200000) stack_top=0xeaba1ff974 threads=DEFAULT-0,IOCP,SYSMON
+2026-10-17T18:43:08.6515740Z after 1 s: transfer=72/72 increase=72/72 collect=72/72 last_transfer_ms_ago=7 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:43:08.6516398Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffcfdb22e74 sp=0xeaba1ff728 depth=2264 image=[0x7ff6b8b30000,+0x1d5000)
+2026-10-17T18:43:08.6800228Z     pc 0x7ffcfdb22e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:43:08.6815017Z     sp+16 0x7ff6b8c4efeb new:seconds:nanoseconds D:\a\_temp\crystal-1.21.0-true-undefined\src\time\span.cr:66
+2026-10-17T18:43:08.6816757Z     sp+192 0x7ff6b8b67faa sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:104
+2026-10-17T18:43:08.6818234Z     sp+288 0x7ff6b8b67cad sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:197
+2026-10-17T18:43:08.6820092Z     sp+368 0x7ff6b8c8e905 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:55
+2026-10-17T18:43:08.6821071Z     sp+672 0x7ff6b8b673c2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:43:08.6821598Z     sp+768 0x7ff6b8c8e8b8 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:43:08.6823360Z     sp+800 0x7ff6b8b6731c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:43:08.6826156Z     sp+816 0x7ff6b8b3914c -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:43:08.6831827Z     sp+856 0x7ff6b8cdbf10 _real D:\a\gcry\gcry\bin\monitor_probe_nofix.exe +1752848:0
+2026-10-17T18:43:08.6832517Z     sp+864 0x7ff6b8b67184 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:43:08.6833115Z     sp+936 0x7ff6b8b39140 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:43:08.6833752Z     sp+1000 0x7ff6b8cdbf10 _real D:\a\gcry\gcry\bin\monitor_probe_nofix.exe +1752848:0
+2026-10-17T18:43:08.6834398Z     sp+1040 0x7ff6b8b67eb5 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:43:08.6834936Z     sp+1104 0x7ff6b8b32359 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:43:08.6993260Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[2, 2, 3] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0xeaba1ef770", "0xeaba1ef770", "0xeaba1ef770"] pad=0xeaba1ef818 stack_top=0xeaba1ff974 stack=[0xeab9a00000,0xeaba200000) exempt=true
+2026-10-17T18:43:08.7122799Z clamp=off: LOST found=true free=true intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[2, 2, 2] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0xeaba1ef818 stack_top=0xeaba1ff974 stack=[0xeab9a00000,0xeaba200000) exempt=true
+2026-10-17T18:43:08.7125151Z end: transfer=77/77 increase=77/77 collect=77/77 last_transfer_ms_ago=3 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:43:08.7166629Z === probe scan-nofix: exit=0
+2026-10-17T18:43:08.7173970Z === spec76 alone scan-nofix ===
+2026-10-17T18:43:11.9368310Z Failures:
+2026-10-17T18:43:11.9374282Z   1) Regression: the Monitor's stack below its birth is scanned when the stop records no SP for it
+2026-10-17T18:43:11.9377338Z        Expected: false
+2026-10-17T18:43:11.9377602Z             got: true
+2026-10-17T18:43:11.9408873Z 2 examples, 1 failures, 0 errors, 0 pending
+2026-10-17T18:43:11.9427336Z === spec76 alone scan-nofix: exit=1
+2026-10-17T18:43:12.0130648Z === spec77 alone gate-nofix ===
+2026-10-17T18:43:20.8321853Z Failures:
+2026-10-17T18:43:20.8322652Z   1) Regression: a library heap's collection does not shut the Monitor out
+2026-10-17T18:43:20.8327232Z        the Monitor gate was still closed 100 ms after a library heap's collection
+2026-10-17T18:43:20.8331075Z 1 examples, 1 failures, 0 errors, 0 pending
+2026-10-17T18:43:20.8377136Z === spec77 alone gate-nofix: exit=1
+2026-10-17T18:43:35.5315965Z 297 examples, 0 failures, 0 errors, 3 pending
+2026-10-17T18:44:31.0155548Z MONPROBE before 76 (example #161): transfer=2081/2081 increase=2081/2081 collect=2081/2081 last_transfer_ms_ago=2 gate(enabled=true stopped=0 busy=0 site=none blocks=55 stw_waits=0)
+2026-10-17T18:44:31.0156771Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x6d69200000,0x6d69a00000) stack_top=0x6d699ff5d4 threads=DEFAULT-0,IOCP,SYSMON,gc-idle
+2026-10-17T18:44:31.0157492Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffcfdb22e74 sp=0x6d699ff388 depth=3192 image=[0x7ff7a9520000,+0x50a000)
+2026-10-17T18:44:31.0158070Z     pc 0x7ffcfdb22e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:44:31.0184905Z     sp+16 0x7ff7a9783d7b new:seconds:nanoseconds D:\a\_temp\crystal-1.21.0-true-undefined\src\time\span.cr:66
+2026-10-17T18:44:31.0187119Z     sp+192 0x7ff7a95de6da sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:104
+2026-10-17T18:44:31.0189033Z     sp+288 0x7ff7a95de31d sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:197
+2026-10-17T18:44:31.0191713Z     sp+368 0x7ff7a97fd0b5 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:55
+2026-10-17T18:44:31.0193103Z     sp+672 0x7ff7a95dda32 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:44:31.0194210Z     sp+768 0x7ff7a97fd068 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:44:31.0195506Z     sp+800 0x7ff7a95dd98c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:44:31.0206015Z     sp+816 0x7ff7a955da3c -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:44:31.0209814Z     sp+856 0x7ff7a998e990 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4647312:0
+2026-10-17T18:44:31.0211299Z     sp+864 0x7ff7a95dd7f4 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:44:31.0211992Z     sp+936 0x7ff7a955da30 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:44:31.0213164Z     sp+1000 0x7ff7a998e990 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4647312:0
+2026-10-17T18:44:31.0213661Z     sp+1040 0x7ff7a95de5e5 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:44:31.0214396Z     sp+1104 0x7ff7a9523bc9 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:44:31.0732123Z MONPROBE after 76: transfer=2084/2084 increase=2084/2084 collect=2084/2084 last_transfer_ms_ago=1 gate(enabled=true stopped=0 busy=0 site=none blocks=55 stw_waits=0)
+2026-10-17T18:44:31.5284710Z 166 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:44:35.0227240Z === is thread-local storage a root? ===
+2026-10-17T18:44:35.0394773Z === is thread-local storage a root? ===
+2026-10-17T18:44:35.0588925Z === is thread-local storage a root? ===
+2026-10-17T18:44:35.0744153Z === is thread-local storage a root? ===
+2026-10-17T18:44:38.7172006Z === does the holders search find a word that is certainly there? ===
+2026-10-17T18:44:42.3008383Z === STW capture coverage ===
+2026-10-17T18:44:45.7790261Z === is a pointer held only in an FP register a root? ===
+2026-10-17T18:44:45.8105500Z === is a pointer held only in an FP register a root? ===
+2026-10-17T18:44:45.8299489Z === is a pointer held only in an FP register a root? ===
+2026-10-17T18:44:48.9985078Z === a stale pointer below a suspended thread's SP ===
+2026-10-17T18:44:49.0300979Z === a stale pointer below a suspended thread's SP ===
+2026-10-17T18:44:49.0617461Z === a stale pointer below a suspended thread's SP ===
+2026-10-17T18:45:09.2386390Z === Summary ===
+2026-10-17T18:45:13.5440197Z === post-STW flush walk vs. mutator unmap ===
+2026-10-17T18:45:21.4563899Z === large-cache race ===
+2026-10-17T18:45:31.3771322Z === STW watchdog ===
+2026-10-17T18:45:39.7322914Z === STW chunk-index race ===

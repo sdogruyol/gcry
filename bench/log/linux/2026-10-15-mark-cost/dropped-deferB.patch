@@ -1,0 +1,52 @@
+--- arms/base/src/gcry/collect_mark.cr	2026-10-15 11:54:32.000000000 +0300
++++ arms/deferB/src/gcry/collect_mark.cr	2026-10-15 13:45:06.031047046 +0300
+@@ -673,6 +673,10 @@
+       shift = @radix_granule_shift
+       l2_mask = @radix_l2_mask
+       hits = 0_u64
++      pend_word = uninitialized StaticArray(UInt64*, 8)
++      pend_bit = uninitialized StaticArray(UInt64, 8)
++      pend_entry = uninitialized StaticArray(UInt64, 8)
++      n = 0
+       p = cursor
+       finish = cursor + words
+       while p < finish
+@@ -708,15 +712,34 @@
+         next if (occ.value & bit) == 0
+         header = Pointer(BlockHeader).new(header_addr)
+         next if base_only && w != BlockHeader.user_from(header).address
+-        # `chunk_set_mark` with its relaxed pre-check already done above.
+-        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+-        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+-        mark_stack_push(mark_entry(chunk, header), shard)
++        pend_word[n] = mark
++        pend_bit[n] = bit
++        pend_entry[n] = ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header) ? 0_u64 : mark_entry(chunk, header).address
++        n += 1
++        if n == 8
++          scan_edges_commit(pend_word.to_unsafe, pend_bit.to_unsafe, pend_entry.to_unsafe, n, shard)
++          n = 0
++        end
+       end
++      scan_edges_commit(pend_word.to_unsafe, pend_bit.to_unsafe, pend_entry.to_unsafe, n, shard) if n > 0
+       # `radix_note_fast_hit`, once per payload.
+       @radix_fast_hits &+= hits unless @mark_parallel
+     end
+ 
++    @[AlwaysInline]
++    private def scan_edges_commit(words : UInt64**, bits : UInt64*, entries : UInt64*, n : Int32, shard : MarkShard?) : Nil
++      i = 0
++      while i < n
++        bit = bits[i]
++        old = Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, words[i], bit, LLVM::AtomicOrdering::Monotonic, false)
++        e = entries[i]
++        if (old & bit) == 0 && e != 0
++          mark_stack_push(Pointer(BlockHeader).new(e), shard)
++        end
++        i += 1
++      end
++    end
++
+     # Scan length for one object, derived from its **chunk** (Phase 7.6).
+     #
+     # This used to read `header.value.size` and clamp it against the chunk, then

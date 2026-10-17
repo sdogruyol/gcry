@@ -1,0 +1,4 @@
+Crystal 1.21.0 [57cf7da50] (2026-07-16)
+
+LLVM: 15.0.7
+Default target: aarch64-apple-macosx11.0

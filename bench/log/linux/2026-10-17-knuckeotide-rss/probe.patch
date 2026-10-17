@@ -1,0 +1,83 @@
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 76703f72..a72df8f6 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -167,14 +167,31 @@ module Gcry
+       return @threshold_pace_pct if cycle_started_ns == 0_u64 || last == 0_u64
+       return @threshold_pace_pct unless last < cycle_started_ns && cycle_started_ns < now
+       return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
++      prev = @threshold_pace_pct
+       @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
+         now - cycle_started_ns, base, @threshold_pace_max_pct)
++      # PROBE: the pace may rise at most to prev × step% per cycle.
++      if @probe_pace_step_pct > 0
++        lim = prev &* @probe_pace_step_pct // 100_u64
++        @threshold_pace_pct = lim if @threshold_pace_pct > lim
++      end
++      @threshold_pace_pct
+     end
+ 
++    # PROBE knobs (GCRY_PROBE_ATOMIC_DIV, GCRY_PROBE_PACE_STEP).
++    property probe_atomic_div : UInt64 = 1_u64
++    property probe_pace_step_pct : UInt64 = 0_u64
++    property probe_warm_idle : Bool = false
++
+     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
+     private def adapt_after_sweep(cycle_started_ns : UInt64 = 0_u64) : Nil
+       return unless @adaptive_threshold || @warm_retain_follows_live
+-      want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
++      live = live_bytes_after_sweep
++      if @probe_atomic_div > 1_u64
++        scanned = @mark_scanned_bytes < live ? @mark_scanned_bytes : live
++        live = scanned &+ (live &- scanned) // @probe_atomic_div
++      end
++      want = live &* @adaptive_threshold_pct // 100_u64
+       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
+       if @adaptive_threshold
+         cap = adaptive_threshold_cap
+diff --git a/src/gcry/collect_sweep.cr b/src/gcry/collect_sweep.cr
+index 1f51f2b6..f79b5d32 100644
+--- a/src/gcry/collect_sweep.cr
++++ b/src/gcry/collect_sweep.cr
+@@ -176,7 +176,8 @@ module Gcry
+                     # without page-fault on reuse). Unbounded Parallel dormant
+                     # remains opt-in via parallel_empty_chunk_dormant_all.
+                     warm_cap = @release_warm_this_collect ? 0_u64 : @empty_chunk_warm_retain
+-                    within_warm = warm_cap > 0 && (warm_budget_used + mapped <= warm_cap)
++                    within_warm = warm_cap > 0 && (warm_budget_used + mapped <= warm_cap) &&
++                                  !(@probe_warm_idle && bitmap_alloc_chunk?(chunk) && ChunkHeader.idle?(chunk))
+                     within_retain = @empty_chunk_retain > 0 &&
+                                     (dormant_budget_used + mapped <= @empty_chunk_retain)
+                     can_dormant = within_retain ||
+@@ -241,7 +242,11 @@ module Gcry
+                       freelist_reserve_fully_dead(chunk, class_index, p, bb)
+                       warm_budget_used += mapped
+                       @last_empty_warm_bytes &+= mapped
+-                      ChunkHeader.set_idle(chunk, false) if ChunkHeader.idle?(chunk)
++                      if @probe_warm_idle && bitmap_alloc_chunk?(chunk)
++                        ChunkHeader.set_idle(chunk, true)
++                      else
++                        ChunkHeader.set_idle(chunk, false) if ChunkHeader.idle?(chunk)
++                      end
+                     elsif grace
+                       # Kept mapped outside the budget; the next major unmaps
+                       # it unless a cursor takes it first.
+diff --git a/src/gcry/gc_override.cr b/src/gcry/gc_override.cr
+index 731b77cd..e1ccff4d 100644
+--- a/src/gcry/gc_override.cr
++++ b/src/gcry/gc_override.cr
+@@ -410,6 +410,14 @@ module GC
+     if pct = env_u64("GCRY_THRESHOLD_FACTOR")
+       heap.adaptive_threshold_pct = pct.clamp(10_u64, 1000_u64)
+     end
++    # PROBE
++    if v = env_u64("GCRY_PROBE_ATOMIC_DIV")
++      heap.probe_atomic_div = v
++    end
++    if v = env_u64("GCRY_PROBE_PACE_STEP")
++      heap.probe_pace_step_pct = v
++    end
++    heap.probe_warm_idle = env_flag_one?("GCRY_PROBE_WARM_IDLE")
+     # Below the floor it would undercut the threshold's own minimum, so it is
+     # ignored there rather than clamped.
+     if (max = env_u64("GCRY_THRESHOLD_MAX")) && max >= Gcry::Heap::ADAPTIVE_THRESHOLD_MIN

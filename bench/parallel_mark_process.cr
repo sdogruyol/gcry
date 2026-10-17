@@ -45,9 +45,10 @@ LIVE   = 200_000
 CHAINS =     256
 
 # Why `stolen > 0` and not a minimum. The array's scan publishes the 256
-# heads as one flush of exactly `MARK_POP_BATCH` entries, which wakes nobody
-# (`flush_pushbuf`), and each later level of the 256 chains is again one flush
-# its marker pops back whole. So the mark is one wave held by one marker, and
+# heads as one flush, no more than one pop takes (`MARK_POP_BATCH`, 256
+# until 0.37.0 and 1 024 since), which wakes nobody (`flush_pushbuf`), and
+# each later level of the 256 chains is again one flush its marker pops back
+# whole. So the mark is one wave held by one marker, and
 # `stolen` records who held it: about 200 k of the 200 k nodes when a helper
 # did, 0.5–5 k when the master did, with nothing in between, and roughly
 # even odds per collection. Two collections on Linux x86_64 stole 2.0 k–328 k

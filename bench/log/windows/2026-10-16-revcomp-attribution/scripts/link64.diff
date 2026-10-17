@@ -1,0 +1,13 @@
+diff --git a/src/gcry/block.cr b/src/gcry/block.cr
+index 85cf9592..d66e90d2 100644
+--- a/src/gcry/block.cr
++++ b/src/gcry/block.cr
+@@ -578,7 +578,7 @@ module Gcry
+     # chunks have no back-link, and nothing needs one: only a large chunk
+     # leaves the list on its own (a trim, a recycle); the sweep drops small
+     # chunks inside the walk that rebuilds the list.
+-    LARGE_LINK_BYTES = 16
++    LARGE_LINK_BYTES = 64
+ 
+     # Bytes from a large chunk's base to its block header, in both builds.
+     def self.large_header_offset : Int32

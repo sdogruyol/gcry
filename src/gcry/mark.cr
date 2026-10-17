@@ -5,10 +5,14 @@ module Gcry
   class MarkStack
     INITIAL_BYTES = 262144_u64 # 256 KiB — avoid grow under JSON mark storms
 
+    # Entries of the batch buffer (`batch_buffer`), 8 KiB.
+    BATCH_ENTRIES = 1024
+
     @base : Void* = Pointer(Void).null
     @capacity : Int32 = 0
     @size : Int32 = 0
     @mapped_bytes : UInt64 = 0
+    @batch : Void** = Pointer(Void*).null
 
     def initialize
       grow(INITIAL_BYTES)
@@ -19,12 +23,42 @@ module Gcry
     end
 
     def destroy : Nil
+      unless @batch.null?
+        Gcry.os_unmap(@batch.as(Void*), BATCH_ENTRIES.to_u64 * sizeof(Void*))
+        @batch = Pointer(Void*).null
+      end
       return if @base.null?
       Gcry.os_unmap(@base, @mapped_bytes.to_u64)
       @base = Pointer(Void).null
       @capacity = 0
       @size = 0
       @mapped_bytes = 0
+    end
+
+    # `BATCH_ENTRIES` words for the serial drain to scan a batch from
+    # (`Heap#serial_mark_drain`), mapped on first use; null if the map
+    # failed. Mapped rather than on the collector's stack: there 8 KiB of
+    # block addresses would widen the frame the entry and exit scrubs have to
+    # cover (`Heap#run_collection`) by more than twice.
+    def batch_buffer : Void**
+      if @batch.null?
+        ptr = Gcry.os_map(BATCH_ENTRIES.to_u64 * sizeof(Void*))
+        @batch = ptr.as(Void**) unless Gcry.mmap_failed?(ptr)
+      end
+      @batch
+    end
+
+    # Up to *cap* entries off the top into *into*, newest first, as that many
+    # `pop`s would return them; the count.
+    def pop_into(into : Void**, cap : Int32) : Int32
+      n = @size < cap ? @size : cap
+      i = 0
+      while i < n
+        into[i] = entries[@size &- 1 &- i]
+        i &+= 1
+      end
+      @size &-= n
+      n
     end
 
     def clear : Nil

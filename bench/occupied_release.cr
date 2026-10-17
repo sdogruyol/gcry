@@ -37,8 +37,7 @@
 #        accepts it, and a block is handed out of a chunk queued for unmapping.
 #   3. The flush runs. Shipped: it finds the chunk occupied, counts the
 #      refusal, keeps it mapped and relinks it. Pre-fix
-#      (`release_occupied_anyway`, `GCRY_RELEASE_OCCUPIED=1` on a process
-#      heap): it unmaps the chunk under the block.
+#      (`release_occupied_anyway`): it unmaps the chunk under the block.
 #
 #   crystal build bench/occupied_release.cr -o bin/occupied_release
 #   bin/occupied_release            # refused once; the block is in the heap and live
