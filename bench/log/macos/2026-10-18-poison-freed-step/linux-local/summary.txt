@@ -1,0 +1,92 @@
+## c036: 100 runs
+exit codes: {0: 100}; secs median 0.33
+shipped criterion (last - first > 4.0 MB) fails: 0/100
+proposed criterion (every round > 4.0 MB) fails: 0/100
+round-1 heap MB min/median/max: 5.85/5.85/5.98; last round: 5.98/5.98/6.10
+max pace per round (rounds): {'100': 400}
+runs with a round-on-round step > 1 MB: 0/100
+
+## c037: 100 runs
+exit codes: {0: 100}; secs median 0.32
+shipped criterion (last - first > 4.0 MB) fails: 0/100
+proposed criterion (every round > 4.0 MB) fails: 0/100
+round-1 heap MB min/median/max: 5.85/5.85/5.85; last round: 5.98/5.98/5.98
+max pace per round (rounds): {'100': 400}
+runs with a round-on-round step > 1 MB: 0/100
+
+## g037: 100 runs
+exit codes: {0: 100}; secs median 0.32
+shipped criterion (last - first > 4.0 MB) fails: 0/100
+proposed criterion (every round > 4.0 MB) fails: 0/100
+round-1 heap MB min/median/max: 5.70/5.70/5.90; last round: 5.90/5.90/6.00
+runs with a round-on-round step > 1 MB: 0/100
+
+## l037: 20 runs
+exit codes: {0: 20}; secs median 0.94
+shipped criterion (last - first > 4.0 MB) fails: 0/20
+proposed criterion (every round > 4.0 MB) fails: 0/20
+round-1 heap MB min/median/max: 5.85/5.85/5.85; last round: 6.27/6.27/6.27
+max pace per round (rounds): {'100': 240}
+runs with a round-on-round step > 1 MB: 0/20
+
+## n037: 100 runs
+exit codes: {0: 100}; secs median 0.32
+shipped criterion (last - first > 4.0 MB) fails: 0/100
+proposed criterion (every round > 4.0 MB) fails: 0/100
+round-1 heap MB min/median/max: 5.85/5.85/5.98; last round: 5.98/5.98/6.10
+max pace per round (rounds): {'100': 400}
+runs with a round-on-round step > 1 MB: 0/100
+
+## p036: 100 runs
+exit codes: {0: 100}; secs median 0.39
+shipped criterion (last - first > 4.0 MB) fails: 0/100
+proposed criterion (every round > 4.0 MB) fails: 0/100
+round-1 heap MB min/median/max: 8.60/8.73/10.98; last round: 9.10/9.23/10.98
+max pace per round (rounds): {'200-299': 1, '300': 399}
+runs with a round-on-round step > 1 MB: 0/100
+
+## p037: 100 runs
+exit codes: {0: 100}; secs median 0.38
+shipped criterion (last - first > 4.0 MB) fails: 0/100
+proposed criterion (every round > 4.0 MB) fails: 0/100
+round-1 heap MB min/median/max: 8.60/8.98/11.85; last round: 8.98/9.10/11.85
+max pace per round (rounds): {'200-299': 1, '300': 399}
+runs with a round-on-round step > 1 MB: 1/100
+  step at round: {4: 1}
+  9.1 -> 9.1 -> 9.1 -> 10.6: r4 +1.50 MB (holding 9.0->10.62, empty 0.0->0.0; cycle gaps [40960, 102400], pace [254, 300]; chunks 4a:52->64)
+
+## red: 10 runs
+exit codes: {1: 10}; secs median 1.13
+shipped criterion (last - first > 4.0 MB) fails: 10/10
+proposed criterion (every round > 4.0 MB) fails: 10/10
+round-1 heap MB min/median/max: 43.10/43.10/43.10; last round: 164.73/164.73/164.73
+max pace per round (rounds): {'300': 40}
+runs with a round-on-round step > 1 MB: 10/10
+  step at round: {2: 10, 3: 10, 4: 10}
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+  43.1 -> 84.3 -> 124.6 -> 164.7: r2 +41.25 MB (holding 42.88->84.12, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:74->148 4:123->246 4a:123->246); r3 +40.25 MB (holding 84.12->124.38, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:148->222 4:246->368 4a:246->368); r4 +40.13 MB (holding 124.38->164.5, empty 0.12->0.12; cycle gaps [40960, 120832], pace [300, 300]; chunks 2a:222->295 4:368->491 4a:368->491)
+
+## redc: 10 runs
+exit codes: {0: 10}; secs median 0.32
+shipped criterion (last - first > 4.0 MB) fails: 0/10
+proposed criterion (every round > 4.0 MB) fails: 0/10
+round-1 heap MB min/median/max: 5.85/5.85/5.85; last round: 5.98/5.98/5.98
+max pace per round (rounds): {'100': 40}
+runs with a round-on-round step > 1 MB: 0/10
+
+## t037: 100 runs
+exit codes: {0: 100}; secs median 0.32
+shipped criterion (last - first > 4.0 MB) fails: 0/100
+proposed criterion (every round > 4.0 MB) fails: 0/100
+round-1 heap MB min/median/max: 8.85/8.85/8.85; last round: 8.98/8.98/8.98
+max pace per round (rounds): {'100': 400}
+runs with a round-on-round step > 1 MB: 0/100
+

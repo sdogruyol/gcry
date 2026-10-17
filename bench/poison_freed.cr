@@ -171,18 +171,18 @@ def run(control : Bool) : Int32
   # collection: on the two macOS runners the control arm paced in 11 of
   # 1 280 rounds, and in none of 800 at v0.36.0; with pacing off or the old
   # 16 MiB floor fixed, none of 400 runs stepped. The shipped test failed 2
-  # control runs in 440 there and 2 knob-on runs in 200
+  # control runs in 640 there and 7 knob-on runs in 400
   # (`bench/log/macos/2026-10-18-poison-freed-step/`).
   #
   # Such a step is a running maximum: it rises only in a round whose longest
   # cycle beats every earlier one, and no further than the paced threshold
-  # allocates — at most +7.0 MB over four rounds in 1 440 runs on those
+  # allocates — at most +7.0 MB over four rounds in 2 320 runs on those
   # runners and the failing one, 16.9 MB the highest any round read. The
   # defect grows the heap in *every* round by what the round allocated:
-  # +15.5 MB a round then, +40 MB a round with the stand-down restored on the
-  # 0.37.0 tree. So the heap test fails when each round after the first grew
-  # by more than 4 MB: three of those are more than 12 MB, beyond any
-  # schedule measured, and the defect clears each one tenfold.
+  # +15.5 MB a round then, +38 to +41 MB a round with the stand-down restored
+  # on the 0.37.0 tree. So the heap test fails when each round after the
+  # first grew by more than 4 MB: three of those are more than 12 MB, beyond
+  # any schedule measured, and the defect clears each of them nine times over.
   #
   # Arms 1-3 leave garbage behind; collect it, so that the occupancy baseline
   # below is what survives into the churn and nothing else.
@@ -207,15 +207,16 @@ def run(control : Bool) : Int32
   # a leak that levels off never reads as one: with an eighth of every
   # reclaim left occupied (a scratch build, FINDINGS) the chunks fill with
   # lost blocks until the other seven eighths suffice, and the heap went
-  # 22.7 → 26.5 → 28.6 → 29.6 MB, which the test above passes. So the
+  # 22.5 → 28.0 → 30.9 → 31.2 MB, which the test above passes. So the
   # defect's mechanism is read as well, and that does not depend on the
   # schedule: `occ`, the bitmap the allocator reads to call a block taken,
   # may gain no more set bits over the churn than twice the strings kept —
   # the margin is for a block a conservative root retains. Read after the
   # last round's `GC.collect`, so every dead block has been swept. The tip
-  # gains the kept strings plus 5 to 8; an eighth left occupied gains 50 700,
-  # a sixty-fourth 6 100, the defect 2.4 million. The header allocator has
-  # no `occ` and reads 0, which passes.
+  # gains the kept strings plus 5 to 20 (600 runs, Linux and both macOS
+  # runners); an eighth left occupied gains 49 000 to 52 000 more, a
+  # sixty-fourth 4 300 to 5 900 more, the defect 2.3 to 2.4 million more. The
+  # header allocator has no `occ` and reads 0, which passes.
   occupied = rounds.map(&.occupied)
   added = occupied.last.to_i64 - occupied_before.to_i64
   puts "occupied blocks per round: #{occupied_before} before -> #{occupied.join(" -> ")} " \

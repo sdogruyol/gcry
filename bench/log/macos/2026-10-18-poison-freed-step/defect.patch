@@ -1,0 +1,13 @@
+diff --git a/src/gcry/collect_sweep.cr b/src/gcry/collect_sweep.cr
+index 37767a01..c0ea1e15 100644
+--- a/src/gcry/collect_sweep.cr
++++ b/src/gcry/collect_sweep.cr
+@@ -1580,7 +1580,7 @@ module Gcry
+       # the header walk reclaims through the freelist and never clears `occ`,
+       # which under this allocator leaks the block permanently — so the
+       # poisoning belongs *in* the arm, and `sweep_words_poisoning` does it.
+-      if @bitmap_alloc && !ChunkHeader.nursery?(chunk)
++      if @bitmap_alloc && !ChunkHeader.nursery?(chunk) && !@poison_freed
+         return sweep_small_bitmap(chunk, class_index, major, class_locked)
+       end
+ 
