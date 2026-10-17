@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry runs Kemal <code>/json</code> at ~102% of Boehm's throughput, at 1.43× its peak RSS and 0.88× after <code>GC.collect</code> (Linux, headerless default, 2026-10-06).</b>
+  <b>gcry runs Kemal <code>/json</code> at ~105% of Boehm's throughput, at 1.21× its peak RSS and 0.88× after <code>GC.collect</code> (Linux, headerless default, 0.37.0).</b>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Kemal `/json`: ~102% of Boehm's throughput at 1.43× peak RSS, 0.88× after `GC.collect` (Linux, 2026-10-06); ~102% at 1.50× peak footprint on macOS (2026-09-06). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
+**Kemal `/json`: ~105% of Boehm's throughput at 1.21× peak RSS, 0.88× after `GC.collect` (Linux, 0.37.0); ~102% at 1.50× peak footprint on macOS (2026-09-06). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
 
 ---
 
@@ -207,14 +207,14 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **105.4%** *(0.36.0, 2026-10-14; 0.35.0: 104.9% in the same session)* |
-| Kemal `/json` peak RSS | **1.31×** *(21.0 vs 16.0 MB; 0.35.0: 1.33×)* |
+| Kemal `/json` throughput | **105.4%** *(0.36.0, 2026-10-14; 0.37.0 is level with 0.36.0: −0.7% / +0.4% in two sessions on 2026-10-18)* |
+| Kemal `/json` peak RSS | **1.21×** *(0.37.0, 19.7 vs 16.2 MB; 0.36.0: 1.31× in the same sessions)* |
 | Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB, 2026-10-06)* |
-| Kemal `/` throughput | **99.9%** *(0.35.0: 100.8%; not GC-bound — the GC is 0.3% of the run, and this row moves with code placement alone)* |
+| Kemal `/` throughput | level with Boehm *(0.36.0: 99.9% on 2026-10-14; 0.37.0 against 0.36.0 +0.3% / −2.8% on 2026-10-18; not GC-bound — the GC is 0.3% of the run, and this row moves with code placement alone)* |
 | Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
 | Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
 
-\*Kemal rows: `bench/log/linux/2026-10-14-0.36-integration-ab/` (QEMU x86-64, 12 vCPUs, 9 interleaved trials, server on 3 CPUs, `wrk -t4 -c50`); the post-collect row is `bench/log/linux/2026-10-06-pr-benchmarks/`. The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
+\*Kemal rows: throughput `bench/log/linux/2026-10-14-0.36-integration-ab/`, peak RSS and the 0.37.0 comparison `bench/log/linux/2026-10-18-0.37-kemal/` (QEMU x86-64, 12 vCPUs, 9 interleaved trials per session, server on 3 CPUs, `wrk -t4 -c50`; Boehm read ~10% slower on 2026-10-18 than on 2026-10-14, so that day's ~116% is the host, not a gcry gain); the post-collect row is `bench/log/linux/2026-10-06-pr-benchmarks/`. The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
 
 \*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
@@ -360,7 +360,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Conservative bodies** | Every non-atomic block is word-scanned; no type map narrows a scan since 2026-10-04 (a union buffer's first tag reads as a type id — `docs/SOUND-DEFAULTS.md`) |
-| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **101.8%** of Boehm at **1.43×** its peak RSS, 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
+| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **105.4%** of Boehm (0.36.0, 2026-10-14; 0.37.0 level with it) at **1.21×** its peak RSS (0.37.0, 2026-10-18), 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
 | **Bitmap allocator** | Process default since 0.24.0 and forced on by the headerless layout — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors. `GCRY_BITMAP_ALLOC=0` is the freelist escape, on `-Dgcry_block_headers` only |
 | **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR` (atomic bytes at a quarter, floored at 8 MiB); an explicit `GC.collect`, the idle collector and the collection before an `OutOfMemoryError` release them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal). Multi-threaded programs too since 0.30.0: Kemal at 4 workers reads 20 MB after `GC.collect`, 85 MB before |
 | **macOS reclaim** | `MADV_FREE_REUSABLE` at host page size (16 KiB on Apple Silicon), with `MADV_FREE_REUSE` before reuse, so released pages leave `phys_footprint` at once |

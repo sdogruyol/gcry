@@ -38,9 +38,10 @@ private runtime state and reopening runtime classes. This RFC proposes:
   `process_spec/regression/14_sound_defaults_spec.cr`. Cost: Linux EC4 pause
   3.07 → 4.55 ms with req/s unchanged, EC1 unchanged, macOS pause ~1.22–1.25×
   (2026-09-26 CI matrix, README "What the default heuristics cost").
-- **Throughput and memory.** Kemal `/json` 101.8% of Boehm at 1.43× peak RSS,
-  0.88× after `GC.collect`, on Linux (2026-10-06,
-  `bench/log/linux/2026-10-06-pr-benchmarks/after-review/`); 101.9% [100.9,
+- **Throughput and memory.** Kemal `/json` 105.4% of Boehm (0.36.0,
+  `bench/log/linux/2026-10-14-0.36-integration-ab/`; 0.37.0 level with it) at
+  1.21× peak RSS (0.37.0, `bench/log/linux/2026-10-18-0.37-kemal/`), 0.88×
+  after `GC.collect`, on Linux (2026-10-06); 101.9% [100.9,
   103.0] at 1.50× peak footprint on macOS
   (`bench/log/macos/2026-09-06-bitmap-default-ab/`, measured with the lags
   then in force); 106.5% at 1.14× peak working set on Windows x86_64, in a
