@@ -31,14 +31,24 @@ require "spec"
 # still allocated. The address crosses threads masked, so no word the
 # collector scans names the block except the Monitor's own frame.
 #
-# Not on Windows: there the Monitor never reached the hook in
-# `increase_parallelism` within 10 s, on all eight Windows jobs of CI run
-# 39028591028; why was not investigated. The defect was reproduced and fixed
-# on Linux, where the Monitor is never suspended and so has no SP. On Windows
-# and macOS a stop suspends threads and reads their SP from the kernel. The
-# fix in `scan_other_thread_fiber_ec1` is the same code on every platform.
+# Windows and macOS suspend the Monitor at a stop like any other thread and
+# read its SP and registers from the kernel (`GetThreadContext`,
+# `thread_get_state`), so the first example kept the block there before the
+# fix too: the scan starts at that SP, below the hold. What the fix changed
+# is the scan of a thread the stop has no SP for, and the second example
+# makes every thread one by turning the SP clamp off — and the register
+# roots, since on arm64 a register the stop read kept the block without the
+# fix. Before the fix that lost the block on Linux in both examples, and in
+# the second on Windows and macOS, x86_64 and arm64 alike (CI run
+# 39059947481, `bench/log/windows/2026-10-18-monitor-hook/`).
+#
+# Windows did not run this until 2026-10-18: there the Monitor never reached
+# the hook (all eight Windows jobs of CI run 39028591028). 72's library-heap
+# collection, four files earlier in the sorted order `ci/windows.ps1` builds,
+# had left the Monitor's gate closed, and the Monitor waited in it for the
+# rest of the run (regression/77).
 
-{% if !flag?(:win32) && @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
+{% if @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
   module MonitorDeepRoot
     CANARY = 0x6d6f_6e69_746f_7221_u64
     MASK   = 0xa5a5_a5a5_a5a5_a5a5_u64
@@ -107,39 +117,64 @@ require "spec"
     end
   end
 
+  # One arm: the block held in the Monitor's deep frame across three
+  # collections.
+  private def monitor_deep_root_check : Nil
+    heap = Gcry.default_heap
+    MonitorDeepRoot.arm
+    deadline = Time.instant + 10.seconds
+    while MonitorDeepRoot.masked_addr == 0
+      fail "the Monitor never reached the hold" if Time.instant > deadline
+      sleep 1.millisecond
+    end
+
+    # Swept inside the collection, so an unmarked block reads free when it
+    # returns rather than at its class's next refill.
+    lazy = heap.lazy_sweep
+    begin
+      heap.lazy_sweep = false
+      3.times { GC.collect }
+    ensure
+      heap.lazy_sweep = lazy
+    end
+
+    # Unmasked only now: a copy on this thread's stack during the
+    # collections would have kept the block alive by itself.
+    info = heap.debug_block_info(Pointer(Void).new(MonitorDeepRoot.masked_addr ^ MonitorDeepRoot::MASK))
+    MonitorDeepRoot.release
+    deadline = Time.instant + 10.seconds
+    while MonitorDeepRoot.intact < 0
+      fail "the Monitor never left the hold" if Time.instant > deadline
+      sleep 1.millisecond
+    end
+
+    info[:found].should be_true
+    info[:free].should be_false
+    MonitorDeepRoot.intact.should eq(1)
+  end
+
   describe "Regression: the Monitor's stack below its birth" do
     it "is scanned while a collection runs" do
+      monitor_deep_root_check
+    end
+
+    # `GCRY_DISABLE_SP_CLAMP=1`'s switch: the stop records no SP for any
+    # thread, which on Windows and macOS is what Linux has for the Monitor.
+    # Register roots off as well (`GCRY_DISABLE_GREG_ROOTS=1`'s), so the
+    # frame is the only thing that can keep the block: a register the stop
+    # read would on arm64.
+    it "is scanned when the stop records neither its SP nor its registers" do
       heap = Gcry.default_heap
-      MonitorDeepRoot.arm
-      deadline = Time.instant + 10.seconds
-      while MonitorDeepRoot.masked_addr == 0
-        fail "the Monitor never reached the hold" if Time.instant > deadline
-        sleep 1.millisecond
-      end
-
-      # Swept inside the collection, so an unmarked block reads free when it
-      # returns rather than at its class's next refill.
-      lazy = heap.lazy_sweep
+      clamp = Gcry::Platform.stw_sp_clamp_enabled?
+      gregs_off = heap.disable_greg_roots
+      Gcry::Platform.stw_sp_clamp_enabled = false
+      heap.disable_greg_roots = true
       begin
-        heap.lazy_sweep = false
-        3.times { GC.collect }
+        monitor_deep_root_check
       ensure
-        heap.lazy_sweep = lazy
+        Gcry::Platform.stw_sp_clamp_enabled = clamp
+        heap.disable_greg_roots = gregs_off
       end
-
-      # Unmasked only now: a copy on this thread's stack during the
-      # collections would have kept the block alive by itself.
-      info = heap.debug_block_info(Pointer(Void).new(MonitorDeepRoot.masked_addr ^ MonitorDeepRoot::MASK))
-      MonitorDeepRoot.release
-      deadline = Time.instant + 10.seconds
-      while MonitorDeepRoot.intact < 0
-        fail "the Monitor never left the hold" if Time.instant > deadline
-        sleep 1.millisecond
-      end
-
-      info[:found].should be_true
-      info[:free].should be_false
-      MonitorDeepRoot.intact.should eq(1)
     end
   end
 {% end %}

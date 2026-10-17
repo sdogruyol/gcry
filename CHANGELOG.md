@@ -222,9 +222,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs before (30 of 40 on an EPYC 9V74), 0 of 400 after.
   `process_spec/regression/76_monitor_deep_frame_root_spec.cr` holds a
   block in a Monitor frame 64 KiB deep across a collection: swept before,
-  in both layouts and on 1.21 and 1.22, kept after (not run on Windows,
-  where the Monitor never reaches the spec's hook)
-  (`bench/log/linux/2026-10-17-monitor-low-water/`).
+  in both layouts and on 1.21 and 1.22, kept after
+  (`bench/log/linux/2026-10-17-monitor-low-water/`). Windows and macOS read
+  the Monitor's SP from the kernel at a stop, so their default was not
+  exposed; with `GCRY_DISABLE_SP_CLAMP=1` no thread has an SP there, and
+  the same scan lost the block before the fix on windows x64 and macOS
+  x86_64, and on both arm64s once the register roots were off too — a
+  register the stop read had kept it (76's second example, CI run
+  39059947481). 76 runs on Windows now as well (next entry).
 
 - **A library heap's collection no longer shuts the runtime's Monitor
   out.** `stop_world_quiescing_roots` closed the Monitor gate for every
