@@ -66,8 +66,10 @@ kept finding the rest.
       single-mutator scan started at its never-switched main fiber's
       `stack_top`. Crystal 1.22's `Thread.sleep` closure lived below it, was
       swept mid-sleep and written after, which crashed `pattern_fuzz` under
-      the freelist (31 of 400 CI runs before, 0 of 400 after). Scanned from
-      the low-water mark now; `process_spec/regression/76`.
+      the freelist (31 of 400 CI runs before, 0 of 400 after, run
+      38981006387). Scanned from the low-water mark now;
+      `process_spec/regression/76` (not run on Windows);
+      `bench/log/linux/2026-10-17-monitor-low-water/FINDINGS.md`.
 - [x] **Thread-local storage was not a root, on the main thread — fixed
       2026-09-12.** A block whose only reference was a main-thread
       `@[ThreadLocal]` was **collected**. `dl_iterate_phdr` gives the
@@ -296,7 +298,7 @@ kept finding the rest.
       complete" means *surviving objects have no dangling edges*, not *nothing
       dangling survives*.
       **Audited from the other side, and the answer is neither.**
-      `GCRY_MARK_AUDIT_ALL=1` walks every used block as a parent, marked or not,
+      `GCRY_MARK_AUDIT_ALL=1` (removed in 0.37.0) walks every used block as a parent, marked or not,
       and across five crashing runs reports **nothing**: when the buffer is
       freed, no pointer to it exists anywhere in the used heap. At fault time
       the holder search finds it on a **running fiber's stack** (17 hits, all
@@ -1062,7 +1064,7 @@ kept finding the rest.
       each time printing the holders header and nothing else, which read as a
       search that found nothing; green on a re-run of the same commit; never
       reproducible locally in 80+ runs including single- and two-CPU ones.
-      Measured with `GCRY_SEGV_REPORT_STACK=1`: the alternate signal stack is
+      Measured with `GCRY_SEGV_REPORT_STACK=1` (removed in 0.37.0): the alternate signal stack is
       **8 192 B with 3 472 already used** on entry, leaving 4 720 for a report
       that walks roots, heap and every fiber stack with a line buffer per frame
       and then repeats all three for the holder it found. Nothing said so
@@ -2104,8 +2106,9 @@ kept finding the rest.
       writer frozen inside its locked section by an *in-STW* sweep resumes
       against the rebuilt list (0 of 37 334 mappings under
       `GCRY_DISABLE_LAZY_SWEEP=1` then) — **was real and is
-      closed (2026-10-17, 0.37.0).** The occupancy-claim stress harness
-      (`claim_stress`, two Parallel workers, in-stop sweep) reached it: 31–252
+      closed (2026-10-17, 0.37.0).** The `claim_stress` harness on branch
+      `occupancy-plain-or`
+      (two Parallel workers, in-stop sweep) reached it: 31–252
       chunks indexed and off the list in 14 of 40 2-second runs. Every loss
       followed a stop that froze `map_chunk` between its head read and its
       head store (3 of 3; 0 of 9 stops that froze a list reader lost
@@ -2117,7 +2120,9 @@ kept finding the rest.
       `process_spec/regression/75` forces the interleaving (0 lost, 55 on the
       control arm); `claim_stress` after it: 0 of 20 runs with two workers,
       0 of 10 with four. No default configuration sweeps in the
-      stop: Parallel, EC4 and EC1 sweep after the world on both layouts.
+      stop: Parallel, EC4 and EC1 sweep after the world on both layouts
+      (`bench/log/linux/2026-10-17-in-stop-sweep/FINDINGS.md`, which also
+      reconciles the branch's own 5-of-10-seeds count).
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which
@@ -3939,7 +3944,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `process_spec/regression/50_collector_lock_fairness_spec.cr` failed 20
       of 20 before and passes on one and two CPUs after.
 - [x] **Decide the RSS budget for large live sets (2026-10-03) — decided
-      2026-10-14: within 1.1× Boehm's peak, cap floor stays 64 MiB.** The
+      2026-10-14: within 1.1× Boehm's peak, cap floor stays 64 MiB; narrowed
+      2026-10-17 (0.37.0) to every crystal-metric row except Knuckeotide.** The
       adaptive threshold's cap now follows a third of the bytes the mark
       scanned (Primes −17%, peak RSS unchanged everywhere). Primes is still
       2.1× and JsonParsePure 2.3× Boehm's process time, and the rest of that
@@ -3970,16 +3976,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       MiB there as well for 0.37.0: Binarytrees 0.96× / 0.98×, Kemal 1.69× /
       1.56×, Intel Binarytrees +2–4% wall the only repeat cost; Darwin pace
       100 met it too but cost Primes 22–27%. Knuckeotide is still 1.74× /
-      1.81× on macOS (Linux 1.35–1.53×, Windows 1.64–1.67×) and no threshold
-      setting moves it under, so its peak is not the collection schedule.
+      1.81× on macOS (Linux 1.35–1.53×, Windows 1.64–1.67×) and no single
+      adaptive-threshold knob takes it under; what sizes its peak is below
+      (Knuckeotide, 2026-10-17).
       **Kemal, 2026-10-17** (`bench/log/linux/2026-10-17-kemal-rss/`): its
       1.31× (Linux) is the threshold, set at 9.6 MB by mostly unwritten 32 KiB
       I/O buffers counted whole, plus a 556 KiB `Heap` object resident in
       every process. Atomic bytes now count a quarter (Kemal 1.38× → 1.27× on
       the x86 runner, M1 1.67× → 1.37×) and the research tables are mapped
       only when armed (−472 KiB). A cost floor (down to 4 MiB where a
-      collection costs under 2% of the mutator time) takes Kemal to 1.05× /
-      0.98× locally but costs Linux Binarytrees 2.7–3.3% wall; parked as
+      collection costs under 2% of the mutator time) takes Kemal to 1.05× on
+      the x86 runner and 0.98× locally but costs Linux Binarytrees 2.7–3.3% wall; parked as
       `bench/log/linux/2026-10-17-kemal-rss/cost-floor.patch` until a lower target is measured.
       **Knuckeotide, 2026-10-17** (`bench/log/linux/2026-10-17-knuckeotide-rss/`):
       its peak is the schedule after all, sized by three things: 21 MB of
@@ -3991,8 +3998,10 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       can use. Releasing the emptied chunks of a size the last cycle did not
       allocate (Knuckeotide −6 to −13%, JsonParsePure −12 to −15% on every
       runner) costs 0.6–1.9% wall beyond the spread on five runner-rows
-      (Perf A/B 38965963265); limiting the pace's rise to 150% a cycle takes
-      the Linux runners to 1.02× / 0.93× but costs Primes up to 12 points.
+      (Perf A/B 38965963265); limiting the pace's rise by at most 1.5× a
+      cycle as well, on top of the idle-kind release and the parked cost
+      floor, reached 1.02× / 0.93× on Linux (Perf A/B 38948987930) but costs
+      Primes up to 12 points.
       Both are parked as patches (`bench/log/linux/2026-10-17-knuckeotide-rss/idle-kind-release.patch`,
       `bench/log/linux/2026-10-17-knuckeotide-rss/pace-step-limit.patch`).
       **The budget holds on every crystal-metric row except Knuckeotide**,
@@ -4034,8 +4043,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       The back-link's 64-byte object start costs nothing: rebuilt at 96 and
       112 it reads within 0.4%
       (`bench/log/linux/2026-10-15-revcomp-attribution/`).
-- [ ] **macOS: Binarytrees runs at ~80% of Boehm (2026-10-03, narrowed
-      2026-10-05).** User CPU equals wall time and system time is the same as
+- [ ] **macOS: Binarytrees runs at 88% of Boehm on M1 since 0.37.0 (was
+      ~80%; Intel 131%) (2026-10-03, narrowed 2026-10-05).** User CPU equals wall time and system time is the same as
       Boehm's, so nothing blocks; parallel mark does not help (four workers
       cost 14 points). A 64 MiB threshold takes it to ~90% at twice Boehm's
       peak RSS (and Linux to 106%), so most of the gap is the RSS-budget
@@ -4616,7 +4625,7 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `GCRY INVARIANT FAILURE … actual=1 reported=2` line in that log is
       `spec/invariant_spec.cr:211` planting a +1 drift and expecting the raise.
       `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
-- [x] **Parallel mark** — on by default above 32 MiB live since 2026-10-05 (`CHANGELOG.md` `[Unreleased]`)
+- [x] **Parallel mark** — on by default above 32 MiB live since 2026-10-05 (`CHANGELOG.md` `[0.35.0]`)
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
 - [x] **Benchmark leaderboard** — per-release transparent perf tracking in `bench/leaderboard.md`

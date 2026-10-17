@@ -218,11 +218,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zeroed `bench/pattern_fuzz.cr`'s fifth phase entry: SIGSEGV at 0x20 in
   `compute_phase_stats` under `GCRY_BITMAP_ALLOC=0` (CI run 38966033174).
   A thread with no recorded SP is now scanned from its stack's low-water
-  mark. Interleaved on the same CI runners: 31 of 400 runs before (30 of 40
-  on an EPYC 9V74), 0 of 400 after.
+  mark. Interleaved on the same CI runners (run 38981006387): 31 of 400
+  runs before (30 of 40 on an EPYC 9V74), 0 of 400 after.
   `process_spec/regression/76_monitor_deep_frame_root_spec.cr` holds a
   block in a Monitor frame 64 KiB deep across a collection: swept before,
-  in both layouts and on 1.21 and 1.22, kept after.
+  in both layouts and on 1.21 and 1.22, kept after (not run on Windows,
+  where the Monitor never reaches the spec's hook)
+  (`bench/log/linux/2026-10-17-monitor-low-water/`).
 
 - **Every gcry process carried 472 KiB of resident memory for research
   knobs that are off.** The unmap guard's and release ledger's record ring,
@@ -236,11 +238,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **An in-stop sweep no longer drops most of the chunk list behind a
   thread it froze mid-prepend.** With the sweep inside the stop
+  (`GCRY_DISABLE_LAZY_SWEEP=1`, `GCRY_PAGE_DONTNEED=1`, `GCRY_TLAB=1`,
   `GCRY_INCREMENTAL=1`, or `parallel_empty_chunk_munmap`) the sweep
   rebuilds `@chunks` without `@chunk_list_lock`, reversing it. A
-  `map_chunk` the stop froze
-  without `@chunk_list_lock`, reversing it. A `map_chunk` the stop froze
-  between reading the head and storing the new one finished after
+  `map_chunk` the stop froze between reading the head and storing the new
+  one finished after
   `start_world` with `new.next` the old head, by then the tail, and every
   other chunk left the list while staying in the chunk index: never swept
   again, its blocks counted live and its capacity counted free for good.
@@ -258,9 +260,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr` parks a
   mapper there (`chunk_publish_hook`) across a `GC.collect`: 0 chunks lost
   with the fix, 55 with `stop_sweep_list_lock = false` (the code before),
-  every run. The same harness after the fix: 0 of 20 runs with two workers
-  and 0 of 10 with four lost a chunk or drifted, the sweep declining 0–9 of
-  ~1 250 relinks a run; the lazy arm, four workers, 0 of 10 on both trees.
+  in each of 3 checks. The same harness after the fix: 0 of 20 runs with
+  two workers and 0 of 10 with four lost a chunk or drifted, the sweep
+  declining 0–9 of ~1 250 relinks a run; the lazy arm, four workers, 0 of
+  10 on both trees (`bench/log/linux/2026-10-17-in-stop-sweep/`; the
+  `occupancy-plain-or` branch's `2026-10-17-occupancy-claim/FINDINGS.md`
+  saw 5 of 10 seeds with 35–50 chunks lost on the same tree, another build
+  and seeds of the harness).
 
 - **The Windows gates jobs no longer fail after their specs pass.** The
   Makefile targets those jobs run still called `crystal spec`, which deletes
