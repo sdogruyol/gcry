@@ -1,0 +1,98 @@
+=== process-spec-invariants run 1 FAILED 2026-10-17T23:45:52+03:00 ===
+................................gcry: GC.free ignored 0x749cc63403e0: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+.gcry: GC.free ignored 0x749cc6340768: not a live gcry allocation (interior pointer, or its chunk was released); counted in double_frees / stale_frees, reported once per kind
+...................................................................................GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+..GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+..................gcry: finalization cycle involving 0x749cc7168a10 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 1
+gcry: finalization cycle involving 0x749cc7168a10 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 2
+gcry: finalization cycle involving 0x749cc7168a10 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 4
+......................gcry: static roots collapsed to 18016 bytes from 67232520 — globals are not roots this collection. collection 296
+.......gcry: finalization cycle involving 0x749c65a7dd00 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 8
+gcry: finalization cycle involving 0x749c65a7dd60 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 16
+.............F..........................
+
+Failures:
+
+  1) Regression: an in-stop sweep keeps the chunks a frozen mapper would drop control arm in a process of its own
+     Failure/Error: fail "child #{status.inspect}:\n#{captured}" unless status.success?
+
+       child Process::Status[1]:
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=2 reported=211
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=10 reported=219
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=18 reported=227
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=26 reported=235
+       Error running at_exit handler: gcry invariant: live_objects mismatch: actual=26 reported=235
+       
+
+     # process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr:113
+
+Finished in 2:32 minutes
+205 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr:109 # Regression: an in-stop sweep keeps the chunks a frozen mapper would drop control arm in a process of its own
+=== process-spec-invariants run 2 FAILED 2026-10-17T23:48:11+03:00 ===
+................................gcry: GC.free ignored 0x7b36c31603e0: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+.gcry: GC.free ignored 0x7b36c3160768: not a live gcry allocation (interior pointer, or its chunk was released); counted in double_frees / stale_frees, reported once per kind
+...................................................................................GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+..GC Warning: Out of Memory! Heap size: 185 MiB. Returning NULL!
+..................gcry: finalization cycle involving 0x7b36c3b81a10 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 1
+gcry: finalization cycle involving 0x7b36c3b81a10 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 2
+gcry: finalization cycle involving 0x7b36c3b81a10 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 4
+......................gcry: static roots collapsed to 18016 bytes from 67232520 — globals are not roots this collection. collection 296
+.......gcry: finalization cycle involving 0x7b3661f9cd00 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 8
+gcry: finalization cycle involving 0x7b3661f9cd60 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 16
+.............F..........................
+
+Failures:
+
+  1) Regression: an in-stop sweep keeps the chunks a frozen mapper would drop control arm in a process of its own
+     Failure/Error: fail "child #{status.inspect}:\n#{captured}" unless status.success?
+
+       child Process::Status[1]:
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=2 reported=211
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=10 reported=219
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=18 reported=227
+       GCRY INVARIANT FAILURE: live_objects mismatch: actual=26 reported=235
+       Error running at_exit handler: gcry invariant: live_objects mismatch: actual=26 reported=235
+       
+
+     # process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr:113
+
+Finished in 2:15 minutes
+205 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr:109 # Regression: an in-stop sweep keeps the chunks a frozen mapper would drop control arm in a process of its own
