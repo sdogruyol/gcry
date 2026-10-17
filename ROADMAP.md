@@ -4226,6 +4226,12 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       Crystal's Parallel-scheduler deadlock (#17486); 5 earlier, uncaptured
       timeouts of the same harness stopped at the same point
       (`bench/log/linux/2026-10-15-0.36-stress/`).
+      2026-10-18, on the 0.37.0 integration: about 3.5 hours over 23 loops
+      and 1 148 bounded runs, 0 gcry failures; the 6 stalls were all the
+      same scheduler deadlock, classified from captures, and the only red
+      runs were spec 75's control arm under the invariant checker, which
+      caught the drift that arm creates on purpose (spec fixed)
+      (`bench/log/linux/2026-10-18-0.37-stress/`).
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 
