@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Kemal `/json`: ~105% of Boehm's throughput at 1.21× peak RSS, 0.88× after `GC.collect` (Linux, 0.37.0); ~102% at 1.50× peak footprint on macOS (2026-09-06). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
+**Kemal `/json`: ~105% of Boehm's throughput at 1.21× peak RSS, 0.88× after `GC.collect` (Linux, 0.37.0); ~104% at 1.39× peak RSS on macOS (`macos-latest` runner, 0.37.0). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
 
 ---
 
@@ -240,31 +240,31 @@ The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.3
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **102.1%** [101.3, 102.9] *(0.36.0, 2026-10-15; 0.35.0: 102.8% in the same run)* |
-| Kemal `/json` peak RSS | **1.94×** *(29.2 vs 15.0 MiB `ru_maxrss`; 0.35.0: 1.97×. Peak footprint, a different measure, was 1.50× and post-GC resident 0.99× on the 2026-09-06 laptop cut)* |
-| Kemal `/` throughput | **100.3%** [99.7, 101.9] *(0.35.0: 99.6%)* |
+| Kemal `/json` throughput | **103.5%** [93.7, 115.4] *(0.37.0, 2026-10-18; 107.1% [98.9, 111.3] in an earlier run; 0.36.0: 102.3% and 104.5% in the same two runs)* |
+| Kemal `/json` peak RSS | **1.39×** *(20.8 vs 15.0 MiB `ru_maxrss`; 0.36.0: 1.98×. Peak footprint, a different measure, was 1.50× and post-GC resident 0.99× on the 2026-09-06 laptop cut)* |
+| Kemal `/` throughput | **99.1%** [98.7, 105.6] at 1.33× *(103.0% in the earlier run; 0.36.0: 101.1% and 99.4%, 1.91×)* |
 | Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
 | Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
-\*Kemal rows: `bench/log/macos/2026-10-15-0.36-native/` — GitHub `macos-latest` runner (Apple M1, 3 vCPUs), Boehm, 0.35.0 and 0.36.0 in random order per trial, 15 trials, `wrk -t2 -c50` 10 s after a 3 s warm-up, medians of per-trial paired ratios [IQR]. Every gcry arm sat at 0.36.0's 16 MiB Darwin threshold floor (8 MiB since 0.37.0) plus the warm-chunk budget against a 15 MiB Boehm process. The earlier paired A/B on an M2 Pro laptop (0.24.x, `bench/log/macos/2026-09-06-bitmap-default-ab/`, 20 rotated rounds, null at 100.9% [99.1, 102.6]) measured peak *footprint*, which leaves out the pages Darwin may reclaim: 101.9% at 1.50×, 0.4 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 2.9 against 5.2 ms. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+\*Kemal rows: `bench/log/macos/2026-10-18-0.37-runners/` — GitHub `macos-latest` runner (Apple M1, 3 vCPUs), Boehm, 0.36.0 and 0.37.0 in random order per trial, 15 trials, `wrk -t2 -c50` 10 s after a 3 s warm-up, medians of per-trial paired ratios [IQR], two runs on two runners; this runner's Kemal spread is ±10 points, and 0.37.0 against 0.36.0 paired is +0.7% [−7.9, +2.3] and +6.8% [−1.2, +12.4], level. The peak drop is 0.37.0's 8 MiB Darwin threshold floor (16 MiB before) and the atomic quarter. The earlier paired A/B on an M2 Pro laptop (0.24.x, `bench/log/macos/2026-09-06-bitmap-default-ab/`, 20 rotated rounds, null at 100.9% [99.1, 102.6]) measured peak *footprint*, which leaves out the pages Darwin may reclaim: 101.9% at 1.50×, 0.4 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 2.9 against 5.2 ms. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
-Allocation storms, crystal-metric (same runner and run, process-fresh whole-process wall time, 15 interleaved reps, Crystal 1.21.0; 0.35.0 in parentheses):
+Allocation storms, crystal-metric (same runner and run, process-fresh whole-process wall time, 15 interleaved reps, Crystal 1.21.0; 0.36.0 in parentheses):
 
 | Bench | gcry speed vs Boehm | peak RSS × Boehm |
 |-------|--------------------:|-----------------:|
-| Primes | **100%** (102%) | 0.88× |
-| JsonParsePure | 93% (91%) | 1.08× |
-| Binarytrees | 78% (80%) | 1.78× |
-| JsonGenerate | **99%** (97%) | 0.64× |
-| JsonParseSerializable | **99%** (94%) | 0.98× |
-| JsonParsePull | **99%** (96%) | 0.94× |
-| Revcomp | 98% (98%) | 0.63× |
-| RegexDna | 97% (98%) | 0.51× |
-| Knuckeotide | 89% (88%) | 1.88× |
+| Primes | **105%** (99%) | 0.89× |
+| JsonParsePure | **99%** (93%) | 1.07× |
+| Binarytrees | 87% (78%) | 0.94× |
+| JsonGenerate | **101%** (99%) | 0.64× |
+| JsonParseSerializable | **100%** (99%) | 0.96× |
+| JsonParsePull | **100%** (99%) | 0.94× |
+| Revcomp | **100%** (98%) | 0.63× |
+| RegexDna | 98% (99%) | 0.50× |
+| Knuckeotide | 92% (89%) | 1.56× |
 
-The JSON rows gain from 0.36.0's in-place `realloc` growth, as on Linux. Primes's −2 points are where its collections happen to fall in a heap that only grows, not more work per byte: on another runner the same change dropped a collection and scanned 37% less. Binarytrees is a small process (39 MiB under Boehm), where 0.36.0's 16 MiB Darwin threshold floor and the warm budget weigh most; Knuckeotide's peak is its collection schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`). Neither moved between the releases. On Intel (`macos-15-intel`, i7-8700B) every row is at 90–98% of Boehm, none slower than 0.35.0 beyond the spread, and Kemal is level with Boehm within that runner's ±10-point spread.
+Paired against 0.36.0 on this runner: Primes −6.8% wall, JsonParsePure −4.7%, Binarytrees −11.2% at a 47% lower peak, Knuckeotide's peak −17%; no row slower beyond its spread. Primes and JsonParsePure gain from 0.37.0's batched mark (Σ mark −29% and −12%); Binarytrees from the Darwin hit path and the 8 MiB floor. Knuckeotide's peak is its collection schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`). The earlier run agrees within its wider spread, except JsonGenerate's peak, 0.64× → 0.73× there and unchanged in this run. On Intel (`macos-15-intel`, i7-8700B) every row is at 92–127% of Boehm (Binarytrees 127%, from 90%), none slower than 0.36.0 beyond the spread, and Kemal `/json` is at 107.2% [99.9, 116.6] and 1.39× (0.36.0: 2.20×) within that runner's ±10-point spread.
 
-**Since 0.36.0 (release-0.37.0 tip, 2026-10-16, `bench/log/macos/2026-10-16-binarytrees/`):** the allocation hit path no longer reads a `@[ThreadLocal]` on Darwin (two out-of-line calls there): Binarytrees 79% → 88% of Boehm on `macos-latest`, 92% → 131% on `macos-15-intel`. And the adaptive threshold floor is 8 MiB on Darwin as everywhere else, which the RSS budget (peak within 1.1× Boehm's on every crystal-metric row except Knuckeotide, whose peak is its collection schedule, `bench/log/linux/2026-10-17-knuckeotide-rss/`) asked for: Binarytrees' peak 1.79× → 0.96× (Intel 1.87× → 0.98×), Knuckeotide 1.89× → 1.74× (1.99× → 1.81×), Kemal `/json` 1.93× → 1.69× (2.19× → 1.56×) at the same req/s, and no other row's speed or peak moved beyond its spread (Intel Binarytrees +2–4% wall). Knuckeotide is the one crystal-metric row still over 1.1× on macOS, as on Linux and Windows.
+**What moved since 0.36.0 on Darwin:** the allocation hit path no longer reads a `@[ThreadLocal]` (two out-of-line calls there), and the adaptive threshold floor is 8 MiB on Darwin as everywhere else, which the RSS budget (peak within 1.1× Boehm's on every crystal-metric row except Knuckeotide) asked for (`bench/log/macos/2026-10-16-binarytrees/`). Knuckeotide is the one crystal-metric row still over 1.1× on macOS, as on Linux and Windows.
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
@@ -376,7 +376,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 
 gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
 Windows x86_64 + ARM64 have native unit, process-GC, and release-sample CI coverage, plus the Linux race and root gates that hold there.
-Windows x86_64 workloads have been measured in VMs, not on physical hardware: 0.36.0 natively on GitHub's `windows-latest` runner, crystal-metric at 94–105% of Boehm's speed (Knuckeotide 89%) and under Boehm's peak working set on 7 of 9 rows (`bench/log/windows/2026-10-15-0.36-native/`), and Kemal `/json` at 106.5% in a 12-vCPU QEMU/KVM VM (`bench/log/windows/2026-10-06-vm-validation/`). Windows ARM64 workloads are unmeasured (CI only). See [support details](docs/WINDOWS.md).
+Windows x86_64 workloads have been measured in VMs, not on physical hardware: 0.37.0 natively on GitHub's `windows-latest` runner, crystal-metric at 94–108% of Boehm's speed and under Boehm's peak working set on 7 of 9 rows (`bench/log/windows/2026-10-18-0.37-runners/`), and Kemal `/json` at 106.5% in a 12-vCPU QEMU/KVM VM (2026-10-06, `bench/log/windows/2026-10-06-vm-validation/`). Windows ARM64 workloads are unmeasured (CI only). See [support details](docs/WINDOWS.md).
 
 | Today | Later / elsewhere |
 |-------|-------------------|
