@@ -1,0 +1,41 @@
+2026-10-17T18:42:54.2590120Z === probe fixed ===
+2026-10-17T18:43:06.5543000Z monitor_probe darwin x86_64 crystal=1.21.0 threads=DEFAULT-0,SYSMON
+2026-10-17T18:43:07.6899890Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x70000e6b0000,0x70000e730000) stack_top=0x70000e72fddc threads=DEFAULT-0,SYSMON
+2026-10-17T18:43:07.6903110Z after 1 s: transfer=43/43 increase=43/43 collect=43/43 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:43:07.7715750Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x70000e71fc60", "0x70000e71fc60", "0x70000e71fc60"] pad=0x70000e71fcd0 stack_top=0x70000e72fddc stack=[0x70000e6b0000,0x70000e730000) exempt=true
+2026-10-17T18:43:07.8014200Z clamp=off: KEPT found=true free=false intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x70000e71fcd0 stack_top=0x70000e72fddc stack=[0x70000e6b0000,0x70000e730000) exempt=true
+2026-10-17T18:43:07.8072710Z end: transfer=48/48 increase=48/48 collect=48/48 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:43:07.8194470Z === probe fixed: exit=0
+2026-10-17T18:43:07.8197500Z === spec76 alone fixed ===
+2026-10-17T18:43:16.4516700Z 2 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:43:16.4551570Z === spec76 alone fixed: exit=0
+2026-10-17T18:43:16.4557560Z === spec77 alone fixed ===
+2026-10-17T18:43:24.5227870Z 1 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:43:24.5262080Z === spec77 alone fixed: exit=0
+2026-10-17T18:43:24.5301360Z === probe scan-nofix ===
+2026-10-17T18:43:29.5498020Z monitor_probe darwin x86_64 crystal=1.21.0 threads=DEFAULT-0,SYSMON
+2026-10-17T18:43:30.5573320Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x700002024000,0x7000020a4000) stack_top=0x7000020a3ddc threads=DEFAULT-0,SYSMON
+2026-10-17T18:43:30.5575890Z after 1 s: transfer=58/58 increase=58/58 collect=58/58 last_transfer_ms_ago=6 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:43:30.5686300Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x700002093c40", "0x700002093c60", "0x700002093c40"] pad=0x700002093cd0 stack_top=0x7000020a3ddc stack=[0x700002024000,0x7000020a4000) exempt=true
+2026-10-17T18:43:30.5784380Z clamp=off: LOST found=true free=true intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x700002093cd0 stack_top=0x7000020a3ddc stack=[0x700002024000,0x7000020a4000) exempt=true
+2026-10-17T18:43:30.5788970Z end: transfer=60/60 increase=60/60 collect=60/60 last_transfer_ms_ago=6 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:43:30.5790730Z === probe scan-nofix: exit=0
+2026-10-17T18:43:30.5791970Z === spec76 alone scan-nofix ===
+2026-10-17T18:43:35.9692770Z Failures:
+2026-10-17T18:43:35.9737720Z   1) Regression: the Monitor's stack below its birth is scanned when the stop records no SP for it
+2026-10-17T18:43:35.9755030Z        Expected: false
+2026-10-17T18:43:35.9756610Z             got: true
+2026-10-17T18:43:35.9906510Z 2 examples, 1 failures, 0 errors, 0 pending
+2026-10-17T18:43:35.9937080Z === spec76 alone scan-nofix: exit=1
+2026-10-17T18:43:35.9941440Z === spec77 alone gate-nofix ===
+2026-10-17T18:43:48.4974690Z Failures:
+2026-10-17T18:43:48.4975630Z   1) Regression: a library heap's collection does not shut the Monitor out
+2026-10-17T18:43:48.4980460Z        the Monitor gate was still closed 100 ms after a library heap's collection
+2026-10-17T18:43:48.4987750Z 1 examples, 1 failures, 0 errors, 0 pending
+2026-10-17T18:43:48.4991900Z === spec77 alone gate-nofix: exit=1
+2026-10-17T18:43:48.9093100Z === full process suite with the stall detector ===
+2026-10-17T18:44:57.1327450Z MONPROBE before 76 (example #70): transfer=892/892 increase=892/892 collect=892/892 last_transfer_ms_ago=5 gate(enabled=true stopped=0 busy=0 site=none blocks=5 stw_waits=0)
+2026-10-17T18:44:57.1335200Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x70000cbae000,0x70000cc2e000) stack_top=0x70000cc2dddc threads=DEFAULT-0,SYSMON,gc-idle
+2026-10-17T18:44:57.3151540Z MONPROBE after 76: transfer=896/896 increase=896/896 collect=896/896 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=5 stw_waits=0)
+2026-10-17T18:45:29.4589180Z 169 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:45:29.5340180Z === full process suite: exit=0

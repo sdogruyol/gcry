@@ -1,0 +1,23 @@
+=== probe fixed (local, 2026-10-17, crystal 1.21.0, -Dgc_none, debug build) ===
+monitor_probe linux x86_64 crystal=1.21.0 threads=DEFAULT-0
+after 1 s: transfer=97/97 increase=97/97 collect=97/97 last_transfer_ms_ago=1 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+  MONPROBE SYSMON exempt=true fiber=main stack=[0x7266ea600000,0x7266eae00000) stack_top=0x7266eadfec64 threads=DEFAULT-0,SYSMON
+clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[0, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x7266eadeeb78 stack_top=0x7266eadfec64 stack=[0x7266ea600000,0x7266eae00000) exempt=true
+clamp=off: KEPT found=true free=false intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x7266eadeeb78 stack_top=0x7266eadfec64 stack=[0x7266ea600000,0x7266eae00000) exempt=true
+end: transfer=99/99 increase=99/99 collect=99/99 last_transfer_ms_ago=1 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+=== probe nofix (scripts/revert-fix.patch applied) ===
+monitor_probe linux x86_64 crystal=1.21.0 threads=DEFAULT-0,SYSMON
+after 1 s: transfer=96/96 increase=96/96 collect=96/96 last_transfer_ms_ago=6 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+  MONPROBE SYSMON exempt=true fiber=main stack=[0x7ab9dc400000,0x7ab9dcc00000) stack_top=0x7ab9dcbfec64 threads=DEFAULT-0,SYSMON
+clamp=on: LOST found=true free=true intact=1 marks=3 sp_clamp_hits=[0, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x7ab9dcbeeb78 stack_top=0x7ab9dcbfec64 stack=[0x7ab9dc400000,0x7ab9dcc00000) exempt=true
+clamp=off: LOST found=true free=true intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x7ab9dcbeeb78 stack_top=0x7ab9dcbfec64 stack=[0x7ab9dc400000,0x7ab9dcc00000) exempt=true
+end: transfer=98/98 increase=98/98 collect=98/98 last_transfer_ms_ago=1 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+=== local `crystal eval 'Dir["process_spec/**/*_spec.cr"]'` order, the files that touch the gate ===
+0 process_spec/process_gc_spec.cr
+11 process_spec/regression/72_bytes_since_gc_free_uncredited_spec.cr
+21 process_spec/regression/73_execve_argv_terminator_spec.cr
+39 process_spec/regression/1_live_objects_dormant_spec.cr
+49 process_spec/regression/70_free_bytes_capacity_spec.cr
+53 process_spec/regression/71_large_unlink_walks_nothing_spec.cr
+55 process_spec/regression/76_monitor_deep_frame_root_spec.cr
+64 process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr

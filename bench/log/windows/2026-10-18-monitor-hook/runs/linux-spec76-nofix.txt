@@ -1,0 +1,30 @@
+Regression: the Monitor's stack below its birth
+  is scanned while a collection runs  is scanned while a collection runs
+  is scanned when the stop records neither its SP nor its registers  is scanned when the stop records neither its SP nor its registers
+
+Failures:
+
+  1) Regression: the Monitor's stack below its birth is scanned while a collection runs
+     Failure/Error: {% if @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
+
+       Expected: false
+            got: true
+
+     # process_spec/regression/76_monitor_deep_frame_root_spec.cr:51
+
+  2) Regression: the Monitor's stack below its birth is scanned when the stop records neither its SP nor its registers
+     Failure/Error: {% if @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
+
+       Expected: false
+            got: true
+
+     # process_spec/regression/76_monitor_deep_frame_root_spec.cr:51
+
+Finished in 21.18 milliseconds
+2 examples, 2 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/76_monitor_deep_frame_root_spec.cr:51 # Regression: the Monitor's stack below its birth is scanned while a collection runs
+crystal spec process_spec/regression/76_monitor_deep_frame_root_spec.cr:51 # Regression: the Monitor's stack below its birth is scanned when the stop records neither its SP nor its registers
+exit=1

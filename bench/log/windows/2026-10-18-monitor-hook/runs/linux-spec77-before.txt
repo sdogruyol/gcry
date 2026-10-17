@@ -1,0 +1,19 @@
+Regression: a library heap's collection
+  does not shut the Monitor out  does not shut the Monitor out
+
+Failures:
+
+  1) Regression: a library heap's collection does not shut the Monitor out
+     Failure/Error: {% if flag?(:gc_none) && @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
+
+       the Monitor gate was still closed 100 ms after a library heap's collection
+
+     # process_spec/regression/77_library_collect_monitor_gate_spec.cr:25
+
+Finished in 5.1 seconds
+1 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/77_library_collect_monitor_gate_spec.cr:25 # Regression: a library heap's collection does not shut the Monitor out
+exit=1
