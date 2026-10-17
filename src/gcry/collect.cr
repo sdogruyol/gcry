@@ -1153,6 +1153,7 @@ module Gcry
     # allocates one: half a megabyte of resident memory for research knobs
     # that are never on by default, 3% of Boehm's whole Kemal process
     # (`bench/log/linux/2026-10-17-kemal-rss/`).
+    @layout_probe_pad = uninitialized StaticArray(UInt8, 483328)
     @guard_base = Pointer(UInt64).null
     @guard_len = Pointer(UInt64).null
     @guard_kind = Pointer(UInt8).null
