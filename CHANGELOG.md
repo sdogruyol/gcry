@@ -217,6 +217,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`make poison-freed` no longer fails when pacing steps its churn arm's
+  heap once.** The arm (200 000 strings a round, 1 in 500 kept) failed when
+  the heap grew more than 4 MB over four rounds, and on `test (darwin
+  x86_64, gates)` the control arm read 9.4 → 10.1 → 16.4 → 16.4 MB (run
+  39073579395). Every chunk a cycle fills keeps a survivor, so the heap is
+  the most chunks any one cycle has needed; one collection paced the
+  threshold to 300%, the next cycle was three times as long, and every later
+  round reused what it mapped. 0.37.0's 8 MiB Darwin floor halves a cycle
+  and lets the control arm pace: 11 of 1 280 rounds on the two macOS
+  runners, 0 of 800 at v0.36.0, and no step with pacing off or a fixed
+  16 MiB. The old test failed about one `make poison-freed` in 120 on
+  macos-15-intel and one in 30 on macos-latest (0 of 400 at v0.36.0). The
+  arm now fails on the defect's own signatures: growth of more than 4 MB in
+  every round, and `occ` gaining more set bits over the churn than twice
+  the strings kept, where healthy runs gain the kept strings plus 5 to 20.
+  The 2026-09-04 stand-down restored fails both (+38 to +41 MB a round, 2.3
+  to 2.4 million blocks); scratch builds that leave an eighth or a
+  sixty-fourth of every reclaim occupied fail the second, which the old
+  test passed at a sixty-fourth on Linux. On the macOS runners the new arm
+  passed 400 of 400 and the gates job is green on both (run 39079656093).
+  `--counters` prints each round's heap split by chunk, collection and size
+  class (`bench/log/macos/2026-10-18-poison-freed-step/`).
+
 - **The Monitor's stack is scanned below its birth on Linux.** The Monitor
   (SYSMON) is never signal-suspended, so a single-mutator stop had no SP
   for it and scanned from its main fiber's `@context.stack_top`, which a
