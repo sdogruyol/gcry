@@ -1,0 +1,4 @@
+33 arms, 1618 functions in every binary, total variance 0.1938 s²
+R²=0.894 phases=4 *Array(Char)@Array(T)::new<Int32>:Array(Char)
+R²=0.894 phases=4 *Array(Char)@Indexable(T)#join:String
+R²=0.894 phases=4 *Array(Char)@Indexable(T)#sample<Int32, Random::PCG32>:Array(Char)

@@ -1,0 +1,19 @@
+..........F..
+
+Failures:
+
+  1) chunk radix class tags clears a tagged chunk's entries when the chunk is unmapped
+     Failure/Error: released.each { |base| heap.radix_tag_of(Pointer(Void).new(base)).should eq(0_u64) }
+
+       Expected: 0
+            got: 28
+
+     # spec/chunk_radix_spec.cr:333
+
+Finished in 18.16 milliseconds
+13 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec spec/chunk_radix_spec.cr:309 # chunk radix class tags clears a tagged chunk's entries when the chunk is unmapped
+exit 1

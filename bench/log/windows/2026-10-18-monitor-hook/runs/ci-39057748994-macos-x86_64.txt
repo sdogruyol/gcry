@@ -1,0 +1,22 @@
+2026-10-17T18:22:29.4155020Z === probe fixed ===
+2026-10-17T18:22:45.1045700Z monitor_probe darwin x86_64 crystal=1.21.0 threads=DEFAULT-0,SYSMON
+2026-10-17T18:22:46.1206900Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x700003fba000,0x70000403a000) stack_top=0x700004039ddc threads=DEFAULT-0,SYSMON
+2026-10-17T18:22:46.1209810Z after 1 s: transfer=28/28 increase=28/28 collect=28/28 last_transfer_ms_ago=50 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:22:46.1592880Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x700004029c40", "0x700004029c60", "0x700004029c60"] pad=0x700004029cd0 stack_top=0x700004039ddc stack=[0x700003fba000,0x70000403a000) exempt=true
+2026-10-17T18:22:46.1772750Z clamp=off: KEPT found=true free=false intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x700004029cd0 stack_top=0x700004039ddc stack=[0x700003fba000,0x70000403a000) exempt=true
+2026-10-17T18:22:46.1785930Z end: transfer=31/31 increase=31/31 collect=31/31 last_transfer_ms_ago=8 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:22:46.1787670Z === probe fixed: exit=0
+2026-10-17T18:22:46.1813220Z === spec76 alone fixed ===
+2026-10-17T18:22:53.3283990Z 1 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:22:53.3288910Z === spec76 alone fixed: exit=0
+2026-10-17T18:22:53.3412340Z === probe nofix ===
+2026-10-17T18:22:58.2260200Z monitor_probe darwin x86_64 crystal=1.21.0 threads=DEFAULT-0,SYSMON
+2026-10-17T18:22:59.2660090Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x70000c9af000,0x70000ca2f000) stack_top=0x70000ca2eddc threads=DEFAULT-0,SYSMON
+2026-10-17T18:22:59.2662720Z after 1 s: transfer=22/22 increase=22/22 collect=22/22 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:22:59.2864810Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x70000ca1ec60", "0x70000ca1ec60", "0x70000ca1ec28"] pad=0x70000ca1ecd0 stack_top=0x70000ca2eddc stack=[0x70000c9af000,0x70000ca2f000) exempt=true
+2026-10-17T18:22:59.3140870Z clamp=off: LOST found=true free=true intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[1, 1, 1] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x70000ca1ecd0 stack_top=0x70000ca2eddc stack=[0x70000c9af000,0x70000ca2f000) exempt=true
+2026-10-17T18:22:59.3145300Z end: transfer=25/25 increase=25/25 collect=25/25 last_transfer_ms_ago=7 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:22:59.3147390Z === probe nofix: exit=0
+2026-10-17T18:22:59.3148020Z === spec76 alone nofix ===
+2026-10-17T18:23:06.5916370Z 1 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:23:06.5917290Z === spec76 alone nofix: exit=0

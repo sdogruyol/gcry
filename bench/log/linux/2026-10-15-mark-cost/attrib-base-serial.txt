@@ -1,0 +1,42 @@
+*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil: 347 of 2279 samples (15.2%)
+  entry/exit                       32    9.2% of function
+  mark_impl-fallback                0    0.0% of function
+  loop-branch                      40   11.5% of function
+  payload-word                     35   10.1% of function
+  radix-L1+index                   22    6.3% of function
+  radix-slot                       15    4.3% of function
+  chunk-header                     57   16.4% of function
+  ordinal                          50   14.4% of function
+  mark+occ-test                    27    7.8% of function
+  after-lock-or                    45   13.0% of function
+  push                              7    2.0% of function
+  exit                             17    4.9% of function
+  other                             0    0.0% of function
+*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil: 502 of 2867 samples (17.5%)
+  entry/exit                       41    8.2% of function
+  mark_impl-fallback                0    0.0% of function
+  loop-branch                      73   14.5% of function
+  payload-word                     29    5.8% of function
+  radix-L1+index                   31    6.2% of function
+  radix-slot                       22    4.4% of function
+  chunk-header                     68   13.5% of function
+  ordinal                          82   16.3% of function
+  mark+occ-test                    38    7.6% of function
+  after-lock-or                    97   19.3% of function
+  push                              8    1.6% of function
+  exit                             13    2.6% of function
+  other                             0    0.0% of function
+*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil: 663 of 4999 samples (13.3%)
+  entry/exit                       43    6.5% of function
+  mark_impl-fallback                0    0.0% of function
+  loop-branch                      71   10.7% of function
+  payload-word                     70   10.6% of function
+  radix-L1+index                   31    4.7% of function
+  radix-slot                       12    1.8% of function
+  chunk-header                     55    8.3% of function
+  ordinal                          88   13.3% of function
+  mark+occ-test                    60    9.0% of function
+  after-lock-or                   192   29.0% of function
+  push                             22    3.3% of function
+  exit                             19    2.9% of function
+  other                             0    0.0% of function

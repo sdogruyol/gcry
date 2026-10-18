@@ -1,0 +1,309 @@
+{
+"arms": {
+"base": "/home/naruto/playground/.scratch/CrossPlatformPerf/bin/cm-v0.35.0",
+"var": "/home/naruto/playground/.scratch/CrossPlatformPerf/bin/cm-v0.36.0",
+"var_env": "/home/naruto/playground/.scratch/CrossPlatformPerf/bin/cm-v0.36.0"
+},
+"arm_env": {
+"var_env": {
+"GCRY_REALLOC_IN_PLACE": "0"
+}
+},
+"benches": [
+"Primes"
+],
+"reps": 8,
+"platform": "linux",
+"floor": 1581056,
+"peak_method": "GNU time %M",
+"runs": [
+{
+"rc": 0,
+"wall": 0.7000286849215627,
+"peak": 644657152,
+"mark": 73.433289,
+"collections": 8,
+"time": 0.666,
+"result": "ok",
+"rep": 0,
+"bench": "Primes",
+"arm": "var"
+},
+{
+"rc": 0,
+"wall": 0.7590740970335901,
+"peak": 641228800,
+"mark": 95.708732,
+"collections": 9,
+"time": 0.731,
+"result": "ok",
+"rep": 0,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.7304585468955338,
+"peak": 652447744,
+"mark": 98.081619,
+"collections": 9,
+"time": 0.702,
+"result": "ok",
+"rep": 0,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.7559510162100196,
+"peak": 640352256,
+"mark": 93.601593,
+"collections": 9,
+"time": 0.726,
+"result": "ok",
+"rep": 1,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.7554958411492407,
+"peak": 642985984,
+"mark": 111.862893,
+"collections": 9,
+"time": 0.729,
+"result": "ok",
+"rep": 1,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.7634464227594435,
+"peak": 643731456,
+"mark": 66.830203,
+"collections": 8,
+"time": 0.731,
+"result": "ok",
+"rep": 1,
+"bench": "Primes",
+"arm": "var"
+},
+{
+"rc": 0,
+"wall": 0.7386733540333807,
+"peak": 639545344,
+"mark": 64.055309,
+"collections": 9,
+"time": 0.705,
+"result": "ok",
+"rep": 2,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.7626451132819057,
+"peak": 646864896,
+"mark": 93.204345,
+"collections": 9,
+"time": 0.736,
+"result": "ok",
+"rep": 2,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.6944914739578962,
+"peak": 644628480,
+"mark": 59.587747,
+"collections": 8,
+"time": 0.665,
+"result": "ok",
+"rep": 2,
+"bench": "Primes",
+"arm": "var"
+},
+{
+"rc": 0,
+"wall": 0.7243259893730283,
+"peak": 647184384,
+"mark": 90.566119,
+"collections": 9,
+"time": 0.699,
+"result": "ok",
+"rep": 3,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.7151170396246016,
+"peak": 650567680,
+"mark": 52.299387,
+"collections": 8,
+"time": 0.683,
+"result": "ok",
+"rep": 3,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.7009319681674242,
+"peak": 644526080,
+"mark": 59.416117,
+"collections": 8,
+"time": 0.668,
+"result": "ok",
+"rep": 3,
+"bench": "Primes",
+"arm": "var"
+},
+{
+"rc": 0,
+"wall": 0.7026148890145123,
+"peak": 644648960,
+"mark": 57.705944,
+"collections": 8,
+"time": 0.672,
+"result": "ok",
+"rep": 4,
+"bench": "Primes",
+"arm": "var"
+},
+{
+"rc": 0,
+"wall": 0.7329128789715469,
+"peak": 640446464,
+"mark": 72.436675,
+"collections": 9,
+"time": 0.703,
+"result": "ok",
+"rep": 4,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.7203384572640061,
+"peak": 639787008,
+"mark": 68.034177,
+"collections": 9,
+"time": 0.689,
+"result": "ok",
+"rep": 4,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.7267202688381076,
+"peak": 639688704,
+"mark": 79.304104,
+"collections": 9,
+"time": 0.699,
+"result": "ok",
+"rep": 5,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.711692146025598,
+"peak": 650469376,
+"mark": 57.884417,
+"collections": 8,
+"time": 0.681,
+"result": "ok",
+"rep": 5,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.6698413863778114,
+"peak": 644714496,
+"mark": 67.750904,
+"collections": 8,
+"time": 0.641,
+"result": "ok",
+"rep": 5,
+"bench": "Primes",
+"arm": "var"
+},
+{
+"rc": 0,
+"wall": 0.7013469818048179,
+"peak": 649248768,
+"mark": 50.28983,
+"collections": 8,
+"time": 0.668,
+"result": "ok",
+"rep": 6,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.6881243120878935,
+"peak": 644628480,
+"mark": 57.317778,
+"collections": 8,
+"time": 0.66,
+"result": "ok",
+"rep": 6,
+"bench": "Primes",
+"arm": "var"
+},
+{
+"rc": 0,
+"wall": 0.7366263191215694,
+"peak": 640536576,
+"mark": 71.841189,
+"collections": 9,
+"time": 0.707,
+"result": "ok",
+"rep": 6,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.7283395999111235,
+"peak": 640905216,
+"mark": 81.687223,
+"collections": 9,
+"time": 0.699,
+"result": "ok",
+"rep": 7,
+"bench": "Primes",
+"arm": "base"
+},
+{
+"rc": 0,
+"wall": 0.7208320433273911,
+"peak": 639348736,
+"mark": 68.617114,
+"collections": 9,
+"time": 0.692,
+"result": "ok",
+"rep": 7,
+"bench": "Primes",
+"arm": "var_env"
+},
+{
+"rc": 0,
+"wall": 0.7190662599168718,
+"peak": 644468736,
+"mark": 58.198211,
+"collections": 8,
+"time": 0.685,
+"result": "ok",
+"rep": 7,
+"bench": "Primes",
+"arm": "var"
+}
+]
+}

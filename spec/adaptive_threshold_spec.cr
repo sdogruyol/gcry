@@ -9,13 +9,22 @@ end
 
 # The process heap sizes itself from the live set after each major
 # collection (`Heap#adapt_after_sweep`): next threshold = live × factor,
-# floored at 8 MiB (Darwin 16 MiB) and capped at 64 MiB or a third of the
-# bytes the mark scanned × factor, whichever is larger; the warm-retention
-# budget follows the same live × factor, capped by the threshold, fixed or
-# not. A library heap keeps its fixed threshold unless opted in.
+# atomic bytes counted at a quarter, floored at 8 MiB on every platform and
+# capped at 64 MiB or a third of the bytes the mark scanned × factor,
+# whichever is larger; the warm-retention budget follows the same live ×
+# factor, capped by the threshold, fixed or not. A library heap keeps its
+# fixed threshold unless opted in.
 describe "adaptive collection threshold" do
   min = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
   max = Gcry::Heap::ADAPTIVE_THRESHOLD_MAX
+
+  # Darwin's floor was 16 MiB; with pacing on top it put small processes at
+  # about twice Boehm's peak there (Binarytrees 1.79×, Kemal 1.94× on an M1),
+  # past the 1.1× RSS budget. One floor for every platform
+  # (`bench/log/macos/2026-10-16-binarytrees/`).
+  it "floors at 8 MiB on every platform, Darwin included" do
+    min.should eq(8_u64 * 1024 * 1024)
+  end
 
   it "is off by default and leaves a fixed threshold alone" do
     heap = Gcry::Heap.new
@@ -46,7 +55,7 @@ describe "adaptive collection threshold" do
     begin
       heap.adaptive_threshold = true
       # ~20 MiB live in one size class — above the floor on every platform
-      # (Darwin's is 16 MiB) — rooted explicitly so the stack is not needed.
+      # — rooted explicitly so the stack is not needed.
       # No auto-major while filling: the roots array lives in the spec's own
       # heap, so an automatic collection would not see it.
       heap.gc_threshold = UInt64::MAX
@@ -105,13 +114,14 @@ describe "adaptive collection threshold" do
     begin
       heap.adaptive_threshold = true
       heap.gc_threshold = UInt64::MAX
-      # The same ~20 MiB as above, atomic: marked, never read. Fewer majors
-      # would buy it nothing, so it keeps the 64 MiB cap and its RSS.
-      roots = Array(Void*).new(5120)
-      5120.times { roots << heap.malloc_atomic(4096) }
+      # ~30 MiB atomic: marked, never read. Fewer majors would buy it
+      # nothing, so it keeps the 64 MiB cap and its RSS. A quarter of it ×
+      # 1000% is past the cap.
+      roots = Array(Void*).new(7680)
+      7680.times { roots << heap.malloc_atomic(4096) }
       heap.adaptive_threshold_pct = 1000_u64
       heap.collect(scan_stack: false, roots: roots)
-      heap.size_class_live_bytes.should be >= 20_u64 * 1024 * 1024
+      heap.size_class_live_bytes.should be >= 30_u64 * 1024 * 1024
       heap.mark_scanned_bytes.should eq 0
       heap.gc_threshold.should eq max
 
@@ -121,6 +131,38 @@ describe "adaptive collection threshold" do
       heap.collect(scan_stack: false, roots: roots)
       heap.mark_scanned_bytes.should eq 0
       heap.gc_threshold.should eq max
+    ensure
+      heap.destroy
+    end
+  end
+
+  # Boehm's `min_bytes_allocd` weighting. Counted whole, Kemal's mostly
+  # unwritten 32 KiB `IO::Buffered` buffers set its threshold at 9.6 MB
+  # against 0.2 MB of small live objects
+  # (`bench/log/linux/2026-10-17-kemal-rss/`).
+  it "counts atomic live bytes at a quarter" do
+    heap = Gcry::Heap.new
+    begin
+      heap.adaptive_threshold = true
+      heap.gc_threshold = UInt64::MAX
+      roots = Array(Void*).new(10240)
+      # ~20 MiB pointerful and ~20 MiB atomic.
+      5120.times { roots << heap.malloc(4096) }
+      5120.times { roots << heap.malloc_atomic(4096) }
+      heap.collect(scan_stack: false, roots: roots)
+      live = heap.size_class_live_bytes
+      scanned = heap.mark_scanned_bytes
+      scanned.should be >= 20_u64 * 1024 * 1024
+      (live - scanned).should be >= 20_u64 * 1024 * 1024
+      heap.gc_threshold.should eq scanned + (live - scanned) // 4
+
+      # Atomic only, large or small, a quarter of it below the floor.
+      roots.clear
+      5120.times { roots << heap.malloc_atomic(4096) }
+      roots << heap.malloc_atomic(8 * 1024 * 1024)
+      heap.collect(scan_stack: false, roots: roots)
+      heap.mark_scanned_bytes.should eq 0
+      heap.gc_threshold.should eq min
     ensure
       heap.destroy
     end

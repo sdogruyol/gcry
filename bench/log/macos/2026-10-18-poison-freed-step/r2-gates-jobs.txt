@@ -1,0 +1,52 @@
+## job 117533830686 (test (darwin x86_64, gates), success, a47a8b8a6b98d5d2cded27c3f0945d9c60f1dcc3)
+crystal build -Dgc_none bench/poison_freed.cr -o bin/poison_freed --error-trace
+GCRY_POISON_FREED=1 bin/poison_freed
+poison_freed: true
+heap MB per round: 15.6 -> 15.9 -> 15.9 -> 15.9 (1600 kept, 2398410 poisoned)
+occupied blocks per round: 133 before -> 539 -> 940 -> 1340 -> 1740 (1600 strings kept)
+ok — freed payloads read 0xdeadf2eedeadf2ee, cleared allocations still come back zeroed, and a use-after-free reads poison rather than plausible data
+bin/poison_freed --control
+poison_freed: false
+heap MB per round: 9.6 -> 10.1 -> 10.1 -> 10.1 (1600 kept, 0 poisoned)
+occupied blocks per round: 135 before -> 541 -> 942 -> 1342 -> 1742 (1600 strings kept)
+ok — with the knob off freed payloads keep their bytes, so the poison arms are attributable to the knob
+crystal build -Dgc_none -Dgcry_block_headers bench/poison_freed.cr -o bin/poison_freed_hdr --error-trace
+GCRY_BITMAP_ALLOC=0 GCRY_POISON_FREED=1 bin/poison_freed_hdr
+poison_freed: true
+heap MB per round: 19.4 -> 19.6 -> 19.9 -> 19.9 (1600 kept, 1726428 poisoned)
+occupied blocks per round: 0 before -> 0 -> 0 -> 0 -> 0 (1600 strings kept)
+ok — freed payloads read 0xdeadf2eedeadf2ee, cleared allocations still come back zeroed, and a use-after-free reads poison rather than plausible data
+GCRY_BITMAP_ALLOC=0 bin/poison_freed_hdr --control
+poison_freed: false
+heap MB per round: 19.1 -> 19.4 -> 19.6 -> 19.6 (1600 kept, 0 poisoned)
+occupied blocks per round: 0 before -> 0 -> 0 -> 0 -> 0 (1600 strings kept)
+ok — with the knob off freed payloads keep their bytes, so the poison arms are attributable to the knob
+ok — a planted heap holder is named by address, a stack-only holder is found on the stack, and a block nobody holds reports zero
+ok — with the knob off no holder line appears, so the other run's holders are attributable to the search and not to something the crash report always said
+
+## job 117533830670 (test (darwin arm64, gates), success, a47a8b8a6b98d5d2cded27c3f0945d9c60f1dcc3)
+crystal build -Dgc_none bench/poison_freed.cr -o bin/poison_freed --error-trace
+GCRY_POISON_FREED=1 bin/poison_freed
+poison_freed: true
+heap MB per round: 12.9 -> 13.1 -> 13.1 -> 13.1 (1600 kept, 2398409 poisoned)
+occupied blocks per round: 132 before -> 539 -> 940 -> 1340 -> 1740 (1600 strings kept)
+ok — freed payloads read 0xdeadf2eedeadf2ee, cleared allocations still come back zeroed, and a use-after-free reads poison rather than plausible data
+bin/poison_freed --control
+poison_freed: false
+heap MB per round: 9.6 -> 10.1 -> 10.1 -> 10.1 (1600 kept, 0 poisoned)
+occupied blocks per round: 135 before -> 541 -> 942 -> 1342 -> 1742 (1600 strings kept)
+ok — with the knob off freed payloads keep their bytes, so the poison arms are attributable to the knob
+crystal build -Dgc_none -Dgcry_block_headers bench/poison_freed.cr -o bin/poison_freed_hdr --error-trace
+GCRY_BITMAP_ALLOC=0 GCRY_POISON_FREED=1 bin/poison_freed_hdr
+poison_freed: true
+heap MB per round: 19.1 -> 19.4 -> 19.6 -> 19.6 (1600 kept, 1677291 poisoned)
+occupied blocks per round: 0 before -> 0 -> 0 -> 0 -> 0 (1600 strings kept)
+ok — freed payloads read 0xdeadf2eedeadf2ee, cleared allocations still come back zeroed, and a use-after-free reads poison rather than plausible data
+GCRY_BITMAP_ALLOC=0 bin/poison_freed_hdr --control
+poison_freed: false
+heap MB per round: 19.1 -> 19.4 -> 19.6 -> 19.6 (1600 kept, 0 poisoned)
+occupied blocks per round: 0 before -> 0 -> 0 -> 0 -> 0 (1600 strings kept)
+ok — with the knob off freed payloads keep their bytes, so the poison arms are attributable to the knob
+ok — a planted heap holder is named by address, a stack-only holder is found on the stack, and a block nobody holds reports zero
+ok — with the knob off no holder line appears, so the other run's holders are attributable to the search and not to something the crash report always said
+

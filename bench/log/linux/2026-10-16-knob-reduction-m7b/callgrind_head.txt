@@ -1,0 +1,40 @@
+179,043,225 (100.0%)  PROGRAM TOTALS
+77,014,212 (43.01%)  src/gcry/heap.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void) [alloc_head]
+16,122,933 ( 9.01%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+15,035,596 ( 8.40%)  src/gcry/bitmap_alloc.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+13,000,013 ( 7.26%)  src/gcry/gc_override.cr:*GC::malloc<UInt64>:Pointer(Void) [alloc_head]
+ 9,001,473 ( 5.03%)  bench/micro/alloc_ns.cr:~procProc(Thread, Nil)@bench/micro/alloc_ns.cr:17 [alloc_head]
+ 7,153,091 ( 4.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+ 7,006,307 ( 3.91%)  src/gcry/bitmap_alloc.cr:*Gcry::Heap::tls_cursor_cache [alloc_head]
+ 4,000,004 ( 2.23%)  src/gcry.cr:*GC::malloc<UInt64>:Pointer(Void)
+ 3,000,177 ( 1.68%)  src/gcry/invariant.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+ 2,559,384 ( 1.43%)  src/gcry/stw_slots.cr:*Gcry::Heap#start_world:Nil
+ 2,000,118 ( 1.12%)  src/gcry/trace.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+ 2,000,005 ( 1.12%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:~procProc(Thread, Nil)@bench/micro/alloc_ns.cr:17
+ 2,000,004 ( 1.12%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:~procProc(Thread, Nil)@bench/micro/alloc_ns.cr:17
+ 1,972,805 ( 1.10%)  src/gcry/stw_slots.cr:*Gcry::Heap#stop_world_quiescing_roots:Nil
+ 1,663,898 ( 0.93%)  src/gcry/collect_mark.cr:*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil [alloc_head]
+ 1,173,588 ( 0.66%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+ 1,000,010 ( 0.56%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/array.cr:~procProc(Thread, Nil)@bench/micro/alloc_ns.cr:17
+ 1,000,006 ( 0.56%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:~procProc(Thread, Nil)@bench/micro/alloc_ns.cr:17
+ 1,000,000 ( 0.56%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/gc.cr:~procProc(Thread, Nil)@bench/micro/alloc_ns.cr:17
+   999,665 ( 0.56%)  src/gcry/kernels.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+   700,456 ( 0.39%)  src/gcry/collect_stw.cr:*Gcry::Heap#stop_world_quiescing_roots:Nil [alloc_head]
+   655,777 ( 0.37%)  src/gcry/collect_mark.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil [alloc_head]
+   485,583 ( 0.27%)  src/gcry/collect_mark.cr:*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil [alloc_head]
+   427,620 ( 0.24%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#start_world:Nil
+   426,677 ( 0.24%)  src/gcry/collect_stw.cr:*Gcry::Heap#start_world:Nil [alloc_head]
+   425,104 ( 0.24%)  src/gcry/block.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+   421,686 ( 0.24%)  src/gcry/parallel_mark.cr:*Gcry::Heap#mark_worker_loop:Nil [alloc_head]
+   366,135 ( 0.20%)  src/gcry/chunk_layout.cr:*Gcry::Heap#malloc<UInt64>:Pointer(Void)
+   319,086 ( 0.18%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#stop_world_quiescing_roots:Nil
+   262,003 ( 0.15%)  src/gcry/bitmap_alloc.cr:*Gcry::Heap#bitmap_pool_candidate?<Pointer(Gcry::ChunkHeader), Int32, Bool>:Bool [alloc_head]
+   248,021 ( 0.14%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/intrinsics.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+   230,793 ( 0.13%)  src/gcry/collect_mark.cr:*Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil
+   192,633 ( 0.11%)  ./stdio-common/./stdio-common/vfscanf-internal.c:__vfscanf_internal [/usr/lib/x86_64-linux-gnu/libc.so.6]
+   185,338 ( 0.10%)  src/gcry/collect_scan.cr:*Gcry::Heap#scan_static_ranges:UInt64 [alloc_head]
+   173,137 ( 0.10%)  src/gcry/platform/linux_pagemap.cr:*Gcry::Platform::stack_low_water<UInt64, UInt64>:UInt64
+   162,609 ( 0.09%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil
+   150,145 ( 0.08%)  ./stdlib/./stdlib/getenv.c:getenv [/usr/lib/x86_64-linux-gnu/libc.so.6]
+   145,066 ( 0.08%)  src/gcry/bitmap_alloc.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+   131,056 ( 0.07%)  src/gcry/heap.cr:*Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil) [alloc_head]

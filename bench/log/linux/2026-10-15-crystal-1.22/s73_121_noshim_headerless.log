@@ -1,0 +1,18 @@
+F
+
+Failures:
+
+  1) execve argv under gcry's exact size classes keeps the NULL terminator inside argv's own block
+     Failure/Error: {% if flag?(:unix) %}
+
+       2 args: argv block holds 16 bytes, needs 24
+
+     # process_spec/regression/73_execve_argv_terminator_spec.cr:22
+
+Finished in 106 microseconds
+1 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/73_execve_argv_terminator_spec.cr:22 # execve argv under gcry's exact size classes keeps the NULL terminator inside argv's own block
+exit 1

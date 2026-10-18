@@ -1,0 +1,1561 @@
+{
+ "binary": "bin/kemal-boehm-probe",
+ "path": "/json",
+ "env": {},
+ "reqs": 43324.51,
+ "vmhwm_kb": 16700,
+ "threads": 13,
+ "idle": {
+  "binary": 2016,
+  "bss": 68,
+  "libc-heap": 40,
+  "fiber-stack": 44,
+  "anon-other": 1284,
+  "thread-stack": 144,
+  "libs": 5680,
+  "kernel": 8,
+  "main-stack": 40
+ },
+ "peak": {
+  "t": 0.1,
+  "cats": {
+   "binary": 2016,
+   "bss": 68,
+   "libc-heap": 40,
+   "anon-other": 7460,
+   "fiber-stack": 1204,
+   "thread-stack": 184,
+   "libs": 5680,
+   "kernel": 8,
+   "main-stack": 40
+  },
+  "total": 16700
+ },
+ "end": {
+  "binary": 2016,
+  "bss": 68,
+  "libc-heap": 40,
+  "anon-other": 7460,
+  "fiber-stack": 1204,
+  "thread-stack": 184,
+  "libs": 5680,
+  "kernel": 8,
+  "main-stack": 40
+ },
+ "end_stats": null,
+ "post_collect": {
+  "binary": 2016,
+  "bss": 68,
+  "libc-heap": 40,
+  "anon-other": 7460,
+  "fiber-stack": 1204,
+  "thread-stack": 184,
+  "libs": 5680,
+  "kernel": 8,
+  "main-stack": 40
+ },
+ "post_stats": null,
+ "samples": [
+  {
+   "t": 0.0,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 5356,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 14596
+  },
+  {
+   "t": 0.1,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.2,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.3,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.41,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.51,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.61,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.71,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.81,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 0.91,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.01,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.11,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.22,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.32,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.42,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.52,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.62,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.72,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.82,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 1.93,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.03,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.13,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.23,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.33,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.43,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.53,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.64,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.74,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.84,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 2.94,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.04,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.14,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.24,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.35,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.45,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.55,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.65,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.75,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.85,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 3.95,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.05,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.16,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.26,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.36,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.46,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.56,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.66,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.77,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.87,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 4.97,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.07,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.17,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.27,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.37,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.47,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.57,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.68,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.78,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.88,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 5.98,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.08,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.18,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.28,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.39,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.49,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.59,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.69,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.79,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.89,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 6.99,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.09,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.19,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.3,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.4,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.5,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.6,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.7,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.8,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 7.9,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.01,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.11,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.21,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.31,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.41,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.51,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.61,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.72,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.82,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 8.92,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.02,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.12,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.22,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.32,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.42,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.53,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.63,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.73,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.83,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 9.93,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  },
+  {
+   "t": 10.03,
+   "cats": {
+    "binary": 2016,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7460,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5680,
+    "kernel": 8,
+    "main-stack": 40
+   },
+   "total": 16700
+  }
+ ],
+ "gc_stats": []
+}

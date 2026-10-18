@@ -1,5 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
+# Every spec run in this file. Plain `crystal spec` except on Windows, where it
+# builds the specs under their own name in $(BIN) and runs them: `crystal
+# spec` deletes its temporary image after the run, and on the Windows runners
+# that delete races a lingering handle and fails a green step (see
+# ci/crystal-spec.sh). The env prefix also makes mingw make hand the line to a
+# shell rather than try to exec the script itself.
+CRYSTAL_SPEC = CRYSTAL="$(CRYSTAL)" BIN="$(BIN)" ci/crystal-spec.sh
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
@@ -17,13 +24,13 @@ $(BIN):
 	mkdir -p $(BIN)
 
 spec:
-	$(CRYSTAL) spec --error-trace
+	$(CRYSTAL_SPEC) --error-trace
 
 spec-process: $(BIN)
-	$(CRYSTAL) spec -Dgc_none process_spec --error-trace
+	$(CRYSTAL_SPEC) -Dgc_none process_spec --error-trace
 
 invariants:
-	GCRY_DEBUG_INVARIANTS=1 $(CRYSTAL) spec --error-trace
+	GCRY_DEBUG_INVARIANTS=1 $(CRYSTAL_SPEC) --error-trace
 
 fuzz: $(BIN)
 	$(CRYSTAL) build bench/fuzz.cr -o $(BIN)/fuzz
@@ -168,8 +175,8 @@ nursery-headers: $(BIN)
 # it found nothing on its first run, which is worth saying rather than
 # implying.
 bitmap-marks-freelist: $(BIN)
-	GCRY_BITMAP=1 $(CRYSTAL) spec -Dgcry_block_headers --error-trace
-	GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 $(CRYSTAL) spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
+	GCRY_BITMAP=1 $(CRYSTAL_SPEC) -Dgcry_block_headers --error-trace
+	GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 $(CRYSTAL_SPEC) -Dgc_none -Dgcry_block_headers process_spec --error-trace
 	$(CRYSTAL) build -Dgcry_block_headers bench/property_test.cr -o $(BIN)/property_test_marks --error-trace
 	GCRY_BITMAP=1 $(BIN)/property_test_marks --seed=1 --iterations=50000
 	$(CRYSTAL) build -Dgcry_block_headers bench/mt_property_test.cr -o $(BIN)/mt_property_test_marks --error-trace
@@ -591,7 +598,7 @@ kernels-broken:
 	  echo "         and a green run here would prove nothing. Run on a SIMD host."; \
 	  exit 1; \
 	fi
-	@out=$$($(CRYSTAL) spec spec/kernels_spec.cr -Dgcry_kernels_broken 2>&1); \
+	@out=$$($(CRYSTAL_SPEC) spec/kernels_spec.cr -Dgcry_kernels_broken 2>&1); \
 	if echo "$$out" | grep -qE '[0-9]+ examples, [1-9][0-9]* failures'; then \
 	  echo "OK: broken vector backends observed red -- $$(echo "$$out" | grep -E 'examples,' | tail -1)"; \
 	else \
@@ -602,7 +609,7 @@ kernels-broken:
 	  exit 1; \
 	fi
 	@echo "== control: unbroken kernels must pass =="
-	$(CRYSTAL) spec spec/kernels_spec.cr
+	$(CRYSTAL_SPEC) spec/kernels_spec.cr
 # The large-freelist page release computed its lower bound as `chunk.address`
 # and rounded up. A chunk base is already page-aligned, so the round-up was a
 # no-op and the range began at page 0 — the page holding that chunk's own

@@ -1,0 +1,9 @@
+2026-10-17T11:30:03.7936086Z Windows library specs (default)
+2026-10-17T11:30:22.9646120Z 297 examples, 0 failures, 0 errors, 3 pending
+2026-10-17T11:30:22.9710526Z Windows process GC specs (default)
+2026-10-17T11:32:41.1362810Z Failures:
+2026-10-17T11:32:41.1374555Z      Failure/Error: {% if @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
+2026-10-17T11:32:41.1376811Z        the Monitor never reached the hold
+2026-10-17T11:32:41.1404892Z ##[error]     # process_spec\regression\76_monitor_deep_frame_root_spec.cr:34
+2026-10-17T11:32:41.1412644Z 161 examples, 1 failures, 0 errors, 0 pending
+2026-10-17T11:32:41.3200387Z ##[error]Process completed with exit code 1.

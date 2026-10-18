@@ -1,0 +1,42 @@
+| arm | runs | rc≠0 | FAIL lines | round-1 MB median | max MB | max last−first | max round step | occupancy excess min/median/max |
+|---|---|---|---|---|---|---|---|---|
+| ctl | 100 | 0 | — | 9.6 | 16.4 | +6.8 | +6.3 | 6/7/20 |
+| hold | 100 | 0 | — | 13.6 | 15.6 | +2.0 | +1.7 | 6/7/20 |
+| hdrc | 20 | 0 | — | 19.1 | 19.9 | +0.5 | +0.3 | -1600/-1600/-1600 |
+| hdrh | 20 | 0 | — | 19.1 | 19.9 | +0.8 | +0.5 | -1600/-1600/-1600 |
+| oldc | 100 | 0 | — | 9.4 | 10.1 | +0.7 | +0.5 | — |
+| oldh | 100 | 0 | — | 14.6 | 16.1 | +1.7 | +1.5 | — |
+| red | 10 | 10 | {'growth': 10, 'occupied': 10} | 46.4 | 162.1 | +115.7 | +38.7 | 2315769/2317935/2320101 |
+| leak8 | 10 | 10 | {'occupied': 10} | 25.6 | 34.9 | +9.7 | +8.2 | 50692/51175/51200 |
+| leak64 | 10 | 10 | {'occupied': 10} | 25.4 | 31.9 | +8.5 | +7.7 | 5630/5776/5858 |
+
+- ctl rc=0: 9.6 → 10.1 → 10.1 → 16.4, occupancy excess 7, fails —
+- hold rc=0: 13.4 → 14.6 → 14.6 → 14.6, occupancy excess 7, fails —
+- hold rc=0: 13.4 → 14.9 → 15.4 → 15.4, occupancy excess 7, fails —
+- hold rc=0: 13.4 → 15.1 → 15.1 → 15.1, occupancy excess 7, fails —
+- hold rc=0: 13.4 → 14.6 → 14.6 → 14.6, occupancy excess 7, fails —
+- hold rc=0: 13.4 → 14.6 → 14.6 → 14.9, occupancy excess 7, fails —
+- hold rc=0: 13.9 → 15.4 → 15.4 → 15.4, occupancy excess 7, fails —
+- oldh rc=0: 14.1 → 15.4 → 15.4 → 15.4, occupancy excess None, fails —
+- oldh rc=0: 13.9 → 15.1 → 15.1 → 15.1, occupancy excess None, fails —
+- oldh rc=0: 14.6 → 15.1 → 15.1 → 16.1, occupancy excess None, fails —
+- oldh rc=0: 14.6 → 16.1 → 16.1 → 16.1, occupancy excess None, fails —
+- oldh rc=0: 14.4 → 14.9 → 16.1 → 16.1, occupancy excess None, fails —
+- red rc=1: 46.4 → 85.1 → 123.6 → 162.1, occupancy excess 2320101, fails ['growth', 'occupied']
+- red rc=1: 46.4 → 85.1 → 123.6 → 162.1, occupancy excess 2315769, fails ['growth', 'occupied']
+- red rc=1: 46.4 → 85.1 → 123.6 → 162.1, occupancy excess 2315769, fails ['growth', 'occupied']
+- red rc=1: 46.4 → 85.1 → 123.6 → 162.1, occupancy excess 2320101, fails ['growth', 'occupied']
+- red rc=1: 46.4 → 85.1 → 123.6 → 162.1, occupancy excess 2317935, fails ['growth', 'occupied']
+- red rc=1: 46.4 → 85.1 → 123.6 → 162.1, occupancy excess 2317935, fails ['growth', 'occupied']
+- leak8 rc=1: 26.1 → 33.4 → 34.4 → 34.9, occupancy excess 51172, fails ['occupied']
+- leak8 rc=1: 27.4 → 33.4 → 34.4 → 34.9, occupancy excess 50749, fails ['occupied']
+- leak8 rc=1: 25.4 → 33.1 → 34.4 → 34.9, occupancy excess 51198, fails ['occupied']
+- leak8 rc=1: 25.4 → 33.1 → 34.4 → 34.9, occupancy excess 51198, fails ['occupied']
+- leak8 rc=1: 26.1 → 33.1 → 34.4 → 34.9, occupancy excess 51174, fails ['occupied']
+- leak8 rc=1: 25.6 → 33.1 → 34.4 → 34.6, occupancy excess 50692, fails ['occupied']
+- leak64 rc=1: 30.6 → 31.1 → 31.4 → 31.9, occupancy excess 5751, fails ['occupied']
+- leak64 rc=1: 24.9 → 31.1 → 31.4 → 31.9, occupancy excess 5775, fails ['occupied']
+- leak64 rc=1: 26.1 → 31.1 → 31.4 → 31.9, occupancy excess 5858, fails ['occupied']
+- leak64 rc=1: 27.4 → 31.1 → 31.4 → 31.6, occupancy excess 5630, fails ['occupied']
+- leak64 rc=1: 23.4 → 31.1 → 31.4 → 31.9, occupancy excess 5778, fails ['occupied']
+- leak64 rc=1: 25.4 → 31.1 → 31.4 → 31.9, occupancy excess 5776, fails ['occupied']

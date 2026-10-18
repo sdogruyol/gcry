@@ -1,0 +1,16 @@
+diff --git a/src/gcry/collect_sweep.cr b/src/gcry/collect_sweep.cr
+index 37767a01..b673c11d 100644
+--- a/src/gcry/collect_sweep.cr
++++ b/src/gcry/collect_sweep.cr
+@@ -1533,7 +1533,10 @@ module Gcry
+         dead = o & ~m
+         freed &+= dead.popcount.to_u64
+         live &+= m.popcount.to_u64
+-        occ[i] = m
++        # SCRATCH (never committed): leave the dead blocks the compile-time
++        # mask selects occupied, so a fraction of each reclaim is never handed
++        # out again — the 2026-09-04 defect at a chosen strength.
++        occ[i] = m | (dead & {{ ((env("SCRATCH_LEAK_MASK") || "0") + "_u64").id }})
+         mark[i] = 0_u64
+         while dead != 0
+           bit = dead.trailing_zeros_count

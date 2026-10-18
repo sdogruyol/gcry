@@ -1,0 +1,92 @@
+2026-10-17T18:45:29.2270475Z === probe fixed ===
+2026-10-17T18:45:32.9999335Z monitor_probe windows aarch64 crystal=1.21.0 threads=DEFAULT-0
+2026-10-17T18:45:34.0005952Z after 1 s: transfer=63/63 increase=63/63 collect=63/63 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:45:34.0007091Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x7e69400000,0x7e69c00000) stack_top=0x7e69bffd5c threads=DEFAULT-0,IOCP,SYSMON
+2026-10-17T18:45:34.0008250Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffd1e251384 sp=0x7e69bffb30 depth=1232 image=[0x7ff6bd590000,+0x2a9000)
+2026-10-17T18:45:34.0008793Z     pc 0x7ffd1e251384
+2026-10-17T18:45:34.0008987Z     sp+288 0x7ff6bd655c64
+2026-10-17T18:45:34.0009212Z     sp+336 0x7ff6bd6eb150
+2026-10-17T18:45:34.0009404Z     sp+456 0x7ff6bd73cfac
+2026-10-17T18:45:34.0009603Z     sp+696 0x7ff6bd6eb11c
+2026-10-17T18:45:34.0009796Z     sp+720 0x7ff6bd59a570
+2026-10-17T18:45:34.0009987Z     sp+728 0x7ff6bd73cfa0
+2026-10-17T18:45:34.0010177Z     sp+736 0x7ff6bd655094
+2026-10-17T18:45:34.0010389Z     sp+792 0x7ff6bd59a564
+2026-10-17T18:45:34.0010631Z     sp+912 0x7ff6bd73cfa0
+2026-10-17T18:45:34.0010824Z     sp+928 0x7ff6bd676b4c
+2026-10-17T18:45:34.0011016Z     sp+960 0x7ff6bd592980
+2026-10-17T18:45:34.0211615Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[2, 2, 3] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x7e69befbc0", "0x7e69befb90", "0x7e69befb90"] pad=0x7e69befc20 stack_top=0x7e69bffd5c stack=[0x7e69400000,0x7e69c00000) exempt=true
+2026-10-17T18:45:34.0357253Z clamp=off: KEPT found=true free=false intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[2, 2, 2] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x7e69befc20 stack_top=0x7e69bffd5c stack=[0x7e69400000,0x7e69c00000) exempt=true
+2026-10-17T18:45:34.0359057Z end: transfer=65/65 increase=65/65 collect=65/65 last_transfer_ms_ago=4 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:45:34.0412771Z === probe fixed: exit=0
+2026-10-17T18:45:34.0421722Z === spec76 alone fixed ===
+2026-10-17T18:45:38.6255940Z 2 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:45:38.6299993Z === spec76 alone fixed: exit=0
+2026-10-17T18:45:38.6308841Z === spec77 alone fixed ===
+2026-10-17T18:45:43.4720233Z 1 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:45:43.4761095Z === spec77 alone fixed: exit=0
+2026-10-17T18:45:43.5398799Z === probe scan-nofix ===
+2026-10-17T18:45:45.9309772Z monitor_probe windows aarch64 crystal=1.21.0 threads=DEFAULT-0
+2026-10-17T18:45:46.9319948Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x43c9c00000,0x43ca400000) stack_top=0x43ca3ff71c threads=DEFAULT-0,IOCP,SYSMON
+2026-10-17T18:45:46.9321043Z after 1 s: transfer=63/63 increase=63/63 collect=63/63 last_transfer_ms_ago=1 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:45:46.9321903Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffd1e251384 sp=0x43ca3ff4f0 depth=2832 image=[0x7ff726d10000,+0x2a9000)
+2026-10-17T18:45:46.9322708Z     pc 0x7ffd1e251384
+2026-10-17T18:45:46.9322901Z     sp+288 0x7ff726dd5c7c
+2026-10-17T18:45:46.9323100Z     sp+336 0x7ff726e6b168
+2026-10-17T18:45:46.9323291Z     sp+456 0x7ff726ebcfac
+2026-10-17T18:45:46.9323489Z     sp+696 0x7ff726e6b134
+2026-10-17T18:45:46.9323679Z     sp+720 0x7ff726d1a570
+2026-10-17T18:45:46.9323865Z     sp+728 0x7ff726ebcfa0
+2026-10-17T18:45:46.9324053Z     sp+736 0x7ff726dd50ac
+2026-10-17T18:45:46.9324249Z     sp+792 0x7ff726d1a564
+2026-10-17T18:45:46.9324437Z     sp+912 0x7ff726ebcfa0
+2026-10-17T18:45:46.9324639Z     sp+928 0x7ff726df6b64
+2026-10-17T18:45:46.9324834Z     sp+960 0x7ff726d12980
+2026-10-17T18:45:46.9531772Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[2, 2, 3] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x43ca3ef550", "0x43ca3ef540", "0x43ca3ef550"] pad=0x43ca3ef5e0 stack_top=0x43ca3ff71c stack=[0x43c9c00000,0x43ca400000) exempt=true
+2026-10-17T18:45:46.9671922Z clamp=off: KEPT found=true free=false intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[2, 2, 2] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x43ca3ef5e0 stack_top=0x43ca3ff71c stack=[0x43c9c00000,0x43ca400000) exempt=true
+2026-10-17T18:45:46.9681913Z end: transfer=65/65 increase=65/65 collect=65/65 last_transfer_ms_ago=5 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:45:46.9708530Z === probe scan-nofix: exit=0
+2026-10-17T18:45:46.9717455Z === spec76 alone scan-nofix ===
+2026-10-17T18:45:50.0015808Z 2 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:45:50.0056941Z === spec76 alone scan-nofix: exit=0
+2026-10-17T18:45:50.1170852Z === spec77 alone gate-nofix ===
+2026-10-17T18:45:58.6588282Z Failures:
+2026-10-17T18:45:58.6588591Z   1) Regression: a library heap's collection does not shut the Monitor out
+2026-10-17T18:45:58.6594959Z        the Monitor gate was still closed 100 ms after a library heap's collection
+2026-10-17T18:45:58.6595991Z 1 examples, 1 failures, 0 errors, 0 pending
+2026-10-17T18:45:58.6639630Z === spec77 alone gate-nofix: exit=1
+2026-10-17T18:46:14.5037184Z 295 examples, 0 failures, 0 errors, 3 pending
+2026-10-17T18:46:58.8770125Z MONPROBE before 76 (example #161): transfer=1497/1497 increase=1497/1497 collect=1497/1497 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=27 stw_waits=0)
+2026-10-17T18:46:58.8771204Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x43b3a00000,0x43b4200000) stack_top=0x43b41ffacc threads=DEFAULT-0,IOCP,SYSMON,gc-idle
+2026-10-17T18:46:58.8772006Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffd1e251384 sp=0x43b41ff8a0 depth=1888 image=[0x7ff632d60000,+0x6f4000)
+2026-10-17T18:46:58.8772515Z     pc 0x7ffd1e251384
+2026-10-17T18:46:58.8772701Z     sp+288 0x7ff632f860b0
+2026-10-17T18:46:58.8774525Z     sp+336 0x7ff6330689b4
+2026-10-17T18:46:58.8774830Z     sp+456 0x7ff6331cfdcc
+2026-10-17T18:46:58.8775035Z     sp+696 0x7ff633068980
+2026-10-17T18:46:58.8775225Z     sp+720 0x7ff632daa8e4
+2026-10-17T18:46:58.8775413Z     sp+728 0x7ff6331cfdc0
+2026-10-17T18:46:58.8775603Z     sp+736 0x7ff632f854e0
+2026-10-17T18:46:58.8775796Z     sp+792 0x7ff632daa8d8
+2026-10-17T18:46:58.8775986Z     sp+912 0x7ff6331cfdc0
+2026-10-17T18:46:58.8776180Z     sp+928 0x7ff632faccbc
+2026-10-17T18:46:58.8776587Z     sp+960 0x7ff632d63980
+2026-10-17T18:46:58.9410095Z MONPROBE after 76: transfer=1500/1500 increase=1500/1500 collect=1500/1500 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=27 stw_waits=0)
+2026-10-17T18:46:59.3842538Z 166 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:47:02.7756369Z === is thread-local storage a root? ===
+2026-10-17T18:47:02.7966145Z === is thread-local storage a root? ===
+2026-10-17T18:47:02.8237482Z === is thread-local storage a root? ===
+2026-10-17T18:47:02.8495435Z === is thread-local storage a root? ===
+2026-10-17T18:47:06.5101917Z === does the holders search find a word that is certainly there? ===
+2026-10-17T18:47:10.7213168Z === STW capture coverage ===
+2026-10-17T18:47:14.0648339Z === is a pointer held only in an FP register a root? ===
+2026-10-17T18:47:14.0964046Z === is a pointer held only in an FP register a root? ===
+2026-10-17T18:47:14.1285448Z === is a pointer held only in an FP register a root? ===
+2026-10-17T18:47:17.2212190Z === a stale pointer below a suspended thread's SP ===
+2026-10-17T18:47:17.2685234Z === a stale pointer below a suspended thread's SP ===
+2026-10-17T18:47:17.3158682Z === a stale pointer below a suspended thread's SP ===
+2026-10-17T18:47:43.3586837Z === Summary ===
+2026-10-17T18:47:50.1359987Z === post-STW flush walk vs. mutator unmap ===
+2026-10-17T18:47:58.9637728Z === large-cache race ===
+2026-10-17T18:48:11.6382546Z === STW watchdog ===
+2026-10-17T18:48:20.0254760Z === STW chunk-index race ===

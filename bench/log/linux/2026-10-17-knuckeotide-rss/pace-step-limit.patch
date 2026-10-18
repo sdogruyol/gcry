@@ -1,0 +1,315 @@
+From 5ebcaabf607be778883459cae40275adca6b0ea2 Mon Sep 17 00:00:00 2001
+From: Serdar Dogruyol <990485+sdogruyol@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 21:18:46 +0300
+Subject: [PATCH 1/2] threshold: the floor comes down to 4 MiB where
+ collections are measured cheap
+
+---
+ spec/adaptive_threshold_spec.cr | 81 +++++++++++++++++++++++++++++++--
+ src/gcry/collect.cr             | 52 +++++++++++++++++++--
+ 2 files changed, 125 insertions(+), 8 deletions(-)
+
+diff --git a/spec/adaptive_threshold_spec.cr b/spec/adaptive_threshold_spec.cr
+index 2ad49fb2..66d04cfa 100644
+--- a/spec/adaptive_threshold_spec.cr
++++ b/spec/adaptive_threshold_spec.cr
+@@ -5,15 +5,21 @@ class Gcry::Heap
+   def threshold_pace_pct_for_spec=(pct : UInt64)
+     @threshold_pace_pct = pct
+   end
++
++  # Stands in for a measured cycle, for the same reason.
++  def cycle_cost_bytes_for_spec=(bytes : UInt64)
++    @cycle_cost_bytes = bytes
++  end
+ end
+ 
+ # The process heap sizes itself from the live set after each major
+ # collection (`Heap#adapt_after_sweep`): next threshold = live × factor,
+-# atomic bytes counted at a quarter, floored at 8 MiB on every platform and
+-# capped at 64 MiB or a third of the bytes the mark scanned × factor,
+-# whichever is larger; the warm-retention budget follows the same live ×
+-# factor, capped by the threshold, fixed or not. A library heap keeps its
+-# fixed threshold unless opted in.
++# atomic bytes counted at a quarter, floored at 8 MiB on every platform —
++# down to 4 MiB where collections are measured cheap — and capped at 64 MiB
++# or a third of the bytes the mark scanned × factor, whichever is larger;
++# the warm-retention budget follows the same live × factor, capped by the
++# threshold, fixed or not. A library heap keeps its fixed threshold unless
++# opted in.
+ describe "adaptive collection threshold" do
+   min = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
+   max = Gcry::Heap::ADAPTIVE_THRESHOLD_MAX
+@@ -168,6 +174,71 @@ describe "adaptive collection threshold" do
+     end
+   end
+ 
++  describe "floor" do
++    mib = 1024_u64 * 1024
++    low = Gcry::Heap::ADAPTIVE_THRESHOLD_LOW
++
++    it "holds collection time to a fiftieth of the mutator time, between 4 and 8 MiB" do
++      low.should eq mib * 4
++      # Unmeasured: the 8 MiB.
++      Gcry::Heap.threshold_floor(0_u64).should eq min
++      # 40 KB a cycle (Kemal `/json`, 141 µs at 280 MB/s): 2 MB would do, held at 4 MiB.
++      Gcry::Heap.threshold_floor(40_000_u64).should eq low
++      # 100 KB a cycle: 5 MB holds it to 2%.
++      Gcry::Heap.threshold_floor(100_000_u64).should eq 5_000_000_u64
++      # 170 KB or more: 8.5 MB would, so the 8 MiB, where pacing takes over.
++      Gcry::Heap.threshold_floor(170_000_u64).should eq min
++      Gcry::Heap.threshold_floor(mib * 10).should eq min
++    end
++
++    it "comes down for cheap collections only once measured, and goes back up on a releasing one" do
++      heap = Gcry::Heap.new
++      begin
++        heap.adaptive_threshold = true
++        heap.threshold_pace_max_pct = 300_u64
++        heap.collect(scan_stack: false)
++        heap.gc_threshold.should eq min
++        # A measured cheap cycle; nothing allocated since, so the next
++        # major does not measure it over.
++        heap.cycle_cost_bytes_for_spec = 40_000_u64
++        heap.collect(scan_stack: false)
++        heap.cycle_cost_bytes.should eq 40_000_u64
++        heap.gc_threshold.should eq low
++        # Expensive enough that 8 MiB is within a fiftieth: the 8 MiB.
++        heap.cycle_cost_bytes_for_spec = 200_u64 * 1024
++        heap.collect(scan_stack: false)
++        heap.gc_threshold.should eq min
++        heap.cycle_cost_bytes_for_spec = 40_000_u64
++        heap.collect(scan_stack: false, release_warm: true)
++        heap.cycle_cost_bytes.should eq 0_u64
++        heap.gc_threshold.should eq min
++      ensure
++        heap.destroy
++      end
++    end
++
++    it "is not measured with pacing off" do
++      heap = Gcry::Heap.new
++      begin
++        heap.adaptive_threshold = true
++        heap.collect(scan_stack: false)
++        # Past half the threshold: a measurable cycle, had pacing been on.
++        1536.times { heap.malloc_atomic(4096) }
++        heap.collect(scan_stack: false)
++        heap.cycle_cost_bytes.should eq 0_u64
++        heap.gc_threshold.should eq min
++
++        heap.threshold_pace_max_pct = 300_u64
++        heap.collect(scan_stack: false) # the first paced major has nothing to measure from
++        1536.times { heap.malloc_atomic(4096) }
++        heap.collect(scan_stack: false)
++        heap.cycle_cost_bytes.should be > 0_u64
++      ensure
++        heap.destroy
++      end
++    end
++  end
++
+   it "counts live large objects" do
+     heap = Gcry::Heap.new
+     begin
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index ce0b1251..7fd186a1 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -172,6 +172,43 @@ module Gcry
+       pct <= 100.0 ? 100_u64 : pct.to_u64
+     end
+ 
++    # Below the floor (`ADAPTIVE_THRESHOLD_MIN`), as far as a cheap
++    # collection allows. The 8 MiB floor is there so a tiny live set is not
++    # collected so often that the collections cost: Binarytrees, under 5 MiB
++    # live, made 259 majors at it. Where a major costs next to nothing it is
++    # RSS for nothing. Kemal `/json` collects 29 times a second at 0.4% of
++    # the wall time, 141 µs a cycle, and its peak RSS is the 8 MiB the cycle
++    # allocates plus what is live (`bench/log/linux/2026-10-17-kemal-rss/`).
++    # So once a cycle has been measured, the floor is the threshold that
++    # holds collection time to `THRESHOLD_FLOOR_TARGET_PCT` of the mutator
++    # time, between `ADAPTIVE_THRESHOLD_LOW` and the 8 MiB. A process whose
++    # collections cost more than that at 8 MiB keeps the 8 MiB and pacing
++    # exactly as before: the floor only moves below where pacing could act,
++    # since a fifth of its target can never ask for more than the pacing's.
++    # Unmeasured — pacing off (`GCRY_THRESHOLD_PACE=100`), the first major,
++    # or after a releasing collection — the floor is the 8 MiB.
++    ADAPTIVE_THRESHOLD_LOW = 4194304_u64 # 4 MiB
++    # Collection time as a percentage of the mutator time that the floor
++    # holds to, a fifth of the pacing target. At most it adds a percentage
++    # point of collection time against the 8 MiB floor (a process at 4 MiB
++    # that collected at 1% there), and only where that buys up to 4 MiB of
++    # peak RSS.
++    THRESHOLD_FLOOR_TARGET_PCT = 2.0
++    # Bytes the mutator allocates in the time one collection takes, from
++    # the last measured cycle: `allocated × cycle_ns ÷ mutator_ns`. A
++    # threshold of T costs `cycle_cost ÷ T` of the mutator time in
++    # collections. 0 until measured, and again after a releasing collection.
++    getter cycle_cost_bytes : UInt64 = 0_u64
++
++    # The adaptive threshold's floor for a measured `cycle_cost` (0:
++    # unmeasured, the 8 MiB).
++    def self.threshold_floor(cycle_cost : UInt64) : UInt64
++      return ADAPTIVE_THRESHOLD_MIN if cycle_cost == 0_u64
++      floor = cycle_cost.to_f64 * 100.0 / THRESHOLD_FLOOR_TARGET_PCT
++      return ADAPTIVE_THRESHOLD_MIN if floor >= ADAPTIVE_THRESHOLD_MIN.to_f64
++      floor <= ADAPTIVE_THRESHOLD_LOW.to_f64 ? ADAPTIVE_THRESHOLD_LOW : floor.to_u64
++    end
++
+     private def update_threshold_pace(base : UInt64, cycle_started_ns : UInt64) : UInt64
+       now = monotonic_ns
+       last = @last_major_end_ns
+@@ -189,15 +226,24 @@ module Gcry
+       return @threshold_pace_pct if cycle_started_ns == 0_u64 || last == 0_u64
+       return @threshold_pace_pct unless last < cycle_started_ns && cycle_started_ns < now
+       return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
+-      @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
+-        now - cycle_started_ns, base, @threshold_pace_max_pct)
++      mutator_ns = cycle_started_ns - last
++      cycle_ns = now - cycle_started_ns
++      @cycle_cost_bytes = (@bytes_before_gc.to_f64 * cycle_ns.to_f64 / mutator_ns.to_f64).to_u64
++      @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, mutator_ns, cycle_ns,
++        base, @threshold_pace_max_pct)
+     end
+ 
+     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
+     private def adapt_after_sweep(cycle_started_ns : UInt64 = 0_u64) : Nil
+       return unless @adaptive_threshold || @warm_retain_follows_live
+       want = schedule_live_bytes &* @adaptive_threshold_pct // 100_u64
+-      want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
++      # The cost floor from the last measured cycle; the cycle being adapted
++      # to is measured below, for the next one. A releasing collection drops
++      # the measurement with the pace, and for the same reason: it asks for
++      # the footprint back.
++      @cycle_cost_bytes = 0_u64 if @release_warm_this_collect
++      floor = @adaptive_threshold ? Heap.threshold_floor(@cycle_cost_bytes) : ADAPTIVE_THRESHOLD_MIN
++      want = floor if want < floor
+       if @adaptive_threshold
+         cap = adaptive_threshold_cap
+         if @threshold_pace_max_pct > 100_u64
+-- 
+2.53.0
+
+
+From a00d66ce7ae1bcbffc16755fbb9c2500657161fb Mon Sep 17 00:00:00 2001
+From: Serdar Dogruyol <990485+sdogruyol@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 21:38:58 +0300
+Subject: [PATCH 2/2] threshold: one cycle raises the pace by at most half
+
+---
+ spec/adaptive_threshold_spec.cr | 47 +++++++++++++++++++++++++++++++++
+ src/gcry/collect.cr             | 24 ++++++++++++++++-
+ 2 files changed, 70 insertions(+), 1 deletion(-)
+
+diff --git a/spec/adaptive_threshold_spec.cr b/spec/adaptive_threshold_spec.cr
+index 66d04cfa..ca0ea5d4 100644
+--- a/spec/adaptive_threshold_spec.cr
++++ b/spec/adaptive_threshold_spec.cr
+@@ -10,6 +10,19 @@ class Gcry::Heap
+   def cycle_cost_bytes_for_spec=(bytes : UInt64)
+     @cycle_cost_bytes = bytes
+   end
++
++  # One cycle measured as `update_threshold_pace` measures it, with the
++  # clock readings it would have taken: the last major ended `mutator_ns`
++  # + `cycle_ns` ago and this cycle's stop began `cycle_ns` ago, after
++  # `allocated` bytes (one threshold's worth, so the cycle counts).
++  def measure_pace_for_spec(allocated : UInt64, mutator_ns : UInt64, cycle_ns : UInt64,
++                            base : UInt64) : UInt64
++    now = monotonic_ns
++    @last_major_end_ns = now - mutator_ns - cycle_ns
++    @bytes_before_gc = allocated
++    @gc_threshold = allocated
++    update_threshold_pace(base, now - cycle_ns)
++  end
+ end
+ 
+ # The process heap sizes itself from the live set after each major
+@@ -314,6 +327,40 @@ describe "adaptive collection threshold" do
+       Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 50_000_000_u64, mib * 8, 300_u64).should eq 300
+     end
+ 
++    it "raises the pace by at most half per cycle, and lowers it at once" do
++      step = Gcry::Heap::THRESHOLD_PACE_STEP_PCT
++      step.should eq 150
++      Gcry::Heap.limit_pace_rise(100_u64, 300_u64, step).should eq 150
++      Gcry::Heap.limit_pace_rise(150_u64, 300_u64, step).should eq 225
++      Gcry::Heap.limit_pace_rise(225_u64, 300_u64, step).should eq 300
++      Gcry::Heap.limit_pace_rise(300_u64, 100_u64, step).should eq 100
++      Gcry::Heap.limit_pace_rise(120_u64, 130_u64, step).should eq 130
++    end
++
++    # Knuckeotide's peak (`bench/log/linux/2026-10-17-knuckeotide-rss/`):
++    # one cycle at the 8 MiB floor while a hash table was being rebuilt,
++    # 8 MiB in 2 ms against a 1.2 ms mark, measured 266% of an 18 MiB live
++    # set and put the next threshold at 48 MiB. The pace rises to 150%.
++    it "does not let one burst cycle take the pace from 100% to the maximum" do
++      heap = Gcry::Heap.new
++      begin
++        heap.adaptive_threshold = true
++        heap.threshold_pace_max_pct = 300_u64
++        heap.threshold_pace_pct.should eq 100
++        pace = heap.measure_pace_for_spec(mib * 8, 2_000_000_u64, 1_200_000_u64, mib * 18)
++        pace.should eq 150
++        heap.threshold_pace_pct.should eq 150
++        # Still expensive: it keeps climbing, 150 → 225, and to the maximum
++        # on the third (a 3 ms cycle asks for far more than 300%).
++        heap.measure_pace_for_spec(mib * 8, 2_000_000_u64, 1_200_000_u64, mib * 18).should eq 225
++        heap.measure_pace_for_spec(mib * 8, 2_000_000_u64, 3_000_000_u64, mib * 18).should eq 300
++        # A cheap cycle brings it straight back down.
++        heap.measure_pace_for_spec(mib * 8, 100_000_000_u64, 1_000_000_u64, mib * 18).should eq 100
++      ensure
++        heap.destroy
++      end
++    end
++
+     it "scales the live-sized threshold, keeps its pace across an unmeasured cycle and drops it on a releasing one" do
+       heap = Gcry::Heap.new
+       begin
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 7fd186a1..fde8b994 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -172,6 +172,27 @@ module Gcry
+       pct <= 100.0 ? 100_u64 : pct.to_u64
+     end
+ 
++    # How far one cycle may raise the pace: the next pace is at most the
++    # last one × this percentage (falling is not limited). One cycle's
++    # measurement can be a burst. Knuckeotide's hash tables grow by
++    # reallocation: the cycle after its 12-letter table died ran at the
++    # 8 MiB floor while the 18-letter one was being built, so 8 MiB went
++    # in 2 ms against a 1.2 ms mark, and the pace jumped from 100% to
++    # 240–300% of an 18 MB live set — a 43–55 MB threshold for one cycle,
++    # the run's peak: 66–81 MB against Boehm's 40–47
++    # (`bench/log/linux/2026-10-17-knuckeotide-rss/`). The next cycle was
++    # back at 100%. A program whose collections stay expensive reaches the
++    # same pace a cycle or two later: 100 → 150 → 225 → 300.
++    THRESHOLD_PACE_STEP_PCT = 150_u64
++    property threshold_pace_step_pct : UInt64 = THRESHOLD_PACE_STEP_PCT
++
++    # *paced*, held to at most *last* × *step_pct* % (never below 100%).
++    def self.limit_pace_rise(last : UInt64, paced : UInt64, step_pct : UInt64) : UInt64
++      last = 100_u64 if last < 100_u64
++      limit = last &* step_pct // 100_u64
++      paced > limit ? limit : paced
++    end
++
+     # Below the floor (`ADAPTIVE_THRESHOLD_MIN`), as far as a cheap
+     # collection allows. The 8 MiB floor is there so a tiny live set is not
+     # collected so often that the collections cost: Binarytrees, under 5 MiB
+@@ -229,8 +250,9 @@ module Gcry
+       mutator_ns = cycle_started_ns - last
+       cycle_ns = now - cycle_started_ns
+       @cycle_cost_bytes = (@bytes_before_gc.to_f64 * cycle_ns.to_f64 / mutator_ns.to_f64).to_u64
+-      @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, mutator_ns, cycle_ns,
++      paced = Heap.threshold_pace_pct(@bytes_before_gc, mutator_ns, cycle_ns,
+         base, @threshold_pace_max_pct)
++      @threshold_pace_pct = Heap.limit_pace_rise(@threshold_pace_pct, paced, @threshold_pace_step_pct)
+     end
+ 
+     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
+-- 
+2.53.0
+

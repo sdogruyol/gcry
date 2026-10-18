@@ -1,0 +1,67 @@
+# Offsets of the timed path's functions in each cross-compiled object
+v0.35.0      0x19bc0 mod64= 0 size= 1328 layout=0f5b3fa06a  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+v0.35.0      0x528d0 mod64=16 size= 1808 layout=7756014ca8  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+v0.35.0      0x592c0 mod64= 0 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+v0.35.0      0x59e20 mod64=32 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+v0.35.0      0x6b9e0 mod64=32 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+v0.35.0      0xac1d0 mod64=16 size=  136 layout=8794079107  GC_malloc_atomic
+123069c3     0x19990 mod64=16 size= 1184 layout=3cb6a49c97  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+123069c3     0x4f9f0 mod64=48 size= 1808 layout=51a8ab17d8  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+123069c3     0x563e0 mod64=32 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+123069c3     0x56f40 mod64= 0 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+123069c3     0x68b20 mod64=32 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+123069c3     0xa8d30 mod64=48 size=  136 layout=8794079107  GC_malloc_atomic
+bfe05bd3     0x19390 mod64=16 size= 1184 layout=3cb6a49c97  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+bfe05bd3     0x4f2d0 mod64=16 size= 1808 layout=51a8ab17d8  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+bfe05bd3     0x55ad0 mod64=16 size=  640 layout=196f7b7a0b  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+bfe05bd3     0x56530 mod64=48 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+bfe05bd3     0x67540 mod64= 0 size= 2720 layout=3ea65a179e  *String#tr<String, String>:String
+bfe05bd3     0xa6af0 mod64=48 size=   30 layout=baf343fff4  GC_malloc_atomic
+0a0e3165     0x194e0 mod64=32 size= 1184 layout=3cb6a49c97  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+0a0e3165     0x4f8a0 mod64=32 size= 1808 layout=51a8ab17d8  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+0a0e3165     0x55b20 mod64=32 size=  640 layout=196f7b7a0b  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+0a0e3165     0x56580 mod64= 0 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+0a0e3165     0x665f0 mod64=48 size= 2720 layout=3ea65a179e  *String#tr<String, String>:String
+0a0e3165     0xa5ba0 mod64=32 size=   30 layout=baf343fff4  GC_malloc_atomic
+f2f25ea2     0x19410 mod64=16 size= 1200 layout=7a23f7797b  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+f2f25ea2     0x50d70 mod64=48 size= 1808 layout=51a8ab17d8  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+f2f25ea2     0x571d0 mod64=16 size=  640 layout=196f7b7a0b  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+f2f25ea2     0x57c30 mod64=48 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+f2f25ea2     0x68960 mod64=32 size= 2688 layout=fca5034883  *String#tr<String, String>:String
+f2f25ea2     0xa87a0 mod64=32 size=   30 layout=baf343fff4  GC_malloc_atomic
+135495f5     0x19b30 mod64=48 size= 1232 layout=797747bae9  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+135495f5     0x50e80 mod64= 0 size= 1808 layout=2e277b4441  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+135495f5     0x58030 mod64=48 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+135495f5     0x58b90 mod64=16 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+135495f5     0x69320 mod64=32 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+135495f5     0xa9b40 mod64= 0 size=  136 layout=8794079107  GC_malloc_atomic
+b1cdc0ed     0x19b10 mod64=16 size= 1232 layout=797747bae9  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+b1cdc0ed     0x50e50 mod64=16 size= 1808 layout=2e277b4441  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+b1cdc0ed     0x58050 mod64=16 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+b1cdc0ed     0x58bb0 mod64=48 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+b1cdc0ed     0x69340 mod64= 0 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+b1cdc0ed     0xa9bf0 mod64=48 size=  136 layout=8794079107  GC_malloc_atomic
+49788b15     0x19700 mod64= 0 size= 1232 layout=797747bae9  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+49788b15     0x509f0 mod64=48 size= 1808 layout=2e277b4441  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+49788b15     0x57bf0 mod64=48 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+49788b15     0x58750 mod64=16 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+49788b15     0x68ee0 mod64=32 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+49788b15     0xa9790 mod64=16 size=  136 layout=8794079107  GC_malloc_atomic
+v0.36.0      0x19700 mod64= 0 size= 1232 layout=797747bae9  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+v0.36.0      0x509f0 mod64=48 size= 1808 layout=2e277b4441  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+v0.36.0      0x57bf0 mod64=48 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+v0.36.0      0x58750 mod64=16 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+v0.36.0      0x68ee0 mod64=32 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+v0.36.0      0xa9790 mod64=16 size=  136 layout=8794079107  GC_malloc_atomic
+4fcee559     0x19730 mod64=48 size= 1232 layout=797747bae9  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+4fcee559     0x50fe0 mod64=32 size= 1808 layout=2e277b4441  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+4fcee559     0x581d0 mod64=16 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+4fcee559     0x58d30 mod64=48 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+4fcee559     0x694c0 mod64= 0 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+4fcee559     0xa9cb0 mod64=48 size=  136 layout=8794079107  GC_malloc_atomic
+link64       0x19700 mod64= 0 size= 1232 layout=797747bae9  *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointe
+link64       0x509f0 mod64=48 size= 1808 layout=2e277b4441  *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)
+link64       0x57bf0 mod64=48 size=  480 layout=cc6a83427e  *IO::Memory@IO#write_string<Slice(UInt8)>:Nil
+link64       0x58750 mod64=16 size=  192 layout=8d60b6b224  *IO::Memory#write<Slice(UInt8)>:Nil
+link64       0x68ee0 mod64=32 size= 3120 layout=85a31a4225  *String#tr<String, String>:String
+link64       0xa9790 mod64=16 size=  136 layout=8794079107  GC_malloc_atomic

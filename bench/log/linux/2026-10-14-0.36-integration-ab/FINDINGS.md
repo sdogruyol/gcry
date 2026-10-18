@@ -32,13 +32,23 @@ large back-link commits; `table.md`, `runs.json`), Revcomp read 96% for 0.35.0
 and 97% for the branch.
 
 **Revcomp's −3 points are code placement, not the changes**
-(`attribution-table.md`, `attribution-runs.json`, 9 reps): binaries at
-`6dc6e7d`, `b1cdc0ed` and `48e7c74` read Revcomp 2.072 / 2.104 / 2.170 s, and
+(`attribution-table.md`, `attribution-runs.json`, 9 reps). Binaries at
+`6dc6e7d`, `b1cdc0ed` and `48e7c74` read Revcomp 2.072 / 2.104 / 2.170 s.
 Brainfuck, which allocates nothing and so cannot see any collector change,
-2.623 / 2.543 / 2.668 s — a 5% swing between the last two builds. Revcomp
-over Brainfuck is 0.790 / 0.827 / 0.813, against 0.798 for 0.35.0.
-[INFERENCE] The large back-link costs one store per large map and unlink,
-and Revcomp maps about 50 large chunks per run.
+read 2.623 / 2.543 / 2.668 s, a 5% swing between the last two builds.
+Revcomp over Brainfuck is 0.790 / 0.827 / 0.813, against 0.798 for 0.35.0.
+
+`../2026-10-15-revcomp-attribution/` confirms this with counts. perf has no
+counters here: the guest has no PMU and `perf_event_paranoid` is 4.
+
+- callgrind: 0.36.0 runs 0.14% *fewer* instructions on Revcomp than 0.35.0.
+  gcry's code is 2.8–3.0% of the instructions in every build. The
+  back-link's unlinks are 25 per run and walk 0 steps.
+- gcry's counters are identical across the 0.36.0 commits: 22 collections,
+  2.1–2.4 ms of total pause, 14 in-place grows.
+- v0.36.0's own source, rebuilt with 16 or 2 096 bytes of nops in front of
+  the program's code, moves Revcomp 2.144 ↔ 2.019 s (6.2%) in two sessions.
+- Revcomp's timed section is 4–5% *faster* than 0.35.0's in every session.
 
 - The JSON rows that grow buffers gain 4–5 points and lose 10–17% of peak RSS
   (in-place growth).

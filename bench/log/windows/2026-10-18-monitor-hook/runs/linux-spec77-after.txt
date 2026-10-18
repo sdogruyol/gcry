@@ -1,0 +1,6 @@
+Regression: a library heap's collection
+  does not shut the Monitor out  does not shut the Monitor out
+
+Finished in 20.83 milliseconds
+1 examples, 0 failures, 0 errors, 0 pending
+exit=0

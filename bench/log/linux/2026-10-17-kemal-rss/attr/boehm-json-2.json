@@ -1,0 +1,1678 @@
+{
+ "binary": "bin/kemal-boehm-probe",
+ "path": "/json",
+ "env": {},
+ "reqs": 43872.92,
+ "vmhwm_kb": 16564,
+ "threads": 13,
+ "idle": {
+  "binary": 2028,
+  "bss": 68,
+  "libc-heap": 40,
+  "anon-other": 1284,
+  "fiber-stack": 44,
+  "thread-stack": 144,
+  "libs": 5784,
+  "kernel": 8,
+  "main-stack": 36
+ },
+ "peak": {
+  "t": 3.15,
+  "cats": {
+   "binary": 2056,
+   "bss": 68,
+   "libc-heap": 40,
+   "fiber-stack": 1224,
+   "anon-other": 7164,
+   "thread-stack": 184,
+   "libs": 5784,
+   "kernel": 8,
+   "main-stack": 36
+  },
+  "total": 16564
+ },
+ "end": {
+  "binary": 2056,
+  "bss": 68,
+  "libc-heap": 40,
+  "fiber-stack": 1224,
+  "anon-other": 7164,
+  "thread-stack": 184,
+  "libs": 5784,
+  "kernel": 8,
+  "main-stack": 36
+ },
+ "end_stats": {
+  "prof_heap_size": 11739136,
+  "prof_free_bytes": 1499136,
+  "prof_unmapped_bytes": 0,
+  "prof_bytes_since_gc": 567392,
+  "prof_bytes_before_gc": 3824188369,
+  "prof_gc_no": 1359,
+  "prof_obtained_from_os_bytes": 12853248
+ },
+ "post_collect": {
+  "binary": 2056,
+  "bss": 68,
+  "libc-heap": 40,
+  "fiber-stack": 1224,
+  "anon-other": 7164,
+  "thread-stack": 184,
+  "libs": 5784,
+  "kernel": 8,
+  "main-stack": 36
+ },
+ "post_stats": {
+  "prof_heap_size": 11739136,
+  "prof_free_bytes": 3633152,
+  "prof_unmapped_bytes": 0,
+  "prof_bytes_since_gc": 101456,
+  "prof_bytes_before_gc": 3824866065,
+  "prof_gc_no": 1360,
+  "prof_obtained_from_os_bytes": 12853248
+ },
+ "samples": [
+  {
+   "t": 0.0,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 5364,
+    "fiber-stack": 1188,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 14728
+  },
+  {
+   "t": 0.1,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7160,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16540
+  },
+  {
+   "t": 0.2,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7160,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16540
+  },
+  {
+   "t": 0.3,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 0.41,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 0.51,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 0.61,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 0.71,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 0.81,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 0.91,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 1.02,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "anon-other": 7164,
+    "fiber-stack": 1204,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16544
+  },
+  {
+   "t": 1.12,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.22,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.32,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.42,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.52,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.63,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.73,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.83,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 1.93,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.03,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.14,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.24,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.34,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.44,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.54,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.64,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.74,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.85,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 2.95,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 3.05,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1208,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16548
+  },
+  {
+   "t": 3.15,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.25,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.36,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.46,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.56,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.66,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.76,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.86,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 3.96,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.07,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.17,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.27,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.38,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.48,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.58,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.68,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.78,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.88,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 4.98,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.09,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.19,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.29,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.39,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.49,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.6,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.7,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.8,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 5.9,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.0,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.1,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.21,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.31,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.41,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.51,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.61,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.71,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.81,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 6.92,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.02,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.12,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.22,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.32,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.43,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.53,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.63,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.73,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.83,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 7.93,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.03,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.14,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.24,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.34,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.44,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.54,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.64,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.75,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.85,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 8.95,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.05,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.15,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.25,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.36,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.46,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.56,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.66,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.76,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.86,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 9.96,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  },
+  {
+   "t": 10.07,
+   "cats": {
+    "binary": 2056,
+    "bss": 68,
+    "libc-heap": 40,
+    "fiber-stack": 1224,
+    "anon-other": 7164,
+    "thread-stack": 184,
+    "libs": 5784,
+    "kernel": 8,
+    "main-stack": 36
+   },
+   "total": 16564
+  }
+ ],
+ "gc_stats": [
+  {
+   "t": 0.0,
+   "prof_heap_size": 8777728,
+   "prof_free_bytes": 1429504,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 1607248,
+   "prof_bytes_before_gc": 910409504,
+   "prof_gc_no": 254,
+   "prof_obtained_from_os_bytes": 9891840
+  },
+  {
+   "t": 1.02,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 1634304,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 488416,
+   "prof_bytes_before_gc": 1212753729,
+   "prof_gc_no": 360,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 2.03,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 659456,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 1810672,
+   "prof_bytes_before_gc": 1513307345,
+   "prof_gc_no": 471,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 3.05,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 425984,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 2138080,
+   "prof_bytes_before_gc": 1807437825,
+   "prof_gc_no": 584,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 4.07,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 1503232,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 588640,
+   "prof_bytes_before_gc": 2104146673,
+   "prof_gc_no": 698,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 5.09,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 1564672,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 497424,
+   "prof_bytes_before_gc": 2387809937,
+   "prof_gc_no": 807,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 6.1,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 573440,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 1926496,
+   "prof_bytes_before_gc": 2663637729,
+   "prof_gc_no": 913,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 7.12,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 561152,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 1945088,
+   "prof_bytes_before_gc": 2955081409,
+   "prof_gc_no": 1025,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 8.14,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 233472,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 2402144,
+   "prof_bytes_before_gc": 3246526417,
+   "prof_gc_no": 1137,
+   "prof_obtained_from_os_bytes": 12853248
+  },
+  {
+   "t": 9.15,
+   "prof_heap_size": 11739136,
+   "prof_free_bytes": 528384,
+   "prof_unmapped_bytes": 0,
+   "prof_bytes_since_gc": 1984976,
+   "prof_bytes_before_gc": 3545768369,
+   "prof_gc_no": 1252,
+   "prof_obtained_from_os_bytes": 12853248
+  }
+ ]
+}

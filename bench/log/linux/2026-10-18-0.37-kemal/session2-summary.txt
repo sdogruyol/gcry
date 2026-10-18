@@ -1,0 +1,8 @@
+## /json
+boehm    req/s median     38556 (min 37618 max 44642, n=9)  100.0% of first arm  peak RSS   16.2 MB (1.00x)
+tip      req/s median     45129 (min 43558 max 46477, n=9)  117.0% of first arm  peak RSS   19.7 MB (1.21x)
+v036     req/s median     44960 (min 43567 max 46839, n=9)  116.6% of first arm  peak RSS   21.2 MB (1.31x)
+## /
+boehm    req/s median     76894 (min 68446 max 78549, n=9)  100.0% of first arm  peak RSS   16.1 MB (1.00x)
+tip      req/s median     81694 (min 70583 max 83959, n=9)  106.2% of first arm  peak RSS   19.7 MB (1.22x)
+v036     req/s median     84015 (min 67731 max 88106, n=9)  109.3% of first arm  peak RSS   21.2 MB (1.32x)

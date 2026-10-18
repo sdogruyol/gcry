@@ -587,7 +587,7 @@ mode `scrub_audit` was rewritten to avoid.
 
 ### Auditing the scrub — what it now answers
 
-`bench/scrub_audit.cr` (`GCRY_SCRUB_AUDIT=1`) moves the charge against
+`bench/scrub_audit.cr` (`Heap#scrub_audit_foreign_sp`) moves the charge against
 `scrub_fibers` from argument to measurement: per collection it counts the parked
 fibers scrubbed while a thread's SP was still on them, and how often the wipe
 reached at or above that SP — over live frames.
@@ -798,7 +798,7 @@ of argued.
 <details>
 <summary>Why this took a second probe (kept — the failure mode is instructive)</summary>
 
-`bench/scrub_audit.cr` (`GCRY_SCRUB_AUDIT=1`) exists to move the charge against
+`bench/scrub_audit.cr` (`Heap#scrub_audit_foreign_sp`) exists to move the charge against
 `scrub_fibers` from argument to measurement. It counts, per collection, the
 parked fibers scrubbed while a suspended thread's SP was still on them, and —
 the number that would decide it — how often the wipe window reached at or above

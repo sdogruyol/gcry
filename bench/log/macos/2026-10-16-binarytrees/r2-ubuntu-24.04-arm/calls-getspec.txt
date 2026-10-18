@@ -1,0 +1,19 @@
+     29 UInt64
+      2 malloc_usable_size@plt
+      2 calloc@plt
+      2 _exit@plt
+      2 String
+      2 Pointer(UInt8), Int32, String
+      2 Pointer(UInt8), Int32
+      2 Gcry::OutOfMemoryError
+      2 *Gcry::Heap::new:Gcry::Heap
+      1 pthread_getspecific@plt
+      1 memset@plt
+      1 __crystal_raise_overflow
+      1 UInt64, Bool, Bool
+      1 Pointer(Void), UInt64, Bool
+      1 Int32
+      1 IndexError
+      1 Gcry::Heap
+      1 *UInt64@Int#
+      1 *IndexError::new:IndexError

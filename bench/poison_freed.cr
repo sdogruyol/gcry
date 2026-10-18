@@ -153,36 +153,84 @@ def run(control : Bool) : Int32
   # So the arm is about reclaim, not about the pattern: churn, and require the
   # heap to stop growing. It runs in both arms because the plateau must hold
   # with the knob off too, or the number it is compared against means nothing.
-  keep = [] of String
-  sizes = [] of Float64
-  poisoned_before = HEAP.poisoned_blocks
-  4.times do
-    200_000.times do |i|
-      # Allocated on every iteration — the churn *is* the experiment. Putting
-      # the allocation inside the `if` (which an earlier version did) leaves
-      # 400 objects a round and the leak has nothing to leak.
-      s = "poison-arm4-#{i}-#{"p" * 24}"
-      keep << s if i % 500 == 0
-    end
-    GC.collect
-    sizes << HEAP.heap_size / 1_048_576.0
-  end
-  churned = HEAP.poisoned_blocks - poisoned_before
+  #
+  # *Stop* growing, not *never* grow, because a healthy heap may grow once.
+  # One string in 500 survives, so every chunk of their class (80 B, atomic)
+  # that a cycle fills keeps a few survivors and is never released: the heap
+  # after a round is the most such chunks any one cycle so far has needed,
+  # and a cycle is as long as the threshold. Pacing raises the threshold up
+  # to 3× when a collection costs more than a tenth of the mutator time
+  # before it, so one paced cycle steps the heap up for good, and every later
+  # round reuses what it mapped. macos-15-intel read 9.4 → 10.1 → 16.4 → 16.4
+  # MB that way (run 39073579395), and the test this replaced — last round
+  # minus first, more than 4 MB — failed it; a probe run with the same shape
+  # had the class's chunks go from 13 to 38 in the round a 300% pace made one
+  # cycle three times as long, then stay there for eight more rounds. 0.37.0's
+  # 8 MiB Darwin floor halves the mutator time between collections (a cycle
+  # every 40 960 iterations here, 80 896 at 16 MiB) without halving the
+  # collection: on the two macOS runners the control arm paced in 11 of
+  # 1 280 rounds, and in none of 800 at v0.36.0; with pacing off or the old
+  # 16 MiB floor fixed, none of 400 runs stepped. The shipped test failed 2
+  # control runs in 640 there and 7 knob-on runs in 400
+  # (`bench/log/macos/2026-10-18-poison-freed-step/`).
+  #
+  # Such a step is a running maximum: it rises only in a round whose longest
+  # cycle beats every earlier one, and no further than the paced threshold
+  # allocates — at most +7.0 MB over four rounds in 2 320 runs on those
+  # runners and the failing one, 16.9 MB the highest any round read. The
+  # defect grows the heap in *every* round by what the round allocated:
+  # +15.5 MB a round then, +38 to +41 MB a round with the stand-down restored
+  # on the 0.37.0 tree. So the heap test fails when each round after the
+  # first grew by more than 4 MB: three of those are more than 12 MB, beyond
+  # any schedule measured, and the defect clears each of them nine times over.
+  #
+  # Arms 1-3 leave garbage behind; collect it, so that the occupancy baseline
+  # below is what survives into the churn and nothing else.
+  GC.collect
+  occupied_before = occupied_blocks
+  rounds = churn_rounds(ROUNDS, COUNTERS)
+  sizes = rounds.map(&.heap_mb)
+  churned = rounds.sum(&.poisoned)
+  keep_size = rounds.last.kept
   puts "heap MB per round: #{sizes.map(&.round(1)).join(" -> ")} " \
-       "(#{keep.size} kept, #{churned} poisoned)"
-  growth = sizes.last - sizes.first
-  # ~1 600 strings stay live, so the heap has nothing to grow for. Before the
-  # fix this arm went 18.1 → 64.7 MB.
-  if growth > 4.0
-    failures << "the heap grew #{growth.round(1)} MB over four churn rounds " \
-                "(#{sizes.map(&.round(1)).join(" -> ")}) — reclaimed blocks are " \
-                "not being handed out again"
+       "(#{keep_size} kept, #{churned} poisoned)"
+  # ~1 600 strings stay live, so the heap has nothing to grow for round on
+  # round. Before the fix this arm went 18.1 → 64.7 MB.
+  deltas = (1...sizes.size).map { |i| sizes[i] - sizes[i - 1] }
+  if (least = deltas.min?) && least > 4.0
+    failures << "the heap grew by more than 4 MB in every churn round " \
+                "(#{sizes.map(&.round(1)).join(" -> ")}, at least +#{least.round(1)} MB " \
+                "each) — reclaimed blocks are not being handed out again"
+  end
+
+  # The heap reads a leak only once it outgrows what the schedule can do, and
+  # a leak that levels off never reads as one: with an eighth of every
+  # reclaim left occupied (a scratch build, FINDINGS) the chunks fill with
+  # lost blocks until the other seven eighths suffice, and the heap went
+  # 22.5 → 28.0 → 30.9 → 31.2 MB, which the test above passes. So the
+  # defect's mechanism is read as well, and that does not depend on the
+  # schedule: `occ`, the bitmap the allocator reads to call a block taken,
+  # may gain no more set bits over the churn than twice the strings kept —
+  # the margin is for a block a conservative root retains. Read after the
+  # last round's `GC.collect`, so every dead block has been swept. The tip
+  # gains the kept strings plus 5 to 20 (600 runs, Linux and both macOS
+  # runners); an eighth left occupied gains 49 000 to 52 000 more, a
+  # sixty-fourth 4 300 to 5 900 more, the defect 2.3 to 2.4 million more. The
+  # header allocator has no `occ` and reads 0, which passes.
+  occupied = rounds.map(&.occupied)
+  added = occupied.last.to_i64 - occupied_before.to_i64
+  puts "occupied blocks per round: #{occupied_before} before -> #{occupied.join(" -> ")} " \
+       "(#{keep_size} strings kept)"
+  if added > 2 * keep_size
+    failures << "#{added} more blocks are occupied after the churn than before it, for " \
+                "#{keep_size} strings kept — reclaimed blocks are staying occupied, and the " \
+                "allocator will not hand them out"
   end
   if on && churned == 0
     failures << "the knob is on and no block was poisoned during the churn, so " \
                 "this arm never exercised the sweep it is about"
   end
-  raise "the live set was collected" unless keep.all?(&.starts_with?("poison-arm4-"))
+  raise "the live set was collected" unless rounds.last.live_intact
 
   puts "poisoned blocks: #{HEAP.poisoned_blocks}"
 
@@ -203,7 +251,151 @@ def run(control : Bool) : Int32
   end
 end
 
+# One churn round's numbers, read after its closing `GC.collect`.
+record Round, heap_mb : Float64, occupied : UInt64, poisoned : UInt64, kept : Int32,
+  live_intact : Bool
+
+# Occupied blocks over every size-class chunk, popcounted from `occ`. A header
+# chunk has no `occ` and counts 0; a dormant one is skipped, its pages are
+# released and it is empty by construction.
+def occupied_blocks : UInt64
+  total = 0_u64
+  HEAP.each_chunk do |chunk|
+    next if Gcry::ChunkHeader.large?(chunk) || Gcry::ChunkHeader.dormant?(chunk)
+    total += HEAP.chunk_occupied_count(chunk)
+  end
+  total
+end
+
+# What a churn round leaves in the size-class chunks, per (class, kind), read
+# after `GC.collect` with no other thread allocating — so the chunk list is
+# stable and every chunk's `occ` is its final occupancy for the round.
+struct ClassCensus
+  property chunks = 0
+  property mapped = 0_u64
+  property occupied = 0_u64
+  property empty = 0
+  property dormant = 0
+
+  def initialize
+  end
+end
+
+# The arm-4 churn: `rounds` rounds of 200 000 strings, 1 in 500 kept.
+#
+# With `counters` it prints one `counters round=N …` line per round, in
+# key=value form so a loop of runs can be tabulated:
+#
+#   heap      `heap_size` after the round's closing `GC.collect`, MB — the
+#             number the gate reads; split below into
+#   holding   size-class chunks with at least one occupied block,
+#   empty     size-class chunks with none (dormant or still mapped), of which
+#             warm / grace / dormant are what the last sweep did with them,
+#   large     large mappings;
+#   live      the last sweep's live size-class payload;
+#   majors    collections inside the round, `GC.collect` included;
+#   peak      the largest `heap_size` seen inside the round (read every 1 024
+#             iterations);
+#   mapped / unmapped   chunks mapped and MB unmapped inside the round;
+#   cycles    for each collection the round ran into: the iteration it was
+#             first seen at, and the threshold and pace it left behind.
+#
+# and one `counters round=N class=…` line per (size class, kind) that holds
+# two chunks or more. Together they say whether a round's growth is chunks
+# that hold survivors or empty ones, and whether it came from a cycle running
+# longer than the ones before (`cycles`) or from every cycle needing fresh
+# chunks (`mapped` stays high with the heap growing round on round — the
+# 2026-09-04 defect).
+def churn_rounds(rounds : Int32, counters : Bool) : Array(Round)
+  keep = [] of String
+  out = [] of Round
+  # {iteration, threshold, pace} per collection seen inside the round.
+  cycles = [] of {Int32, UInt64, UInt64}
+  rounds.times do |r|
+    poisoned_before = HEAP.poisoned_blocks
+    majors_before = HEAP.major_collections
+    mapped_before = HEAP.chunks_mapped
+    unmapped_before = HEAP.unmapped_bytes
+    seen_majors = majors_before
+    peak = HEAP.heap_size
+    cycles.clear
+    200_000.times do |i|
+      # Allocated on every iteration — the churn *is* the experiment. Putting
+      # the allocation inside the `if` (which an earlier version did) leaves
+      # 400 objects a round and the leak has nothing to leak.
+      s = "poison-arm4-#{i}-#{"p" * 24}"
+      keep << s if i % 500 == 0
+      # Field reads every 1 024 iterations, and an append only when a
+      # collection ran — five or so a round, and only with `--counters`.
+      if counters && i & 1023 == 0
+        h = HEAP.heap_size
+        peak = h if h > peak
+        if (m = HEAP.major_collections) != seen_majors
+          cycles << {i, HEAP.gc_threshold, HEAP.threshold_pace_pct}
+          seen_majors = m
+        end
+      end
+    end
+    GC.collect
+    heap = HEAP.heap_size
+    occupied = occupied_blocks
+    out << Round.new(heap / 1_048_576.0, occupied, HEAP.poisoned_blocks - poisoned_before,
+      keep.size, keep.all?(&.starts_with?("poison-arm4-")))
+    if counters
+      print_round(r + 1, heap, peak, cycles, HEAP.major_collections - majors_before,
+        HEAP.chunks_mapped - mapped_before, HEAP.unmapped_bytes - unmapped_before)
+    end
+  end
+  out
+end
+
+private def mb(bytes : UInt64) : String
+  (bytes / 1_048_576.0).round(2).to_s
+end
+
+private def print_round(n : Int32, heap : UInt64, peak : UInt64, cycles, majors : UInt64,
+                        chunks_mapped : UInt64, unmapped : UInt64) : Nil
+  census = Hash({UInt32, Bool}, ClassCensus).new
+  holding = 0_u64
+  empty = 0_u64
+  HEAP.each_chunk do |chunk|
+    next if Gcry::ChunkHeader.large?(chunk)
+    key = {chunk.value.size_class, Gcry::ChunkHeader.atomic?(chunk)}
+    c = census[key]? || ClassCensus.new
+    c.chunks += 1
+    c.mapped += chunk.value.mapped_bytes
+    # A dormant chunk's pages are released; reading its bitmap would fault
+    # them back in, and it is empty by construction.
+    occ = Gcry::ChunkHeader.dormant?(chunk) ? 0_u64 : HEAP.chunk_occupied_count(chunk)
+    c.dormant += 1 if Gcry::ChunkHeader.dormant?(chunk)
+    c.occupied += occ
+    if occ == 0
+      c.empty += 1
+      empty += chunk.value.mapped_bytes
+    else
+      holding += chunk.value.mapped_bytes
+    end
+    census[key] = c
+  end
+  puts "counters round=#{n} heap=#{mb(heap)} holding=#{mb(holding)} empty=#{mb(empty)} " \
+       "warm=#{mb(HEAP.last_empty_warm_bytes)} grace=#{mb(HEAP.last_empty_grace_bytes)} " \
+       "dormant=#{mb(HEAP.dormant_chunk_bytes)} large=#{mb(HEAP.large_mapped_bytes)} " \
+       "live=#{mb(HEAP.size_class_live_bytes)} majors=#{majors} peak=#{mb(peak)} " \
+       "mapped=#{chunks_mapped} unmapped=#{mb(unmapped)} thr=#{mb(HEAP.gc_threshold)} " \
+       "cycles=#{cycles.map { |(i, t, p)| "#{i}/#{mb(t)}/#{p}" }.join(",")}"
+  census.to_a.sort_by { |(k, _)| {k[0], k[1] ? 1 : 0} }.each do |(k, c)|
+    next if c.chunks < 2
+    puts "counters round=#{n} class=#{k[0]}#{k[1] ? "a" : ""} " \
+         "payload=#{Gcry::SizeClasses.payload(k[0].to_i32)} chunks=#{c.chunks} " \
+         "mb=#{mb(c.mapped)} occupied=#{c.occupied} empty=#{c.empty} dormant=#{c.dormant}"
+  end
+end
+
 control = ARGV.includes?("--control")
+# Diagnostics, not part of the gate: `--counters` prints the per-round split
+# above, `--rounds N` runs N churn rounds instead of 4.
+COUNTERS = ARGV.includes?("--counters")
+ROUNDS   = (idx = ARGV.index("--rounds")) ? ARGV[idx + 1].to_i : 4
 puts "=== poison on free ==="
 puts "mode: #{control ? "control (knob off; freed payloads must keep their bytes)" : "hold (knob on)"}"
 exit run(control)

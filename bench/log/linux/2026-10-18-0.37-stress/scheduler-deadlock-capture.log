@@ -1,0 +1,322 @@
+Process-GC STW + concurrent mutation property test
+  seed=14073 iterations=400 workers=[2, 4, 8]
+  stop_the_world=true
+  bitmap_alloc=true headers=false
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=400 seed=14073
+STALLED: still running after 90 s
+--- stall capture: pid 269313, 8 thread(s)
+task 269313 stw_mt_property state=S wchan=ep_poll
+task 269317 SYSMON state=R wchan=hrtimer_nanosleep
+task 269318 stw-mt-2-0 state=R wchan=0
+task 269319 stw-mt-2-1 state=R wchan=0
+task 269320 gcry-mark state=S wchan=futex_do_wait
+task 269321 gcry-mark state=S wchan=futex_do_wait
+task 269322 gcry-mark state=S wchan=futex_do_wait
+task 269323 gc-idle state=S wchan=hrtimer_nanosleep
+--- gdb, attached through task 269313
+[New LWP 269323]
+[New LWP 269322]
+[New LWP 269321]
+[New LWP 269320]
+[New LWP 269319]
+[New LWP 269318]
+[New LWP 269317]
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.ubuntu.com>
+Enable debuginfod for this session? (y or [n]) [answered N; input not from terminal]
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+__syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+
+warning: 56	../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S: No such file or directory
+  Id   Target Id                                            Frame 
+* 1    Thread 0x721bc730dc00 (LWP 269313) "stw_mt_property" __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  2    Thread 0x721bb6ffd6c0 (LWP 269323) "gc-idle"         __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  3    Thread 0x721bb77fe6c0 (LWP 269322) "gcry-mark"       syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+  4    Thread 0x721bb7fff6c0 (LWP 269321) "gcry-mark"       syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+  5    Thread 0x721bbcdfe6c0 (LWP 269320) "gcry-mark"       syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+  6    Thread 0x721bbd5ff6c0 (LWP 269319) "stw-mt-2-1"      0x0000721bc711aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+  7    Thread 0x721bbe7ff6c0 (LWP 269318) "stw-mt-2-0"      0x0000721bc711aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+  8    Thread 0x721bc59df6c0 (LWP 269317) "SYSMON"          __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+
+Thread 8 (Thread 0x721bc59df6c0 (LWP 269317) "SYSMON"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000721bc70a030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+#2  0x0000721bc70f5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:48
+#3  0x0000721bc7103707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#4  0x000058857e8e4e95 in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:111
+#5  sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:197
+#6  run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:55
+#7  0x000058857e8e4d41 in run_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/monitor_gate.cr:270
+#8  0x000058857e8e4d29 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#9  0x000058857e8793e3 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+#10 thread_proc () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:47
+#11 -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:22
+#12 0x0000721bc70a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#13 0x0000721bc71375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 7 (Thread 0x721bbe7ff6c0 (LWP 269318) "stw-mt-2-0"):
+#0  0x0000721bc711aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+#1  0x000058857e8bffe1 in yield_current () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:56
+#2  yield () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:230
+#3  delay () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:207
+#4  0x000058857e8e2144 in resume () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:97
+#5  0x000058857e8f023e in send () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/channel.cr:150
+#6  worker_run () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:207
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:257
+#8  0x000058857e8dc878 in run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:168
+#9  0x0000000000000000 in ?? ()
+Backtrace stopped: Cannot access memory at address 0x721bbde00000
+
+Thread 6 (Thread 0x721bbd5ff6c0 (LWP 269319) "stw-mt-2-1"):
+#0  0x0000721bc711aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+#1  0x000058857e8bffe1 in yield_current () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:56
+#2  yield () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:230
+#3  delay () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:207
+#4  0x000058857e8e2144 in resume () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:97
+#5  0x000058857e8f0435 in receive () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/channel.cr:227
+#6  worker_run () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:210
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:257
+#8  0x000058857e8dc878 in run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:168
+#9  0x0000000000000000 in ?? ()
+
+Thread 5 (Thread 0x721bbcdfe6c0 (LWP 269320) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000058857e877092 in wait_on_mark_word () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:881
+#2  mark_wait () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:872
+#3  wait_for_mark_epoch () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:941
+#4  mark_worker_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:760
+#5  0x000058857e876f16 in run_mark_worker () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:139
+#6  gcry_mark_worker_main () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:43
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:172
+#8  0x0000721bc70a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000721bc71375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x721bb7fff6c0 (LWP 269321) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000058857e877092 in wait_on_mark_word () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:881
+#2  mark_wait () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:872
+#3  wait_for_mark_epoch () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:941
+#4  mark_worker_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:760
+#5  0x000058857e876f16 in run_mark_worker () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:139
+#6  gcry_mark_worker_main () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:43
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:172
+#8  0x0000721bc70a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000721bc71375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 3 (Thread 0x721bb77fe6c0 (LWP 269322) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000058857e877092 in wait_on_mark_word () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:881
+#2  mark_wait () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:872
+#3  wait_for_mark_epoch () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:941
+#4  mark_worker_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:760
+#5  0x000058857e876f16 in run_mark_worker () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:139
+#6  gcry_mark_worker_main () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:43
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:172
+#8  0x0000721bc70a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000721bc71375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x721bb6ffd6c0 (LWP 269323) "gc-idle"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000721bc70a030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+#2  0x0000721bc70f5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:48
+#3  0x0000721bc7103707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#4  0x000058857e8adaba in loop_forever () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/idle_release.cr:250
+#5  0x000058857e8ad716 in -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/idle_release.cr:169
+#6  0x000058857e8793ea in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+#7  thread_proc () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:47
+#8  -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:22
+#9  0x0000721bc70a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#10 0x0000721bc71375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 1 (Thread 0x721bc730dc00 (LWP 269313) "stw_mt_property"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000721bc70a039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x0000721bc71378b5 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x000058857e8dfc6b in wait () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/epoll.cr:49
+#5  run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/event_loop/epoll.cr:52
+#6  0x000058857e8e4677 in find_next_runnable () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:221
+#7  run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:159
+#8  -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:44
+#9  0x000058857e8dc878 in run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:168
+#10 0x0000000000000000 in ?? ()
+[Inferior 1 (process 269313) detached]
+--- innermost frames with arguments and locals
+[New LWP 269323]
+[New LWP 269322]
+[New LWP 269321]
+[New LWP 269320]
+[New LWP 269319]
+[New LWP 269318]
+[New LWP 269317]
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.ubuntu.com>
+Enable debuginfod for this session? (y or [n]) [answered N; input not from terminal]
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+__syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+
+warning: 56	../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S: No such file or directory
+
+Thread 8 (Thread 0x721bc59df6c0 (LWP 269317) "SYSMON"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+No locals.
+#1  0x0000721bc70a030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+        result = <optimized out>
+        pd = <optimized out>
+        ch = <optimized out>
+#2  0x0000721bc70f5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:48
+        r = <optimized out>
+#3  0x0000721bc7103707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+        ret = <optimized out>
+#4  0x000058857e8e4e95 in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:111
+No locals.
+#5  sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:197
+No locals.
+#6  run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:55
+No locals.
+#7  0x000058857e8e4d41 in run_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/monitor_gate.cr:270
+No locals.
+
+Thread 7 (Thread 0x721bbe7ff6c0 (LWP 269318) "stw-mt-2-0"):
+#0  0x0000721bc711aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+No locals.
+#1  0x000058857e8bffe1 in yield_current () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:56
+No locals.
+#2  yield () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:230
+No locals.
+#3  delay () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:207
+No locals.
+#4  0x000058857e8e2144 in resume () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:97
+No locals.
+#5  0x000058857e8f023e in send () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/channel.cr:150
+No locals.
+#6  worker_run () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:207
+No locals.
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:257
+No locals.
+
+Thread 6 (Thread 0x721bbd5ff6c0 (LWP 269319) "stw-mt-2-1"):
+#0  0x0000721bc711aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+No locals.
+#1  0x000058857e8bffe1 in yield_current () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:56
+No locals.
+#2  yield () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:230
+No locals.
+#3  delay () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:207
+No locals.
+#4  0x000058857e8e2144 in resume () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:97
+No locals.
+#5  0x000058857e8f0435 in receive () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/channel.cr:227
+No locals.
+#6  worker_run () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:210
+No locals.
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/bench/stw_mt_property_test.cr:257
+No locals.
+
+Thread 5 (Thread 0x721bbcdfe6c0 (LWP 269320) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+No locals.
+#1  0x000058857e877092 in wait_on_mark_word () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:881
+No locals.
+#2  mark_wait () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:872
+No locals.
+#3  wait_for_mark_epoch () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:941
+No locals.
+#4  mark_worker_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:760
+No locals.
+#5  0x000058857e876f16 in run_mark_worker () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:139
+No locals.
+#6  gcry_mark_worker_main () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:43
+No locals.
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:172
+No locals.
+
+Thread 4 (Thread 0x721bb7fff6c0 (LWP 269321) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+No locals.
+#1  0x000058857e877092 in wait_on_mark_word () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:881
+No locals.
+#2  mark_wait () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:872
+No locals.
+#3  wait_for_mark_epoch () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:941
+No locals.
+#4  mark_worker_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:760
+No locals.
+#5  0x000058857e876f16 in run_mark_worker () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:139
+No locals.
+#6  gcry_mark_worker_main () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:43
+No locals.
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:172
+No locals.
+
+Thread 3 (Thread 0x721bb77fe6c0 (LWP 269322) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+No locals.
+#1  0x000058857e877092 in wait_on_mark_word () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:881
+No locals.
+#2  mark_wait () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:872
+No locals.
+#3  wait_for_mark_epoch () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:941
+No locals.
+#4  mark_worker_loop () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:760
+No locals.
+#5  0x000058857e876f16 in run_mark_worker () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:139
+No locals.
+#6  gcry_mark_worker_main () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:43
+No locals.
+#7  -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/parallel_mark.cr:172
+No locals.
+
+Thread 2 (Thread 0x721bb6ffd6c0 (LWP 269323) "gc-idle"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+No locals.
+#1  0x0000721bc70a030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+        result = <optimized out>
+        pd = <optimized out>
+        ch = <optimized out>
+#2  0x0000721bc70f5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:48
+        r = <optimized out>
+#3  0x0000721bc7103707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+        ret = <optimized out>
+#4  0x000058857e8adaba in loop_forever () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/idle_release.cr:250
+No locals.
+#5  0x000058857e8ad716 in -> () at /home/naruto/playground/.scratch/kemal2/tip-src/src/gcry/idle_release.cr:169
+No locals.
+#6  0x000058857e8793ea in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+No locals.
+#7  thread_proc () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:47
+No locals.
+
+Thread 1 (Thread 0x721bc730dc00 (LWP 269313) "stw_mt_property"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+No locals.
+#1  0x0000721bc70a039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+        result = <optimized out>
+        pd = <optimized out>
+        ch = <optimized out>
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+        r = <optimized out>
+#3  0x0000721bc71378b5 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+No locals.
+#4  0x000058857e8dfca1 in wait () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/epoll.cr:49
+No locals.
+#5  run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/event_loop/epoll.cr:52
+No locals.
+#6  0x000058857e8e4677 in find_next_runnable () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:221
+No locals.
+#7  run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:159
+No locals.
+[Inferior 1 (process 269313) detached]
+STALL CLASSIFIED: Crystal Parallel-scheduler resume deadlock (upstream, not gcry)

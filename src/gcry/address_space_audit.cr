@@ -3,7 +3,8 @@
 # The elimination chain is complete and it ends in a contradiction. When the
 # `Deque(Fiber::Stack)` buffer is swept, its address is:
 #
-#   - not in any used heap block (`mark_audit_all_parents`, 0 reports),
+#   - not in any used heap block (the mark audit walking every used
+#     block as a parent, 0 reports; that mode was removed in 0.37.0),
 #   - not in any suspended thread's captured GP registers (0 hits),
 #   - never offered to the mark by the mutator-stack scan (0 offers),
 #   - not in the explicit root set (0),

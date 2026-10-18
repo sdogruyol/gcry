@@ -1,0 +1,10 @@
+base *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil sub    $0xce8,%rsp
+base *Gcry::Heap#mark_worker_loop:Nil sub    $0x858,%rsp
+pb64 *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil sub    $0x6e8,%rsp
+pb64 *Gcry::Heap#mark_worker_loop:Nil sub    $0x58,%rsp
+pb256 *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil sub    $0x6e8,%rsp
+pb256 *Gcry::Heap#mark_worker_loop:Nil sub    $0x58,%rsp
+pb1024 *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil sub    $0x6e8,%rsp
+pb1024 *Gcry::Heap#mark_worker_loop:Nil sub    $0x58,%rsp
+pb1024w256 *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil sub    $0x6e8,%rsp
+pb1024w256 *Gcry::Heap#mark_worker_loop:Nil sub    $0x58,%rsp

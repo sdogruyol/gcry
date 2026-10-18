@@ -1,0 +1,168 @@
+2026-10-17T18:25:38.8094514Z === probe fixed ===
+2026-10-17T18:25:45.4632307Z monitor_probe windows x86_64 crystal=1.21.0 threads=DEFAULT-0
+2026-10-17T18:25:46.4636913Z after 1 s: transfer=73/73 increase=73/73 collect=73/73 last_transfer_ms_ago=7 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:25:46.4638987Z   MONPROBE SYSMON exempt=true fiber=main stack=[0x46a3600000,0x46a3e00000) stack_top=0x46a3dff904 threads=DEFAULT-0,IOCP,SYSMON
+2026-10-17T18:25:46.4644552Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffc898a2e74 sp=0x46a3dff6b8 depth=2376 image=[0x7ff61c970000,+0x1d5000)
+2026-10-17T18:25:46.5041806Z     pc 0x7ffc898a2e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:25:46.5057816Z     sp+16 0x7ff61ca8efab new:seconds:nanoseconds D:\a\_temp\crystal-1.21.0-true-undefined\src\time\span.cr:66
+2026-10-17T18:25:46.5059661Z     sp+192 0x7ff61c9a7faa sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:104
+2026-10-17T18:25:46.5061188Z     sp+288 0x7ff61c9a7cad sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:197
+2026-10-17T18:25:46.5063306Z     sp+368 0x7ff61cace8c5 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:55
+2026-10-17T18:25:46.5064052Z     sp+672 0x7ff61c9a73c2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:25:46.5065431Z     sp+768 0x7ff61cace878 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:25:46.5066615Z     sp+800 0x7ff61c9a731c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:25:46.5070628Z     sp+816 0x7ff61c97914c -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:25:46.5077834Z     sp+856 0x7ff61cb1bf10 _real D:\a\gcry\gcry\bin\monitor_probe.exe +1752848:0
+2026-10-17T18:25:46.5078628Z     sp+864 0x7ff61c9a7184 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:25:46.5079848Z     sp+936 0x7ff61c979140 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:25:46.5080970Z     sp+1000 0x7ff61cb1bf10 _real D:\a\gcry\gcry\bin\monitor_probe.exe +1752848:0
+2026-10-17T18:25:46.5082089Z     sp+1040 0x7ff61c9a7eb5 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:25:46.5083240Z     sp+1104 0x7ff61c972359 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:25:46.5271273Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[2, 2, 3] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0x46a3def6b0", "0x46a3def700", "0x46a3def700"] pad=0x46a3def7a8 stack_top=0x46a3dff904 stack=[0x46a3600000,0x46a3e00000) exempt=true
+2026-10-17T18:25:46.5373334Z clamp=off: KEPT found=true free=false intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[2, 2, 2] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0x46a3def7a8 stack_top=0x46a3dff904 stack=[0x46a3600000,0x46a3e00000) exempt=true
+2026-10-17T18:25:46.5375526Z end: transfer=78/78 increase=78/78 collect=78/78 last_transfer_ms_ago=7 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:25:46.5429500Z === probe fixed: exit=0
+2026-10-17T18:25:46.5438243Z === spec76 alone fixed ===
+2026-10-17T18:25:52.9308717Z 1 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:25:52.9337934Z === spec76 alone fixed: exit=0
+2026-10-17T18:25:52.9751087Z === probe nofix ===
+2026-10-17T18:25:55.8530726Z monitor_probe windows x86_64 crystal=1.21.0 threads=DEFAULT-0
+2026-10-17T18:25:56.8540049Z after 1 s: transfer=75/75 increase=75/75 collect=75/75 last_transfer_ms_ago=6 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:25:56.8541538Z   MONPROBE SYSMON exempt=true fiber=main stack=[0xfa12a00000,0xfa13200000) stack_top=0xfa131ffcb4 threads=DEFAULT-0,IOCP,SYSMON
+2026-10-17T18:25:56.8542903Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffc898a2e74 sp=0xfa131ffa68 depth=1432 image=[0x7ff62f8f0000,+0x1d5000)
+2026-10-17T18:25:56.8923209Z     pc 0x7ffc898a2e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:25:56.8939414Z     sp+16 0x7ff62fa0efbb new:seconds:nanoseconds D:\a\_temp\crystal-1.21.0-true-undefined\src\time\span.cr:66
+2026-10-17T18:25:56.8941235Z     sp+192 0x7ff62f927faa sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:104
+2026-10-17T18:25:56.8943078Z     sp+288 0x7ff62f927cad sleep D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:197
+2026-10-17T18:25:56.8945559Z     sp+368 0x7ff62fa4e8d5 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:55
+2026-10-17T18:25:56.8946719Z     sp+672 0x7ff62f9273c2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:25:56.8947859Z     sp+768 0x7ff62fa4e888 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:25:56.8949497Z     sp+800 0x7ff62f92731c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:25:56.8953165Z     sp+816 0x7ff62f8f914c -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:25:56.8959750Z     sp+856 0x7ff62fa9bf10 _real D:\a\gcry\gcry\bin\monitor_probe_nofix.exe +1752848:0
+2026-10-17T18:25:56.8960553Z     sp+864 0x7ff62f927184 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:25:56.8963323Z     sp+936 0x7ff62f8f9140 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:25:56.8964217Z     sp+1000 0x7ff62fa9bf10 _real D:\a\gcry\gcry\bin\monitor_probe_nofix.exe +1752848:0
+2026-10-17T18:25:56.8965098Z     sp+1040 0x7ff62f927eb5 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:25:56.8966381Z     sp+1104 0x7ff62f8f2359 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:25:56.9060055Z clamp=on: KEPT found=true free=false intact=1 marks=3 sp_clamp_hits=[2, 2, 3] sp_clamp_fallbacks=[0, 0, 0] monitor_sp_at_mark=["0xfa131efab0", "0xfa131efa28", "0xfa131efab0"] pad=0xfa131efb58 stack_top=0xfa131ffcb4 stack=[0xfa12a00000,0xfa13200000) exempt=true
+2026-10-17T18:25:56.9135273Z clamp=off: LOST found=true free=true intact=1 marks=6 sp_clamp_hits=[1, 1, 1] sp_clamp_fallbacks=[2, 2, 2] monitor_sp_at_mark=["0x0", "0x0", "0x0"] pad=0xfa131efb58 stack_top=0xfa131ffcb4 stack=[0xfa12a00000,0xfa13200000) exempt=true
+2026-10-17T18:25:56.9137391Z end: transfer=80/80 increase=80/80 collect=80/80 last_transfer_ms_ago=5 gate(enabled=true stopped=0 busy=0 site=none blocks=0 stw_waits=0)
+2026-10-17T18:25:56.9180724Z === probe nofix: exit=0
+2026-10-17T18:25:56.9190502Z === spec76 alone nofix ===
+2026-10-17T18:26:00.4420146Z 1 examples, 0 failures, 0 errors, 0 pending
+2026-10-17T18:26:00.4454119Z === spec76 alone nofix: exit=0
+2026-10-17T18:26:18.0523477Z 297 examples, 0 failures, 0 errors, 3 pending
+2026-10-17T18:27:25.8196520Z MONPROBE stalled after example #154 'agrees with a walk of the chunks through allocation, frees, release and revival': transfer=2297/2296 increase=2296/2296 collect=2296/2296 last_transfer_ms_ago=1002 gate(enabled=true stopped=1 busy=0 site=transfer_schedulers_blocked_on_syscall blocks=112 stw_waits=0)
+2026-10-17T18:27:25.8199231Z   MONPROBE SYSMON exempt=true fiber=main stack=[0xadd3c00000,0xadd4400000) stack_top=0xadd43ffc04 threads=DEFAULT-0,IOCP,SYSMON,gc-idle
+2026-10-17T18:27:25.8200814Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffc898a2e74 sp=0xadd43ff408 depth=3064 image=[0x7ff68c870000,+0x508000)
+2026-10-17T18:27:25.8202041Z     pc 0x7ffc898a2e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:27:25.8259102Z     sp+16 0x7ff68c9c2878 bitmap_alloc_locked D:\a\gcry\gcry\src\gcry\bitmap_alloc.cr:810
+2026-10-17T18:27:25.8263063Z     sp+192 0x7ff68c94e03b nanosleep D:\a\gcry\gcry\src\gcry\platform\windows_os.cr:274
+2026-10-17T18:27:25.8277619Z     sp+224 0x7ff68c873ce0 ~Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\src\gcry\monitor_gate.cr:31
+2026-10-17T18:27:25.8280492Z     sp+232 0x7ff68cd4f72c Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +5109548:0
+2026-10-17T18:27:25.8282766Z     sp+288 0x7ff68ca9927c wait_for_open D:\a\gcry\gcry\src\gcry\monitor_gate.cr:235
+2026-10-17T18:27:25.8285582Z     sp+304 0x7ff68c9266cf get D:\a\_temp\crystal-1.21.0-true-undefined\src\atomic.cr:336
+2026-10-17T18:27:25.8287228Z     sp+384 0x7ff68ca991da enter D:\a\gcry\gcry\src\gcry\monitor_gate.cr:208
+2026-10-17T18:27:25.8289387Z     sp+416 0x7ff68c9beeb2 alloc_old_small D:\a\gcry\gcry\src\gcry\heap.cr:1953
+2026-10-17T18:27:25.8291728Z     sp+704 0x7ff68caa9baa capture_registers D:\a\gcry\gcry\src\gcry\roots.cr:242
+2026-10-17T18:27:25.8294597Z     sp+1696 0x7ff68cb4cfc0 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:25.8296642Z     sp+1728 0x7ff68cb4dc5b t_in D:\a\gcry\gcry\bench\monitor_probe_lib.cr:40
+2026-10-17T18:27:25.8298338Z     sp+1776 0x7ff68cb4cf88 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\bench\monitor_probe_lib.cr:152
+2026-10-17T18:27:25.8300216Z     sp+1824 0x7ff68cb4cda6 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:42
+2026-10-17T18:27:25.8302676Z     sp+2128 0x7ff68c92d7d2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:27:25.8304411Z     sp+2224 0x7ff68cb4ccf8 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:25.8305945Z     sp+2256 0x7ff68c92d72c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:27:25.8307380Z     sp+2272 0x7ff68c8ad9cc -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:25.8313252Z     sp+2312 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:25.8314644Z     sp+2320 0x7ff68c92d594 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:27:25.8315965Z     sp+2392 0x7ff68c8ad9c0 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:25.8317161Z     sp+2456 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:25.8318383Z     sp+2496 0x7ff68c92e385 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:27:25.8319689Z     sp+2560 0x7ff68c873b59 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:27:25.8690204Z MONPROBE running again after example #155 'unlinks a deep large chunk by its back-link': transfer=2299/2299 increase=2299/2299 collect=2299/2299 last_transfer_ms_ago=0 gate(enabled=true stopped=0 busy=0 site=none blocks=112 stw_waits=0)
+2026-10-17T18:27:26.8781505Z MONPROBE stalled after example #156 'with a thread freeing what it allocated on the hit path': transfer=2300/2299 increase=2299/2299 collect=2299/2299 last_transfer_ms_ago=992 gate(enabled=true stopped=1 busy=0 site=transfer_schedulers_blocked_on_syscall blocks=113 stw_waits=0)
+2026-10-17T18:27:26.8784530Z   MONPROBE SYSMON exempt=true fiber=main stack=[0xadd3c00000,0xadd4400000) stack_top=0xadd43ffc04 threads=DEFAULT-0,IOCP,SYSMON,gc-idle
+2026-10-17T18:27:26.8786374Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffc898a2e74 sp=0xadd43ff408 depth=3064 image=[0x7ff68c870000,+0x508000)
+2026-10-17T18:27:26.8787671Z     pc 0x7ffc898a2e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:27:26.8788960Z     sp+16 0x7ff68c9c2878 bitmap_alloc_locked D:\a\gcry\gcry\src\gcry\bitmap_alloc.cr:810
+2026-10-17T18:27:26.8789983Z     sp+192 0x7ff68c94e03b nanosleep D:\a\gcry\gcry\src\gcry\platform\windows_os.cr:274
+2026-10-17T18:27:26.8791265Z     sp+224 0x7ff68c873ce0 ~Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\src\gcry\monitor_gate.cr:31
+2026-10-17T18:27:26.8792887Z     sp+232 0x7ff68cd4f72c Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +5109548:0
+2026-10-17T18:27:26.8794649Z     sp+288 0x7ff68ca9927c wait_for_open D:\a\gcry\gcry\src\gcry\monitor_gate.cr:235
+2026-10-17T18:27:26.8795249Z     sp+304 0x7ff68c9266cf get D:\a\_temp\crystal-1.21.0-true-undefined\src\atomic.cr:336
+2026-10-17T18:27:26.8795820Z     sp+384 0x7ff68ca991da enter D:\a\gcry\gcry\src\gcry\monitor_gate.cr:208
+2026-10-17T18:27:26.8796341Z     sp+416 0x7ff68c9beeb2 alloc_old_small D:\a\gcry\gcry\src\gcry\heap.cr:1953
+2026-10-17T18:27:26.8796881Z     sp+704 0x7ff68caa9baa capture_registers D:\a\gcry\gcry\src\gcry\roots.cr:242
+2026-10-17T18:27:26.8797579Z     sp+1696 0x7ff68cb4cfc0 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:26.8798203Z     sp+1728 0x7ff68cb4dc5b t_in D:\a\gcry\gcry\bench\monitor_probe_lib.cr:40
+2026-10-17T18:27:26.8798834Z     sp+1776 0x7ff68cb4cf88 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\bench\monitor_probe_lib.cr:152
+2026-10-17T18:27:26.8799611Z     sp+1824 0x7ff68cb4cda6 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:42
+2026-10-17T18:27:26.8800362Z     sp+2128 0x7ff68c92d7d2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:27:26.8800987Z     sp+2224 0x7ff68cb4ccf8 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:26.8801645Z     sp+2256 0x7ff68c92d72c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:27:26.8802436Z     sp+2272 0x7ff68c8ad9cc -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:26.8803124Z     sp+2312 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:26.8804279Z     sp+2320 0x7ff68c92d594 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:27:26.8805642Z     sp+2392 0x7ff68c8ad9c0 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:26.8806889Z     sp+2456 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:26.8808171Z     sp+2496 0x7ff68c92e385 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:27:26.8809486Z     sp+2560 0x7ff68c873b59 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:27:31.0184934Z MONPROBE before 76 (example #161): transfer=2300/2299 increase=2299/2299 collect=2299/2299 last_transfer_ms_ago=5133 gate(enabled=true stopped=1 busy=0 site=transfer_schedulers_blocked_on_syscall blocks=113 stw_waits=0)
+2026-10-17T18:27:31.0187596Z   MONPROBE SYSMON exempt=true fiber=main stack=[0xadd3c00000,0xadd4400000) stack_top=0xadd43ffc04 threads=DEFAULT-0,IOCP,SYSMON,gc-idle
+2026-10-17T18:27:31.0189340Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffc898a2e74 sp=0xadd43ff408 depth=3064 image=[0x7ff68c870000,+0x508000)
+2026-10-17T18:27:31.0190896Z     pc 0x7ffc898a2e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:27:31.0191989Z     sp+16 0x7ff68c9c2878 bitmap_alloc_locked D:\a\gcry\gcry\src\gcry\bitmap_alloc.cr:810
+2026-10-17T18:27:31.0193092Z     sp+192 0x7ff68c94e03b nanosleep D:\a\gcry\gcry\src\gcry\platform\windows_os.cr:274
+2026-10-17T18:27:31.0194353Z     sp+224 0x7ff68c873ce0 ~Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\src\gcry\monitor_gate.cr:31
+2026-10-17T18:27:31.0195839Z     sp+232 0x7ff68cd4f72c Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +5109548:0
+2026-10-17T18:27:31.0196926Z     sp+288 0x7ff68ca9927c wait_for_open D:\a\gcry\gcry\src\gcry\monitor_gate.cr:235
+2026-10-17T18:27:31.0197682Z     sp+304 0x7ff68c9266cf get D:\a\_temp\crystal-1.21.0-true-undefined\src\atomic.cr:336
+2026-10-17T18:27:31.0198365Z     sp+384 0x7ff68ca991da enter D:\a\gcry\gcry\src\gcry\monitor_gate.cr:208
+2026-10-17T18:27:31.0200300Z     sp+416 0x7ff68c9beeb2 alloc_old_small D:\a\gcry\gcry\src\gcry\heap.cr:1953
+2026-10-17T18:27:31.0200939Z     sp+704 0x7ff68caa9baa capture_registers D:\a\gcry\gcry\src\gcry\roots.cr:242
+2026-10-17T18:27:31.0201584Z     sp+1696 0x7ff68cb4cfc0 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:31.0202246Z     sp+1728 0x7ff68cb4dc5b t_in D:\a\gcry\gcry\bench\monitor_probe_lib.cr:40
+2026-10-17T18:27:31.0202865Z     sp+1776 0x7ff68cb4cf88 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\bench\monitor_probe_lib.cr:152
+2026-10-17T18:27:31.0203591Z     sp+1824 0x7ff68cb4cda6 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:42
+2026-10-17T18:27:31.0204350Z     sp+2128 0x7ff68c92d7d2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:27:31.0205401Z     sp+2224 0x7ff68cb4ccf8 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:31.0206091Z     sp+2256 0x7ff68c92d72c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:27:31.0206897Z     sp+2272 0x7ff68c8ad9cc -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:31.0207590Z     sp+2312 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:31.0208252Z     sp+2320 0x7ff68c92d594 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:27:31.0208970Z     sp+2392 0x7ff68c8ad9c0 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:31.0209639Z     sp+2456 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:31.0210506Z     sp+2496 0x7ff68c92e385 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:27:31.0211288Z     sp+2560 0x7ff68c873b59 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:27:41.0202664Z MONPROBE 76 never reached: transfer=2300/2299 increase=2299/2299 collect=2299/2299 last_transfer_ms_ago=15134 gate(enabled=true stopped=1 busy=0 site=transfer_schedulers_blocked_on_syscall blocks=113 stw_waits=0)
+2026-10-17T18:27:41.0205176Z   MONPROBE SYSMON exempt=true fiber=main stack=[0xadd3c00000,0xadd4400000) stack_top=0xadd43ffc04 threads=DEFAULT-0,IOCP,SYSMON,gc-idle
+2026-10-17T18:27:41.0206674Z   MONPROBE SYSMON prev_suspend_count=0 getctx=1 pc=0x7ffc898a2e74 sp=0xadd43ff408 depth=3064 image=[0x7ff68c870000,+0x508000)
+2026-10-17T18:27:41.0207815Z     pc 0x7ffc898a2e74 ZwDelayExecution C:\Windows\SYSTEM32\ntdll.dll +1453684:0
+2026-10-17T18:27:41.0208882Z     sp+16 0x7ff68c9c2878 bitmap_alloc_locked D:\a\gcry\gcry\src\gcry\bitmap_alloc.cr:810
+2026-10-17T18:27:41.0209873Z     sp+192 0x7ff68c94e03b nanosleep D:\a\gcry\gcry\src\gcry\platform\windows_os.cr:274
+2026-10-17T18:27:41.0211229Z     sp+224 0x7ff68c873ce0 ~Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\src\gcry\monitor_gate.cr:31
+2026-10-17T18:27:41.0212811Z     sp+232 0x7ff68cd4f72c Gcry::MonitorGate::stopped:init D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +5109548:0
+2026-10-17T18:27:41.0213966Z     sp+288 0x7ff68ca9927c wait_for_open D:\a\gcry\gcry\src\gcry\monitor_gate.cr:235
+2026-10-17T18:27:41.0214878Z     sp+304 0x7ff68c9266cf get D:\a\_temp\crystal-1.21.0-true-undefined\src\atomic.cr:336
+2026-10-17T18:27:41.0215540Z     sp+384 0x7ff68ca991da enter D:\a\gcry\gcry\src\gcry\monitor_gate.cr:208
+2026-10-17T18:27:41.0216168Z     sp+416 0x7ff68c9beeb2 alloc_old_small D:\a\gcry\gcry\src\gcry\heap.cr:1953
+2026-10-17T18:27:41.0216858Z     sp+704 0x7ff68caa9baa capture_registers D:\a\gcry\gcry\src\gcry\roots.cr:242
+2026-10-17T18:27:41.0217670Z     sp+1696 0x7ff68cb4cfc0 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:41.0218447Z     sp+1728 0x7ff68cb4dc5b t_in D:\a\gcry\gcry\bench\monitor_probe_lib.cr:40
+2026-10-17T18:27:41.0219582Z     sp+1776 0x7ff68cb4cf88 transfer_schedulers_blocked_on_syscall D:\a\gcry\gcry\bench\monitor_probe_lib.cr:152
+2026-10-17T18:27:41.0220358Z     sp+1824 0x7ff68cb4cda6 run_loop D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:42
+2026-10-17T18:27:41.0221122Z     sp+2128 0x7ff68c92d7d2 unlock D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:141
+2026-10-17T18:27:41.0221759Z     sp+2224 0x7ff68cb4ccf8 run_loop D:\a\gcry\gcry\src\gcry\monitor_gate.cr:270
+2026-10-17T18:27:41.0222430Z     sp+2256 0x7ff68c92d72c system_name= D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:136
+2026-10-17T18:27:41.0223203Z     sp+2272 0x7ff68c8ad9cc -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:41.0223911Z     sp+2312 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:41.0224595Z     sp+2320 0x7ff68c92d594 start D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\thread.cr:249
+2026-10-17T18:27:41.0225312Z     sp+2392 0x7ff68c8ad9c0 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\fiber\execution_context\monitor.cr:19
+2026-10-17T18:27:41.0225995Z     sp+2456 0x7ff68ccdd840 _real D:\a\gcry\gcry\bin\spec_x86_64-default-process.exe +4642880:0
+2026-10-17T18:27:41.0227093Z     sp+2496 0x7ff68c92e385 thread_proc D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:41
+2026-10-17T18:27:41.0228079Z     sp+2560 0x7ff68c873b59 -> D:\a\_temp\crystal-1.21.0-true-undefined\src\crystal\system\win32\thread.cr:16
+2026-10-17T18:27:41.0230539Z Failures:
+2026-10-17T18:27:41.0241972Z      Failure/Error: {% if @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
+2026-10-17T18:27:41.0242973Z        the Monitor never reached the hold
+2026-10-17T18:27:41.0277839Z 161 examples, 1 failures, 0 errors, 0 pending

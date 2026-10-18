@@ -1,0 +1,7 @@
+Regression: the Monitor's stack below its birth
+  is scanned while a collection runs  is scanned while a collection runs
+  is scanned when the stop records neither its SP nor its registers  is scanned when the stop records neither its SP nor its registers
+
+Finished in 22.57 milliseconds
+2 examples, 0 failures, 0 errors, 0 pending
+exit=0

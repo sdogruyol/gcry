@@ -1,0 +1,21 @@
+diff --git a/src/gcry/collect_stw.cr b/src/gcry/collect_stw.cr
+index e76d2bfc..81591740 100644
+--- a/src/gcry/collect_stw.cr
++++ b/src/gcry/collect_stw.cr
+@@ -889,15 +889,7 @@ module Gcry
+       # longer keeps a thread in `add_root` / `delete_root` out — the Windows
+       # livelock of 2026-09-30. A waiter the stop then freezes still costs no
+       # one anything: a test-and-set lock goes to whoever is running.
+-      #
+-      # Only for a heap that stops the world. The gate is opened again in
+-      # `start_world`, which returns at once when the world was not stopped,
+-      # so a library heap's collection closed it and left it closed: the
+-      # Monitor sat in `MonitorGate.enter` until the process heap's next
+-      # collection, running none of its work
+-      # (`process_spec/regression/77_library_collect_monitor_gate_spec.cr`).
+-      # A heap that stops nothing has nothing to shut the Monitor out of.
+-      MonitorGate.close if @stop_the_world && !@monitor_gate_late_close
++      MonitorGate.close unless @monitor_gate_late_close
+       @roots_lock.lock_for_stop
+       @finalizers.lock_for_stw
+       slots_locked = false

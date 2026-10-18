@@ -1,7 +1,8 @@
 # Upstream draft: `raises?` is not a fixpoint, so a `rescue` can be skipped
 
 Prepared 2026-10-14 against crystal-lang/crystal master `39f3f4d` (1.22.0).
-Not filed. `crystal-raises-fixpoint.patch` (this directory) applies to it
+Filed 2026-10-14 as crystal-lang/crystal#17644 (open; no PR opened).
+`crystal-raises-fixpoint.patch` (this directory) applies to it
 unchanged.
 
 ## Issue

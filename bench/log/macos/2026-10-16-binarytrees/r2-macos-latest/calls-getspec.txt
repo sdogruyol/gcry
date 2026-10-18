@@ -1,0 +1,16 @@
+  29 UInt64
+   8 _write
+   2 String
+   2 Pointer(UInt8), Int32, String
+   2 Pointer(UInt8), Int32
+   2 Gcry::OutOfMemoryError
+   2 _*Gcry::Heap::new:Gcry::Heap
+   1 UInt64, Bool, Bool
+   1 Pointer(Void), UInt64, Bool
+   1 Int64
+   1 Int32
+   1 IndexError
+   1 Gcry::Heap
+   1 _*UInt64@Int#
+   1 _*IndexError::new:IndexError
+   1 ___crystal_raise_overflow

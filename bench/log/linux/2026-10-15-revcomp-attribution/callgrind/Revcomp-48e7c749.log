@@ -1,0 +1,32 @@
+==3892692== Callgrind, a call-graph generating cache profiler
+==3892692== Copyright (C) 2002-2017, and GNU GPL'd, by Josef Weidendorfer et al.
+==3892692== Using Valgrind-3.26.0 and LibVEX; rerun with -h for copyright info
+==3892692== Command: /home/naruto/playground/.scratch/RevcompCounters/bin/cm-48e7c749 Revcomp
+==3892692== 
+--3892692-- warning: L3 cache found, using its data for the LL simulation.
+==3892692== For interactive control, run 'callgrind_control -h'.
+Revcomp: err result=1154849210, but expected=2734405216 in 128.126s, award 1.0
+128.1262s, 1.00/1, 1.00
+==3892692== 
+==3892692== Events    : Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+==3892692== Collected : 27640423599 4455290066 1978310779 34466 28817057 29016115 25769 26196520 28562935 6255618173 172902962 15810265 1860
+==3892692== 
+==3892692== I   refs:      27,640,423,599
+==3892692== I1  misses:            34,466
+==3892692== LLi misses:            25,769
+==3892692== I1  miss rate:           0.00%
+==3892692== LLi miss rate:           0.00%
+==3892692== 
+==3892692== D   refs:       6,433,600,845  (4,455,290,066 rd + 1,978,310,779 wr)
+==3892692== D1  misses:        57,833,172  (   28,817,057 rd +    29,016,115 wr)
+==3892692== LLd misses:        54,759,455  (   26,196,520 rd +    28,562,935 wr)
+==3892692== D1  miss rate:            0.9% (          0.6%   +           1.5%  )
+==3892692== LLd miss rate:            0.9% (          0.6%   +           1.4%  )
+==3892692== 
+==3892692== LL refs:           57,867,638  (   28,851,523 rd +    29,016,115 wr)
+==3892692== LL misses:         54,785,224  (   26,222,289 rd +    28,562,935 wr)
+==3892692== LL miss rate:             0.2% (          0.1%   +           1.4%  )
+==3892692== 
+==3892692== Branches:       6,271,428,438  (6,255,618,173 cond +    15,810,265 ind)
+==3892692== Mispredicts:      172,904,822  (  172,902,962 cond +         1,860 ind)
+==3892692== Mispred rate:             2.8% (          2.8%     +           0.0%   )

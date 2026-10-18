@@ -1,0 +1,86 @@
+--- bench/kemal/src/server.cr	2026-10-16 20:45:26.731955190 +0300
++++ bench/kemal/src/server_probe.cr	2026-10-16 21:01:08.184262008 +0300
+@@ -22,6 +22,7 @@
+   HeaderPolicyExperiment.apply(Gcry.default_heap)
+ {% end %}
+ 
++require "../../log/linux/2026-10-17-kemal-rss/vma_names"
+ require "kemal"
+ require "json"
+ 
+@@ -107,6 +108,75 @@
+   end
+ {% end %}
+ 
++{% if flag?(:gc_none) %}
++  lib LibProbeMincore
++    fun mincore(addr : Void*, length : LibC::SizeT, vec : UInt8*) : Int32
++  end
++
++  # PROBE: every large chunk — mapped bytes, recorded size, atomic, allocated,
++  # resident bytes (mincore) and the first word (type id when pointerful).
++  get "/large-census" do |env|
++    env.response.content_type = "text/plain"
++    h = Gcry.default_heap
++    rows = [] of String
++    GC.disable
++    h.each_chunk do |chunk|
++      next unless Gcry::ChunkHeader.large?(chunk)
++      header = Gcry::ChunkHeader.large_header(chunk)
++      mapped = chunk.value.mapped_bytes
++      pages = (mapped + 4095) // 4096
++      vec = Pointer(UInt8).malloc(pages)
++      LibProbeMincore.mincore(chunk.as(Void*), LibC::SizeT.new(pages * 4096), vec)
++      res = 0
++      pages.times { |i| res += 1 if vec[i] & 1 != 0 }
++      data = Gcry::ChunkHeader.data_start(chunk).as(Int32*)
++      rows << "#{mapped}\t#{Gcry::BlockHeader.large_size(header)}\t#{Gcry::ChunkHeader.atomic?(chunk) ? 1 : 0}\t#{h.diag_allocated?(header) ? 1 : 0}\t#{res * 4096}\t#{data.value}"
++    end
++    GC.enable
++    "mapped\tsize\tatomic\tallocated\tresident\tword0\n" + rows.join("\n") + "\n"
++  end
++{% end %}
++
++{% if flag?(:gc_none) %}
++  get "/live-attr" do |env|
++    env.response.content_type = "application/json"
++    Gcry.live_attr_json
++  end
++{% end %}
++
++get "/tids" do |env|
++  "TCPSocket=#{TCPSocket.crystal_instance_type_id} HTTP::Server::Response=#{HTTP::Server::Response.crystal_instance_type_id} " \
++  "HTTP::Server::Context=#{HTTP::Server::Context.crystal_instance_type_id} HTTP::Request=#{HTTP::Request.crystal_instance_type_id} " \
++  "Fiber=#{Fiber.crystal_instance_type_id} HTTP::Server::Response::Output=#{HTTP::Server::Response::Output.crystal_instance_type_id}\n"
++end
++
++# PROBE: how many sockets have been finalized (both GCs).
++module SocketProbe
++  @@finalized = Atomic(Int64).new(0)
++  def self.inc; @@finalized.add(1); end
++  def self.get; @@finalized.get; end
++end
++
++class Socket
++  def finalize
++    SocketProbe.inc
++    previous_def
++  end
++end
++
++get "/sockets-finalized" do
++  "#{SocketProbe.get}\n"
++end
++
++# PROBE: GC.prof_stats on both GCs.
++get "/gc-prof" do |env|
++  env.response.content_type = "application/json"
++  p = GC.prof_stats
++  {heap_size: p.heap_size, free_bytes: p.free_bytes, unmapped_bytes: p.unmapped_bytes,
++   bytes_since_gc: p.bytes_since_gc, bytes_before_gc: p.bytes_before_gc, gc_no: p.gc_no,
++   obtained_from_os_bytes: p.obtained_from_os_bytes}.to_json
++end
++
+ # Alloc-heavy handler — closer to a real JSON API (nested objects, arrays, strings).
+ # Avoids Time formatting on the hot path (extra allocator churn / formatter state).
+ get "/json" do |env|
