@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A collection asked for with `scan_stack: false` on the process heap
+  leaves out only the caller's stack.** It left out every stack: every other
+  thread's stack and registers, its `Thread` and every parked fiber went
+  with the caller's own. A thread in its birth holds its new main `Fiber` in
+  its own frame alone until `Fiber.new` pushes it onto the fiber list, and
+  waits for that push through any stop, which holds the list's mutex; such a
+  collection freed the fiber, the push published the freed block, and the
+  next fiber walk read its next owner's bytes as `Fiber#next`. gcry starts
+  one such thread itself, the idle thread, at the end of the first
+  collection, and `make nursery-tlab-smoke`'s first `minor_collect(scan_stack:
+  false)` comes ten minors later: SIGSEGV in `Heap#scan_all_fiber_roots` at
+  `0x6c696665725f6271` on macos-latest (CI run 38975094005), "ab_refil" + 16
+  — `Fiber#running?` through a `next` holding the line the smoke had just
+  printed, built in the freed fiber's block. 1 Darwin gate run in about 460
+  in CI; on the probe runners 9 of 2 000 on macos-latest and 10 of 2 000 on
+  macos-15-intel before, 0 of 2 000 on each after (with
+  `GCRY_POISON_FREED=1`, three arm64 runs faulted on the poison itself read
+  as `next`); 0 of 1 100 on Linux before. On a stop-the-world heap
+  `scan_stack: false` now leaves out the caller's stack and nothing else; a
+  library heap keeps the old meaning, and `GC.collect` and every automatic
+  collection, which always scan every stack, are unchanged.
+  `process_spec/regression/78_scan_stack_false_unborn_fiber_spec.cr` holds
+  the fiber list's mutex so a new thread stops in that push, and collects
+  with `scan_stack: false` around it: the thread's fiber was freed in every
+  child before (majors in the default and headered layouts, minors in the
+  headered one; 120 of 120 on Linux, 300 of 300 on each macOS runner) and is
+  allocated in every child after
+  (`bench/log/macos/2026-10-19-tlab-nursery-crash/`).
+
 ## [0.37.0] - 2026-10-18
 
 ### Added
