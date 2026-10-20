@@ -2122,7 +2122,16 @@ kept finding the rest.
       0 of 10 with four. No default configuration sweeps in the
       stop: Parallel, EC4 and EC1 sweep after the world on both layouts
       (`bench/log/linux/2026-10-17-in-stop-sweep/FINDINGS.md`, which also
-      reconciles the branch's own 5-of-10-seeds count).
+      reconciles the branch's own 5-of-10-seeds count). A second hole of the
+      same shape **closed 2026-10-21**. A thread frozen while holding the lock,
+      between `bitmap_pool_candidate?` and CURSOR in `bitmap_take_pool_chunk`,
+      had its chunk made dormant by the in-stop sweep. The thread then
+      allocated into a dormant chunk, which every flush released under its
+      live objects and every revive handed out again. It failed 1 in 100
+      `claim_stress` in-stop runs, and 20 of 20 with that window widened, on
+      0.37.0's tree too. Dormancy now declines along with the relink
+      (`stop_sweep_dormant_declined`, `process_spec/regression/80`,
+      `bench/log/linux/2026-10-21-claim-counter-drift/`).
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which
