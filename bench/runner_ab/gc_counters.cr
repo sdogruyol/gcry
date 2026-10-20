@@ -1,8 +1,10 @@
-# crystal-metric entry point that prints the default heap's counters at exit,
-# for `AB_STATS` in bench/runner_ab/ab.sh (copied over crystal-metric's
-# `main.cr`, so `./metric` is the benchmark). One `GCSTATS name=value ...` line
-# on stderr. A counter an older revision lacks is left out rather than failing
-# the build, so `base` can be any release this harness measures against.
+# Prints the default heap's counters at exit, for `AB_STATS` in
+# bench/runner_ab/ab.sh, which puts this file in front of the entry file of a
+# counter build (`COUNTERS=1`: crystal-metric's `main.cr`, Kemal's
+# `server.cr`). One `GCSTATS name=value ...` line on stderr. A counter an
+# older revision lacks is left out rather than failing the build, so `base`
+# can be any release this harness measures against. Kemal stops on SIGTERM and
+# returns from `Kemal.run`, so the hook runs there too.
 #
 # Built apart from the timing binaries: the extra code moves where the rest
 # lands, and the counters, unlike the time, don't depend on that.
@@ -25,5 +27,3 @@ at_exit do
   STDERR.print " os_mapped_bytes=", Gcry.os_mapped_bytes if Gcry.responds_to?(:os_mapped_bytes)
   STDERR.print "\n"
 end
-
-require "./metric"

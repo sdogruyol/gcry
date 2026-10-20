@@ -20,19 +20,22 @@ name: Perf A/B
 #
 # On Windows the script runs under Git Bash with the native crystal.exe, and
 # memory is PeakWorkingSetSize, not RSS (bench/runner_ab/ab.py). `kemal_trials`
-# above 0 also runs Kemal `/json` and `/` under wrk with the same three arms
-# (Linux and macOS only; Windows has no wrk and skips it).
+# above 0 also runs Kemal under wrk with the same arms (Linux and macOS only;
+# Windows has no wrk and skips it), on the routes in `kemal_paths` (default
+# `/json,/`). `benches=-` skips crystal-metric, for a Kemal-only run.
 # `var_env` adds a fourth arm, the ref's binary under extra environment
 # (`-f var_env=GCRY_REALLOC_IN_PLACE=0`), to attribute a change to one default.
 # `pads` adds placement probes: one arm per byte count, the ref's source built
 # with that many bytes of nops in front of the benchmarks' code (`16`, arm
 # `pad16`) or, with a `p`, of all the program's code, the collector's
-# included (`p16`, arm `prepad16`): `-f pads="16 2096 p16 p2096"`. The arms
-# differ only in where code lands (bench/runner_ab/ab.sh, `build`).
+# included (`p16`, arm `prepad16`): `-f pads="16 2096 p16 p2096"`. A leading
+# `b` pads `base` instead (`bp16`, arm `baseprepad16`). The arms differ only
+# in where code lands (bench/runner_ab/ab.sh, `prep`); Kemal gets them too.
 # `stats` runs a counter-printing build of `base` and `var` that many times
-# per bench and writes the heap's counters at exit to gc-counters.txt. Every
-# run records user and kernel time and page faults; `syms/` holds each
-# binary's symbol table (`nm`, or the link map on Windows).
+# per bench (and per Kemal route) and writes the heap's counters at exit to
+# gc-counters.txt (kemal-gc-counters.txt). Every run records user and kernel
+# time and page faults; `syms/` holds each binary's symbol table (`nm`, or
+# the link map on Windows).
 on:
   workflow_dispatch:
     inputs:
@@ -43,7 +46,7 @@ on:
         description: "Interleaved repetitions per benchmark"
         default: "10"
       benches:
-        description: "crystal-metric benchmarks, space-separated"
+        description: "crystal-metric benchmarks, space-separated (- = none)"
         default: "Primes JsonParsePure Binarytrees JsonGenerate"
       os:
         description: 'Runners, as a JSON list, e.g. ["macos-latest","windows-latest"]'
@@ -52,13 +55,16 @@ on:
         description: "Also build and run a stock-Crystal (Boehm) arm: 1 or 0"
         default: "1"
       kemal_trials:
-        description: "Kemal /json and / A/B trials per arm (0 = skip; not on Windows)"
+        description: "Kemal A/B trials per arm (0 = skip; not on Windows)"
         default: "0"
+      kemal_paths:
+        description: "Kemal routes, comma-separated"
+        default: "/json,/"
       var_env:
         description: 'Extra arm: the ref under this environment, e.g. "GCRY_REALLOC_IN_PLACE=0" (empty = none)'
         default: ""
       pads:
-        description: 'Placement probes: nop bytes ahead of the benches ("16") or of all code ("p16"), one arm each (empty = none)'
+        description: 'Placement probes: nop bytes ahead of the benches ("16") or of all code ("p16"); "b" pads base ("bp16"); one arm each'
         default: ""
       stats:
         description: "GC counter runs per bench of base and var (0 = skip)"
@@ -107,6 +113,7 @@ jobs:
           AB_PADS: ${{ inputs.pads }}
           AB_STATS: ${{ inputs.stats }}
           AB_KEMAL_TRIALS: ${{ runner.os != 'Windows' && inputs.kemal_trials || '0' }}
+          AB_KEMAL_PATHS: ${{ inputs.kemal_paths }}
           AB_OUT: bench/log/_ab
         run: bench/runner_ab/ab.sh
       - if: always()
