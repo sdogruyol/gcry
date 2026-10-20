@@ -28,8 +28,10 @@ require "spec"
 # block the idle thread's main fiber had been allocated in. The smoke's
 # `minor_collect(scan_stack: false)` in `claim_probe` had run while the idle
 # thread, started by the smoke's first minor, was in its birth. 1 of about
-# 460 Darwin runs of that gate in CI; Linux starts the thread fast enough to
-# be past the push by then (bench/log/macos/2026-10-19-tlab-nursery-crash/).
+# 460 Darwin runs of that gate in CI; 19 of 4 000 on the two macOS runners
+# and 0 of 4 000 with the fix; never in 1 100 runs on Linux, where the new
+# thread is presumably past the push long before
+# (bench/log/macos/2026-10-19-tlab-nursery-crash/).
 #
 # Not specific to the nursery or to the headered layout: any collection with
 # `scan_stack: false` on the process heap, a major in the default layout
@@ -43,8 +45,8 @@ require "spec"
 # `scan_stack: false` while the thread waits. Then the holder lets go and the
 # new thread asks whether its own main fiber is still an allocated block
 # whose stack is its own. Before the fix it was free in every run, majors in
-# both layouts and minors in the headered one; after it, allocated in every
-# run.
+# both layouts and minors in the headered one (120 of 120 children on Linux,
+# 300 of 300 on each macOS runner); after it, allocated in every run.
 #
 # A process of its own: the walk after a freed fiber's push reads freed
 # memory, and the parent's other examples must not inherit that.
@@ -163,7 +165,7 @@ private module UnbornFiber
 end
 
 describe "Regression: scan_stack: false skips only the caller's stack" do
-  {% for kind in %w(major minor) %}
+  {% for kind in %w[major minor] %}
     it "keeps a thread's main fiber allocated in its birth across a {{kind.id}}" do
       captured = IO::Memory.new
       status = Process.run(Process.executable_path.not_nil!, ["-e", "unborn-fiber child"],
