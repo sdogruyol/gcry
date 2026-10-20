@@ -68,6 +68,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A sweep inside the stop no longer makes a chunk dormant under a thread
+  taking it.** A cursor takes a chunk from its class's pool in one hold of
+  the chunk list lock. It checks that the chunk is free to take (not
+  dormant, no cursor on it, a free block), then marks it as a cursor's. A
+  stop that froze a thread between the two could find the chunk empty, and
+  its in-stop sweep then made it dormant. The thread took the dormant chunk
+  on resuming and allocated into it. After that, every collection released
+  the chunk's pages under its live objects, which then read zero on Linux.
+  No sweep reclaimed the chunk. The next revive zeroed its occupancy and
+  handed its blocks out a second time. `live_objects` and `free_bytes`
+  kept its blocks while every walk counted it empty. This happened in
+  0.37.0 and earlier too. It needed another mutator thread, a sweep inside
+  the stop (`GCRY_DISABLE_LAZY_SWEEP=1`, `GCRY_PAGE_DONTNEED=1`, or the
+  finishing slice of `GCRY_INCREMENTAL=1`), and that sweep making empties
+  dormant (a multi-mutator `GC.collect`, or a dormant budget). The default
+  after-world sweep holds the class lock the taker holds, and was never
+  affected. When a frozen thread holds the list lock, the in-stop sweep now
+  keeps empty chunks awake, as it already keeps the list as it is.
+  `make claim-stress`'s in-stop arm showed it as drift of exactly one
+  class-4 chunk of `select` garbage (live −1632, free +130 560 bytes) in 1
+  run of 100. Here it showed in 1 of 112 runs with 9 live stamped blocks
+  zeroed, and in 2 of 100 on 0.37.0's tree. With the window widened to
+  50 µs it showed in 20 of 20 on both trees, with blocks zeroed and blocks
+  handed out twice. After the fix: 0 of 40 widened, 0 of 200 in-stop and
+  0 of 100 lazy. The harness also fails a run that ends with a dormant
+  chunk holding blocks.
+  `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr` parks a
+  taker in the window across a collection. Before, the chunk it got was
+  dormant and its live block's last page read zero after the next
+  collection; after, the chunk is awake and intact
+  (`bench/log/linux/2026-10-21-claim-counter-drift/`).
+
 - **The thread-staging spec no longer depends on which specs ran before
   it.** "process GC thread staging records every thread it creates"
   asserted the process-wide `staged_overflows` was 0. `crystal spec`
