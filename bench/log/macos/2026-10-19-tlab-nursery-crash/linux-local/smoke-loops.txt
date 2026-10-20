@@ -1,0 +1,8 @@
+# bin/nursery_tlab_smoke, GCRY_BITMAP_ALLOC=0, 12-CPU x86_64 QEMU guest, Crystal 1.21.0
+# base = release-0.38.0 tip 16b7e67c; fixed = a00f5c47 (base + scan_stack fix). poison = GCRY_SEGV_REPORT=1 GCRY_POISON_FREED=1
+plain: n=300 pass=300 fail=0
+poison: n=300 pass=300 fail=0
+fixed_plain: n=300 pass=300 fail=0
+fixed_poison: n=300 pass=300 fail=0
+base taskset -c 0 (one CPU): n=300 pass=300 fail=0
+base taskset -c 0 with three busy loops pinned to CPU 0: n=200 pass=200 fail=0

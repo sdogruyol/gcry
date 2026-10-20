@@ -1,0 +1,68 @@
+name: CI
+
+# PROBE ONLY (never merged): rate of the nursery-tlab-smoke SIGSEGV in
+# scan_all_fiber_roots seen on run 38975094005 job 117222511786.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "serial runs per arm"
+        default: "1000"
+      par:
+        description: "concurrent loops in the parallel arm (0 skips it)"
+        default: "4"
+      par_runs:
+        description: "runs per concurrent loop"
+        default: "300"
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+        base: ["233b3ad6", "release"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    name: probe (${{ matrix.os }}, ${{ matrix.base }})
+    env:
+      RUNS: ${{ inputs.runs }}
+      PAR: ${{ inputs.par }}
+      PAR_RUNS: ${{ inputs.par_runs }}
+      BASE: ${{ matrix.base }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build at base
+        run: |
+          if [ "$BASE" != "release" ]; then git checkout "$BASE" -- src bench Makefile; fi
+          git log -1 --format=%H
+          mkdir -p bin plog
+          crystal build -Dgc_none -Dgcry_block_headers bench/nursery_tlab_smoke.cr -o bin/nursery_tlab_smoke
+      - name: Loop
+        run: |
+          arm() { # tag n env...
+            tag=$1; n=$2; shift 2; pass=0; fail=0
+            for i in $(seq 1 "$n"); do
+              env GCRY_BITMAP_ALLOC=0 "$@" bin/nursery_tlab_smoke > "plog/$tag.$i" 2>&1; rc=$?
+              if [ $rc -eq 0 ]; then pass=$((pass+1)); rm -f "plog/$tag.$i"; else fail=$((fail+1)); echo "$tag run $i rc=$rc" >> plog/fails.txt; fi
+            done
+            echo "$tag: n=$n pass=$pass fail=$fail" | tee -a plog/summary.txt
+          }
+          arm plain "$RUNS"
+          arm segv_poison "$RUNS" GCRY_SEGV_REPORT=1 GCRY_POISON_FREED=1
+          if [ "$PAR" -gt 0 ]; then
+            for k in $(seq 1 "$PAR"); do arm "par$k" "$PAR_RUNS" GCRY_SEGV_REPORT=1 & done
+            wait
+          fi
+          echo "=== summary ($BASE, ${{ matrix.os }}) ==="; cat plog/summary.txt
+          for f in plog/*.*; do case "$f" in plog/summary.txt|plog/fails.txt) ;; *) echo "--- $f"; cat "$f";; esac; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plog-${{ matrix.os }}-${{ matrix.base }}
+          path: plog

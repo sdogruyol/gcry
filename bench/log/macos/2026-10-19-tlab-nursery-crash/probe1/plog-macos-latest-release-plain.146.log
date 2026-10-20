@@ -1,0 +1,19 @@
+=== nursery + TLAB minor ===
+bitmap_alloc=false tlab=true nursery=true stw=true
+
+  claim_probe: free_after_minor=true free_after_major=true minors=12 tlab_hits=32 tlab_refills=9
+  PASS minor left the FREE node on the stack FREE
+  PASS major left the FREE node on the stack FREE
+Invalid memory access (signal 11) at address 0x6c696665725f6271
+[0x100c15c10] *Exception::CallStack::print_backtrace:Nil +112 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100bf9b6c] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/signal.cr:180 +276 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x18b4bd744] _sigtramp +56 in /usr/lib/system/libsystem_platform.dylib
+[0x100c4ec34] *Gcry::Heap#scan_all_fiber_roots:Nil +328 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke (2 times)
+[0x100c433fc] *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil +2624 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100c42118] *Gcry::Heap#run_collection<Bool, Bool, Nil, Bool, Bool, Bool>:Nil +104 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100c874c8] *Gcry::Heap#collect:scan_stack<Bool>:Nil +452 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100bfc384] *released_chunk_probe<Gcry::Heap>:Tuple(Int32, Bool, Bool) +140 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100bf12c0] __crystal_main +2912 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100cebcd0] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +12 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100cebc1c] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +64 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x100bf9750] main +32 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke

@@ -1,0 +1,23 @@
+2026-10-16T22:26:33.0642530Z crystal build -Dgc_none -Dgcry_block_headers bench/nursery_tlab_smoke.cr -o bin/nursery_tlab_smoke --error-trace
+2026-10-16T22:26:37.4855710Z GCRY_BITMAP_ALLOC=0 bin/nursery_tlab_smoke
+2026-10-16T22:26:37.4945030Z === nursery + TLAB minor ===
+2026-10-16T22:26:37.4946630Z bitmap_alloc=false tlab=true nursery=true stw=true
+2026-10-16T22:26:37.4948760Z 
+2026-10-16T22:26:37.7499450Z   claim_probe: free_after_minor=true free_after_major=true minors=12 tlab_hits=32 tlab_refills=10
+2026-10-16T22:26:37.7502280Z   PASS minor left the FREE node on the stack FREE
+2026-10-16T22:26:37.7503180Z   PASS major left the FREE node on the stack FREE
+2026-10-16T22:26:37.7680930Z Invalid memory access (signal 11) at address 0x6c696665725f6271
+2026-10-16T22:26:37.7694350Z [0x102559c70] *Exception::CallStack::print_backtrace:Nil +112 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7697560Z [0x10253dbcc] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/signal.cr:180 +276 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7806280Z [0x1851d9744] _sigtramp +56 in /usr/lib/system/libsystem_platform.dylib
+2026-10-16T22:26:37.7807080Z [0x102593374] *Gcry::Heap#scan_all_fiber_roots:Nil +340 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke (2 times)
+2026-10-16T22:26:37.7808530Z [0x1025879c8] *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil +2624 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7809640Z [0x1025866e4] *Gcry::Heap#run_collection<Bool, Bool, Nil, Bool, Bool, Bool>:Nil +116 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7810490Z [0x1025cb93c] *Gcry::Heap#collect:scan_stack<Bool>:Nil +500 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7811280Z [0x1025403e4] *released_chunk_probe<Gcry::Heap>:Tuple(Int32, Bool, Bool) +140 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7811910Z [0x1025352c0] __crystal_main +2912 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7812520Z [0x102630cf8] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +12 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7813440Z [0x102630c44] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +64 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7814170Z [0x10253d7b0] main +32 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+2026-10-16T22:26:37.7814520Z make: *** [nursery-tlab-smoke] Error 11
+2026-10-16T22:26:37.7916150Z ##[error]Process completed with exit code 2.

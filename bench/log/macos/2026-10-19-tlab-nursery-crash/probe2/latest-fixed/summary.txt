@@ -1,0 +1,12 @@
+spec78 fixed default [GCRY_BITMAP_ALLOC=1] major: freed=0 kept=50 other=0 n=50
+spec78 fixed default [GCRY_BITMAP_ALLOC=0] major: freed=0 kept=50 other=0 n=50
+spec78 fixed hdr [GCRY_BITMAP_ALLOC=1] major: freed=0 kept=50 other=0 n=50
+spec78 fixed hdr [GCRY_BITMAP_ALLOC=0] major: freed=0 kept=50 other=0 n=50
+spec78 fixed hdr [GCRY_BITMAP_ALLOC=1] minor: freed=0 kept=50 other=0 n=50
+spec78 fixed hdr [GCRY_BITMAP_ALLOC=0] minor: freed=0 kept=50 other=0 n=50
+smoke fixed plain: n=1000 pass=1000 fail=0
+smoke fixed segv_poison: n=1000 pass=1000 fail=0
+smoke fixed par4: n=300 pass=300 fail=0
+smoke fixed par1: n=300 pass=300 fail=0
+smoke fixed par3: n=300 pass=300 fail=0
+smoke fixed par2: n=300 pass=300 fail=0
