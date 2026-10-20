@@ -830,6 +830,13 @@ jobs:
         run: |
           make counter-loss
 
+      # The allocation entry's frame is live across every collection an
+      # allocation triggers; a buffer in it that nothing writes is read as
+      # roots (process_spec regression/79, release build).
+      - name: No unwritten buffer in the allocation entry frame
+        run: |
+          make alloc-entry-frame
+
       # The guard's ledger, end to end: a fault into a chunk gcry released must
       # be named — base, size, release path, collection — rather than reported
       # as an address. That reporting is what turns one sighting a week into a

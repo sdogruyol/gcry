@@ -290,12 +290,26 @@ module GC
   FORK_POISON_EXIT = 69
 
   private def self.check_fork_poison! : Nil
-    if @@after_fork_child
-      buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
-      n = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: GC after fork is unsupported without atfork reinit (unset GCRY_DISABLE_ATFORK); see docs/POLICY.md\n")
-      Gcry::RawOut.flush(buf.to_unsafe, n)
-      LibC._exit(FORK_POISON_EXIT)
-    end
+    fork_poison_exit if @@after_fork_child
+  end
+
+  # Out of line on purpose. `check_fork_poison!` is inlined into `GC.malloc`
+  # and `GC.malloc_atomic`, and with this buffer inline every allocation entry
+  # carried `RawOut::LIMIT` bytes of stack that nothing on the normal path
+  # writes. That frame is live across every collection an allocation
+  # triggers, and the conservative scan read those bytes as roots: whatever
+  # deeper calls had left at that depth was kept. On crystal-metric
+  # JsonParsePull, built with the occupancy claim (which inlines
+  # `Heap#malloc_atomic` there), one such word kept a dead 33.5 MB buffer
+  # through one more collection, and the run unmapped and faulted again
+  # 25 MB more (+4.8% page faults). The frame went from 0x258 to 0x78
+  # bytes. `make alloc-entry-frame` (process_spec regression/79) is the gate.
+  @[NoInline]
+  private def self.fork_poison_exit : NoReturn
+    buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
+    n = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: GC after fork is unsupported without atfork reinit (unset GCRY_DISABLE_ATFORK); see docs/POLICY.md\n")
+    Gcry::RawOut.flush(buf.to_unsafe, n)
+    LibC._exit(FORK_POISON_EXIT)
   end
 
   # Root-completeness profile (GCRY_SOUND=1). See docs/SOUND-DEFAULTS.md.

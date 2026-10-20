@@ -1827,6 +1827,16 @@ counter-loss: $(BIN)
 	$(BIN)/counter_loss
 	$(BIN)/counter_loss --plain
 
+# No unwritten buffer in the allocation entry's frame (process_spec
+# regression/79). That frame is live across every collection an allocation
+# triggers, so a block of it nothing writes is read as roots. `--release`,
+# because only inlining puts `check_fork_poison!`'s message buffer there: 73
+# stale words with it inline, 13 without, on x86-64 Linux. A debug build
+# reads 21 either way.
+.PHONY: alloc-entry-frame
+alloc-entry-frame: $(BIN)
+	$(CRYSTAL) spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr
+
 # What a fault outside gcry's span actually *is*. The three readings there say
 # what it is not — not a gcry allocation, and whether a swept object is
 # excluded — and that was the whole of the 2026-09-19 churn sighting: an
