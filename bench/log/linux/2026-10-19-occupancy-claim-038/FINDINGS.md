@@ -1,4 +1,4 @@
-# The occupancy claim on the 0.38 base: sound, still not shipped (2026-10-19)
+# The occupancy claim on the 0.38 base: sound, shipped in 0.38.0 (2026-10-19, decided 2026-10-20)
 
 `bench/log/linux/2026-10-17-occupancy-claim/` describes the change: a cursor
 claims a word's free blocks in `occ` with one atomic and hands them out with
@@ -336,6 +336,11 @@ spread except Revcomp on ubuntu-latest, which placement covers. RSS passes
 everywhere except the ≤1.1% JSON-row peak rises above, which are inside the
 budget but neither stack pinning nor attributed. Knuckeotide is
 stack-pinning and exempt. The decision on those is the maintainer's.
+
+**Decision (2026-10-20): shipped in 0.38.0.** The maintainer took the change
+with the ≤1.1% JSON-row peak rises (every row at or under 0.90× Boehm's peak,
+inside the RSS budget) and Revcomp's +1.4% on ubuntu-latest (inside the
+placement spread) accepted as they are.
 
 Correctness on the final tree: `claim_stress` 100 lazy + 50 in-stop passed;
 `mt_property_test` 50 of 50; `stw_mt_property_test` 199 of 200 with 1

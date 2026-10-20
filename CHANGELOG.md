@@ -44,6 +44,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nothing in gcry changes: the code isn't gcry's, and Crystal can't align a
   function (`bench/log/linux/2026-10-19-kemal-placement/`).
 
+### Changed
+
+- **The allocation hit path sets no occupancy bit with a locked
+  instruction.** It took one atomic OR per block. A cursor now claims every
+  free block of an occupancy word with one atomic when it takes the word,
+  and hands them out from its private mask with no shared write; whatever
+  it has not handed out goes back when it retires. A stop premarks a frozen
+  cursor's claim, so the sweep keeps it, and `free`, `live?` and every
+  occupancy count see handed-out blocks only. Binarytrees, % of Boehm, five
+  runners against 0.38's base (Perf A/B 39419215218, 15 reps): x86 Linux
+  84% → 103%, arm64 Linux 84% → 100%, macOS Intel 126% → 146%, M1 89% →
+  93%, Windows 119% → 121%. Kemal is level everywhere. Revcomp is +1.4% on
+  `ubuntu-latest`, inside its placement spread; a few JSON rows' peaks rise
+  0.2–1.1% on arm64 and macOS Intel, all at or under 0.90× Boehm's.
+  Knuckeotide's peak rises 20–24% on Linux from a dead buffer pinned by a
+  word in crystal-metric's own `Benchmark::run` frame, whose size changes
+  with the inlining. Gates: `make claim-stress` (lazy and in-stop sweeps,
+  cross-thread frees, collections every 0.2–2.2 ms), `spec/occupancy_claim_spec.cr`,
+  `process_spec/regression/74_occupancy_claim_pinned_spec.cr`; five
+  deliberately broken variants are each caught
+  (`bench/log/linux/2026-10-19-occupancy-claim-038/`).
+
 ### Fixed
 
 - **The thread-staging spec no longer depends on which specs ran before
