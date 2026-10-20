@@ -21,12 +21,21 @@ module Gcry
     getter release_refused_cursor : UInt64 = 0_u64
     # In-stop sweeps that left `@chunks` as they found it because a thread the
     # stop froze held `@chunk_list_lock` (`Heap#sweep`). Each one also kept
-    # its empty chunks mapped rather than queue them for release.
+    # its empty chunks mapped rather than queue them for release, and out of
+    # dormancy (`stop_sweep_dormant_declined`).
     getter stop_sweep_relinks_declined : UInt64 = 0_u64
     # Research only: false relinks in the stop whoever holds the list lock,
     # the code before 2026-10-17 — the control arm of
     # `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`.
     property stop_sweep_list_lock : Bool = true
+    # Empty chunks an in-stop sweep kept out of dormancy because a thread the
+    # stop froze held `@chunk_list_lock`, which a cursor holds from finding a
+    # chunk free to take to taking it (`Heap#sweep`).
+    getter stop_sweep_dormant_declined : UInt64 = 0_u64
+    # Research only: false makes an empty chunk dormant in the stop whoever
+    # holds the list lock, the code before 2026-10-21 — the control arm of
+    # `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`.
+    property stop_sweep_dormant_lock : Bool = true
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -128,7 +137,8 @@ module Gcry
       # *reader* did). The lock is free unless such a thread holds it, so it
       # is taken here without waiting and held until the rebuild is
       # published. When a frozen thread holds it the list is left exactly as
-      # it is — no relink, and no empty chunk dropped from it for release —
+      # it is — no relink, no empty chunk dropped from it for release, and
+      # none made dormant (below: the holder may be a cursor taking it) —
       # and the frozen writer's links stay true; the empties stay mapped
       # until a later major finds the lock free.
       # `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`.
@@ -230,6 +240,32 @@ module Gcry
                     if can_dormant && after_world && sweep_multi_mutator? && !bitmap_alloc_chunk?(chunk)
                       can_dormant = false
                       @last_empty_header_blocked_bytes &+= mapped
+                    end
+                    # And never dormant in a stop that froze a thread holding
+                    # `@chunk_list_lock` (`list_relinkable` false, above). A
+                    # cursor holds that lock from finding a chunk free to take
+                    # to taking it — `bitmap_pool_candidate?` (not dormant, not
+                    # a cursor's, a free block) and then CURSOR, in
+                    # `bitmap_take_pool_chunk` — and nothing marks the chunk
+                    # between the two, so this walk sees it empty and unowned.
+                    # Made dormant here, it went back to the taker when the
+                    # world restarted, which set CURSOR on it and allocated
+                    # into it: a cursor's chunk and a dormant one at once. Every
+                    # later flush DONTNEEDs a dormant chunk's pages, zeroing the
+                    # objects in it (`flush_pending_dormant_chunks`); every
+                    # sweep skips one, so they are never reclaimed; the walks
+                    # count it all free while the counters hold its blocks; and
+                    # the next revive zeroes its `occ` and hands its blocks out
+                    # again (`bitmap_revive_dormant`). An after-world sweep
+                    # holds the class lock the taker holds, and one that took
+                    # the list lock here has no taker inside it. The empty
+                    # chunk stays mapped and in the pool, as the declined
+                    # relink leaves the rest, until a later major finds the
+                    # lock free. `bench/log/linux/2026-10-21-claim-counter-drift/`,
+                    # `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`.
+                    if can_dormant && !list_relinkable && @stop_sweep_dormant_lock
+                      can_dormant = false
+                      @stop_sweep_dormant_declined &+= 1
                     end
                     # One cycle's grace before an unmap. The warm budget is
                     # the threshold, and a cycle allocates the threshold, so

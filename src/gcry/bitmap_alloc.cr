@@ -322,6 +322,14 @@ module Gcry
     # retirement releases. Plain increments: exact in a stop, best-effort
     # across classes retiring under their own locks, like the counters above.
     getter cursor_claims_released : UInt64 = 0_u64
+    # Research only: called by `bitmap_take_pool_chunk` with the chunk it is
+    # about to take, after `bitmap_pool_candidate?` accepted it and before
+    # CURSOR is set, under the class lock and `@chunk_list_lock` — on the
+    # allocating thread, so it must not allocate. A hook that parks its
+    # thread there until a stop has come and gone puts the stop's sweep
+    # between a taker's check and its take, every time
+    # (`process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`).
+    property pool_take_hook : Proc(ChunkHeader*, Nil)? = nil
 
     # A failed capacity search remains true until a free, sweep, or retirement
     # publishes capacity for this (class, kind). The same generation invalidates
@@ -1258,9 +1266,15 @@ module Gcry
         address = pool.value.addresses[at]
         # A stale address is harmless only after this lookup. Do not cast it
         # to ChunkHeader* or read its flags before the live index accepts it.
+        # The check and the CURSOR store are one hold of the list lock: the
+        # chunk is nobody's between them, and an in-stop sweep that finds the
+        # lock held by a frozen thread makes no chunk dormant (`Heap#sweep`).
         with_chunk_list_for_allocation do
           if chunk = bitmap_indexed_chunk(address)
             if chunk.address == address && bitmap_pool_candidate?(chunk, index, atomic)
+              if hook = @pool_take_hook
+                hook.call(chunk)
+              end
               ChunkHeader.set_cursor(chunk, true)
               return chunk
             end
