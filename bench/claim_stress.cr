@@ -15,10 +15,11 @@
 # and serial in its first two words and its last, and every owner re-reads
 # its stamps — before it frees or passes a block on, on a full pass of its
 # ring every few hundred operations, and at the end. A second owner's stamp,
-# or the zeroing a non-atomic allocation does, breaks the first owner's. A
-# legitimate free refused as a double free shows as `double_frees` moving,
-# and lost or doubled accounting as walk-against-counter drift once the
-# workers are joined.
+# or the zeroing a non-atomic allocation does, breaks the first owner's, and
+# so does the zeroing of a page released under live blocks. A legitimate
+# free refused as a double free shows as `double_frees` moving, and lost or
+# doubled accounting as walk-against-counter drift once the workers are
+# joined.
 #
 # Workers run in a `Fiber::ExecutionContext::Parallel` context (one OS thread
 # each), the main fiber collects every millisecond or two. Sizes span the
@@ -270,6 +271,24 @@ listed = Set(UInt64).new(initial_capacity: 1 << 16)
 heap.each_chunk { |c| listed << c.address }
 unlisted = 0
 heap.each_indexed_chunk { |c| unlisted += 1 unless listed.includes?(c.address) }
+# Dormant chunks holding blocks, or a cursor. A dormant chunk is an empty
+# one: the walks count it all free, every sweep skips it, every flush
+# releases its pages and a revive zeroes its `occ`. One with blocks in it is
+# a chunk a cursor took while a stop made it dormant — an in-stop sweep of a
+# multi-mutator heap did, under a thread frozen between its check of the
+# chunk and its take, until 2026-10-21
+# (`bench/log/linux/2026-10-21-claim-counter-drift/FINDINGS.md`,
+# process_spec/regression/80). A revive usually zeroes it before the end and
+# leaves only the drift; when it has not, this names the class. The walk
+# allocates nothing, so no collection rebuilds the list under it.
+dormant_held = 0
+dormant_seen = StaticArray(Gcry::ChunkHeader*, 8).new(Pointer(Gcry::ChunkHeader).null)
+heap.each_chunk do |c|
+  next if Gcry::ChunkHeader.large?(c) || !Gcry::ChunkHeader.dormant?(c)
+  next if heap.chunk_occupied_count(c) == 0 && !Gcry::ChunkHeader.cursor?(c)
+  dormant_seen[dormant_held] = c if dormant_held < dormant_seen.size
+  dormant_held += 1
+end
 live_drift = ClaimStress.settled_drift { Gcry::Invariant.live_objects_drift(heap) }
 free_drift = ClaimStress.settled_drift { Gcry::Invariant.free_bytes_drift(heap) }
 refused = heap.double_frees - double_frees
@@ -280,7 +299,7 @@ puts "  collections=#{heap.collections - collections} claims_released=#{heap.cur
      "sets_pinned=#{heap.cursor_sets_pinned - pinned} hits=#{heap.cursor_hit_allocations} " \
      "locked=#{heap.bitmap_locked_allocations}"
 puts "  refused_frees=#{refused} live_objects_drift=#{live_drift.inspect} free_bytes_drift=#{free_drift.inspect} " \
-     "unlisted_chunks=#{unlisted}"
+     "unlisted_chunks=#{unlisted} dormant_held=#{dormant_held}"
 
 failed = test.errors.get > 0
 if refused != 0
@@ -293,6 +312,15 @@ if live_drift != 0 || free_drift != 0
 end
 if unlisted != 0
   STDERR.puts "  FAIL: #{unlisted} chunk(s) indexed and not on the chunk list"
+  failed = true
+end
+if dormant_held != 0
+  STDERR.puts "  FAIL: #{dormant_held} dormant chunk(s) holding blocks or a cursor"
+  dormant_seen.each do |c|
+    next if c.null?
+    STDERR.puts "    chunk 0x#{c.address.to_s(16)}: class #{c.value.size_class}#{Gcry::ChunkHeader.atomic?(c) ? " atomic" : ""}, " \
+                "#{heap.chunk_occupied_count(c)} block(s)#{Gcry::ChunkHeader.cursor?(c) ? ", a cursor's" : ""}"
+  end
   failed = true
 end
 if test.remote_frees.get == 0 || heap.collections == collections
