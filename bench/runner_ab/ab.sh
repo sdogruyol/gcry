@@ -193,6 +193,14 @@ if [ "${AB_KEMAL_TRIALS:-0}" != 0 ]; then
   kbuild . kemal-var -Dgc_none
   kbuild . kemal-boehm
   karms=(--arm "boehm=$root/bin/kemal-boehm" --arm "base=$root/bin/kemal-base" --arm "var=$root/bin/kemal-var")
+  # Probe only: more gcry revisions as Kemal arms, name=rev.
+  for spec in ${AB_KEMAL_REVS:-tip=4b625c87 a975=a975d5cd fa51=fa51f65f}; do
+    n=${spec%%=*}
+    rm -rf ../ab-rev && git worktree add -q --detach ../ab-rev "${spec#*=}"
+    kbuild ../ab-rev "kemal-$n" -Dgc_none
+    git worktree remove --force ../ab-rev
+    karms+=(--arm "$n=$root/bin/kemal-$n")
+  done
   for spec in ${AB_PADS:-}; do
     pad_arm "$spec"
     padded kbuild "$psrc" "kemal-$pname" -Dgc_none
