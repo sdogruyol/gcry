@@ -3780,6 +3780,23 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       start their threads while other workers allocate and collect, which is
       the same shape. Fixed by resolving every port and bound before the first suspend:
       0 stalls in 20 runs (`bench/log/macos/2026-09-29-pthread-list-lock/`).
+- [x] **macOS: `nursery-tlab-smoke` faulted in `scan_all_fiber_roots`
+      (2026-10-16) — closed 2026-10-20.** CI run `38975094005`, darwin
+      arm64 gates: SIGSEGV at `0x6c696665725f6271`, "ab_refil" + 16 —
+      `Fiber#running?` loaded through a `next` that held the line the smoke
+      had just printed. Not the headered TLAB + nursery configuration: a
+      `scan_stack: false` collection on the process heap left out every
+      thread's stack, not only the caller's, and the idle thread gcry starts
+      at the first collection was still in its birth, its new main fiber in
+      its own frame alone, when the smoke's first `minor_collect(scan_stack:
+      false)` ran. The minor freed the fiber, the thread's push listed the
+      freed block, the printed line was built in it. 1 gate run in about 460
+      on Darwin CI; 19 of 4 000 on the two macOS runners before, 0 of 4 000
+      after; never on Linux. `scan_stack: false` now leaves out only the
+      caller's stack on a stop-the-world heap; `GC.collect` and automatic
+      collections never skipped any. Regression 78 forces the birth window
+      and is red in every run before, in every layout
+      (`bench/log/macos/2026-10-19-tlab-nursery-crash/FINDINGS.md`).
 - [ ] **A large chunk released with its block still allocated (`dormant_flush`,
       2026-09-28).** Two consecutive faults in the first minutes of a
       campaign on `2a46123`. A worker wrote into its own buffer after the
