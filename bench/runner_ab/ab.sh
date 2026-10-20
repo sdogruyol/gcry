@@ -180,8 +180,13 @@ if [ "${AB_KEMAL_TRIALS:-0}" != 0 ]; then
     local src=$1 o=$2
     shift 2
     # server.cr requires ../../performance/header_policy, hence the layout.
+    # `cp -R`, not `-r`: `shards install` leaves symlinks under lib/ that
+    # point back up the tree (lib/gcry to the repo, each shard's own lib/ to
+    # ../../lib); macOS's `cp -r` follows them and stops at "directory causes
+    # a cycle" (perf-ab run 39414207840). `-R` copies a symlink as a symlink on
+    # GNU and BSD alike, and lib/gcry is replaced below anyway.
     local k=../kab-build/kemal
-    rm -rf ../kab-build && mkdir -p ../kab-build/performance && cp -r bench/kemal $k
+    rm -rf ../kab-build && mkdir -p ../kab-build/performance && cp -R bench/kemal $k
     cp bench/performance/header_policy.cr ../kab-build/performance/
     rm -rf $k/lib/gcry && mkdir -p $k/lib/gcry && cp -r "$src/src" $k/lib/gcry/src
     prep $k src/server.cr
