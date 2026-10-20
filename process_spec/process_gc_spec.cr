@@ -377,6 +377,16 @@ end
     # when the thread turns up in Crystal's list.
     it "records every thread it creates" do
       before = Gcry::Platform.staged_total
+      # The counters are process-wide, so what this example owns is the
+      # difference. Asserting `staged_overflows == 0` outright asserted on
+      # every spec that ran first: `crystal spec` collects files with an
+      # unsorted `Dir[]`, the runner image of 2026-10-18 (kernel 7.0) lists
+      # them in another order, the thread-churn specs run first there, and
+      # their 650 births fill the 64-slot table legitimately (drain, then
+      # evict, as designed and counted). The example read 7 to 32 there on
+      # every run of v0.37.0 and 0.38 alike, and 0 on the 2026-10-12 image
+      # (probe run 39463376257).
+      overflows_before = Gcry::Platform.staged_overflows
       ec = Fiber::ExecutionContext::Parallel.new("staging-spec", 2)
       done = Channel(Nil).new(4)
       4.times { ec.spawn { done.send(nil) } }
@@ -386,7 +396,7 @@ end
       # from one where `pthread_create` was never wrapped, which is the failure
       # this asserts against.
       (Gcry::Platform.staged_total - before).should be > 0
-      Gcry::Platform.staged_overflows.should eq(0)
+      (Gcry::Platform.staged_overflows - overflows_before).should eq(0)
     end
 
     # Deliberately not asserted against live threads: whether a real thread is
