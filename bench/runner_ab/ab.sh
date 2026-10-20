@@ -187,6 +187,7 @@ if [ "${AB_KEMAL_TRIALS:-0}" != 0 ]; then
     prep $k src/server.cr
     (cd $k && crystal build "$@" ${flags[@]+"${flags[@]}"} --release src/server.cr -o "$root/bin/$o")
     syms "$o"
+    mkdir -p "$out/bin" && cp "$root/bin/$o" "$out/bin/"
   }
   kbuild ../ab-base kemal-base -Dgc_none
   kbuild . kemal-var -Dgc_none
