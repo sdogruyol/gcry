@@ -490,10 +490,12 @@ aarch64 pair; `os` takes any JSON list, macOS and Windows included:
 gh workflow run perf-ab.yml --ref my-branch -f base=origin/master
 # optional: -f reps=10 -f benches="Primes JsonParsePure Binarytrees JsonGenerate"
 #           -f os='["macos-latest","macos-15-intel","windows-latest"]'
-#           -f kemal_trials=15   # Kemal /json and / too (Linux, macOS)
+#           -f kemal_trials=15   # Kemal too (Linux, macOS)
+#           -f kemal_paths=/json # Kemal routes, default "/json,/"
+#           -f benches=-         # no crystal-metric (a Kemal-only run)
 #           -f boehm=0           # skip the Boehm arm
 #           -f var_env=GCRY_REALLOC_IN_PLACE=0   # the ref's binary under extra env
-#           -f pads="p0 p16 p32 p48" # placement probes, one arm per nop count
+#           -f pads="p0 p16 p32 p48 bp0 bp16" # placement probes, one arm per nop count
 #           -f stats=3           # heap counters at exit, 3 runs per bench of base and var
 ```
 
@@ -521,23 +523,34 @@ runner itself. Each count adds one arm: the ref's source built with that
 many bytes of nops in a never-inlined function called once. Code emitted
 after the pad moves by it and nothing else changes.
 
-- `N` (arm `padN`) calls the pad first in `main.cr`. That moves the
-  benchmarks and the stdlib code they are first to reach, but not gcry,
-  whose allocation paths are emitted while the prelude is compiled.
+- `N` (arm `padN`) calls the pad first in the entry file (`main.cr`,
+  Kemal's `server.cr`). That moves the benchmarks and the stdlib code they
+  are first to reach, but not gcry, whose allocation paths are emitted while
+  the prelude is compiled.
 - `pN` (arm `prepadN`) calls it from a prelude that requires the stock one
   after it. That moves everything, the collector included.
+- A leading `b` (`bN`, `bpN`: arms `basepadN`, `baseprepadN`) builds the
+  `base` source that way instead, so the two revisions' placement spreads
+  are measured in the same interleaved run.
 
+With `kemal_trials`, every pad arm is built and timed as a Kemal server too.
 The spread of the pad arms is how far placement alone moves a bench on that
 runner, and a gap inside it isn't a collector cost. `syms/<binary>.txt` in
 the artifact gives every function's address (`nm` on POSIX, the link map on
 Windows), and crystal's `--cross-compile --target x86_64-pc-windows-msvc`
 object reproduces a Windows runner's layout exactly.
 
-`stats` builds `bench/runner_ab/gc_counters.cr` for `base` and `var`. It
-prints the default heap's counters at exit (collections, pauses, in-place
-grows, large reservations, mapped and unmapped bytes) into
-`gc-counters.txt`. Windows Revcomp's 0.36.0 drop was settled this way: it
-is the placement of gcry's own `Heap#malloc_atomic` (or `Heap#allocate` behind it)
+`stats` builds `bench/runner_ab/gc_counters.cr` in front of the entry file
+for `base` and `var`. It prints the default heap's counters at exit
+(collections, pauses, bytes allocated, in-place grows, large reservations,
+mapped and unmapped bytes) into `gc-counters.txt`, and, with
+`kemal_trials`, the same per Kemal route into `kemal-gc-counters.txt` with
+the requests each server answered. Every Kemal run also records the
+server's CPU time and faults, the requests it served and, on gcry arms, its
+`/gc-stats`; `kemal-summary.md` puts them per 1 000 requests, so two arms
+that do the same work per request at different speeds show it. Windows
+Revcomp's 0.36.0 drop was settled this way: it is the placement of gcry's
+own `Heap#malloc_atomic` (or `Heap#allocate` behind it)
 (`bench/log/windows/2026-10-16-revcomp-attribution/`).
 
 ## How to record (Linux)
