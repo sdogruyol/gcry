@@ -46,6 +46,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The allocation entry's frame no longer carries 512 bytes nothing
+  writes.** `GC.malloc` and `GC.malloc_atomic` inline `check_fork_poison!`,
+  and its message buffer sat in their frame. That frame is live across every
+  collection an allocation triggers, so the conservative scan read the
+  buffer's stale contents as roots. On crystal-metric JsonParsePull, in a
+  build where `Heap#malloc_atomic` is inlined there, one stale word kept a
+  dead 33.5 MB buffer through one more collection, and the large cache then
+  unmapped and faulted again 25 MB more: +4.8% page faults, +1.3% peak. The
+  buffer now lives in an out-of-line `fork_poison_exit`, and the x86-64
+  frame goes from 0x258 to 0x78 bytes. Five runners against base
+  (`Perf A/B` 39419212059): no row is slower beyond what placement probes
+  of the same source move it by. JsonParsePull is −6.8% on macos-latest and
+  JSON parsing −3% on arm64. Peaks fall: JsonParsePure −13.6% on macos-latest
+  (1.07× → 0.93× Boehm), RegexDna −10% to −16% on macOS. One rise is left
+  beyond its spread: JsonParsePull +1.2% on ubuntu-latest (0.79× Boehm).
+  Kemal `/json` on ubuntu-latest reads −6%, which is inside both sources'
+  placement spread (39429021296). Gate: process_spec regression 79,
+  `make alloc-entry-frame`, in a release build, where 73 stale words
+  survive without the fix and 13 with it
+  (`bench/log/linux/2026-10-20-alloc-entry-frame/`).
+
 - **A collection asked for with `scan_stack: false` on the process heap
   leaves out only the caller's stack.** It left out every stack: every other
   thread's stack and registers, its `Thread` and every parked fiber went
