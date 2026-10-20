@@ -1,0 +1,3 @@
+# release claim_stress at 8b9e7eab, GCRY_DISABLE_LAZY_SWEEP=1, --seconds=5 --workers=4; one line per failing run
+seed=1073 rc=1   FAIL: walk against counter drifted (live -2698, free bytes 129504) RESULT: FAIL seed=1073 
+progress pass=111 fail=1 last=1112 (seeds 1001-1112, release, GCRY_DISABLE_LAZY_SWEEP=1, loop cancelled after 1112)

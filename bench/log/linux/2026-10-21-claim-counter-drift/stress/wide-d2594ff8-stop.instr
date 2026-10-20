@@ -1,0 +1,20 @@
+seed=1001 rc=1  INSTR take_dormant=9 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=1027  refused_frees=1 live_objects_drift=-5042 free_bytes_drift=407920 unlisted_chunks=0 
+seed=1002 rc=1  INSTR take_dormant=6 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=960  refused_frees=2 live_objects_drift=-2900 free_bytes_drift=235360 unlisted_chunks=0 
+seed=1003 rc=1  INSTR take_dormant=9 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=770  refused_frees=0 live_objects_drift=-1481 free_bytes_drift=142768 unlisted_chunks=0 
+seed=1004 rc=1  INSTR take_dormant=10 slot_dormant=0 revive_cursor=0 dormant_occ=1 dormant_cursor=0 dormant_revives=862  refused_frees=3 live_objects_drift=-3052 free_bytes_drift=286688 unlisted_chunks=0 
+seed=1005 rc=1  INSTR take_dormant=8 slot_dormant=0 revive_cursor=1 dormant_occ=0 dormant_cursor=0 dormant_revives=696  refused_frees=0 live_objects_drift=-2941 free_bytes_drift=235280 unlisted_chunks=0 
+seed=1006 rc=1  INSTR take_dormant=15 slot_dormant=0 revive_cursor=0 dormant_occ=1 dormant_cursor=0 dormant_revives=801  refused_frees=0 live_objects_drift=-5144 free_bytes_drift=464336 unlisted_chunks=0 
+seed=1007 rc=1  INSTR take_dormant=11 slot_dormant=0 revive_cursor=0 dormant_occ=1 dormant_cursor=0 dormant_revives=703  refused_frees=0 live_objects_drift=-3417 free_bytes_drift=334000 unlisted_chunks=0 
+seed=1008 rc=1  INSTR take_dormant=13 slot_dormant=0 revive_cursor=0 dormant_occ=1 dormant_cursor=0 dormant_revives=712  refused_frees=0 live_objects_drift=-5923 free_bytes_drift=586672 unlisted_chunks=0 
+seed=1009 rc=1  INSTR take_dormant=11 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=829  refused_frees=1 live_objects_drift=-1519 free_bytes_drift=147184 unlisted_chunks=0 
+seed=1010 rc=1  INSTR take_dormant=15 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=741  refused_frees=4 live_objects_drift=-2119 free_bytes_drift=282160 unlisted_chunks=0 
+seed=1011 rc=1  INSTR take_dormant=12 slot_dormant=0 revive_cursor=0 dormant_occ=2 dormant_cursor=0 dormant_revives=827  refused_frees=4 live_objects_drift=-3473 free_bytes_drift=288064 unlisted_chunks=0 
+seed=1012 rc=1  INSTR take_dormant=9 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=737  refused_frees=3 live_objects_drift=-900 free_bytes_drift=78144 unlisted_chunks=0 
+seed=1013 rc=1  INSTR take_dormant=19 slot_dormant=0 revive_cursor=1 dormant_occ=0 dormant_cursor=0 dormant_revives=868  refused_frees=0 live_objects_drift=-9338 free_bytes_drift=781056 unlisted_chunks=0 
+seed=1014 rc=1  INSTR take_dormant=12 slot_dormant=0 revive_cursor=0 dormant_occ=2 dormant_cursor=0 dormant_revives=719  refused_frees=0 live_objects_drift=-5299 free_bytes_drift=440064 unlisted_chunks=0 
+seed=1015 rc=1  INSTR take_dormant=12 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=735  refused_frees=1 live_objects_drift=-3091 free_bytes_drift=253984 unlisted_chunks=0 
+seed=1016 rc=1  INSTR take_dormant=16 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=694  refused_frees=0 live_objects_drift=-4586 free_bytes_drift=547216 unlisted_chunks=0 
+seed=1017 rc=1  INSTR take_dormant=18 slot_dormant=0 revive_cursor=1 dormant_occ=1 dormant_cursor=0 dormant_revives=778  refused_frees=3 live_objects_drift=-6447 free_bytes_drift=584064 unlisted_chunks=0 
+seed=1018 rc=2 
+seed=1019 rc=1  INSTR take_dormant=16 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=681  refused_frees=0 live_objects_drift=-3476 free_bytes_drift=330352 unlisted_chunks=0 
+seed=1020 rc=1  INSTR take_dormant=10 slot_dormant=0 revive_cursor=0 dormant_occ=1 dormant_cursor=0 dormant_revives=721  refused_frees=0 live_objects_drift=-2504 free_bytes_drift=202800 unlisted_chunks=0 

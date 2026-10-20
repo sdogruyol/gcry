@@ -1,0 +1,8 @@
+# Overnight stress, as reported (not re-run here): release build of
+# bench/claim_stress.cr at 8b9e7eab, GCRY_DISABLE_LAZY_SWEEP=1 GCRY_SEGV_REPORT=1,
+# seeds 1001-1100, 1 failure in 100.
+claim_stress seconds=5.0 workers=4 seed=1038 ring=512 lazy_sweep=false headers=false
+  ops=12147993 allocs=12147993 local_frees=4049959 remote_frees=4047938 drops=4047892 checks=40488833
+  collections=2836 claims_released=3372347 sets_pinned=5777 hits=108233349 locked=4956472
+  refused_frees=0 live_objects_drift=-1632 free_bytes_drift=130560 unlisted_chunks=0
+  FAIL: walk against counter drifted (live -1632, free bytes 130560)

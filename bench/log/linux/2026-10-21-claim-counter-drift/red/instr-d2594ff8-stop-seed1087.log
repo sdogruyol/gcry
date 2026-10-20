@@ -1,0 +1,33 @@
+claim_stress seconds=5.0 workers=4 seed=1087 ring=512 lazy_sweep=false headers=false
+INSTR take: dormant chunk taken as cursor
+  INSTR take_dormant=1 slot_dormant=0 revive_cursor=0 dormant_occ=0 dormant_cursor=0 dormant_revives=33267
+  ops=12604286 allocs=12604286 local_frees=4199120 remote_frees=4203100 drops=4199924 checks=42012703
+  collections=2956 claims_released=0 sets_pinned=6104 hits=112930443 locked=4606708
+  refused_frees=0 live_objects_drift=-8 free_bytes_drift=49152 unlisted_chunks=0
+  FAIL: walk against counter drifted (live -8, free bytes 49152)
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e1e030 (6000 B, owner 3, serial 4357) reads 0x5eedc2a10cc01104 0x30000001105 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 6840337406005088516, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e1f830 (6000 B, owner 3, serial 4475) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e1e030 (6000 B, owner 3, serial 4357) reads 0x5eedc2a10cc01104 0x30000001105 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 6840337406005088516, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e25830 (6000 B, owner 3, serial 4560) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e28830 (6000 B, owner 3, serial 4628) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e21030 (6000 B, owner 3, serial 4527) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e22830 (6000 B, owner 3, serial 4528) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e27030 (6000 B, owner 3, serial 4627) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e24030 (6000 B, owner 3, serial 4531) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e27030 (6000 B, owner 3, serial 4627) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e28830 (6000 B, owner 3, serial 4628) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e21030 (6000 B, owner 3, serial 4527) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e22830 (6000 B, owner 3, serial 4528) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e24030 (6000 B, owner 3, serial 4531) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e24030 (6000 B, owner 3, serial 4531) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e28830 (6000 B, owner 3, serial 4628) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e21030 (6000 B, owner 3, serial 4527) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e22830 (6000 B, owner 3, serial 4528) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e28830 (6000 B, owner 3, serial 4628) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e21030 (6000 B, owner 3, serial 4527) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e22830 (6000 B, owner 3, serial 4528) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e21030 (6000 B, owner 3, serial 4527) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e22830 (6000 B, owner 3, serial 4528) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x747e62e28830 (6000 B, owner 3, serial 4628) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x747e62e28830 (6000 B, owner 3, serial 4628) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 6144, flags: 0, first_word: 0, offset: 0}
+RESULT: FAIL seed=1087

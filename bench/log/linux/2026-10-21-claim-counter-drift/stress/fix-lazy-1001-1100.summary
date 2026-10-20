@@ -1,0 +1,2 @@
+# release claim_stress at 01ef5a8d (the fix, 9ce2b840, plus the dormant-chunk check), lazy sweep (default), seeds 1001-1100, --seconds=5 --workers=4; one line per failing run, then the total
+done pass=100 fail=0
