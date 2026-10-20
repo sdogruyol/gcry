@@ -8,8 +8,8 @@ writer). Spec: `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`.
 The runs below were made locally from a scratch worktree whose logs were
 not kept; the numbers are those the investigation reported when the fix
 landed, and only spec 75 can be rerun from this tree. The harness is
-`bench/claim_stress.cr`, which is not in this tree: it is on branch
-`occupancy-plain-or` (`95e73e39`, `make claim-stress` there).
+`bench/claim_stress.cr` (`make claim-stress`), in the tree since 0.38.0;
+it was then on branch `occupancy-plain-or` (`95e73e39`, since deleted).
 
 ## Root cause
 
@@ -56,8 +56,8 @@ investigated.
 
 ## The other set of numbers
 
-`bench/log/linux/2026-10-17-occupancy-claim/FINDINGS.md` on
-`occupancy-plain-or` reports the same bug on the same base tree
+`bench/log/linux/2026-10-17-occupancy-claim/FINDINGS.md` (then on the
+branch, in the tree since 0.38.0) reports the same bug on the same base tree
 `e8c0327e`: 5 of 10 seeds (1–10) of `claim_stress --workers=2`, 2 s, with
 35–50 chunks unlisted and drift −618 to −6 884 objects, −4.1 to −5.8 MB
 free bytes (3 of 10 on that branch's own tree), and none under the lazy

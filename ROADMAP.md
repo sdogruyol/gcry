@@ -2106,8 +2106,8 @@ kept finding the rest.
       writer frozen inside its locked section by an *in-STW* sweep resumes
       against the rebuilt list (0 of 37 334 mappings under
       `GCRY_DISABLE_LAZY_SWEEP=1` then) — **was real and is
-      closed (2026-10-17, 0.37.0).** The `claim_stress` harness on branch
-      `occupancy-plain-or`
+      closed (2026-10-17, 0.37.0).** The `claim_stress` harness
+      (`bench/claim_stress.cr`, in the tree since 0.38.0)
       (two Parallel workers, in-stop sweep) reached it: 31–252
       chunks indexed and off the list in 14 of 40 2-second runs. Every loss
       followed a stop that froze `map_chunk` between its head read and its

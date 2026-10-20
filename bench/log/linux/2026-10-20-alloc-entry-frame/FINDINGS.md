@@ -10,8 +10,8 @@ the buffer into a `@[NoInline]` `fork_poison_exit`, called only in a forked
 child. In the x86-64 release build, `GC::malloc_atomic<UInt64>`'s frame goes
 from `sub $0x258,%rsp` to `sub $0x78,%rsp` (`local/jsonparsepull-churn.txt`).
 
-Commit `c2dd2226` on `occupancy-claim-038`, the bottom commit, independent
-of the occupancy claim above it.
+Commit `c2dd2226` (first on branch `occupancy-claim-038`, since deleted;
+in 0.38.0), independent of the occupancy claim that followed it.
 
 ## How it was found
 
