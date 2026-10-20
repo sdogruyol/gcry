@@ -4098,19 +4098,29 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       from a shifted collection schedule rather than the claim, which no
       mark reaches. Kept on branch `occupancy-plain-or` with its findings
       (`bench/log/linux/2026-10-17-occupancy-claim/` there).
-- [ ] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
-      0.36.0 (2026-10-18).** Three paired runs: −2.3% [−3.9, −0.6], −6.6%
-      [−8.0, −1.6], −2.4% [−4.8, −0.9]; peak −10%. On the 12-vCPU QEMU host
-      the same comparison is −0.7% / +0.4%, and macOS and Linux arm64 are
-      level or faster. A bisect over the 0.37 commits on that runner puts the
-      step at `a975d5cd` (the research tables mapped only when armed), alone
-      −2.5% to −4.1% on three runners, every other step within its spread.
-      That commit removes work: the `Heap` shrinks by 472 KiB and the default
-      no longer records the release map. Putting a 472 KiB pad back reads
-      +0.1% to +2.9% with every IQR across zero, so layout or code placement
-      is suspected and not shown. Next: a `pads` placement probe on that
-      runner, as for Revcomp (`bench/log/linux/2026-10-18-0.37-runners/`,
-      `kemal-bisect/`).
+- [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
+      0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
+      output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,
+      −2.4%) measured `4b625c87`'s `src/`; the bisect put the step at
+      `a975d5cd`, a commit that removes work. Six Kemal-only `Perf A/B` runs
+      with placement probes on four CPU models: v0.36.0's own source moves
+      0 to −4.5% with the bytes of nops ahead of its code, a run spans
+      2.8–5.5 points across both sources, and v0.37.0 as released reads
+      +1.6%, −1.4%, +0.1%, +1.1%, +1.6%, −1.4% against v0.36.0 (level). The
+      collector does the same work in every build of one source (0.630
+      against 0.711 collections per 1 000 requests, the same bytes per
+      request). What predicts the speed is the offset mod 64 of a class of
+      stdlib functions that move together (`JSON::Builder::Escape#write`,
+      `Char#to_s<IO+>`, `IO::Buffered#write`, the `HTTP::Headers` hash; R²
+      0.51 over 66 effects, permutation p < 0.0005); 32 mod 64 is the slow
+      placement on all four CPUs. `a975d5cd`, `272d73e5` and `4b625c87` put
+      it at 32, v0.36.0 at 16, v0.37.0 at 48, and that phase predicts every
+      earlier bisect step and the 472 KiB pad's +0.1–2.9%. gcry's
+      `Heap#malloc` and `#malloc_atomic` don't (p 0.72, 0.07). The real
+      cost of 0.37 is +12.7% collections per request (the atomic quarter)
+      and `dab25144`'s deeper stack scan: 0.12–0.24% of a request. No fix:
+      the code isn't gcry's and Crystal can't align it
+      (`bench/log/linux/2026-10-19-kemal-placement/`).
 - [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
       (2026-10-15) — code placement of gcry's allocation path
       (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.

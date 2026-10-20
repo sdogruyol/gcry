@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Perf A/B` probes Kemal's code placement and work per request.** `pads`
+  now builds every placement arm as a Kemal server too (`N` pads ahead of
+  `server.cr`, `pN` ahead of all code), and a leading `b` pads the `base`
+  source instead (`bp16`, arm `baseprepad16`), so two revisions' spreads are
+  timed in one interleaved run. `benches=-` makes a run Kemal-only and
+  `kemal_paths` picks the routes. Every Kemal run records the server's CPU
+  time and faults, the requests it served and, on gcry arms, `/gc-stats`;
+  `kemal-summary.md` puts them per 1 000 requests. `stats` adds counter
+  builds of `base` and `var` per route (`kemal-gc-counters.txt`, bytes
+  allocated included), and `syms/` holds each Kemal binary's `nm`.
+
+- **Kemal `/json`'s 2–7% drop on `ubuntu-latest` (0.37 against 0.36.0) is
+  code placement of Crystal's JSON and HTTP output path, not a collector
+  cost.** Six Kemal-only runs, 20 trials each, on EPYC 9V74, 9V45 and 7763
+  and Xeon 8573C runners. v0.36.0's own source rebuilt with nops ahead of
+  its code moves 0 to −4.5%, a run spans 2.8–5.5 points across both
+  sources, and v0.37.0 as released reads −1.4% to +1.6% against v0.36.0 in
+  all six (level). The earlier −2.3%, −6.6% and −2.4% measured
+  `4b625c87`'s `src/`, which re-timed is 1.2–2.8% slower than v0.37.0. Each
+  source does the same collector work in every placement: 0.630 against
+  0.711 collections per 1 000 requests and 5 964–5 974 bytes per request
+  in both. The offset mod 64 of a class of stdlib functions that always
+  move together (`JSON::Builder::Escape#write`, `Char#to_s<IO+>`,
+  `IO::Buffered#write`, the `HTTP::Headers` hash) explains 51% of the
+  variance of 66 effects (permutation p < 0.0005), with 32 mod 64 the slow
+  placement on all four CPUs; gcry's `Heap#malloc` and `Heap#malloc_atomic`
+  don't predict it (p 0.72 and 0.07). That phase predicts every step of the
+  earlier bisect, `a975d5cd`'s −2.5% to −4.1% included (it moves the class
+  from 0 to 32), and the 472 KiB `Heap` pad's +0.1–2.9% (32 to 48). What
+  0.37 does cost there is 12.7% more collections per request (the atomic
+  quarter, which takes peak 10% lower) and `dab25144`'s deeper stack scan:
+  0.017–0.040 ms of pause per 1 000 requests, 0.12–0.24% of a request.
+  Nothing in gcry changes: the code isn't gcry's, and Crystal can't align a
+  function (`bench/log/linux/2026-10-19-kemal-placement/`).
+
 ### Fixed
 
 - **A collection asked for with `scan_stack: false` on the process heap
