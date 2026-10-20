@@ -46,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The thread-staging spec no longer depends on which specs ran before
+  it.** "process GC thread staging records every thread it creates"
+  asserted the process-wide `staged_overflows` was 0. `crystal spec`
+  collects files in the filesystem's order, and on GitHub's 2026-10-18
+  `ubuntu-latest` image (kernel 7.0) the thread-churn specs run first: 654
+  births fill the 64-slot table, which drains and evicts as designed, and
+  the example failed in every x86_64 configuration, v0.37.0 included. It
+  now counts the overflows of its own four threads. Every job on the new
+  image failed before and passed after
+  (`bench/log/linux/2026-10-20-staging-spec-order/`).
+
 - **The allocation entry's frame no longer carries 512 bytes nothing
   writes.** `GC.malloc` and `GC.malloc_atomic` inline `check_fork_poison!`,
   and its message buffer sat in their frame. That frame is live across every
