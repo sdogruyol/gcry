@@ -4096,8 +4096,23 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       0.37 base it fails the keep rule: x86 JSON rows +3.0–4.5% wall and
       Knuckeotide's peak on arm64 1.09× → 1.43× (Perf A/B 38966029947),
       from a shifted collection schedule rather than the claim, which no
-      mark reaches. Kept on branch `occupancy-plain-or` with its findings
-      (`bench/log/linux/2026-10-17-occupancy-claim/` there).
+      mark reaches. **2026-10-20, on the 0.38 base: sound, decision
+      pending** (branch `occupancy-claim-038`,
+      `bench/log/linux/2026-10-19-occupancy-claim-038/` there). It ran
+      claim_stress 150 runs, `stw-mt` 199 of 200 plus 1 Crystal scheduler
+      deadlock, and caught all five red arms. The first round's JSON peaks
+      (+8%), x86 Linux JSON wall (+1.7–3.5%) and 25 MB unmap/refault churn
+      were one dead buffer held by `GC.malloc_atomic`'s unwritten fork-check
+      buffer, which the claim's inlining put in the live frame. That is fixed
+      on its own at the bottom of the branch
+      (`bench/log/linux/2026-10-20-alloc-entry-frame/`). On top of the fix
+      (Perf A/B 39419215218), Binarytrees is 84% → 103% of Boehm on x86
+      Linux, 84% → 100% on arm64, 126% → 146% on macos-15-intel, 89% → 93%
+      on the M1 and 119% → 121% on Windows. Revcomp +1.4% on ubuntu-latest
+      is inside placement. Knuckeotide's peak (+20–24% Linux) is stack
+      pinning in crystal-metric's own `Benchmark::run` frame. Left: JSON-row
+      peak rises of +0.2–1.1% on arm64 and macos-15-intel, under budget, not
+      attributed.
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
       0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
       output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,

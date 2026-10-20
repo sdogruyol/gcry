@@ -1,0 +1,18 @@
+F
+
+Failures:
+
+  1) Regression: a cursor frozen mid-allocation keeps its claim through the stop's sweep keeps the claimed word occupied and hands each block out once
+     Failure/Error: (heap.claim74_occ(chunk, word) & claim).should eq(claim)
+
+       Expected: 4398046511102
+            got: 0
+
+     # process_spec/regression/74_occupancy_claim_pinned_spec.cr:77
+
+Finished in 958 microseconds
+1 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/74_occupancy_claim_pinned_spec.cr:49 # Regression: a cursor frozen mid-allocation keeps its claim through the stop's sweep keeps the claimed word occupied and hands each block out once

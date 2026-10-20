@@ -313,3 +313,21 @@ claim code: the settle returns early, there is no CURSOR chunk, and
 `block_allocated_exact?` falls through to `block_allocated?`. It did not
 reproduce in 20 runs each of var and `01b184a6` built with Crystal 1.22.0
 locally, nor in 10 runs of var on 1.21. Treated as unattributed.
+
+## Ported to 0.38 (2026-10-19): still not shipped
+
+Branch `occupancy-claim-038` carries the change on `release-0.38.0`. On that
+base it is still sound: claim_stress 100 + 50 runs, 196 of 200 `stw-mt` with
+4 scheduler deadlocks, 50 `mt_property_test` runs, and all five red arms
+caught. It was measured on all five runners
+(`bench/log/linux/2026-10-19-occupancy-claim-038/`).
+
+Knuckeotide's peak is now shown to be stack pinning: one word at
+`Benchmark::run`'s rsp+0x40, whose frame is 32 bytes larger on var, holds
+the dead 6.1 MB Fasta string. The x86 Linux JSON and Revcomp wall cost
+survives a pinned schedule, and placement probes of the same source cover
+it.
+
+Two things still fail the rule. The JSON rows' +8% Linux peak is the pace
+answering a different timing input; with pacing off it is +0.8–0.9%. That
+remainder is a 25 MB unmap/remap churn, not attributed.

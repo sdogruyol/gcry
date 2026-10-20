@@ -1,0 +1,18 @@
+....F
+
+Failures:
+
+  1) occupancy claimed a word at a time marks a claim made while the after-world sweep can run
+     Failure/Error: (heap.claim_spec_occ(chunk, word) & claim).should eq(claim)
+
+       Expected: 18446744073709551614
+            got: 0
+
+     # spec/occupancy_claim_spec.cr:191
+
+Finished in 2.49 milliseconds
+5 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec spec/occupancy_claim_spec.cr:166 # occupancy claimed a word at a time marks a claim made while the after-world sweep can run
