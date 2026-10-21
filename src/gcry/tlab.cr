@@ -766,7 +766,12 @@ module Gcry
     # that one collection the pause of its sweep.
     protected def sweep_frozen_classes_in_stop? : Bool
       return false unless @stop_frozen_sweep_in_stop
-      return false if (@stop_frozen_classes | @stop_frozen_nursery_classes) == 0_u64
+      # Only a stash needs it. Without allocation batches the after-world
+      # sweep waits on the resumed holder's class lock and finds its work
+      # done; and on a bitmap heap with a nursery, bits a frozen bitmap
+      # refill or free set are for chunks the frozen skip ignores anyway.
+      return false unless @alloc_batch > 0 && @alloc_batches_booted
+      return false if @stop_frozen_classes == 0_u64
       @stop_frozen_sweeps_in_stop &+= 1
       true
     end

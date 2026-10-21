@@ -370,3 +370,14 @@ After the review fixes (on `580cca6a`), each heavy run under the shared lock:
 | header `process_spec` (`GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 -Dgcry_block_headers`) | 253 examples, 0 failures |
 | `crystal spec -Dgc_none process_spec` | 252 examples, 0 failures |
 | format, `make lint`, `make windows-typecheck` | clean |
+
+Re-review: `sweep_frozen_classes_in_stop?` forced the in-stop sweep for any
+frozen class, but only an allocation-batch stash needs it; without batches
+the after-world sweep waits on the resumed holder's class lock. It now asks
+only on a heap with batches booted, and only of the old-generation mask
+(stashes are old-generation). Measured with `stress/frozen_probe.cr`
+(header layout, `GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0`, alloc batch off, TLAB
+off, lazy sweep, four churning threads, `GC.collect` every 5 ms for 20 s,
+`stress/frozen_probe.txt`): `stop_frozen_sweeps_in_stop` 2 and 5 in about
+3 200 collections before, 0 and 0 after. Regression 84, all 12 arms, 3 of 3
+runs green after it.

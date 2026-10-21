@@ -1,0 +1,4 @@
+before run1: alloc_batch=0 bitmap_alloc=false lazy=true collects=3217 stop_frozen_sweeps_in_stop=2 stop_sweep_freelist_declined=10
+before run2: alloc_batch=0 bitmap_alloc=false lazy=true collects=3238 stop_frozen_sweeps_in_stop=5 stop_sweep_freelist_declined=76
+after run1: alloc_batch=0 bitmap_alloc=false lazy=true collects=3261 stop_frozen_sweeps_in_stop=0 stop_sweep_freelist_declined=0
+after run2: alloc_batch=0 bitmap_alloc=false lazy=true collects=3226 stop_frozen_sweeps_in_stop=0 stop_sweep_freelist_declined=0

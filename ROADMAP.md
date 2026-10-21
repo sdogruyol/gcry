@@ -2977,6 +2977,18 @@ kept finding the rest.
       at once, under a fault handler that may be reading it on another CPU.
       Not reproduced; both need a construction of their own.
 
+- [ ] **The incremental cycle never flushes allocation-batch stashes
+      (pre-existing, from the re-review of 84, 2026-10-22).** Only
+      `run_collection_body`'s stop calls `flush_all_alloc_batches`; the
+      stops that begin an incremental cycle and its slices do not. A stash
+      claimed before the cycle began is USED, unmarked (allocate-black marks
+      only claims made while marking) and linked only through headers, so
+      the finishing slice's in-stop sweep can reclaim it onto the class list
+      while the slot still links it — a class nobody holds frozen, so
+      `note_frozen_freelists` does not save it. Header layout with
+      `GCRY_BITMAP_ALLOC=0`, `GCRY_ALLOC_BATCH` and `GCRY_INCREMENTAL=1`.
+      Read, not reproduced.
+
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**
       The mechanism now fits without any gap: the crash faults in `find_block`
