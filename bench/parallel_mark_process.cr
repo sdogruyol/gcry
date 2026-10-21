@@ -125,6 +125,17 @@ begin
 
   GC.collect
   GC.collect
+  # A steal needs a worker on a CPU while the master still holds chain heads.
+  # On the 3-vCPU `macos-latest` runner, four markers and the runner's own
+  # load can leave every worker unscheduled for the whole of two short marks:
+  # 0 -> 0 once in CI (run 39671302776, darwin arm64 gates, 2026-10-21), 0 of
+  # 300 locally on 12 and on 3 CPUs. Up to eight more collections give the
+  # workers the chance; a marker that cannot steal at all still reads 0, and
+  # the disabled arm must stay at 0 through all of them.
+  8.times do
+    break if h.parallel_mark_stolen > before_stolen
+    GC.collect
+  end
 
   runs = h.parallel_mark_runs
   stolen = h.parallel_mark_stolen
