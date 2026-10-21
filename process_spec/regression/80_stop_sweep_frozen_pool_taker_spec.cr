@@ -140,6 +140,19 @@ describe "Regression: an in-stop sweep makes no chunk dormant under a frozen poo
       env["GCRY_DEBUG_INVARIANTS"] = nil if arm == "control"
       status = Process.run(Process.executable_path.not_nil!, ["-e", "stop-sweep-frozen-pool-taker child #{arm}"],
         env: env, output: captured, error: captured)
+      # On Windows a dormant chunk's pages are decommitted, not zeroed
+      # (`Platform.release_reusable_pages`, MEM_DECOMMIT), and the flush runs
+      # after the world restarts, racing the resumed taker. When the flush
+      # wins, the control arm's taker clears its block in a decommitted page
+      # and the child dies with an access violation in `clear_block` — the old
+      # code failing harder than the assertions below can, and as much a red
+      # arm as they are (CI run 39681882864, 2026-10-21).
+      {% if flag?(:win32) %}
+        if arm == "control" && !status.success? &&
+           captured.to_s.includes?("Invalid memory access") && captured.to_s.includes?("clear_block")
+          next
+        end
+      {% end %}
       fail "child #{status.inspect}:\n#{captured}" unless status.success?
       captured.to_s.should contain("1 examples, 0 failures")
     end
