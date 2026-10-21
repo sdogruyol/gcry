@@ -67,6 +67,17 @@ module Gcry
       @@mp_hits.get
     end
 
+    # Research only: called by `mprotect_fault`, in the SEGV handler, with
+    # the faulting address, after the card state is read and before it or
+    # the page is touched. Must not allocate. A hook that parks the handler
+    # there puts a stop in the window
+    # (`process_spec/regression/83_mprotect_fault_frozen_handler_spec.cr`).
+    class_property mprotect_fault_hook : Proc(UInt64, Nil)? = nil
+    # Research only: false installs the handler with the stop's suspend
+    # signal deliverable inside it, the code before 2026-10-22 — the control
+    # arm of regression 83. Read when the handler is installed.
+    class_property mprotect_block_suspend : Bool = true
+
     # Install SEGV handler that re-enables write + marks page dirty.
     # Faults the barrier did not cause are forwarded to the previous handler.
     def self.install_mprotect_barrier : Bool
@@ -87,6 +98,21 @@ module Gcry
         end
       end
       LibC.sigemptyset(pointerof(action.@sa_mask))
+      # The stop's suspend signal waits until the handler returns. The
+      # handler reads the card state (`@@mp_state`), then sets the page's
+      # dirty bit in it and unprotects the page. A stop that froze it in
+      # between re-armed the barrier inside the stop
+      # (`arm_page_barrier_after_major` / `_after_collect`): it freed that
+      # state — `disarm_mprotect_barrier` retires it and
+      # `mprotect_set_heap_range` frees what was just retired — and
+      # protected the page again under fresh cards with its dirty bit clear.
+      # The handler resumed into freed memory, then made the page writable
+      # behind the new cards' back, so the write it retried, and every one
+      # after it until the next arm, reached no dirty bit: an old→young or
+      # an incremental edge the barrier exists to report, lost. Bounded:
+      # the handler takes no lock and makes one `mprotect` call, so the stop
+      # waits that long. `bench/log/linux/2026-10-22-in-stop-sweep-audit/`.
+      LibC.sigaddset(pointerof(action.@sa_mask), STW_SIG_SUSPEND) if @@mprotect_block_suspend
       if LibC.sigaction(LibC::SIGSEGV, pointerof(action), pointerof(@@mp_old_sa)) != 0
         return false
       end
@@ -203,6 +229,9 @@ module Gcry
 
       idx = ((addr - base) // PAGE).to_i32
       return false if idx < 0 || idx >= st.value.pages
+      if hook = @@mprotect_fault_hook
+        hook.call(addr)
+      end
 
       word = idx >> 6
       mask = 1_u64 << (idx & 63)
