@@ -1,0 +1,11 @@
+make-counter-loss rc=0 13s
+make-chunk-list-drift rc=0 20s
+make-thread-churn-uaf rc=0 24s
+make-large-cache-race rc=0 49s
+build-claim rc=0 31s
+claim-lazy pass=100 fail=0
+claim-instop pass=50 fail=0
+build-mtprop rc=0 16s
+mtprop pass=50 fail=0
+build-stwmt rc=0 29s
+stwmt pass=196 fail=0 stall=0 scheduler_deadlock=4

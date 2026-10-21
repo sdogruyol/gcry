@@ -1,0 +1,15 @@
+ci.yml runs listed: 1500 (2026-07-25 .. 2026-10-19); darwin gates jobs since 2026-09-30: 552
+by job and conclusion:
+  ('test (darwin arm64, gates)', 'cancelled') 27
+  ('test (darwin arm64, gates)', 'failure') 29
+  ('test (darwin arm64, gates)', 'success') 220
+  ('test (darwin x86_64, gates)', 'cancelled') 39
+  ('test (darwin x86_64, gates)', 'failure') 21
+  ('test (darwin x86_64, gates)', 'success') 216
+'Linux gates on Darwin' step success (nursery-tlab-smoke ran and passed): 436 {'test (darwin x86_64, gates)': 216, 'test (darwin arm64, gates)': 220} first 2026-10-01T11:03:51Z
+failed 'Linux gates on Darwin' steps (34 logs, joblogs/): smoke ran and passed 20, smoke failed 2, smoke not reached 12
+  smoke failures: 38975094005/117222511786 darwin arm64 SIGSEGV 0x6c696665725f6271 (this one)
+                  37328942780/111826755413 darwin x86_64 FAIL "the probe's chunk was not released by the major" (deterministic; the
+                  kept-chunk assertion that was made Linux-only on 2026-10-06, unrelated)
+exposure: 436 + 20 + 2 = 458 Darwin runs of the gate, 1 SIGSEGV (~0.2%; cancelled jobs not counted)
+Linux 'Process-GC nursery+TLAB minor smoke' step: no failure in the 1500 runs listed

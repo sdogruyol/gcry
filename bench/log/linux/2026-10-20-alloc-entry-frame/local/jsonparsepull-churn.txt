@@ -1,0 +1,59 @@
+# JsonParsePull, GCRY_THRESHOLD_PACE=100. Per-site @unmapped_bytes (debug copies of base 203a1715 and the port; site 5 = trim_large_cache's detach, site 7 = the sweep's empty size-class chunk flush) and map_chunk totals
+== ubase
+UNMAP site=5 n=17 bytes=166350848
+UNMAP site=7 n=393 bytes=106037248
+MAP small n=2111 bytes=276692992 other n=25 bytes=192819200
+== uvar
+UNMAP site=5 n=17 bytes=191516672
+UNMAP site=7 n=398 bytes=106037248
+MAP small n=2111 bytes=276692992 other n=25 bytes=192819200
+
+# large blocks >1 MiB at each major sweep: swept (cached) or kept (marked); only differences shown (diff base var)
+16c16
+< EV swept-large mapped=33558528 coll=14
+---
+> EV kept-large mapped=33558528 coll=14
+18c18
+< EV swept-large mapped=2101248 coll=14
+---
+> EV kept-large mapped=2101248 coll=14
+21a22,23
+> EV swept-large mapped=2101248 coll=15
+> EV swept-large mapped=33558528 coll=15
+
+# gdb at the 14th run_collection_body of the release builds (km/base, km/var): words on the main stack pointing into the 33.5 MB buffer
+== var
+hits [('0x7fffffff89a0', '0x7fffd817a040')]
+frame 0 rsp=7fffffff8798 run_collection_body
+frame 1 rsp=7fffffff87a0 run_collection
+frame 2 rsp=7fffffff87d0 collect:coalesce
+frame 3 rsp=7fffffff8800 allocate:atomic:clear
+frame 4 rsp=7fffffff8840 malloc_atomic
+frame 5 rsp=7fffffff8840 malloc_atomic
+frame 6 rsp=7fffffff8ad0 malloc_atomic
+frame 7 rsp=7fffffff8ad0 new
+frame 8 rsp=7fffffff8ad0 new
+frame 9 rsp=7fffffff8ad0 new
+slot 7fffffff89a0 value 7fffd817a040 -> frame (5, 'malloc_atomic')
+== base
+hits []
+frame 0 rsp=7fffffff8bf8 run_collection_body
+frame 1 rsp=7fffffff8c00 run_collection
+frame 2 rsp=7fffffff8c30 collect:coalesce
+frame 3 rsp=7fffffff8c60 allocate:atomic:clear
+frame 4 rsp=7fffffff8ca0 malloc_atomic
+frame 5 rsp=7fffffff8d50 malloc_atomic
+frame 6 rsp=7fffffff8d50 malloc_atomic
+frame 7 rsp=7fffffff8d50 new
+frame 8 rsp=7fffffff8f60 initialize
+frame 9 rsp=7fffffff8f60 new
+
+# GC::malloc_atomic<UInt64> frame: base / var / var2 (var + fork_poison_exit out of line)
+base size=0x00000000000000b4 sub $0x1e8,%rsp
+var size=0x0000000000000837 sub $0x258,%rsp
+var2 size=0x000000000000080c sub $0x78,%rsp
+
+# minor faults / peak KB, 8 runs each
+base: 127108/417644 127106/417704 127105/417612 127113/417624 127102/417608 127108/417544 127107/417708 127107/417620
+var: 133249/423192 133243/423188 133244/423140 133250/450592 133244/423224 133242/423124 133247/423148 133249/423240
+var2: 127131/417628 127125/417732 127094/417660 127095/417768 127129/417744 127129/417720 127092/417700 127099/417660

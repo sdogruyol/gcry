@@ -1,0 +1,24 @@
+=== nursery + TLAB minor ===
+bitmap_alloc=false tlab=true nursery=true stw=true
+
+  claim_probe: free_after_minor=true free_after_major=true minors=12 tlab_hits=32 tlab_refills=9
+  PASS minor left the FREE node on the stack FREE
+  PASS major left the FREE node on the stack FREE
+gcry: SIGSEGV at 0x6c696665725f6271 — outside gcry's heap span [0x10515c000, 0x10ae90000) — never a gcry allocation, so a swept object is not the explanation
+gcry: the mapping that holds that address could not be read on this platform, so what it is stays open
+gcry: writer — the faulting instruction is at 0x104e8d010 = exe+0x1000e1010. sp 0x16b050b00 fp 0x16b050b00
+gcry: writer — addr2line -f -C -e <binary> 0x1000e1010 0x10005ec34 0x10005ec34 0x1000533fc 0x100052118 0x1000974c8 0x10000c384 0x1000012c0 0x1000fbc1c 0x100009750
+gcry: writer — return addresses above sp: addr2line -f -C -e <binary> 0x10005ec34 0x1000bb3d8 0x10005a138 0x1000cbde0 0x1000cbd18 0x1000cbde0 0x1000cbd18 0x100044a24 0x1000cbde0 0x1000cbd18 0x100044814 0x100044374 0x1000bba48 0x1000b3b8c 0x100007264 0x100007264 0x1000af080 0x100007264 0x100007264 0x1000533fc 0x10000d794 0x10000d794 0x10001d5fc 0x1001448b8
+Invalid memory access (signal 11) at address 0x6c696665725f6271
+[0x104dd1c10] *Exception::CallStack::print_backtrace:Nil +112 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104db5b6c] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/signal.cr:180 +276 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x18464d744] _sigtramp +56 in /usr/lib/system/libsystem_platform.dylib
+[0x104e0ac34] *Gcry::Heap#scan_all_fiber_roots:Nil +328 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke (2 times)
+[0x104dff3fc] *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil +2624 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104dfe118] *Gcry::Heap#run_collection<Bool, Bool, Nil, Bool, Bool, Bool>:Nil +104 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104e434c8] *Gcry::Heap#collect:scan_stack<Bool>:Nil +452 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104db8384] *released_chunk_probe<Gcry::Heap>:Tuple(Int32, Bool, Bool) +140 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104dad2c0] __crystal_main +2912 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104ea7cd0] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +12 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104ea7c1c] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +64 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke
+[0x104db5750] main +32 in /Users/runner/work/gcry/gcry/bin/nursery_tlab_smoke

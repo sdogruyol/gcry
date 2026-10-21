@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry runs Kemal <code>/json</code> at ~105% of Boehm's throughput, at 1.21× its peak RSS and 0.88× after <code>GC.collect</code> (Linux, headerless default, 0.37.0).</b>
+  <b>gcry runs Kemal <code>/json</code> at ~105% of Boehm's throughput, at 1.23× its peak RSS and 0.88× after <code>GC.collect</code> (Linux, headerless default, 0.38.0).</b>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Kemal `/json`: ~105% of Boehm's throughput at 1.21× peak RSS, 0.88× after `GC.collect` (Linux, 0.37.0); ~104% at 1.39× peak RSS on macOS (`macos-latest` runner, 0.37.0). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
+**Kemal `/json`: ~105% of Boehm's throughput at 1.23× peak RSS, 0.88× after `GC.collect` (Linux, 0.38.0); ~104% at 1.39× peak RSS on macOS (`macos-latest` runner, 0.38.0). Compatible with the Boehm surface Crystal uses, not a one-to-one Boehm clone: [Boehm parity](docs/INTEGRATION.md#boehm-parity).**
 
 ---
 
@@ -207,32 +207,32 @@ perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **105.4%** *(0.36.0, 2026-10-14. 0.37.0 against 0.36.0: −0.7% / +0.4% on this 12-vCPU host, but −2.3% to −6.6% in three runs on GitHub's 4-vCPU `ubuntu-latest`, bisected to the commit that maps the research tables lazily, which removes work; layout or placement suspected, not proven — `bench/log/linux/2026-10-18-0.37-runners/`)* |
-| Kemal `/json` peak RSS | **1.21×** *(0.37.0, 19.7 vs 16.2 MB; 0.36.0: 1.31× in the same sessions)* |
+| Kemal `/json` throughput | **104.3–105.4%** *(0.38.0, 2026-10-21, two sessions on this 12-vCPU host; level with 0.37.0, paired −1.5% / +0.2%. 0.37.0 was level with 0.36.0 there and in six runs on GitHub's 4-vCPU `ubuntu-latest`, where an earlier −2% to −7% was the code placement of the stdlib's JSON/HTTP path — `bench/log/linux/2026-10-19-kemal-placement/`)* |
+| Kemal `/json` peak RSS | **1.23×** *(0.38.0, 19.7 vs 16.0 MB; 0.37.0: 1.23× in the same sessions)* |
 | Kemal `/json` post-`/gc-collect` RSS | **0.88×** *(13.8 vs 15.6 MiB, 2026-10-06)* |
-| Kemal `/` throughput | level with Boehm *(0.36.0: 99.9% on 2026-10-14; 0.37.0 against 0.36.0 +0.3% / −2.8% on 2026-10-18; not GC-bound — the GC is 0.3% of the run, and this row moves with code placement alone)* |
+| Kemal `/` throughput | level with Boehm *(0.38.0: 107.3% and 99.4% in two sessions, against 0.37.0 +3.5% and −1.3%, both inside the spread; not GC-bound — the GC is 0.3% of the run, and this row moves with code placement alone)* |
 | Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
 | Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
 
-\*Kemal rows: throughput `bench/log/linux/2026-10-14-0.36-integration-ab/`, peak RSS and the 0.37.0 comparison `bench/log/linux/2026-10-18-0.37-kemal/` (QEMU x86-64, 12 vCPUs, 9 interleaved trials per session, server on 3 CPUs, `wrk -t4 -c50`; Boehm read ~10% slower on 2026-10-18 than on 2026-10-14, so that day's ~116% is the host, not a gcry gain); the post-collect row is `bench/log/linux/2026-10-06-pr-benchmarks/`. The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
+\*Kemal rows: throughput and peak RSS `bench/log/linux/2026-10-21-0.38-kemal/` (QEMU x86-64, 12 vCPUs, 9 interleaved trials per session, server on 3 CPUs, `wrk -t4 -c50`, medians of per-trial ratios); the post-collect row is `bench/log/linux/2026-10-06-pr-benchmarks/`. The paragraph below is the 2026-09-06 paired A/B on 0.24.x, kept for the layout comparisons it carries.
 
 \*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
-Allocation storms, crystal-metric (process-fresh whole-process wall time, 11 interleaved reps, 12 CPUs, Crystal 1.21.0, 0.37.0 on 2026-10-18 — `bench/log/linux/2026-10-18-0.37-crystal-metric/`; 0.36.0 from the same session in parentheses):
+Allocation storms, crystal-metric (process-fresh whole-process wall time, 11 interleaved reps, 12 CPUs, Crystal 1.21.0, 0.38.0 on 2026-10-21 — `bench/log/linux/2026-10-21-0.38-crystal-metric/`; 0.37.0 from the same session in parentheses):
 
 | Bench | gcry speed vs Boehm | peak RSS × Boehm |
 |-------|--------------------:|-----------------:|
-| Primes | **106%** (103%) | 0.94× |
-| JsonParsePure | **104%** (101%) | 0.81× |
-| Binarytrees | **101%** (100%) | 0.74× |
-| JsonGenerate | **107%** (107%) | 0.63× |
-| JsonParseSerializable | **105%** (101%) | 0.71× |
-| JsonParsePull | **108%** (106%) | 0.78× |
-| Revcomp | 97% (94%) | 0.60× |
-| RegexDna | 98% (99%) | 0.53× |
-| Knuckeotide | 100% (97%) | 1.47× (1.67×) |
+| Primes | **107%** (104%) | 0.94× |
+| JsonParsePure | **102%** (103%) | 0.81× |
+| Binarytrees | **114%** (99%) | 0.74× |
+| JsonGenerate | **105%** (104%) | 0.63× |
+| JsonParseSerializable | **106%** (104%) | 0.71× |
+| JsonParsePull | **105%** (104%) | 0.76× |
+| Revcomp | 97% (96%) | 0.62× |
+| RegexDna | 99% (98%) | 0.48× (0.60×) |
+| Knuckeotide | 100% (99%) | 1.71× (1.45×) |
 
-0.37.0 against 0.36.0 is −0.5% to −3.7% wall on every row but RegexDna (+0.7%), each inside its interquartile range; a first, noisier session the same evening agrees within its spread (Brainfuck, which allocates nothing, moved 8.5% between the same two binaries there). Knuckeotide's peak drops 12% with 0.37.0's atomic quarter and is still the one row over the 1.1× budget (`bench/log/linux/2026-10-17-knuckeotide-rss/`).
+0.38.0 against 0.37.0: Binarytrees −11.2% wall [−13.9, −10.7], the occupancy claim (the allocation hit path no longer does a locked OR per block); every other row within its interquartile range, and a first, noisier session the same night agrees. RegexDna's peak is 19% lower with the claim. Knuckeotide's peak is 21% higher: a dead buffer pinned by a word in crystal-metric's own `Benchmark::run` frame, whose layout moves with the claim's inlining (`bench/log/linux/2026-10-19-occupancy-claim-038/`); it is still the one row over the 1.1× budget (`bench/log/linux/2026-10-17-knuckeotide-rss/`).
 
 The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.36.0: it keeps the old pointer valid, unlike the opt-in page move (`GCRY_REALLOC_MOVE=1`, unsafe for programs that read a buffer after growing it — the stdlib does) (`bench/log/linux/2026-10-14-realloc-in-place/`). Revcomp's −3 points are code placement. 0.36.0 executes 0.14% fewer instructions than 0.35.0 on it, gcry's code is 3% of them in both, and Revcomp's own timed section is 4–5% faster. Rebuilding 0.36.0 with nop padding in front of the program's code moves Revcomp by 6% with nothing else changed (`bench/log/linux/2026-10-15-revcomp-attribution/`).
 
@@ -240,31 +240,31 @@ The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.3
 
 | Workload | gcry vs Boehm (headerless default)* |
 |----------|------------------------------------:|
-| Kemal `/json` throughput | **103.5%** [93.7, 115.4] *(0.37.0, 2026-10-18; 107.1% [98.9, 111.3] in an earlier run; 0.36.0: 102.3% and 104.5% in the same two runs)* |
-| Kemal `/json` peak RSS | **1.39×** *(20.8 vs 15.0 MiB `ru_maxrss`; 0.36.0: 1.98×. Peak footprint, a different measure, was 1.50× and post-GC resident 0.99× on the 2026-09-06 laptop cut)* |
-| Kemal `/` throughput | **99.1%** [98.7, 105.6] at 1.33× *(103.0% in the earlier run; 0.36.0: 101.1% and 99.4%, 1.91×)* |
+| Kemal `/json` throughput | **103.5%** [101.5, 105.3] *(0.38.0, 2026-10-21; 0.37.0 in the same run: 103.9%, paired +0.3% [−0.3, +1.0])* |
+| Kemal `/json` peak RSS | **1.39×** *(20.2 vs 14.5 MiB `ru_maxrss`; 0.37.0: 1.40×. Peak footprint, a different measure, was 1.50× and post-GC resident 0.99× on the 2026-09-06 laptop cut)* |
+| Kemal `/` throughput | **100.0%** [98.9, 101.8] at 1.35× *(0.37.0: 101.3%, 1.34×; paired −1.5% [−2.7, +1.2])* |
 | Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
 | Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
-\*Kemal rows: `bench/log/macos/2026-10-18-0.37-runners/` — GitHub `macos-latest` runner (Apple M1, 3 vCPUs), Boehm, 0.36.0 and 0.37.0 in random order per trial, 15 trials, `wrk -t2 -c50` 10 s after a 3 s warm-up, medians of per-trial paired ratios [IQR], two runs on two runners; this runner's Kemal spread is ±10 points, and 0.37.0 against 0.36.0 paired is +0.7% [−7.9, +2.3] and +6.8% [−1.2, +12.4], level. The peak drop is 0.37.0's 8 MiB Darwin threshold floor (16 MiB before) and the atomic quarter. The earlier paired A/B on an M2 Pro laptop (0.24.x, `bench/log/macos/2026-09-06-bitmap-default-ab/`, 20 rotated rounds, null at 100.9% [99.1, 102.6]) measured peak *footprint*, which leaves out the pages Darwin may reclaim: 101.9% at 1.50×, 0.4 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 2.9 against 5.2 ms. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+\*Kemal rows: `bench/log/macos/2026-10-21-0.38-runners/` — GitHub `macos-latest` runner (Apple M1, 3 vCPUs), Boehm, 0.37.0 and 0.38.0 in random order per trial, 15 trials, `wrk -t2 -c50` 10 s after a 3 s warm-up, medians of per-trial paired ratios [IQR]; 0.38.0 against 0.37.0 is level on throughput and peak, with the same collections per request. The earlier paired A/B on an M2 Pro laptop (0.24.x, `bench/log/macos/2026-09-06-bitmap-default-ab/`, 20 rotated rounds, null at 100.9% [99.1, 102.6]) measured peak *footprint*, which leaves out the pages Darwin may reclaim: 101.9% at 1.50×, 0.4 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 2.9 against 5.2 ms. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
-Allocation storms, crystal-metric (same runner and run, process-fresh whole-process wall time, 15 interleaved reps, Crystal 1.21.0; 0.36.0 in parentheses):
+Allocation storms, crystal-metric (same runner and run, process-fresh whole-process wall time, 15 interleaved reps, Crystal 1.21.0; 0.37.0 in parentheses):
 
 | Bench | gcry speed vs Boehm | peak RSS × Boehm |
 |-------|--------------------:|-----------------:|
-| Primes | **105%** (99%) | 0.89× |
-| JsonParsePure | **99%** (93%) | 1.07× |
-| Binarytrees | 87% (78%) | 0.94× |
-| JsonGenerate | **101%** (99%) | 0.64× |
-| JsonParseSerializable | **100%** (99%) | 0.96× |
-| JsonParsePull | **100%** (99%) | 0.94× |
-| Revcomp | **100%** (98%) | 0.63× |
-| RegexDna | 98% (99%) | 0.50× |
-| Knuckeotide | 92% (89%) | 1.56× |
+| Primes | **107%** (104%) | 0.89× |
+| JsonParsePure | **102%** (97%) | 0.94× (1.07×) |
+| Binarytrees | 92% (88%) | 0.94× |
+| JsonGenerate | **100%** (102%) | 0.64× |
+| JsonParseSerializable | **103%** (100%) | 0.90× (0.97×) |
+| JsonParsePull | **104%** (101%) | 0.86× (0.92×) |
+| Revcomp | 98% (97%) | 0.61× |
+| RegexDna | **100%** (99%) | 0.43× (0.51×) |
+| Knuckeotide | 93% (90%) | 1.58× (1.56×) |
 
-Paired against 0.36.0 on this runner: Primes −6.8% wall, JsonParsePure −4.7%, Binarytrees −11.2% at a 47% lower peak, Knuckeotide's peak −17%; no row slower beyond its spread. Primes and JsonParsePure gain from 0.37.0's batched mark (Σ mark −29% and −12%); Binarytrees from the Darwin hit path and the 8 MiB floor. Knuckeotide's peak is its collection schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`). The earlier run agrees within its wider spread, except JsonGenerate's peak, 0.64× → 0.73× there and unchanged in this run. On Intel (`macos-15-intel`, i7-8700B) every row is at 92–127% of Boehm (Binarytrees 127%, from 90%), none slower than 0.36.0 beyond the spread, and Kemal `/json` is at 107.2% [99.9, 116.6] and 1.39× (0.36.0: 2.20×) within that runner's ±10-point spread.
+Paired against 0.37.0 on this runner: Binarytrees −3.8% wall, JsonParsePure −3.2% at a 12% lower peak, JsonParseSerializable −2.1% and JsonParsePull −1.8% at 7% lower peaks (Σ mark −26–28%), Knuckeotide −2.2%, RegexDna's peak −16%; no wall time slower beyond its spread. Knuckeotide's peak is +1.2% [+0.9, +1.2]; it is its collection schedule (`bench/log/linux/2026-10-17-knuckeotide-rss/`). On Intel (`macos-15-intel`, i7-8700B, two runs) every row is at 96–149% of Boehm (Binarytrees 149%, from 129–133%, −11–12% wall paired), JsonGenerate was +4.2% wall in run 1 and −1.4% in run 2, no other row slower than 0.37.0 beyond the spread, and Kemal `/json` is at 111.4% and 109.9% at 1.39× (0.37.0: 109.0% and 108.2%, 1.39×) within that runner's wider spread.
 
-**What moved since 0.36.0 on Darwin:** the allocation hit path no longer reads a `@[ThreadLocal]` (two out-of-line calls there), and the adaptive threshold floor is 8 MiB on Darwin as everywhere else, which the RSS budget (peak within 1.1× Boehm's on every crystal-metric row except Knuckeotide) asked for (`bench/log/macos/2026-10-16-binarytrees/`). Knuckeotide is the one crystal-metric row still over 1.1× on macOS, as on Linux and Windows.
+**What moved since 0.37.0 on Darwin:** the allocation hit path claims a whole occupancy word per cursor with one atomic instead of one locked OR per block, which is most of Binarytrees' gain. The RSS budget (peak within 1.1× Boehm's on every crystal-metric row except Knuckeotide) holds on both macOS runners; Knuckeotide is the one row over it on macOS (1.58× on M1, 1.60–1.78× on Intel), as on Linux and Windows.
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
@@ -363,7 +363,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Conservative bodies** | Every non-atomic block is word-scanned; no type map narrows a scan since 2026-10-04 (a union buffer's first tag reads as a type id — `docs/SOUND-DEFAULTS.md`) |
-| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **105.4%** of Boehm (0.36.0, 2026-10-14; 0.37.0 within 2–7% of it) at **1.21×** its peak RSS (0.37.0, 2026-10-18), 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
+| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` **104.3–105.4%** of Boehm at **1.23×** its peak RSS (0.38.0, 2026-10-21), 0.88× after `GC.collect` (Linux, 2026-10-06). `-Dgcry_block_headers` restores the header layout |
 | **Bitmap allocator** | Process default since 0.24.0 and forced on by the headerless layout — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors. `GCRY_BITMAP_ALLOC=0` is the freelist escape, on `-Dgcry_block_headers` only |
 | **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR` (atomic bytes at a quarter, floored at 8 MiB); an explicit `GC.collect`, the idle collector and the collection before an `OutOfMemoryError` release them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal). Multi-threaded programs too since 0.30.0: Kemal at 4 workers reads 20 MB after `GC.collect`, 85 MB before |
 | **macOS reclaim** | `MADV_FREE_REUSABLE` at host page size (16 KiB on Apple Silicon), with `MADV_FREE_REUSE` before reuse, so released pages leave `phys_footprint` at once |
@@ -376,7 +376,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 
 gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
 Windows x86_64 + ARM64 have native unit, process-GC, and release-sample CI coverage, plus the Linux race and root gates that hold there.
-Windows x86_64 workloads have been measured in VMs, not on physical hardware: 0.37.0 natively on GitHub's `windows-latest` runner, crystal-metric at 94–108% of Boehm's speed and under Boehm's peak working set on 7 of 9 rows (`bench/log/windows/2026-10-18-0.37-runners/`), and Kemal `/json` at 106.5% in a 12-vCPU QEMU/KVM VM (2026-10-06, `bench/log/windows/2026-10-06-vm-validation/`). Windows ARM64 workloads are unmeasured (CI only). See [support details](docs/WINDOWS.md).
+Windows x86_64 workloads have been measured in VMs, not on physical hardware: 0.38.0 natively on GitHub's `windows-latest` runner, crystal-metric at 94–122% of Boehm's speed in two runs and under Boehm's peak working set on 7 of 9 rows; three rows were 0.8–2.7% slower than 0.37.0 in wall time in one run and level in the other (`bench/log/windows/2026-10-21-0.38-runners/`), and Kemal `/json` at 106.5% in a 12-vCPU QEMU/KVM VM (2026-10-06, `bench/log/windows/2026-10-06-vm-validation/`). Windows ARM64 workloads are unmeasured (CI only). See [support details](docs/WINDOWS.md).
 
 | Today | Later / elsewhere |
 |-------|-------------------|

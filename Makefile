@@ -1827,6 +1827,32 @@ counter-loss: $(BIN)
 	$(BIN)/counter_loss
 	$(BIN)/counter_loss --plain
 
+# No unwritten buffer in the allocation entry's frame (process_spec
+# regression/79). That frame is live across every collection an allocation
+# triggers, so a block of it nothing writes is read as roots. `--release`,
+# because only inlining puts `check_fork_poison!`'s message buffer there: 73
+# stale words with it inline, 13 without, on x86-64 Linux. A debug build
+# reads 21 either way.
+.PHONY: alloc-entry-frame
+alloc-entry-frame: $(BIN)
+	$(CRYSTAL) spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr
+
+# The occupancy claim (`bitmap_alloc.cr`, "Occupancy is claimed a word at a
+# time") under four allocating threads, cross-thread `GC.free` and a
+# collection every 0.2-2.2 ms: every block carries a stamp its owner re-reads
+# before it frees or passes it on, on a pass of its ring and at the end, so a
+# lost occupancy bit or a block handed out twice breaks one; a legitimate
+# free refused, or walk-against-counter drift once the threads are joined,
+# fails the run too. Two arms: the lazy sweep, and the sweep inside the stop
+# (`GCRY_DISABLE_LAZY_SWEEP=1`), the one that sweeps a chunk a frozen cursor
+# holds and so needs its claim marked by the settle. Red arms, by hand edit,
+# in `bench/log/linux/2026-10-17-occupancy-claim/FINDINGS.md`. ~12 s.
+.PHONY: claim-stress
+claim-stress: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/claim_stress.cr -o $(BIN)/claim_stress --error-trace
+	$(BIN)/claim_stress --seconds=5 --workers=4 --seed=$${CLAIM_SEED:-1}
+	GCRY_DISABLE_LAZY_SWEEP=1 $(BIN)/claim_stress --seconds=5 --workers=4 --seed=$${CLAIM_SEED:-1}
+
 # What a fault outside gcry's span actually *is*. The three readings there say
 # what it is not — not a gcry allocation, and whether a swept object is
 # excluded — and that was the whole of the 2026-09-19 churn sighting: an

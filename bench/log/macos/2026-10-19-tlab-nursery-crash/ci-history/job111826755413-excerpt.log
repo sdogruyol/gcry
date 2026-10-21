@@ -1,0 +1,14 @@
+448:2026-10-05T15:02:18.9266410Z crystal build -Dgc_none -Dgcry_block_headers bench/nursery_tlab_smoke.cr -o bin/nursery_tlab_smoke --error-trace
+449:2026-10-05T15:02:26.9046140Z GCRY_BITMAP_ALLOC=0 bin/nursery_tlab_smoke
+450-2026-10-05T15:02:26.9208440Z === nursery + TLAB minor ===
+451-2026-10-05T15:02:26.9212810Z bitmap_alloc=false tlab=true nursery=true stw=true
+452-2026-10-05T15:02:26.9213860Z 
+453-2026-10-05T15:02:27.3382620Z   claim_probe: free_after_minor=true free_after_major=true minors=12 tlab_hits=45 tlab_refills=22
+454-2026-10-05T15:02:27.3388000Z   PASS minor left the FREE node on the stack FREE
+455-2026-10-05T15:02:27.3390630Z   PASS major left the FREE node on the stack FREE
+456-2026-10-05T15:02:27.4594250Z   PASS unrooted nursery object swept after minor
+457-2026-10-05T15:02:27.4729040Z FAIL: the probe's chunk was not released by the major, so the freelist check below means nothing
+458-2026-10-05T15:02:27.4843590Z make: *** [nursery-tlab-smoke] Error 1
+459-2026-10-05T15:02:27.4895710Z 
+460-2026-10-05T15:02:27.5273690Z ##[error]Process completed with exit code 2.
+461-2026-10-05T15:02:27.7711760Z Post job cleanup.

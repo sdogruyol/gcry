@@ -1,0 +1,18 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 2f4f0b26..528b717a 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -673,13 +673,6 @@ module Gcry
+       # finishing slice of an incremental cycle. Claimed blocks are not
+       # objects, so they must not be swept as dead ones (allocate-black for
+       # the whole word; the sweep's `live` takes them back out).
+-      if @collecting || @incremental_marking || @lazy_sweep_pending
+-        mark = ChunkHeader.mark_bitmap(chunk)
+-        unless mark.null?
+-          Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark + word, mask,
+-            LLVM::AtomicOrdering::Monotonic, false)
+-        end
+-      end
+       # Release: a thread that sees these bits sees the mask that names them
+       # as claimed (`block_allocated_exact?`).
+       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, ChunkHeader.occ_bitmap(chunk) + word, mask,

@@ -1,0 +1,73 @@
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -16,6 +16,7 @@
+ {% end %}
+ 
+ module Gcry
++  ENV_WIDEN_NS = {{ (env("WIDEN_NS") || "50000").to_i }}
+   # One (class, kind) allocation cursor: the chunk it stands on, the `occ`
+   # word it is consuming, that word's free bits as a private mask, and the
+   # block it is handing out right now (`in_flight`), which the collector
+@@ -163,6 +164,10 @@
+     getter cursor_set_count : Int32
+     getter cursor_sets_pinned : UInt64 = 0_u64
+     getter cursor_sets_retired : UInt64 = 0_u64
++    getter instr_take_dormant : UInt64 = 0_u64
++    getter instr_slot_dormant : UInt64 = 0_u64
++    getter instr_revive_cursor : UInt64 = 0_u64
++    getter cursor_claims_released : UInt64 = 0_u64
+ 
+     # One TLS read carries both the heap address (high 64 bits) and the set
+     # address (low 64 bits). Check the heap identity before dereferencing the
+@@ -960,7 +965,18 @@
+         with_chunk_list_for_allocation do
+           if chunk = bitmap_indexed_chunk(address)
+             if chunk.address == address && bitmap_pool_candidate?(chunk, index, atomic)
++              # INSTR widen: between the candidate check and CURSOR.
++              if ENV_WIDEN_NS > 0
++                t0 = Time.instant
++                while (Time.instant - t0).total_nanoseconds < ENV_WIDEN_NS
++                  Intrinsics.pause
++                end
++              end
+               ChunkHeader.set_cursor(chunk, true)
++              if ChunkHeader.dormant?(chunk)
++                @instr_take_dormant &+= 1
++                Gcry::OS.write(2, "INSTR take: dormant chunk taken as cursor\n", 42)
++              end
+               return chunk
+             end
+           end
+@@ -1084,6 +1100,7 @@
+         else
+           # A suspended reviver must be either dormant (skipped) or cursor
+           # owned (pinned) throughout the transition and bitmap reset.
++          @instr_revive_cursor &+= 1 if ChunkHeader.cursor?(chunk)
+           ChunkHeader.set_cursor(chunk, true)
+           ChunkHeader.set_dormant(chunk, false)
+         end
+--- a/bench/claim_stress.cr
++++ b/bench/claim_stress.cr
+@@ -270,6 +270,22 @@
+ heap.each_chunk { |c| listed << c.address }
+ unlisted = 0
+ heap.each_indexed_chunk { |c| unlisted += 1 unless listed.includes?(c.address) }
++dormant_occ = 0
++dormant_cursor = 0
++heap.each_chunk do |c|
++  next if Gcry::ChunkHeader.large?(c)
++  next unless Gcry::ChunkHeader.dormant?(c)
++  dormant_cursor += 1 if Gcry::ChunkHeader.cursor?(c)
++  occ = Gcry::ChunkHeader.occ_bitmap(c)
++  next if occ.null?
++  n = 0
++  c.value.bitmap_words.to_i32.times { |i| n += occ[i].popcount }
++  if n > 0
++    dormant_occ += 1
++    puts "  INSTR dormant chunk 0x#{c.address.to_s(16)} class #{c.value.size_class} flags 0x#{c.value.flags.to_s(16)} occ #{n}"
++  end
++end
++puts "  INSTR take_dormant=#{heap.instr_take_dormant} slot_dormant=#{heap.instr_slot_dormant} revive_cursor=#{heap.instr_revive_cursor} dormant_occ=#{dormant_occ} dormant_cursor=#{dormant_cursor} dormant_revives=#{heap.bitmap_dormant_revives}"
+ live_drift = ClaimStress.settled_drift { Gcry::Invariant.live_objects_drift(heap) }
+ free_drift = ClaimStress.settled_drift { Gcry::Invariant.free_bytes_drift(heap) }
+ refused = heap.double_frees - double_frees

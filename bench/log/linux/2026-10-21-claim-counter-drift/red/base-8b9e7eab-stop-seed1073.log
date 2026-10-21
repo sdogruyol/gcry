@@ -1,0 +1,39 @@
+claim_stress seconds=5.0 workers=4 seed=1073 ring=512 lazy_sweep=false headers=false
+  ops=15410682 allocs=15410682 local_frees=5137838 remote_frees=5135534 drops=5135065 checks=51364235
+  collections=2953 claims_released=3492100 sets_pinned=6009 hits=136245349 locked=7271250
+  refused_frees=0 live_objects_drift=-2698 free_bytes_drift=129504 unlisted_chunks=0
+  FAIL: walk against counter drifted (live -2698, free bytes 129504)
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff03563c0 (32 B, owner 3, serial 3621731) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f5e0 (32 B, owner 3, serial 3621445) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f520 (32 B, owner 3, serial 3621503) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f9d0 (32 B, owner 3, serial 3621580) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f880 (32 B, owner 3, serial 3621554) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f700 (32 B, owner 3, serial 3621526) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff0348e30 (32 B, owner 3, serial 3621363) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f550 (32 B, owner 3, serial 3621383) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 2 receiving: block Pointer(Void)@0x7d9ff034fac0 (32 B, owner 3, serial 3621625) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff034f520 (32 B, owner 3, serial 3621503) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff034f700 (32 B, owner 3, serial 3621526) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff0348e30 (32 B, owner 3, serial 3621363) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff03563c0 (32 B, owner 3, serial 3621731) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f5e0 (32 B, owner 3, serial 3621445) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f9d0 (32 B, owner 3, serial 3621580) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f880 (32 B, owner 3, serial 3621554) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f550 (32 B, owner 3, serial 3621383) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff034f880 (32 B, owner 3, serial 3621554) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff03563c0 (32 B, owner 3, serial 3621731) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f5e0 (32 B, owner 3, serial 3621445) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f9d0 (32 B, owner 3, serial 3621580) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f550 (32 B, owner 3, serial 3621383) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff03563c0 (32 B, owner 3, serial 3621731) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f5e0 (32 B, owner 3, serial 3621445) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f9d0 (32 B, owner 3, serial 3621580) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f550 (32 B, owner 3, serial 3621383) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f5e0 (32 B, owner 3, serial 3621445) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f9d0 (32 B, owner 3, serial 3621580) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f550 (32 B, owner 3, serial 3621383) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff034f5e0 (32 B, owner 3, serial 3621445) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff034f9d0 (32 B, owner 3, serial 3621580) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 ring pass: block Pointer(Void)@0x7d9ff034f550 (32 B, owner 3, serial 3621383) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+  ERROR: worker 3 before release: block Pointer(Void)@0x7d9ff034f550 (32 B, owner 3, serial 3621383) reads 0x0 0x0 last 0x0; live?=true block={found: true, free: false, size: 48, flags: 2, first_word: 0, offset: 0}
+RESULT: FAIL seed=1073

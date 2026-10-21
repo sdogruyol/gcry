@@ -1,0 +1,21 @@
+claim_stress seconds=5.0 workers=4 seed=1 ring=512 lazy_sweep=false headers=false
+gcry: GC.free ignored 0x7adbe41bf830: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+  ops=6578887 allocs=6578887 local_frees=2188962 remote_frees=2188612 drops=2189937 checks=21921915
+  collections=1801 claims_released=2477031 sets_pinned=3728 hits=58388125 locked=3064928
+  refused_frees=21039 live_objects_drift=1777 free_bytes_drift=-7185056 unlisted_chunks=0
+  FAIL: 21039 legitimate free(s) refused as double frees
+  FAIL: walk against counter drifted (live 1777, free bytes -7185056)
+  ERROR: worker 1 before release: block Pointer(Void)@0x7adbde69f4c0 (16 B, owner 1, serial 116) reads 0x1000000001 0x3237623600000010 last 0x0; live?=true block={found: true, free: false, size: 32, flags: 2, first_word: 68719476737, offset: 0}
+Invalid memory access (signal 11) at address 0x7adc4693cc6d
+[0x6323b5f9e089] ?? +109005028057225 in bin/claim_stress_red
+[0x6323b5f9dc64] ?? +109005028056164 in bin/claim_stress_red
+[0x7adbea645cb0] ?? +135084948872368 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7adbea7b3650] ?? +135084950369872 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x6323b5f1b812] ?? +109005027522578 in bin/claim_stress_red
+[0x6323b5f068d2] ?? +109005027436754 in bin/claim_stress_red
+[0x6323b5fad837] ?? +109005028120631 in bin/claim_stress_red
+[0x6323b5f963c6] main +6 in bin/claim_stress_red
+[0x7adbea62a601] ?? +135084948760065 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7adbea62a718] __libc_start_main +136 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x6323b5f00985] _start +37 in bin/claim_stress_red
+[0x0] ???

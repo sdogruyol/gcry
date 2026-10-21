@@ -1,0 +1,27 @@
+cg/k036.cg: 68173 Ir/request; gcry 9164, GC:: 3009, other 56000
+cg/k037.cg: 70329 Ir/request; gcry 11310, GC:: 3008, other 56011
+
+largest differences, cg/k037.cg minus cg/k036.cg (Ir/request):
+     -16.7      16.7 →      0.0  *Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader)>:Nil
+      -6.3     611.4 →    605.1  *HTTP::Server::RequestProcessor#process<IO+, IO+>:Nil'2
+      -3.0      11.7 →      8.6  *Gcry::Heap#scan_mutator_stack:Nil
+      -2.1       7.9 →      5.8  *Gcry::Heap#note_mutator_candidate<UInt64>:Nil
+      -1.5     108.7 →    107.2  *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil
+      -1.1    2549.8 →   2548.7  *GC::realloc_impl<Pointer(Void), UInt64>:Pointer(Void)
+      -1.1      10.8 →      9.7  *Gcry::Heap#sweep<Bool, Bool>:Nil
+      -0.4   10127.7 →  10127.3  *JSON::Builder::Escape#write<Slice(UInt8)>:Nil
+      +3.4      24.2 →     27.6  *Fiber::ExecutionContext::Monitor#run_loop':NoReturn
+      +5.1      67.9 →     73.0  *Gcry::Heap#bitmap_pool_candidate?<Pointer(Gcry::ChunkHeader), Int32, Bool>:Bool
+      +6.0     153.3 →    159.3  *HTTP::Server::RequestProcessor#process<IO+, IO+>:Nil
+      +9.0      40.7 →     49.7  *Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweep
+     +14.2       5.0 →     19.2  *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+     +17.7     206.8 →    224.6  *Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil
+     +19.7       0.0 →     19.7  *Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil
+     +50.8      17.0 →     67.8  *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+     +62.1       0.0 →     62.1  *Gcry::Heap#scan_pthread_stack<(Tuple(Pointer(Void), Pointer(Void)) | Nil), (Pointer(Void) | Nil)>:N
+    +158.8      40.5 →    199.4  *Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+    +262.9       0.5 →    263.4  *Gcry::Heap#start_world:Nil
+    +265.6       0.0 →    265.6  *Gcry::Platform::stack_low_water<UInt64, UInt64>:UInt64
+    +292.4      36.4 →    328.8  *Gcry::Heap#scan_all_fiber_roots:Nil
+    +330.3       3.0 →    333.4  *Gcry::Heap#stop_world_quiescing_roots:Nil
+    +662.7     346.9 →   1009.6  *Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil

@@ -8,8 +8,8 @@ require "spec"
 # became the tail, and the store it finished after `start_world` left the
 # list two chunks long. Everything else stayed in the chunk index and off the
 # list: never swept again, its blocks counted live and its free capacity
-# counted free for good. `bench/claim_stress.cr` (on the occupancy-plain-or
-# branch) with `GCRY_DISABLE_LAZY_SWEEP=1` and two workers lost 31-252
+# counted free for good. `bench/claim_stress.cr` (`make claim-stress`, in
+# the tree since 0.38.0) with `GCRY_DISABLE_LAZY_SWEEP=1` and two workers lost 31-252
 # chunks in 14 of 40 2-second runs on e8c0327e, every loss after a stop that
 # froze a mapper between those two lines. The in-stop sweep now takes the
 # lock without waiting, and leaves the list alone when it cannot

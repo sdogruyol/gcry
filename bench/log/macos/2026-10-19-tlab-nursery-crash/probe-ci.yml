@@ -1,0 +1,95 @@
+name: CI
+
+# PROBE ONLY (never merged): rate of the nursery-tlab-smoke SIGSEGV in
+# scan_all_fiber_roots seen on run 38975094005 job 117222511786, at the
+# release-0.38.0 tip (16b7e67c) and with the scan_stack fix on top.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "serial runs per arm"
+        default: "1000"
+      par:
+        description: "concurrent loops in the parallel arm (0 skips it)"
+        default: "4"
+      par_runs:
+        description: "runs per concurrent loop"
+        default: "300"
+      spec_runs:
+        description: "runs of regression 78's child per kind"
+        default: "50"
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+        arm: ["base", "fixed"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    name: probe (${{ matrix.os }}, ${{ matrix.arm }})
+    env:
+      RUNS: ${{ inputs.runs }}
+      PAR: ${{ inputs.par }}
+      PAR_RUNS: ${{ inputs.par_runs }}
+      SPEC_RUNS: ${{ inputs.spec_runs }}
+      ARM: ${{ matrix.arm }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build
+        run: |
+          # base: the release-0.38.0 tip's src under the HEAD regression spec.
+          if [ "$ARM" = "base" ]; then git checkout 16b7e67c -- src bench Makefile; fi
+          git status --short | head
+          mkdir -p bin plog
+          crystal build -Dgc_none -Dgcry_block_headers bench/nursery_tlab_smoke.cr -o bin/nursery_tlab_smoke
+          crystal build -Dgc_none process_spec/regression/78_scan_stack_false_unborn_fiber_spec.cr -o bin/spec78_default
+          crystal build -Dgc_none -Dgcry_block_headers process_spec/regression/78_scan_stack_false_unborn_fiber_spec.cr -o bin/spec78_hdr
+      - name: Regression 78 child verdicts
+        run: |
+          set +e
+          for b in default hdr; do for kind in major minor; do
+            [ $b = default ] && [ $kind = minor ] && continue
+            for env in GCRY_BITMAP_ALLOC=1 GCRY_BITMAP_ALLOC=0; do
+              f=0; k=0; o=0
+              for i in $(seq 1 "$SPEC_RUNS"); do
+                v=$(env $env GCRY_UNBORN_FIBER_CHILD=$kind GCRY_IDLE_RELEASE_MS=0 bin/spec78_$b -e "unborn-fiber child" 2>&1 | grep -o "verdict [0-9-]*")
+                case "$v" in "verdict 0") f=$((f+1));; "verdict 1") k=$((k+1));; *) o=$((o+1));; esac
+              done
+              echo "spec78 $ARM $b [$env] $kind: freed=$f kept=$k other=$o n=$SPEC_RUNS" | tee -a plog/summary.txt
+            done
+          done; done
+      - name: Smoke loop
+        run: |
+          set +e
+          arm() { # tag n env...
+            tag=$1; n=$2; shift 2; pass=0; fail=0
+            for i in $(seq 1 "$n"); do
+              env GCRY_BITMAP_ALLOC=0 "$@" bin/nursery_tlab_smoke > "plog/$tag.$i" 2>&1; rc=$?
+              if [ $rc -eq 0 ]; then pass=$((pass+1)); rm -f "plog/$tag.$i"; else fail=$((fail+1)); echo "$tag run $i rc=$rc" >> plog/fails.txt; fi
+            done
+            echo "smoke $ARM $tag: n=$n pass=$pass fail=$fail" | tee -a plog/summary.txt
+          }
+          arm plain "$RUNS"
+          arm segv_poison "$RUNS" GCRY_SEGV_REPORT=1 GCRY_POISON_FREED=1
+          if [ "$PAR" -gt 0 ]; then
+            for k in $(seq 1 "$PAR"); do arm "par$k" "$PAR_RUNS" GCRY_SEGV_REPORT=1 & done
+            wait
+          fi
+          echo "=== summary ($ARM, ${{ matrix.os }}) ==="; cat plog/summary.txt
+          n=0
+          for f in plog/*.*; do
+            case "$f" in plog/summary.txt|plog/fails.txt) ;; *) n=$((n+1)); [ $n -le 6 ] && { echo "--- $f"; cat "$f"; };; esac
+          done
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plog-${{ matrix.os }}-${{ matrix.arm }}
+          path: plog

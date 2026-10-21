@@ -1,0 +1,25 @@
+# JsonParsePull, GCRY_THRESHOLD_PACE=100 (schedule pinned), local x86-64 guest: minor faults and peak KB (/usr/bin/time %R %M)
+base 127103 417572
+var 133244 423140
+base 127106 417608
+var 133248 423036
+base 127105 417740
+var 133245 423108
+
+# same, exit counters (probe3 main: gc_counters.cr plus sweep-cursor and claim counters)
+c3base collections=20 unmapped_bytes=476409856 heap_size=80506880 sweep_cursor_pinned=20 sweep_cursor_retired=0 release_refused_cursor=0 fast_miss_refill=4137
+c3var collections=20 unmapped_bytes=501575680 heap_size=80506880 sweep_cursor_pinned=20 sweep_cursor_retired=0 release_refused_cursor=0 cursor_claims_released=5975 fast_miss_refill=4137
+
+# default pacing: the pace's inputs at collections 2-4 (debug build adding dbg_alloc/mut/cyc to GCRY_TRACE), 6 runs each
+dbase c2 pace=134 alloc=8.4M mut=7.06ms cyc=0.95ms | c3 pace=212 alloc=11.2M mut=8.90ms cyc=1.70ms | c4 pace=201 alloc=21.5M mut=18.59ms cyc=3.24ms
+dvar c2 pace=156 alloc=8.4M mut=5.70ms cyc=0.89ms | c3 pace=195 alloc=13.1M mut=10.82ms cyc=1.74ms | c4 pace=180 alloc=21.0M mut=15.59ms cyc=2.56ms
+dbase c2 pace=178 alloc=8.4M mut=5.63ms cyc=1.00ms | c3 pace=175 alloc=14.9M mut=12.49ms cyc=1.72ms | c4 pace=188 alloc=20.5M mut=16.01ms cyc=2.88ms
+dvar c2 pace=161 alloc=8.4M mut=6.89ms cyc=1.12ms | c3 pace=194 alloc=13.7M mut=11.43ms cyc=1.84ms | c4 pace=166 alloc=21.9M mut=16.62ms cyc=2.48ms
+dbase c2 pace=120 alloc=8.4M mut=7.45ms cyc=0.89ms | c3 pace=224 alloc=10.1M mut=7.90ms cyc=1.72ms | c4 pace=156 alloc=21.8M mut=17.32ms cyc=2.28ms
+dvar c2 pace=181 alloc=8.4M mut=5.42ms cyc=0.99ms | c3 pace=207 alloc=15.2M mut=11.83ms cyc=1.90ms | c4 pace=182 alloc=24.4M mut=18.67ms cyc=2.92ms
+dbase c2 pace=125 alloc=8.4M mut=7.40ms cyc=0.93ms | c3 pace=288 alloc=10.5M mut=9.68ms cyc=2.63ms | c4 pace=198 alloc=28.5M mut=21.90ms cyc=3.17ms
+dvar c2 pace=209 alloc=8.4M mut=6.82ms cyc=1.43ms | c3 pace=170 alloc=17.5M mut=15.48ms cyc=1.89ms | c4 pace=182 alloc=21.4M mut=16.49ms cyc=2.92ms
+dbase c2 pace=140 alloc=8.4M mut=5.96ms cyc=0.84ms | c3 pace=222 alloc=11.7M mut=9.07ms cyc=1.77ms | c4 pace=168 alloc=22.9M mut=18.62ms cyc=2.64ms
+dvar c2 pace=159 alloc=8.4M mut=5.10ms cyc=0.81ms | c3 pace=209 alloc=13.4M mut=10.31ms cyc=1.82ms | c4 pace=163 alloc=23.6M mut=19.28ms cyc=2.70ms
+dbase c2 pace=157 alloc=8.4M mut=5.91ms cyc=0.93ms | c3 pace=188 alloc=13.2M mut=10.59ms cyc=1.64ms | c4 pace=158 alloc=20.3M mut=18.81ms cyc=2.78ms
+dvar c2 pace=169 alloc=8.4M mut=4.91ms cyc=0.83ms | c3 pace=178 alloc=14.2M mut=10.83ms cyc=1.57ms | c4 pace=198 alloc=20.4M mut=14.68ms cyc=2.76ms

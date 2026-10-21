@@ -1,0 +1,10 @@
+=== stw-mt-property-test-headers-freelist run 110 FAILED 2026-10-21T10:44:41+03:00 ===
+Process-GC STW + concurrent mutation property test
+  seed=22868 iterations=200 workers=[2, 4]
+  stop_the_world=true
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=200 seed=22868

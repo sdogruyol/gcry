@@ -1,0 +1,5 @@
+seed=1001 rc=1  refused_frees=3 live_objects_drift=-10513 free_bytes_drift=919936 unlisted_chunks=0 dormant_held=1 
+seed=1002 rc=1  refused_frees=3 live_objects_drift=-5070 free_bytes_drift=497440 unlisted_chunks=0 dormant_held=0 
+seed=1003 rc=1  refused_frees=0 live_objects_drift=-3678 free_bytes_drift=419104 unlisted_chunks=0 dormant_held=0 
+seed=1004 rc=1  refused_frees=0 live_objects_drift=-7197 free_bytes_drift=613456 unlisted_chunks=0 dormant_held=0 
+seed=1005 rc=1  refused_frees=0 live_objects_drift=-904 free_bytes_drift=77936 unlisted_chunks=0 dormant_held=1 

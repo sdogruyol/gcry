@@ -1,0 +1,419 @@
+*JSON::Builder::Escape#write<Slice(UInt8)>:Nil	10127.5
+*Char#to_s<IO+>:Nil	6158.9
+*String::Builder#increase_capacity_by<Int32>:(Pointer(UInt8) | Nil)	4357.0
+*String::Builder#write_byte<UInt8>:Nil	3886.2
+*Gcry::Heap#malloc<UInt64>:Pointer(Void)	3579.6
+*JSON::Builder#end_scalar<Bool>:(JSON::Builder::ArrayState | JSON::Builder::DocumentEndState | JSON::Builder::ObjectState)	3327.5
+*Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)	3220.9
+*JSON::Builder#start_scalar<Bool>:Nil	3009.5
+*GC::realloc_impl<Pointer(Void), UInt64>:Pointer(Void)	2549.2
+__memcpy_ssse3	2473.4
+*JSON::Builder#string<String>:Nil	1850.3
+*Hash(HTTP::Headers::Key, Array(String) | String)@Hash(K, V)#key_hash<HTTP::Headers::Key>:UInt32	1502.2
+*Int32@Int#to_s<String::Builder>:Nil	1334.2
+*Socket+@IO::Buffered#write<Slice(UInt8)>:Nil	1056.2
+*Hash(HTTP::Headers::Key, Array(String) | String)@Hash(K, V)#find_entry<HTTP::Headers::Key>:(Hash::Entry(HTTP::Headers::Key, Array(String) | String) | Nil)	989.2
+*String::interpolation<String, Int32, String, Int32>:String	872.1
+*Int32@Int#to_s<IO+>:Nil	863.5
+./??:*Char#to_s<IO+>:Nil	748.2
+*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil	678.2
+__memset_sse2_unaligned_erms	616.4
+*Gcry::Heap#owns_user_pointer_in?<Pointer(Void), Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)>:Bool	612.1
+*HTTP::Server::RequestProcessor#process<IO+, IO+>:Nil'2	608.3
+~procProc(HTTP::Server::Context, String)@src/server.cr:112	565.1
+*IO+@IO#write_string<Slice(UInt8)>:Nil	546.1
+__crystal_malloc64	510.2
+*Hash(HTTP::Headers::Key, Array(String) | String)@Hash(K, V)#[]=<HTTP::Headers::Key, String>:String	506.1
+*GC::malloc_atomic<UInt64>:Pointer(Void)	459.1
+*Gcry::Heap::tls_cursor_cache	455.9
+*JSON::Builder#end_object:Nil	410.1
+*HTTP::parse_header<Slice(UInt8)>:Tuple(String, String)	381.1
+*Kemal::InitHandler#call<HTTP::Server::Context>:Nil	371.1
+*HTTP::Server::Response#write_headers:Bool	363.1
+*Crystal::System::File::info?<String, Bool>:(File::Info | Nil)	358.1
+*String#*<Int32>:String	336.1
+*String::Builder#to_s':String	330.1
+*HTTP::StaticFileHandler+@HTTP::StaticFileHandler#call<HTTP::Server::Context>:Nil	330.1
+*Hash(HTTP::Headers::Key, Array(String) | String)@Hash(K, V)#entry_matches?<Hash::Entry(HTTP::Headers::Key, Array(String) | String), HTTP::Headers::Key>:Bool	302.0
+*JSON::Builder#start_object:Nil	300.0
+*HTTP::Server::Response#content_type=<String>:String	290.0
+*HTTP::Request::parse_request_line<Slice(UInt8)>:(HTTP::Request::RequestLine | HTTP::Status)	232.0
+*Array(JSON::Builder::ArrayState | JSON::Builder::DocumentEndState | JSON::Builder::DocumentStartState | JSON::Builder::ObjectState | JSON::Builder::StartState)@Array(T)#check_needs_resize:(Int32 | Pointer(JSON::Builder::ArrayState | JSON::Builder::DocumentEndState | JSON::Builder::DocumentStartState | JSON::Builder::ObjectState | JSON::Builder::StartState) | Nil)	226.0
+__memchr_sse2	220.0
+__memcmp_sse2	217.0
+*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil	215.7
+*Hash(String, Bool)@Hash(K, V)#find_entry<String>:(Hash::Entry(String, Bool) | Nil)	194.0
+*Gcry::Heap#scan_all_fiber_roots:Nil	182.6
+*String#size:Int32	182.0
+*Path#normalize:remove_final_separator<Bool>:Path	178.0
+*Gcry::Heap#stop_world_quiescing_roots:Nil	168.2
+*Char#to_s<String::Builder>:Nil	160.0
+*HTTP::Server::RequestProcessor#process<IO+, IO+>:Nil	156.3
+*String#single_byte_optimizable?:Bool	153.0
+*Gcry::Platform::stack_low_water<UInt64, UInt64>:UInt64	132.8
+*Gcry::Heap#start_world:Nil	132.0
+*Kemal::RouteHandler#call<HTTP::Server::Context>:(HTTP::Server::Context | Nil)	128.0
+*Slice(UInt8)@Slice(T)#[]<Int32, Int32>:Slice(UInt8)	128.0
+*Socket+@Socket#unbuffered_read<Slice(UInt8)>:Int32'2	123.0
+*Gcry::SizeClasses::payload<Int32>:UInt32	121.2
+*Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)	120.0
+*String#blank?:Bool	112.0
+*Gcry::Heap#scan_static_ranges:UInt64	110.6
+*Int32@Int#to_s:String	110.0
+*Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil	108.0
+*String#byte_slice?<Int32, Int32>:(String | Nil)	106.2
+__syscall_cancel	104.4
+*String::interpolation<String, String, String>:String	100.0
+*Kemal::RouteHandler#lookup_route<String, String>:Radix::Result(Kemal::Route)	96.0
+*Hash(String, Kemal::LRUCache::Node(String, Radix::Result(Kemal::Route)))@Hash(K, V)#[]?<String>:(Kemal::LRUCache::Node(String, Radix::Result(Kemal::Route)) | Nil)	92.0
+*String#downcase:String	92.0
+*Char::Reader#next_char:Char	90.0
+*Char#whitespace?:Bool	84.0
+./??:*IO+@IO#write_string<Slice(UInt8)>:Nil	84.0
+*Radix::Tree(Kemal::WebSocket)@Radix::Tree(T)#find<String, Radix::Result(Kemal::WebSocket), Radix::Node(Kemal::WebSocket), Bool>:Nil	84.0
+*URI::Parser#parse_path:Nil	83.0
+*Crystal::System::Thread::current_thread:Thread	78.4
+*Path#absolute?:Bool	78.0
+*Socket+@Socket#unbuffered_write<Slice(UInt8)>:Nil	77.0
+*Slice(UInt8)@Slice(T)#[]<Range(Int32, Int32)>:Slice(UInt8)	75.0
+*String::interpolation<String, Int32>:String	74.0
+*Gcry::Heap#bitmap_pool_candidate?<Pointer(Gcry::ChunkHeader), Int32, Bool>:Bool	70.5
+*IO+@IO#<<<String>:IO+	70.0
+*Crystal::EventLoop::Polling+@Crystal::EventLoop::Polling#run<Pointer(Fiber::List), Bool>:Nil	68.6
+*String#to_s<IO+>:Nil	68.0
+*String#index<Char>:(Int32 | Nil)	68.0
+*Socket+@IO::Buffered#skip<Int32>:Nil	66.0
+*HTTP::Server::Response::Output#close:Nil	65.0
+*HTTP::Server::Context#ws_route_lookup:Radix::Result(Kemal::WebSocket)	65.0
+*HTTP::Headers#unsafe_add<String, String>:(Array(String) | String)	64.0
+*String#+<String>:String	63.0
+*Socket+@IO::Buffered#write_byte<UInt8>:Nil	60.0
+*HTTP::Request#keep_alive?:Bool	60.0
+*HTTP::Server::Response::Output#unbuffered_write<Slice(UInt8)>:Nil	57.0
+*Socket+@IO::Buffered#peek:Slice(UInt8)'2	55.9
+*Hash(Int32, Proc(HTTP::Server::Context, Exception+, String))@Hash(K, V)#find_entry<Int32>:(Hash::Entry(Int32, Proc(HTTP::Server::Context, Exception+, String)) | Nil)	55.0
+*HTTP::Server::Response#content_length=<Int32>:String	53.0
+*Crystal::System::Thread::current_thread	50.8
+*HTTP::Server::Response::Output@IO::Buffered#write<Slice(UInt8)>:Nil	49.0
+*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)	45.6
+*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts	45.2
+*HTTP::Server::Response::Output#ensure_headers_written:(Bool | Nil)	45.0
+*Kemal::HeadRequestHandler#call<HTTP::Server::Context>:Nil	45.0
+*HTTP::Server::Response#reset:Nil	44.0
+*Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)	42.4
+*Char::Reader#initialize<String, Int32>:Char	42.0
+*HTTP::Server::Context#route_lookup:Radix::Result(Kemal::Route)	42.0
+__syscall_cancel_arch	41.4
+*Path#drive_and_root:Tuple(String | Nil, String | Nil)	40.0
+*JSON::Builder#end_array:Nil	39.0
+*URI::Parser#from_input<Int32>:String	38.0
+*String#calc_excess_right:Int32	36.0
+*JSON::Builder#end_document:Nil	35.0
+*Path#drive_and_root_indices:Tuple(Int32 | Nil, Int32 | Nil)	34.0
+*Random::thread_default:Random::PCG32	34.0
+*Kemal::ExceptionHandler#call<HTTP::Server::Context>:(HTTP::Server::Context | Nil)	33.0
+*Time::new:seconds:nanoseconds:location<Int64, Int32, Time::Location>:Time	32.0
+*Gcry::Heap#scan_pthread_stack<(Tuple(Pointer(Void), Pointer(Void)) | Nil), (Pointer(Void) | Nil)>:Nil	31.0
+*JSON::Builder#start_array:Nil	30.0
+*String#calc_excess_left:Int32	29.0
+*Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil'2	28.1
+*IPSocket+@IPSocket#remote_address:Socket::IPAddress	27.0
+*IPSocket+@IPSocket#local_address:Socket::IPAddress	27.0
+*Fiber::ExecutionContext::Monitor#run_loop':NoReturn	25.9
+./??:*HTTP::Server::RequestProcessor#process<IO+, IO+>:Nil'2	25.5
+*HTTP::Server::Response::Output#unbuffered_flush:Nil	25.0
+*Kemal::WebSocketHandler@HTTP::Handler#call_next<HTTP::Server::Context>:Nil	24.0
+*HTTP::StaticFileHandler+@HTTP::Handler#call_next<HTTP::Server::Context>:Nil	24.0
+*String#strip:String	24.0
+*Sync::Mutex#unlock:Nil	24.0
+*Fiber::ExecutionContext::Parallel::Scheduler#quick_dequeue?:(Fiber | Nil)	23.6
+*Sync::Mutex#lock:Nil	23.0
+*Kemal::WebSocketHandler#call<HTTP::Server::Context>:Nil	23.0
+*JSON::Builder#start_document:Nil	23.0
+*Time::utc:Time	23.0
+*URI::decode<String>:String	21.0
+*HTTP::Server::Response@IO#write_string<Slice(UInt8)>:Nil	20.0
+*URI::Parser#parse_no_scheme:Nil	20.0
+*Crystal::EventLoop::Polling::Event::new<Crystal::EventLoop::Polling::Event::Type, Fiber, Crystal::EventLoop::Polling::Arena::Index, (Time::Span | Nil)>:Crystal::EventLoop::Polling::Event	20.0
+read	18.9
+*Gcry::Heap#scan_other_thread_stacks:Nil	18.7
+*Gcry::Heap#mark_worker_loop:Nil	17.5
+*HTTP::Server::Response#write<Slice(UInt8)>:Nil	17.0
+*Char::Reader#pos=<Int32>:Int32	16.0
+*Socket+@Socket#unbuffered_read<Slice(UInt8)>:Int32	14.9
+__xstat	14.0
+*Random::thread_default	14.0
+clock_gettime@@GLIBC_2.17	13.7
+*HTTP::Server::Response#closed?:Bool	13.0
+write	12.3
+*Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)	12.1
+*Fiber::suspend:Nil'2	11.5
+*Gcry::Heap#find_object_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)	11.4
+*Fiber::ExecutionContext::Parallel::Scheduler#enqueue_many<Pointer(Fiber::List)>:(Fiber | Nil)	11.2
+*Gcry::Platform::thread_sp<UInt64>:(Pointer(Void) | Nil)	10.5
+*Gcry::Heap#sweep<Bool, Bool>:Nil	10.2
+*Gcry::Heap#scan_mutator_stack:Nil	10.2
+*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil	9.8
+*HTTP::Status#description:(String | Nil)	9.0
+*Fiber::swapcontext<Pointer(Fiber::Context), Pointer(Fiber::Context)>:Nil'2	9.0
+*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader)>:Nil	8.4
+*Gcry::Heap#bitmap_indexed_chunk<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)	6.9
+*Gcry::Heap#note_mutator_candidate<UInt64>:Nil	6.9
+syscall	6.7
+./??:*HTTP::Server::RequestProcessor#process<IO+, IO+>:Nil	6.5
+__errno_location	6.2
+pthread_mutex_lock@@GLIBC_2.2.5	6.1
+*Socket+@IO::Buffered#peek:Slice(UInt8)	6.1
+./??:*JSON::Builder#end_document:Nil	6.0
+~procProc(HTTP::Server::Context, String)@lib/kemal/src/kemal/route.cr:13	6.0
+pthread_mutex_unlock@@GLIBC_2.2.5	5.8
+./??:*Kemal::WebSocketHandler@HTTP::Handler#call_next<HTTP::Server::Context>:Nil	5.0
+./??:*HTTP::StaticFileHandler+@HTTP::StaticFileHandler#call<HTTP::Server::Context>:Nil	5.0
+./??:*Kemal::InitHandler#call<HTTP::Server::Context>:Nil	5.0
+./??:*Kemal::HeadRequestHandler#call<HTTP::Server::Context>:Nil	5.0
+./??:*HTTP::StaticFileHandler+@HTTP::Handler#call_next<HTTP::Server::Context>:Nil	5.0
+*Gcry::Heap#alloc_old_small<UInt32, UInt32, Int32, UInt64>:Tuple(Pointer(Void), Bool)	4.9
+*Gcry::Heap#unmarked_live_block<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)	4.8
+*Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void)	4.4
+*Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil	4.3
+./??:*HTTP::Server::Response::Output#unbuffered_write<Slice(UInt8)>:Nil	4.0
+./??:*HTTP::Server::Response::Output#unbuffered_flush:Nil	4.0
+*Gcry::Heap#mark_stack_push<Pointer(Gcry::BlockHeader)>:Nil	3.8
+*Gcry::Heap#bitmap_settle_cursor_sets:Nil	3.7
+./??:*Kemal::ExceptionHandler#call<HTTP::Server::Context>:(HTTP::Server::Context | Nil)	3.0
+*Gcry::Heap#maybe_collect:Nil	2.8
+__internal_syscall_cancel	2.8
+*Gcry::Heap#clear_all_marks:Nil	1.7
+clock_nanosleep@@GLIBC_2.17	1.7
+*Gcry::Heap#mark_bitmap_alloc_in_flight:Nil	1.6
+*Gcry::Heap#sweep_large_one<Pointer(Gcry::ChunkHeader), Bool, Bool>:Nil	1.5
+*Gcry::Heap#fiber_stack_scan_top<Fiber, UInt64, Bool>:UInt64	1.4
+*Gcry::Heap#enqueue_unreachable_finalizers:Nil	1.3
+*Gcry::Heap#note_chunk_fill<UInt64, UInt64>:Nil	1.3
+*Fiber::suspend:Nil	1.2
+*Gcry::Heap#heap_marked?<Pointer(Gcry::BlockHeader)>:Bool	1.1
+nanosleep	1.0
+*Fiber::swapcontext<Pointer(Fiber::Context), Pointer(Fiber::Context)>:Nil	0.9
+*Gcry::Heap#delete_root<Pointer(Void)>:Bool	0.9
+*Fiber::ExecutionContext::GlobalQueue#unsafe_grab?<Fiber::ExecutionContext::Runnables(256), Int32>:(Fiber | Nil)	0.9
+free	0.9
+*Time#year_month_day_day_year:Tuple(Int32, Int32, Int32, Int32)	0.8
+epoll_wait	0.8
+*Gcry::Heap::oom_depth	0.7
+malloc	0.7
+*Gcry::Heap#other_thread_scan_sp<Thread>:(Pointer(Void) | Nil)	0.7
+*Gcry::StwSlots::Table#slot_of<UInt64>:Int32	0.6
+0x000000000001faf0	0.5
+*Gcry::Heap#index_insert<Pointer(Gcry::ChunkHeader)>:Nil	0.5
+*Gcry::Heap#scan_thread_roots:Nil	0.4
+*Gcry::Heap#move_large_contents<Pointer(Gcry::ChunkHeader), Pointer(Void), Pointer(Void), UInt64>:Bool	0.4
+*Gcry::Roots::page_readable?<UInt64>:Bool	0.3
+*HTTP::format_time<Time>:String	0.2
+*Gcry::Heap#mark_thread_roots<Thread>:Nil	0.2
+*Gcry::Platform::slot_for<UInt64>:Int32	0.2
+*Gcry::Heap#unlink_detached_large<Pointer(Void), Int32>:Nil	0.2
+pthread_getattr_np@@GLIBC_2.32	0.2
+*Gcry::Heap#alloc_large_counted<UInt64, UInt32, Bool, Bool, Bool>:Tuple(Pointer(Void), UInt64)	0.2
+0x0000000000021f30	0.2
+*Gcry::Heap#map_chunk<UInt64, UInt32, UInt32, Pointer(Void)>:Pointer(Gcry::ChunkHeader)	0.1
+pread	0.1
+_Unwind_Find_FDE	0.1
+*Gcry::Roots::ensure_probe_pipe:Nil	0.1
+0x0000000000020f80	0.1
+*Time#offset_seconds:Int64	0.1
+calloc	0.1
+*Gcry::Heap#pin_ec_slot<UInt64, Int32, String>:Nil	0.1
+*Gcry::Heap#radix_remove<Pointer(Gcry::ChunkHeader)>:Nil	0.1
+~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil)@lib/gcry/src/gcry/platform/linux_stw.cr:639	0.1
+*Gcry::IdleRelease::loop_forever:NoReturn	0.1
+*Gcry::Heap#record_pause<UInt64>:Nil	0.1
+*Gcry::Platform::snapshotted_stack_bounds<UInt64>:(Tuple(Pointer(Void), Pointer(Void)) | Nil)	0.1
+*Gcry::Heap#scan_large_from<Pointer(Gcry::ChunkHeader), Pointer(Gcry::BlockHeader), UInt64, Nil>:Nil	0.1
+*Gcry::StwSlots::Table#clear:Nil	0.1
+*Gcry::Heap#update_threshold_pace<UInt64, UInt64>:UInt64	0.1
+*Gcry::Platform::pthread_stack_bounds<UInt64>:(Tuple(Pointer(Void), Pointer(Void)) | Nil)	0.1
+*/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/raise.cr::LEBReader#read_uleb128:UInt64	0.1
+pthread_attr_setaffinity_np@@GLIBC_2.32	0.1
+pthread_kill@@GLIBC_2.34	0.1
+*String#[]<Int32, Int32>:String	0.1
+*/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/raise.cr::LEBReader#read_uint8:UInt8	0.1
+*Gcry::StwSlots::greg_row<UInt64>:(Tuple(Pointer(UInt64), Int32) | Nil)	0.1
+*Gcry::Heap#refuse_live_release<UInt64, UInt64, UInt8>:Bool	0.1
+*Time#day_of_week:Time::DayOfWeek	0.0
+*TCPServer#accept?:(TCPSocket | Nil)	0.0
+*Time::Location+@Time::Location#utc?:Bool	0.0
+*Gcry::Finalizers::Registry#run_pending:Int32	0.0
+_int_malloc	0.0
+*UInt64@Int#<<<Int32>:UInt64	0.0
+*Gcry::Heap#collect:coalesce<Bool>:Nil	0.0
+pthread_getaffinity_np@@GLIBC_2.32	0.0
+*Gcry::Heap#link_free_large<Pointer(Gcry::ChunkHeader), Pointer(Gcry::BlockHeader)>:Nil	0.0
+*IPSocket+@Socket#unbuffered_close:Nil	0.0
+*Gcry::Finalizers::Registry#append_entry<Gcry::Finalizers::Entry, Int32>:Nil	0.0
+pthread_attr_init@@GLIBC_2.2.5	0.0
+__crystal_personality	0.0
+*Gcry::Heap#flush_pending_large_release:Nil	0.0
+getpid	0.0
+*Gcry::Heap#detach_large_cache<UInt64, UInt64>:Pointer(Void)	0.0
+_dl_find_object	0.0
+__pthread_attr_extension	0.0
+*Gcry::MonitorGate::close:Nil	0.0
+pthread_sigmask@@GLIBC_2.32	0.0
+*Gcry::Platform::set_suspend_ack<Int32, Bool>:Nil	0.0
+*Fiber::StackPool#checkout:Fiber::Stack	0.0
+pthread_attr_destroy	0.0
+*Gcry::Heap#clear_stack_guarded<UInt64, Bool>:UInt64	0.0
+*Gcry::Finalizers::Registry#claim_object<Pointer(Void)>:Int32	0.0
+0x0000000000024310	0.0
+__sigsetjmp	0.0
+mmap	0.0
+*Gcry::Heap#thread_events<Gcry::Heap::CollectionEvent, Thread>:Nil	0.0
+__strlen_sse2	0.0
+*Gcry::Heap#run_collection<Bool, Bool, Nil, Bool, Bool, Bool>:Nil	0.0
+*spawn:name<Nil, &Proc(Nil)>:Fiber	0.0
+__sigjmp_save	0.0
+*Gcry::StwWatchdog::enter<Int32>:Nil	0.0
+*Gcry::Heap#index_reserve<Pointer(Gcry::ChunkHeader)>:Bool	0.0
+0x000000000001f8f0	0.0
+realloc	0.0
+pthread_equal	0.0
+*Gcry::StwSlots::Table#reserve<Int32>:Bool	0.0
+~procProc(Nil)@lib/gcry/src/gcry/c_abi.cr:898	0.0
+*Gcry::Heap#replace_finalizer<Pointer(Void), &Proc(Pointer(Void), Nil)>:Nil	0.0
+pthread_attr_getstack@@GLIBC_2.34	0.0
+*Gcry::Heap#scan_block<Pointer(Gcry::ChunkHeader), Pointer(Gcry::BlockHeader), UInt64, UInt64>:Nil	0.0
+*Fiber#run:Nil'2	0.0
+__libc_malloc2	0.0
+*Gcry::Heap#flush_pending_empty_chunks:Nil	0.0
+*Gcry::Heap#index_remove_locked<Pointer(Gcry::ChunkHeader)>:Nil	0.0
+*Pointer(UInt8)@Pointer(T)#+<Int32>:Pointer(UInt8)	0.0
+*Gcry::Platform::ensure_static_root_cache:Nil	0.0
+*Gcry::Heap#scrub_parked_fiber_stacks:Nil	0.0
+*Gcry::Heap#flush_pending_dormant_chunks:Nil	0.0
+*Gcry::Trace::collect_end<Gcry::Heap, Bool>:Nil	0.0
+~procProc(Nil)@lib/gcry/src/gcry/gc_override.cr:206	0.0
+*Thread::LinkedList(Fiber)@Thread::LinkedList(T)#push<Fiber>:Nil	0.0
+*Gcry::Finalizers::Registry#drop_rows<Pointer(Void), Int32, Bool>:Tuple(Pointer(Void), Pointer(Void))	0.0
+*Gcry::Heap#ensure_mark_pthreads<Int32>:Nil	0.0
+*Crystal::EventLoop::Polling::Arena(Crystal::EventLoop::Polling::PollDescriptor, 65536)@Crystal::EventLoop::Polling::Arena(T, BLOCK_BYTESIZE)#at<Int32, Bool>:Pointer(Crystal::EventLoop::Polling::Arena::Entry(Crystal::EventLoop::Polling::PollDescriptor))	0.0
+getpagesize	0.0
+sigprocmask	0.0
+_Unwind_RaiseException	0.0
+*Fiber::StackPool#release<Fiber::Stack>:Nil	0.0
+*Gcry::Heap#debt_at_threshold?<UInt64>:Bool	0.0
+*Fiber::ExecutionContext::Runnables(256)@Fiber::ExecutionContext::Runnables(N)#push<Fiber>:Nil	0.0
+*Fiber::inactive<Fiber>:Nil	0.0
+*Gcry::Trace::collect_start<Bool>:Nil	0.0
+*UInt64@Int#to_s<String::Builder, Int32>:Nil	0.0
+*Crystal::EventLoop::Polling::PollDescriptor#take_ownership<Crystal::EventLoop::Polling+, Int32, Crystal::EventLoop::Polling::Arena::Index>:Nil	0.0
+*Gcry::Heap#guard_release<UInt64, UInt64, UInt8>:Bool	0.0
+_Unwind_Backtrace	0.0
+~procProc(Nil)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server.cr:464	0.0
+do_lookup_x	0.0
+*IPSocket+@IPSocket#close:Nil	0.0
+~procProc(Pointer(Void), Pointer(Void), LibUnwind::ReasonCode)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/exception/call_stack/libunwind.cr:42	0.0
+*Gcry::Heap#quarantine_release<UInt64, UInt64>:Bool	0.0
+getrlimit	0.0
+0x0000000000023610	0.0
+0x00000000054573d0	0.0
+*Gcry::Heap#flush_all_alloc_batches:Nil	0.0
+0x000000000001f520	0.0
+*IO::Error@SystemError::ClassMethods::from_os_error:target<String, Errno, Socket+>:IO::Error	0.0
+madvise	0.0
+0x00000000000224f0	0.0
+~procProc(Nil)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server.cr:451'2	0.0
+0x0000000000022350	0.0
+*Socket+@Reference#to_s<String::Builder>:Nil	0.0
+pthread_self	0.0
+__syscall_cancel_arch'2	0.0
+__dcigettext	0.0
+sigdelset	0.0
+sigsuspend	0.0
+accept4	0.0
+0x0000000005457400	0.0
+0x00000000054543d0	0.0
+*Gcry::Trace::finalizer<String, Pointer(Void)>:Nil	0.0
+setjmp	0.0
+pthread_rwlock_unlock@@GLIBC_2.34	0.0
+epoll_ctl	0.0
+close	0.0
+*Fiber#run:Nil	0.0
+__stpcpy_sse2	0.0
+_dl_lookup_symbol_x	0.0
+0x0000000005454400	0.0
+*Gcry::Heap#unlink_chunk<Pointer(Gcry::ChunkHeader)>:Nil	0.0
+sigfillset	0.0
+*Gcry::Finalizers::Registry#swap_remove_entry<Int32>:Nil	0.0
+*Gcry::Heap#map_chunk<UInt64, UInt32, UInt32>:Pointer(Gcry::ChunkHeader)	0.0
+pthread_rwlock_rdlock@@GLIBC_2.34	0.0
+~procProc(Nil)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server.cr:451	0.0
+0x0000000005457730	0.0
+0x00000000054576a0	0.0
+0x0000000005457440	0.0
+munmap	0.0
+*Pointer(UInt8)@Comparable(T)#<<Pointer(UInt8)>:Bool	0.0
+getsockname	0.0
+getpeername	0.0
+./??:~procProc(Nil)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server.cr:451'2	0.0
+_dl_fixup	0.0
+0x00000000054054a0	0.0
+0x00000000054546a0	0.0
+0x0000000005454440	0.0
+0x0000000005454730	0.0
+*Gcry::Heap#update_heap_bounds_after_unmap:Nil	0.0
+*Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil	0.0
+__xpg_strerror_r	0.0
+0x00000000054024a0	0.0
+*raise<IO::Error>:NoReturn	0.0
+check_match	0.0
+_Unwind_GetIP	0.0
+__mempcpy_ssse3	0.0
+0x0000000005405620	0.0
+0x0000000005405600	0.0
+strcmp	0.0
+./??:~procProc(Nil)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server.cr:451	0.0
+tfind	0.0
+strerror_r	0.0
+*Gcry::Heap#bitmap_pool_grow<Pointer(Gcry::BitmapPoolIndex), Int32>:Bool	0.0
+*/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/raise.cr::LEBReader::new<Pointer(UInt8)>:/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/raise.cr::LEBReader	0.0
+_Unwind_GetCFA	0.0
+*Crystal::System::Fiber::allocate_stack<Int32, Bool>:Pointer(Void)	0.0
+0x0000000005402620	0.0
+0x0000000005402600	0.0
+pthread_once@@GLIBC_2.34	0.0
+_dl_runtime_resolve_fxsave	0.0
+_Unwind_SetGR	0.0
+~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil)@lib/gcry/src/gcry/platform/linux_stw.cr:738	0.0
+*Pointer(UInt8)@Pointer(T)#+<UInt64>:Pointer(UInt8)	0.0
+__current_locale_name	0.0
+*Pointer(LibUnwind::Exception)@Pointer(T)::malloc:Pointer(LibUnwind::Exception)	0.0
+*Int32@Int#bits_set?<Int32>:Bool	0.0
+__get_errlist	0.0
+__crystal_raise	0.0
+*raise_without_backtrace<IO::Error>:NoReturn	0.0
+0x0000000005405520	0.0
+./??:~metaclass	0.0
+_Unwind_GetRegionStart	0.0
+_Unwind_GetLanguageSpecificData	0.0
+~procProc(Fiber, Nil)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:103'2	0.0
+0x0000000005402520	0.0
+dcgettext	0.0
+*/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/raise.cr::LEBReader#initialize<Pointer(UInt8)>:Pointer(UInt8)	0.0
+~proc18Proc(Pointer(Void), Nil)@lib/gcry/src/gcry/gc_override.cr:1658	0.0
+~proc18Proc(Pointer(Void), Nil)@lib/gcry/src/gcry/gc_override.cr:1676	0.0
+0x00000000054574f0	0.0
+0x00000000054544f0	0.0
+*Crystal::FdLock#handle_last_ref<UInt32>:Nil	0.0
+0x00000000054056f0	0.0
+mprotect	0.0
+*LibUnwind::Action@Enum#includes?<LibUnwind::Action>:Bool	0.0
+0x0000000005457420	0.0
+0x00000000054573e0	0.0
+0x00000000054543e0	0.0
+0x0000000005454420	0.0
+0x00000000054026f0	0.0
+_Unwind_SetIP	0.0
+~procProc(Fiber, Nil)@/home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:103	0.0
+0x00000000054574a0	0.0
+0x00000000000229c0	0.0
+0x00000000054544a0	0.0

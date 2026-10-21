@@ -158,6 +158,15 @@ end
 # finds the chunk empty and releases it, and the read of `p`'s header below
 # faults: until 2026-10-05 the twenty 64-byte atomic plants in `main` shared
 # this class and kept the chunk, and the atomic slack moved them one class up.
+#
+# `scan_stack: false` leaves out this thread's stack only. Until 2026-10-20
+# it left out every thread's, and the idle thread, which the first minor
+# above starts, could still be in its birth here holding its new main fiber
+# in its own frame alone: the promoting minor freed it, the line printed
+# after this probe was built in its block, and the major in
+# `released_chunk_probe` walked into it — SIGSEGV in `scan_all_fiber_roots`
+# on macOS (process_spec/regression/78, CI run 38975094005,
+# bench/log/macos/2026-10-19-tlab-nursery-crash/).
 @[NoInline]
 def claim_probe(heap : Gcry::Heap) : {Bool, Bool}
   p = GC.malloc(64)

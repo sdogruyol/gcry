@@ -1,0 +1,3 @@
+advisors:
+  - name: default
+    model: anthropic/claude-fable-5-1:high

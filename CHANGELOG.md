@@ -7,6 +7,180 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-21
+
+### Added
+
+- **README, COMPARISON, WINDOWS and the RFC carry 0.38.0's numbers on every
+  platform.** Linux x86_64 on the 12-vCPU host, against v0.37.0 and Boehm
+  in two sessions (`bench/log/linux/2026-10-21-0.38-crystal-metric/`,
+  `bench/log/linux/2026-10-21-0.38-kemal/`): Binarytrees 99% → 114% of
+  Boehm (−11.2% wall), every other row level, RegexDna's peak 0.60× →
+  0.48×; Kemal `/json` 104.3–105.4% at 1.23×, level with 0.37.0. The other
+  four from `perf-ab.yml` on the GitHub runners, measured at 8b9e7eab (runs
+  39487147696, 39497374362;
+  `bench/log/{linux,macos,windows}/2026-10-21-0.38-runners/`): Binarytrees
+  is faster everywhere: arm64 Linux 77% → 90% of Boehm, macOS Intel
+  129–133% → 149%, M1 88% → 92%. macOS arm64: crystal-metric 98–107% of
+  Boehm on 7 of 9 rows, JsonParsePure's peak 1.07× → 0.94×, Kemal `/json`
+  103.5% at 1.39× (level with 0.37.0); Windows: 94–122%, no row slower than
+  0.37.0 in both runs. Heavier: Knuckeotide's peak on Linux, +21% on the
+  12-vCPU host (1.45× → 1.71×), +18% on `ubuntu-latest` (1.29× → 1.59×) and
+  +15% on arm64 (1.08× → 1.35×), at 2.5–4% less wall time — the
+  `Benchmark::run` frame pin named under the occupancy claim.
+
+- **`Perf A/B` probes Kemal's code placement and work per request.** `pads`
+  now builds every placement arm as a Kemal server too (`N` pads ahead of
+  `server.cr`, `pN` ahead of all code), and a leading `b` pads the `base`
+  source instead (`bp16`, arm `baseprepad16`), so two revisions' spreads are
+  timed in one interleaved run. `benches=-` makes a run Kemal-only and
+  `kemal_paths` picks the routes. Every Kemal run records the server's CPU
+  time and faults, the requests it served and, on gcry arms, `/gc-stats`;
+  `kemal-summary.md` puts them per 1 000 requests. `stats` adds counter
+  builds of `base` and `var` per route (`kemal-gc-counters.txt`, bytes
+  allocated included), and `syms/` holds each Kemal binary's `nm`.
+
+- **Kemal `/json`'s 2–7% drop on `ubuntu-latest` (0.37 against 0.36.0) is
+  code placement of Crystal's JSON and HTTP output path, not a collector
+  cost.** Six Kemal-only runs, 20 trials each, on EPYC 9V74, 9V45 and 7763
+  and Xeon 8573C runners. v0.36.0's own source rebuilt with nops ahead of
+  its code moves 0 to −4.5%, a run spans 2.8–5.5 points across both
+  sources, and v0.37.0 as released reads −1.4% to +1.6% against v0.36.0 in
+  all six (level). The earlier −2.3%, −6.6% and −2.4% measured
+  `4b625c87`'s `src/`, which re-timed is 1.2–2.8% slower than v0.37.0. Each
+  source does the same collector work in every placement: 0.630 against
+  0.711 collections per 1 000 requests and 5 964–5 974 bytes per request
+  in both. The offset mod 64 of a class of stdlib functions that always
+  move together (`JSON::Builder::Escape#write`, `Char#to_s<IO+>`,
+  `IO::Buffered#write`, the `HTTP::Headers` hash) explains 51% of the
+  variance of 66 effects (permutation p < 0.0005), with 32 mod 64 the slow
+  placement on all four CPUs; gcry's `Heap#malloc` and `Heap#malloc_atomic`
+  don't predict it (p 0.72 and 0.07). That phase predicts every step of the
+  earlier bisect, `a975d5cd`'s −2.5% to −4.1% included (it moves the class
+  from 0 to 32), and the 472 KiB `Heap` pad's +0.1–2.9% (32 to 48). What
+  0.37 does cost there is 12.7% more collections per request (the atomic
+  quarter, which takes peak 10% lower) and `dab25144`'s deeper stack scan:
+  0.017–0.040 ms of pause per 1 000 requests, 0.12–0.24% of a request.
+  Nothing in gcry changes: the code isn't gcry's, and Crystal can't align a
+  function (`bench/log/linux/2026-10-19-kemal-placement/`).
+
+### Changed
+
+- **The allocation hit path sets no occupancy bit with a locked
+  instruction.** It took one atomic OR per block. A cursor now claims every
+  free block of an occupancy word with one atomic when it takes the word,
+  and hands them out from its private mask with no shared write; whatever
+  it has not handed out goes back when it retires. A stop premarks a frozen
+  cursor's claim, so the sweep keeps it, and `free`, `live?` and every
+  occupancy count see handed-out blocks only. Binarytrees, % of Boehm, five
+  runners against 0.38's base (Perf A/B 39419215218, 15 reps): x86 Linux
+  84% → 103%, arm64 Linux 84% → 100%, macOS Intel 126% → 146%, M1 89% →
+  93%, Windows 119% → 121%. Kemal is level everywhere. Revcomp is +1.4% on
+  `ubuntu-latest`, inside its placement spread; a few JSON rows' peaks rise
+  0.2–1.1% on arm64 and macOS Intel, all at or under 0.90× Boehm's.
+  Knuckeotide's peak rises 20–24% on Linux from a dead buffer pinned by a
+  word in crystal-metric's own `Benchmark::run` frame, whose size changes
+  with the inlining. Gates: `make claim-stress` (lazy and in-stop sweeps,
+  cross-thread frees, collections every 0.2–2.2 ms), `spec/occupancy_claim_spec.cr`,
+  `process_spec/regression/74_occupancy_claim_pinned_spec.cr`; five
+  deliberately broken variants are each caught
+  (`bench/log/linux/2026-10-19-occupancy-claim-038/`).
+
+### Fixed
+
+- **A sweep inside the stop no longer makes a chunk dormant under a thread
+  taking it.** A cursor takes a chunk from its class's pool in one hold of
+  the chunk list lock. It checks that the chunk is free to take (not
+  dormant, no cursor on it, a free block), then marks it as a cursor's. A
+  stop that froze a thread between the two could find the chunk empty, and
+  its in-stop sweep then made it dormant. The thread took the dormant chunk
+  on resuming and allocated into it. After that, every collection released
+  the chunk's pages under its live objects, which then read zero on Linux.
+  No sweep reclaimed the chunk. The next revive zeroed its occupancy and
+  handed its blocks out a second time. `live_objects` and `free_bytes`
+  kept its blocks while every walk counted it empty. This happened in
+  0.37.0 and earlier too. It needed another mutator thread, a sweep inside
+  the stop (`GCRY_DISABLE_LAZY_SWEEP=1`, `GCRY_PAGE_DONTNEED=1`, or the
+  finishing slice of `GCRY_INCREMENTAL=1`), and that sweep making empties
+  dormant (a multi-mutator `GC.collect`, or a dormant budget). The default
+  after-world sweep holds the class lock the taker holds, and was never
+  affected. When a frozen thread holds the list lock, the in-stop sweep now
+  keeps empty chunks awake, as it already keeps the list as it is.
+  `make claim-stress`'s in-stop arm showed it as drift of exactly one
+  class-4 chunk of `select` garbage (live −1632, free +130 560 bytes) in 1
+  run of 100. Here it showed in 1 of 112 runs with 9 live stamped blocks
+  zeroed, and in 2 of 100 on 0.37.0's tree. With the window widened to
+  50 µs it showed in 20 of 20 on both trees, with blocks zeroed and blocks
+  handed out twice. After the fix: 0 of 40 widened, 0 of 200 in-stop and
+  0 of 100 lazy. The harness also fails a run that ends with a dormant
+  chunk holding blocks.
+  `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr` parks a
+  taker in the window across a collection. Before, the chunk it got was
+  dormant and its live block's last page read zero after the next
+  collection; after, the chunk is awake and intact
+  (`bench/log/linux/2026-10-21-claim-counter-drift/`).
+
+- **The thread-staging spec no longer depends on which specs ran before
+  it.** "process GC thread staging records every thread it creates"
+  asserted the process-wide `staged_overflows` was 0. `crystal spec`
+  collects files in the filesystem's order, and on GitHub's 2026-10-18
+  `ubuntu-latest` image (kernel 7.0) the thread-churn specs run first: 654
+  births fill the 64-slot table, which drains and evicts as designed, and
+  the example failed in every x86_64 configuration, v0.37.0 included. It
+  now counts the overflows of its own four threads. Every job on the new
+  image failed before and passed after
+  (`bench/log/linux/2026-10-20-staging-spec-order/`).
+
+- **The allocation entry's frame no longer carries 512 bytes nothing
+  writes.** `GC.malloc` and `GC.malloc_atomic` inline `check_fork_poison!`,
+  and its message buffer sat in their frame. That frame is live across every
+  collection an allocation triggers, so the conservative scan read the
+  buffer's stale contents as roots. On crystal-metric JsonParsePull, in a
+  build where `Heap#malloc_atomic` is inlined there, one stale word kept a
+  dead 33.5 MB buffer through one more collection, and the large cache then
+  unmapped and faulted again 25 MB more: +4.8% page faults, +1.3% peak. The
+  buffer now lives in an out-of-line `fork_poison_exit`, and the x86-64
+  frame goes from 0x258 to 0x78 bytes. Five runners against base
+  (`Perf A/B` 39419212059): no row is slower beyond what placement probes
+  of the same source move it by. JsonParsePull is −6.8% on macos-latest and
+  JSON parsing −3% on arm64. Peaks fall: JsonParsePure −13.6% on macos-latest
+  (1.07× → 0.93× Boehm), RegexDna −10% to −16% on macOS. One rise is left
+  beyond its spread: JsonParsePull +1.2% on ubuntu-latest (0.79× Boehm).
+  Kemal `/json` on ubuntu-latest reads −6%, which is inside both sources'
+  placement spread (39429021296). Gate: process_spec regression 79,
+  `make alloc-entry-frame`, in a release build, where 73 stale words
+  survive without the fix and 13 with it
+  (`bench/log/linux/2026-10-20-alloc-entry-frame/`).
+
+- **A collection asked for with `scan_stack: false` on the process heap
+  leaves out only the caller's stack.** It left out every stack: every other
+  thread's stack and registers, its `Thread` and every parked fiber went
+  with the caller's own. A thread in its birth holds its new main `Fiber` in
+  its own frame alone until `Fiber.new` pushes it onto the fiber list, and
+  waits for that push through any stop, which holds the list's mutex; such a
+  collection freed the fiber, the push published the freed block, and the
+  next fiber walk read its next owner's bytes as `Fiber#next`. gcry starts
+  one such thread itself, the idle thread, at the end of the first
+  collection, and `make nursery-tlab-smoke`'s first `minor_collect(scan_stack:
+  false)` comes ten minors later: SIGSEGV in `Heap#scan_all_fiber_roots` at
+  `0x6c696665725f6271` on macos-latest (CI run 38975094005), "ab_refil" + 16
+  — `Fiber#running?` through a `next` holding the line the smoke had just
+  printed, built in the freed fiber's block. 1 Darwin gate run in about 460
+  in CI; on the probe runners 9 of 2 000 on macos-latest and 10 of 2 000 on
+  macos-15-intel before, 0 of 2 000 on each after (with
+  `GCRY_POISON_FREED=1`, three arm64 runs faulted on the poison itself read
+  as `next`); 0 of 1 100 on Linux before. On a stop-the-world heap
+  `scan_stack: false` now leaves out the caller's stack and nothing else; a
+  library heap keeps the old meaning, and `GC.collect` and every automatic
+  collection, which always scan every stack, are unchanged.
+  `process_spec/regression/78_scan_stack_false_unborn_fiber_spec.cr` holds
+  the fiber list's mutex so a new thread stops in that push, and collects
+  with `scan_stack: false` around it: the thread's fiber was freed in every
+  child before (majors in the default and headered layouts, minors in the
+  headered one; 120 of 120 on Linux, 300 of 300 on each macOS runner) and is
+  allocated in every child after
+  (`bench/log/macos/2026-10-19-tlab-nursery-crash/`).
+
 ## [0.37.0] - 2026-10-18
 
 ### Added
@@ -7764,7 +7938,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/sdogruyol/gcry/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/sdogruyol/gcry/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/sdogruyol/gcry/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/sdogruyol/gcry/compare/v0.34.0...v0.35.0

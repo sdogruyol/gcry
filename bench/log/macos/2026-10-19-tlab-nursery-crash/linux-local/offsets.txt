@@ -1,0 +1,4 @@
+Fiber@context=8 Fiber@next=96 Fiber@previous=104 instance_sizeof(Fiber)=176
+Context@resumable=8
+String header=12 'ab_refil' index=84 object offset=96
+fault-0x10 little-endian bytes: "ab_refil"

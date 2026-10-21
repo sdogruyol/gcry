@@ -1,0 +1,20 @@
+build-claim rc=0 24s
+claim-lazy pass=100 fail=0
+claim-instop pass=50 fail=0
+build-mtprop rc=0 11s
+mtprop pass=50 fail=0
+build-stwmt rc=0 22s
+stwmt pass=199 fail=0 stall=0 scheduler_deadlock=1
+spec-headerless rc=0 12s
+spec-headers rc=0 8s
+process-spec rc=0 93s
+process-spec-headers rc=0 161s
+lint rc=0 39s
+windows-typecheck rc=0 39s
+darwin-typecheck rc=0 2s
+make-counter-loss rc=0 14s
+make-chunk-list-drift rc=0 14s
+make-thread-churn-uaf rc=0 16s
+make-large-cache-race rc=0 13s
+make-fork-test rc=0
+make-alloc-entry-frame rc=0

@@ -1,0 +1,9 @@
+claim_stress seconds=5.0 workers=4 seed=2 ring=512 lazy_sweep=false headers=false
+gcry: GC.free ignored 0x7d2dea4c3830: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+Invalid memory access (signal 11) at address 0xfffffcffffffffc7
+[0x573909819089] ?? +95902484238473 in bin/claim_stress_red
+[0x573909818c64] ?? +95902484237412 in bin/claim_stress_red
+[0x7d2df6645cb0] ?? +137636360772784 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x5739098230c9] ?? +95902484279497 in bin/claim_stress_red
+[0x57390980a338] ?? +95902484177720 in bin/claim_stress_red
+[0x0] ???

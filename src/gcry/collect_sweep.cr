@@ -21,12 +21,21 @@ module Gcry
     getter release_refused_cursor : UInt64 = 0_u64
     # In-stop sweeps that left `@chunks` as they found it because a thread the
     # stop froze held `@chunk_list_lock` (`Heap#sweep`). Each one also kept
-    # its empty chunks mapped rather than queue them for release.
+    # its empty chunks mapped rather than queue them for release, and out of
+    # dormancy (`stop_sweep_dormant_declined`).
     getter stop_sweep_relinks_declined : UInt64 = 0_u64
     # Research only: false relinks in the stop whoever holds the list lock,
     # the code before 2026-10-17 — the control arm of
     # `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`.
     property stop_sweep_list_lock : Bool = true
+    # Empty chunks an in-stop sweep kept out of dormancy because a thread the
+    # stop froze held `@chunk_list_lock`, which a cursor holds from finding a
+    # chunk free to take to taking it (`Heap#sweep`).
+    getter stop_sweep_dormant_declined : UInt64 = 0_u64
+    # Research only: false makes an empty chunk dormant in the stop whoever
+    # holds the list lock, the code before 2026-10-21 — the control arm of
+    # `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`.
+    property stop_sweep_dormant_lock : Bool = true
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -128,7 +137,8 @@ module Gcry
       # *reader* did). The lock is free unless such a thread holds it, so it
       # is taken here without waiting and held until the rebuild is
       # published. When a frozen thread holds it the list is left exactly as
-      # it is — no relink, and no empty chunk dropped from it for release —
+      # it is — no relink, no empty chunk dropped from it for release, and
+      # none made dormant (below: the holder may be a cursor taking it) —
       # and the frozen writer's links stay true; the empties stay mapped
       # until a later major finds the lock free.
       # `process_spec/regression/75_stop_sweep_frozen_mapper_spec.cr`.
@@ -230,6 +240,32 @@ module Gcry
                     if can_dormant && after_world && sweep_multi_mutator? && !bitmap_alloc_chunk?(chunk)
                       can_dormant = false
                       @last_empty_header_blocked_bytes &+= mapped
+                    end
+                    # And never dormant in a stop that froze a thread holding
+                    # `@chunk_list_lock` (`list_relinkable` false, above). A
+                    # cursor holds that lock from finding a chunk free to take
+                    # to taking it — `bitmap_pool_candidate?` (not dormant, not
+                    # a cursor's, a free block) and then CURSOR, in
+                    # `bitmap_take_pool_chunk` — and nothing marks the chunk
+                    # between the two, so this walk sees it empty and unowned.
+                    # Made dormant here, it went back to the taker when the
+                    # world restarted, which set CURSOR on it and allocated
+                    # into it: a cursor's chunk and a dormant one at once. Every
+                    # later flush DONTNEEDs a dormant chunk's pages, zeroing the
+                    # objects in it (`flush_pending_dormant_chunks`); every
+                    # sweep skips one, so they are never reclaimed; the walks
+                    # count it all free while the counters hold its blocks; and
+                    # the next revive zeroes its `occ` and hands its blocks out
+                    # again (`bitmap_revive_dormant`). An after-world sweep
+                    # holds the class lock the taker holds, and one that took
+                    # the list lock here has no taker inside it. The empty
+                    # chunk stays mapped and in the pool, as the declined
+                    # relink leaves the rest, until a later major finds the
+                    # lock free. `bench/log/linux/2026-10-21-claim-counter-drift/`,
+                    # `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`.
+                    if can_dormant && !list_relinkable && @stop_sweep_dormant_lock
+                      can_dormant = false
+                      @stop_sweep_dormant_declined &+= 1
                     end
                     # One cycle's grace before an unmap. The warm budget is
                     # the threshold, and a cycle allocates the threshold, so
@@ -1377,9 +1413,11 @@ module Gcry
       words = ((nblocks + 63) >> 6).to_i32
 
       # Pinned through this stop-the-world: its owner was frozen inside the
-      # unlocked hit path and will store into `occ` here without the class
-      # lock, so the after-world walk leaves the chunk alone (marks stale
-      # until the next stop-the-world zeroes them — `bitmap_settle_cursor_sets`).
+      # unlocked hit path and will hand out blocks here, and claim words of it
+      # (`cursor_claim_word`), without the class lock, so the after-world walk
+      # leaves the chunk alone (marks stale until the next stop-the-world
+      # zeroes them — `bitmap_settle_cursor_sets`). The count leaves the
+      # owner's claim out (`chunk_occupied_count`).
       if !@world_stopped && ChunkHeader.pinned?(chunk)
         occupied = chunk_occupied_count(chunk)
         @sweep_cursor_pinned &+= 1
@@ -1392,6 +1430,20 @@ module Gcry
                     else
                       @kernels.sweep_words(occ, mark, words)
                     end
+
+      # A cursor's claim on this chunk survives the kernel because it is
+      # marked — by the settle for a set pinned in this stop, or when it was
+      # made while a sweep could run (`cursor_claim_word`) — so it is in
+      # `live` and in no part of `freed`. Its blocks hold no objects: take
+      # them back out of `live`, or the live bytes overstate and a chunk whose
+      # only "live" blocks are a claim never reaches the empty-chunk path
+      # below. Exact here: in a stop the owner is frozen; after it this thread
+      # holds the class lock, which a cursor on an unpinned chunk is
+      # allocating under.
+      if ChunkHeader.cursor?(chunk)
+        claimed = chunk_claimed_count(chunk)
+        live = live > claimed ? live - claimed : 0_u64
+      end
 
       # No tail correction, and getting that wrong cost an afternoon: the first
       # version subtracted `(words * 64) - nblocks` from `freed` on the theory
@@ -1480,27 +1532,31 @@ module Gcry
     # SIMD kernel is untouched and remains the shipping path.
     #
     # The whole-word store is kept, and it is not incidental: a per-bit clear
-    # would race a mutator setting a different bit in the same word.
+    # would race a mutator setting other bits in the same word.
     #
     # That sentence says why a per-bit clear is wrong; it does not say why the
     # store is *right*, and read alone it invites the opposite conclusion.
     # `occ[i] = mark[i]` is a read-modify-write of a word the allocator writes
-    # with an atomic OR from a mutator holding no lock — so it looks like it
-    # must erase occupancy published since `mark[i]` was read, which is one
-    # live block per race and a chunk that then reads empty enough to release.
+    # with an atomic OR — a cursor's claim on the word (`cursor_claim_word`) —
+    # from a mutator holding no lock, so it looks like it must erase
+    # occupancy published since `mark[i]` was read, which is up to a word of
+    # blocks per race and a chunk that then reads empty enough to release.
     #
     # It does not, and the argument is three parts, none of which is local to
     # this loop:
     #
     #   * Cursor sets are settled inside the stop (`bitmap_settle_cursor_sets`).
-    #     One frozen mid-allocation keeps its chunks PINNED and this walk skips
-    #     them; an idle one is retired, and its owner must come back through
+    #     One frozen mid-allocation keeps its chunks PINNED, this walk skips
+    #     them, and its claims are marked; an idle one is retired with its
+    #     claims released, and its owner must come back through
     #     `bitmap_alloc_locked` — the class lock this walk also takes.
-    #   * Allocate-black. A block handed out while `@collecting` — which stays
-    #     true through the whole post-STW section, sweep included — carries
-    #     `mark=1`, so it is not in `occ & ~mark` and the store preserves it.
-    #   * A bit in `mark` but not in `occ` cannot exist: marking follows
-    #     occupancy on both allocation paths.
+    #   * Allocate-black. A block handed out, and a word claimed, while
+    #     `@collecting` — which stays true through the whole post-STW section,
+    #     sweep included — carries `mark=1`, so it is not in `occ & ~mark` and
+    #     the store preserves it.
+    #   * A bit in `mark` but not in `occ` is only ever a claim between its
+    #     mark and its OR (`cursor_claim_word` marks first), and the store
+    #     then sets the bit the owner is about to set itself.
     #
     # Measured rather than argued, 2026-09-12: an audit (since removed) asked,
     # per dead word, whether any cursor slot was mid-allocation inside a block

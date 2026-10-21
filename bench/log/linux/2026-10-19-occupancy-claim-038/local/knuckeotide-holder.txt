@@ -1,0 +1,63 @@
+# gdb at the 31st collection of crystal-metric Knuckeotide (km/{base,var}: cm-build.sh release builds of origin/release-0.38.0 16b7e67c and the port 24df3da5 src)
+== base
+block range 7fffeda2a000-7fffedffc000
+hits []
+frame 0 rsp=7fffffff8bc8 run_collection_body
+frame 1 rsp=7fffffff8bd0 run_collection
+frame 2 rsp=7fffffff8c00 collect:coalesce
+frame 3 rsp=7fffffff8c30 allocate:atomic:clear
+frame 4 rsp=7fffffff8c70 malloc_atomic
+frame 5 rsp=7fffffff8d20 malloc_atomic
+frame 6 rsp=7fffffff8d20 malloc_atomic
+frame 7 rsp=7fffffff8d20 byte_slice?
+frame 8 rsp=7fffffff8f40 byte_slice
+frame 9 rsp=7fffffff8f40 frecuency
+frame 10 rsp=7fffffff8f80 find_seq
+frame 11 rsp=7fffffff8f80 run
+frame 12 rsp=7fffffff8f80 _run
+frame 13 rsp=7fffffff8f80 run
+frame 14 rsp=7fffffffcf90 __crystal_main
+frame 15 rsp=7fffffffd100 main_user_code
+frame 16 rsp=7fffffffd100 main
+frame 17 rsp=7fffffffd320 main
+== var
+block range 7fffeda2a000-7fffedffc000
+hits [('0x7fffffff8fa0', '0x7fffeda2a040')]
+frame 0 rsp=7fffffff8ba8 run_collection_body
+frame 1 rsp=7fffffff8bb0 run_collection
+frame 2 rsp=7fffffff8be0 collect:coalesce
+frame 3 rsp=7fffffff8c10 allocate:atomic:clear
+frame 4 rsp=7fffffff8c50 malloc_atomic
+frame 5 rsp=7fffffff8c50 malloc_atomic
+frame 6 rsp=7fffffff8ee0 malloc_atomic
+frame 7 rsp=7fffffff8ee0 byte_slice?
+frame 8 rsp=7fffffff8f20 byte_slice
+frame 9 rsp=7fffffff8f20 frecuency
+frame 10 rsp=7fffffff8f60 find_seq
+frame 11 rsp=7fffffff8f60 run
+frame 12 rsp=7fffffff8f60 _run
+frame 13 rsp=7fffffff8f60 run
+frame 14 rsp=7fffffffcf90 __crystal_main
+frame 15 rsp=7fffffffd100 main_user_code
+frame 16 rsp=7fffffffd100 main
+frame 17 rsp=7fffffffd320 main
+slot 7fffffff8fa0 value 7fffeda2a040 -> frame (13, 'run')
+
+# Benchmark::run<(String | Nil)>:Nil prologue and size
+base 00000000000e5ca0 000000000001774e t *Benchmark::run<(String | Nil)>:Nil
+base    e5caa:	sub    $0x3fd8,%rsp
+var 00000000000e6240 0000000000017dcc t *Benchmark::run<(String | Nil)>:Nil
+var    e624a:	sub    $0x3ff8,%rsp
+
+# exit counters (gc_counters.cr main), Knuckeotide, 3 runs each
+sbase collections=69 large_reserved_bytes=0 large_mapped_bytes=3260416 heap_size=6668288
+svar collections=65 large_reserved_bytes=4194304 large_mapped_bytes=13561856 heap_size=16969728
+sbase collections=71 large_reserved_bytes=0 large_mapped_bytes=3260416 heap_size=6668288
+svar collections=68 large_reserved_bytes=4194304 large_mapped_bytes=13561856 heap_size=16969728
+sbase collections=71 large_reserved_bytes=0 large_mapped_bytes=3260416 heap_size=6668288
+svar collections=64 large_reserved_bytes=4194304 large_mapped_bytes=13561856 heap_size=16969728
+
+# exit-time holders with the probe2 main (qbase/qvar: same src, different main)
+qbase GCSTATS large_mapped_bytes=3260416
+qbase LIVE large user=0x7ce40931d040 payload=3000016
+qvar GCSTATS large_mapped_bytes=258048

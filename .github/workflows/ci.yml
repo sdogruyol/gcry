@@ -830,6 +830,22 @@ jobs:
         run: |
           make counter-loss
 
+      # The occupancy claim: a cursor claims a word's free blocks with one
+      # atomic and hands them out with no shared write. Four threads, cross-
+      # thread frees and a collection every 0.2-2.2 ms, lazy sweep and the
+      # sweep inside the stop; a lost occupancy bit, a block handed out twice,
+      # a refused legitimate free or counter drift fails it.
+      - name: Occupancy claim under concurrent frees and collections
+        run: |
+          make claim-stress
+
+      # The allocation entry's frame is live across every collection an
+      # allocation triggers; a buffer in it that nothing writes is read as
+      # roots (process_spec regression/79, release build).
+      - name: No unwritten buffer in the allocation entry frame
+        run: |
+          make alloc-entry-frame
+
       # The guard's ledger, end to end: a fault into a chunk gcry released must
       # be named — base, size, release path, collection — rather than reported
       # as an address. That reporting is what turns one sighting a week into a
@@ -2182,7 +2198,7 @@ jobs:
           mkdir -p bin
           make poison-freed finalizer-complex mark-audit explicit-collect-barrier
           make parallel-mark-process parallel-mark-termination parallel-mark-stress monitor-gate-deadlock
-          make bitmap-marks-freelist stw-slot-precision heap-counters counter-loss
+          make bitmap-marks-freelist stw-slot-precision heap-counters counter-loss claim-stress
           # Not stw-mt-sample: Crystal's own scheduler deadlock
           # (crystal-lang/crystal#17486) stalls about 1 run in 700, and there
           # is no gdb here to tell it from gcry's, so 40 runs failed the job
@@ -2284,7 +2300,7 @@ jobs:
           cc=$(cygpath -m "$GCRY_CI_CRYSTAL")
           make CRYSTAL="$cc" poison-freed finalizer-complex mark-audit explicit-collect-barrier
           make CRYSTAL="$cc" parallel-mark-process parallel-mark-termination parallel-mark-stress monitor-gate-deadlock
-          make CRYSTAL="$cc" bitmap-marks-freelist stw-slot-precision heap-counters counter-loss
+          make CRYSTAL="$cc" bitmap-marks-freelist stw-slot-precision heap-counters counter-loss claim-stress
           make CRYSTAL="$cc" thread-death-window
           # Not stw-mt-sample (see the x86_64 job), and not find-block-race:
           # its `live` control crashed 0 of 40 here, so the gate cannot be
@@ -2520,7 +2536,7 @@ jobs:
           # counter-loss is back (2026-10-14): its one Intel failure was the
           # old per-allocation comparison catching a runtime thread's birth
           # allocation in flight, and the arms it had were the same code.
-          make stw-slot-precision heap-counters counter-loss interior-only-buffer unaligned-only-buffer
+          make stw-slot-precision heap-counters counter-loss claim-stress interior-only-buffer unaligned-only-buffer
           make stw-mt-sample idle-release
           ci/sound-suite.sh
 

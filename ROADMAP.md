@@ -4,10 +4,10 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-**Release state.** Latest release **v0.37.0** (2026-10-18): batched serial
-and parallel mark, the macOS allocation hit path and 8 MiB floor, atomic
-bytes at a quarter in threshold sizing, Crystal 1.22.0 in CI, and the
-Monitor, Monitor-gate and in-stop sweep fixes of PR #53. The tip is the next
+**Release state.** Latest release **v0.38.0** (2026-10-21): the occupancy
+claim on the allocation hit path, and the in-stop sweep dormancy,
+`scan_stack: false`, allocation-entry frame and thread-staging spec fixes of
+PR #55. The tip is the next
 candidate; `CHANGELOG.md`'s `[Unreleased]` section is what it holds.
 
 The headings below carry **no version numbers on purpose**. They are work
@@ -2106,8 +2106,8 @@ kept finding the rest.
       writer frozen inside its locked section by an *in-STW* sweep resumes
       against the rebuilt list (0 of 37 334 mappings under
       `GCRY_DISABLE_LAZY_SWEEP=1` then) — **was real and is
-      closed (2026-10-17, 0.37.0).** The `claim_stress` harness on branch
-      `occupancy-plain-or`
+      closed (2026-10-17, 0.37.0).** The `claim_stress` harness
+      (`bench/claim_stress.cr`, in the tree since 0.38.0)
       (two Parallel workers, in-stop sweep) reached it: 31–252
       chunks indexed and off the list in 14 of 40 2-second runs. Every loss
       followed a stop that froze `map_chunk` between its head read and its
@@ -2122,7 +2122,16 @@ kept finding the rest.
       0 of 10 with four. No default configuration sweeps in the
       stop: Parallel, EC4 and EC1 sweep after the world on both layouts
       (`bench/log/linux/2026-10-17-in-stop-sweep/FINDINGS.md`, which also
-      reconciles the branch's own 5-of-10-seeds count).
+      reconciles the branch's own 5-of-10-seeds count). A second hole of the
+      same shape **closed 2026-10-21**. A thread frozen while holding the lock,
+      between `bitmap_pool_candidate?` and CURSOR in `bitmap_take_pool_chunk`,
+      had its chunk made dormant by the in-stop sweep. The thread then
+      allocated into a dormant chunk, which every flush released under its
+      live objects and every revive handed out again. It failed 1 in 100
+      `claim_stress` in-stop runs, and 20 of 20 with that window widened, on
+      0.37.0's tree too. Dormancy now declines along with the relink
+      (`stop_sweep_dormant_declined`, `process_spec/regression/80`,
+      `bench/log/linux/2026-10-21-claim-counter-drift/`).
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which
@@ -3780,6 +3789,23 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       start their threads while other workers allocate and collect, which is
       the same shape. Fixed by resolving every port and bound before the first suspend:
       0 stalls in 20 runs (`bench/log/macos/2026-09-29-pthread-list-lock/`).
+- [x] **macOS: `nursery-tlab-smoke` faulted in `scan_all_fiber_roots`
+      (2026-10-16) — closed 2026-10-20.** CI run `38975094005`, darwin
+      arm64 gates: SIGSEGV at `0x6c696665725f6271`, "ab_refil" + 16 —
+      `Fiber#running?` loaded through a `next` that held the line the smoke
+      had just printed. Not the headered TLAB + nursery configuration: a
+      `scan_stack: false` collection on the process heap left out every
+      thread's stack, not only the caller's, and the idle thread gcry starts
+      at the first collection was still in its birth, its new main fiber in
+      its own frame alone, when the smoke's first `minor_collect(scan_stack:
+      false)` ran. The minor freed the fiber, the thread's push listed the
+      freed block, the printed line was built in it. 1 gate run in about 460
+      on Darwin CI; 19 of 4 000 on the two macOS runners before, 0 of 4 000
+      after; never on Linux. `scan_stack: false` now leaves out only the
+      caller's stack on a stop-the-world heap; `GC.collect` and automatic
+      collections never skipped any. Regression 78 forces the birth window
+      and is red in every run before, in every layout
+      (`bench/log/macos/2026-10-19-tlab-nursery-crash/FINDINGS.md`).
 - [ ] **A large chunk released with its block still allocated (`dormant_flush`,
       2026-09-28).** Two consecutive faults in the first minutes of a
       campaign on `2a46123`. A worker wrote into its own buffer after the
@@ -4079,21 +4105,46 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       0.37 base it fails the keep rule: x86 JSON rows +3.0–4.5% wall and
       Knuckeotide's peak on arm64 1.09× → 1.43× (Perf A/B 38966029947),
       from a shifted collection schedule rather than the claim, which no
-      mark reaches. Kept on branch `occupancy-plain-or` with its findings
-      (`bench/log/linux/2026-10-17-occupancy-claim/` there).
-- [ ] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
-      0.36.0 (2026-10-18).** Three paired runs: −2.3% [−3.9, −0.6], −6.6%
-      [−8.0, −1.6], −2.4% [−4.8, −0.9]; peak −10%. On the 12-vCPU QEMU host
-      the same comparison is −0.7% / +0.4%, and macOS and Linux arm64 are
-      level or faster. A bisect over the 0.37 commits on that runner puts the
-      step at `a975d5cd` (the research tables mapped only when armed), alone
-      −2.5% to −4.1% on three runners, every other step within its spread.
-      That commit removes work: the `Heap` shrinks by 472 KiB and the default
-      no longer records the release map. Putting a 472 KiB pad back reads
-      +0.1% to +2.9% with every IQR across zero, so layout or code placement
-      is suspected and not shown. Next: a `pads` placement probe on that
-      runner, as for Revcomp (`bench/log/linux/2026-10-18-0.37-runners/`,
-      `kemal-bisect/`).
+      mark reaches. **2026-10-20, on the 0.38 base: shipped in 0.38.0**
+      (`bench/log/linux/2026-10-19-occupancy-claim-038/`). It ran
+      claim_stress 150 runs, `stw-mt` 199 of 200 plus 1 Crystal scheduler
+      deadlock, and caught all five red arms. The first round's JSON peaks
+      (+8%), x86 Linux JSON wall (+1.7–3.5%) and 25 MB unmap/refault churn
+      were one dead buffer held by `GC.malloc_atomic`'s unwritten fork-check
+      buffer, which the claim's inlining put in the live frame. That is fixed
+      on its own, also in 0.38.0
+      (`bench/log/linux/2026-10-20-alloc-entry-frame/`). On top of the fix
+      (Perf A/B 39419215218), Binarytrees is 84% → 103% of Boehm on x86
+      Linux, 84% → 100% on arm64, 126% → 146% on macos-15-intel, 89% → 93%
+      on the M1 and 119% → 121% on Windows. Revcomp +1.4% on ubuntu-latest
+      is inside placement. Knuckeotide's peak (+20–24% Linux) is stack
+      pinning in crystal-metric's own `Benchmark::run` frame. Accepted as
+      they are: JSON-row peak rises of +0.2–1.1% on arm64 and macos-15-intel,
+      every row at or under 0.90× Boehm's peak, not attributed. Left on the
+      M1: Binarytrees at 93%.
+- [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
+      0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
+      output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,
+      −2.4%) measured `4b625c87`'s `src/`; the bisect put the step at
+      `a975d5cd`, a commit that removes work. Six Kemal-only `Perf A/B` runs
+      with placement probes on four CPU models: v0.36.0's own source moves
+      0 to −4.5% with the bytes of nops ahead of its code, a run spans
+      2.8–5.5 points across both sources, and v0.37.0 as released reads
+      +1.6%, −1.4%, +0.1%, +1.1%, +1.6%, −1.4% against v0.36.0 (level). The
+      collector does the same work in every build of one source (0.630
+      against 0.711 collections per 1 000 requests, the same bytes per
+      request). What predicts the speed is the offset mod 64 of a class of
+      stdlib functions that move together (`JSON::Builder::Escape#write`,
+      `Char#to_s<IO+>`, `IO::Buffered#write`, the `HTTP::Headers` hash; R²
+      0.51 over 66 effects, permutation p < 0.0005); 32 mod 64 is the slow
+      placement on all four CPUs. `a975d5cd`, `272d73e5` and `4b625c87` put
+      it at 32, v0.36.0 at 16, v0.37.0 at 48, and that phase predicts every
+      earlier bisect step and the 472 KiB pad's +0.1–2.9%. gcry's
+      `Heap#malloc` and `#malloc_atomic` don't (p 0.72, 0.07). The real
+      cost of 0.37 is +12.7% collections per request (the atomic quarter)
+      and `dab25144`'s deeper stack scan: 0.12–0.24% of a request. No fix:
+      the code isn't gcry's and Crystal can't align it
+      (`bench/log/linux/2026-10-19-kemal-placement/`).
 - [x] **Windows: Revcomp's timed section is 7.7% slower on 0.36.0
       (2026-10-15) — code placement of gcry's allocation path
       (2026-10-16).** Whole-process wall +3.4%; macOS shows none of it.

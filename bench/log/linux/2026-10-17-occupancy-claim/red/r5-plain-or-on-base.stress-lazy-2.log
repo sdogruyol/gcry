@@ -1,0 +1,6 @@
+claim_stress seconds=5.0 workers=4 seed=2 ring=512 lazy_sweep=true headers=false
+  ops=14672896 allocs=14672896 local_frees=4892448 remote_frees=4887661 drops=4890554 checks=48903373
+  collections=2951 claims_released=na sets_pinned=6105 hits=130245571 locked=6530097
+  refused_frees=0 live_objects_drift=1212 free_bytes_drift=-1095472 unlisted_chunks=0
+  FAIL: walk against counter drifted (live 1212, free bytes -1095472)
+RESULT: FAIL seed=2

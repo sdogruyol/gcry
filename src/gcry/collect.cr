@@ -1492,7 +1492,10 @@ module Gcry
         n += occ[i].popcount
         i += 1
       end
-      n
+      # Allocated, not occupied: a cursor's claim on the chunk is blocks it has
+      # not handed out (`chunk_claimed_count`). Such a chunk is refused as one
+      # a cursor stands on, which is what it is, not as one holding a block.
+      n - chunk_claimed_count(chunk).to_i32
     end
 
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
@@ -1883,8 +1886,9 @@ module Gcry
       header, chunk = found
       # `find_object` already required occupancy; this re-asks the same
       # authority rather than the header flag, which is stale on a bitmap chunk
-      # and absent under headerless.
-      block_allocated?(chunk, header)
+      # and absent under headerless — exactly: a block a cursor has claimed and
+      # not handed out is occupied in `occ` and not live.
+      block_allocated_exact?(chunk, header)
     end
 
     # ExecutionContext Monitor must not run process STW — it would signal-suspend
@@ -2757,6 +2761,34 @@ module Gcry
       mark_explicit_root(user)
     end
 
+    # Are stacks other than the caller's roots of this collection? Always on
+    # a stop-the-world heap; on any other only when `scan_stack` is.
+    #
+    # `scan_stack: false` used to switch off every stack: the caller's, every
+    # parked fiber's, and every other thread's, with their registers and
+    # their `Thread` objects. The caller can only speak for its own frames.
+    # On a stop-the-world heap every other thread is a mutator the stop froze
+    # wherever it was, and gcry starts one itself at the end of the first
+    # collection (the idle thread). A thread in its birth holds its new main
+    # `Fiber` in its own frame alone until `Fiber.new` pushes it onto the
+    # fiber list, and waits for that push through any stop, which holds the
+    # list's mutex. A `scan_stack: false` collection there freed the fiber,
+    # the push published the freed block, and the next fiber walk read its
+    # next owner's bytes as `Fiber#next`: `make nursery-tlab-smoke` faulting
+    # in `scan_all_fiber_roots` on macOS, the smoke's first
+    # `minor_collect(scan_stack: false)` landing in the idle thread's birth
+    # (`process_spec/regression/78_scan_stack_false_unborn_fiber_spec.cr`,
+    # `bench/log/macos/2026-10-19-tlab-nursery-crash/FINDINGS.md`).
+    #
+    # A library heap (`stop_the_world` false) keeps the old meaning: nothing
+    # else runs against it, and its specs use the flag to make the whole
+    # process's stacks not roots. `GC.collect` and every automatic collection
+    # pass `scan_stack: true` and are unchanged.
+    @[AlwaysInline]
+    private def other_stacks_are_roots?(scan_stack : Bool) : Bool
+      scan_stack || @stop_the_world
+    end
+
     # Thin on purpose, and the body is never inlined into it: every frame a
     # collection pushes — the body's own large, heavily inlined frame included
     # — then lies *below* the SP captured here, where the scrubs can reach it.
@@ -2927,14 +2959,17 @@ module Gcry
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
           @last_roots_metadata_ns = monotonic_ns - root_part if @root_phase_timing
+          # `scan_stack: false` leaves out the caller's own stack and nothing
+          # else (`other_stacks_are_roots?`).
+          other_stacks = other_stacks_are_roots?(scan_stack)
           # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
           t_scrub = monotonic_ns
-          scrub_parked_fiber_stacks if scan_stack
+          scrub_parked_fiber_stacks if other_stacks
           scrub_ns = monotonic_ns - t_scrub
           @last_phase_scrub_ns = scrub_ns
           # Fiber objects + suspended stacks (once; not also via push_gc_roots).
           root_part = monotonic_ns if @root_phase_timing
-          scan_all_fiber_roots if scan_stack
+          scan_all_fiber_roots if other_stacks
           if @root_phase_timing
             now = monotonic_ns
             @last_roots_fibers_ns = now - root_part
@@ -2942,8 +2977,8 @@ module Gcry
           end
           # Research arms: stacks `Fiber.unsafe_each` does not yield
           # (src/gcry/unowned_stack_roots.cr). Off by default.
-          scan_unowned_stacks if scan_stack
-          scan_thread_roots if scan_stack && @stop_the_world
+          scan_unowned_stacks if other_stacks
+          scan_thread_roots if other_stacks && @stop_the_world
           @last_roots_threads_ns = monotonic_ns - root_part if @root_phase_timing
           @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
           StwWatchdog.enter(StwWatchdog::PHASE_STATIC)
@@ -2963,10 +2998,8 @@ module Gcry
           end
 
           t0 = monotonic_ns
-          if scan_stack
-            scan_mutator_stack
-            scan_other_thread_stacks
-          end
+          scan_mutator_stack if scan_stack
+          scan_other_thread_stacks if other_stacks
           @last_phase_stacks_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_MARK)
 
@@ -3452,16 +3485,15 @@ module Gcry
         mark_large_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
-        scrub_parked_fiber_stacks if scan_stack
-        scan_all_fiber_roots if scan_stack
-        scan_thread_roots if scan_stack && @stop_the_world
+        other_stacks = other_stacks_are_roots?(scan_stack)
+        scrub_parked_fiber_stacks if other_stacks
+        scan_all_fiber_roots if other_stacks
+        scan_thread_roots if other_stacks && @stop_the_world
         if @scan_static_roots
           scan_static_ranges
         end
-        if scan_stack
-          scan_mutator_stack
-          scan_other_thread_stacks
-        end
+        scan_mutator_stack if scan_stack
+        scan_other_thread_stacks if other_stacks
         # Arm page-dirty barrier for mutator writes between incremental slices.
         arm_page_barrier_after_collect
       ensure

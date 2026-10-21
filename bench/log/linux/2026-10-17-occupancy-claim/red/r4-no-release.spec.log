@@ -1,0 +1,18 @@
+...FF
+Failures:
+  1) occupancy claimed a word at a time gives the claim back when a stop retires the cursor
+     Failure/Error: (heap.cursor_claims_released - released).should eq(claim.popcount)
+       Expected: 63
+            got: 0
+     # spec/occupancy_claim_spec.cr:153
+  2) occupancy claimed a word at a time marks a claim made while the after-world sweep can run
+     Failure/Error: heap.live_objects.should eq(2)
+       Expected: 2
+            got: 0
+     # spec/occupancy_claim_spec.cr:193
+Finished in 2.56 milliseconds
+5 examples, 2 failures, 0 errors, 0 pending
+Failed examples:
+crystal spec spec/occupancy_claim_spec.cr:142 # occupancy claimed a word at a time gives the claim back when a stop retires the cursor
+crystal spec spec/occupancy_claim_spec.cr:166 # occupancy claimed a word at a time marks a claim made while the after-world sweep can run
+exit 1
