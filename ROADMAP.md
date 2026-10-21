@@ -4,10 +4,10 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-**Release state.** Latest release **v0.37.0** (2026-10-18): batched serial
-and parallel mark, the macOS allocation hit path and 8 MiB floor, atomic
-bytes at a quarter in threshold sizing, Crystal 1.22.0 in CI, and the
-Monitor, Monitor-gate and in-stop sweep fixes of PR #53. The tip is the next
+**Release state.** Latest release **v0.38.0** (2026-10-21): the occupancy
+claim on the allocation hit path, and the in-stop sweep dormancy,
+`scan_stack: false`, allocation-entry frame and thread-staging spec fixes of
+PR #55. The tip is the next
 candidate; `CHANGELOG.md`'s `[Unreleased]` section is what it holds.
 
 The headings below carry **no version numbers on purpose**. They are work
