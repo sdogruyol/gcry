@@ -1,0 +1,63 @@
+# make dormant-flush-race equivalent (parent binary, GCRY_SEGV_REPORT=1), one run per heavy-lock hold
+# df_new  = 9157672e harness (no per-free trim, single-line quote); df_trim = 3d097aeb (guard fix f0fdf4e3, per-free trim, whole report)
+## df_new gate-new-1
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     0 of 6 failed
+  note: stress missed the unsafe window; the scheduled control above must still fault
+## df_new gate-new-2
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     0 of 6 failed
+  note: stress missed the unsafe window; the scheduled control above must still fault
+## df_new gate-new-3
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     0 of 6 failed
+  note: stress missed the unsafe window; the scheduled control above must still fault
+## df_trim gate-trim-1
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-2
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-3
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-4
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-5
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-6
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-7
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-8
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-9
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-10
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-11
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+## df_trim gate-trim-1, the control's quoted line
+     gcry: SIGSEGV at 0x7a4ce83b1034 — in a chunk gcry RELEASED — base 0x7a4ce83b1000, 45056 bytes, large-object release, at collection 5; the write is 52 bytes into it. Collections since: 0. First user word at release: 0x5c (type_id 92). Blocks still allocated at release: 0
