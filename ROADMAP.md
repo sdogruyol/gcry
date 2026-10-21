@@ -3806,16 +3806,32 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       collections never skipped any. Regression 78 forces the birth window
       and is red in every run before, in every layout
       (`bench/log/macos/2026-10-19-tlab-nursery-crash/FINDINGS.md`).
-- [ ] **A large chunk released with its block still allocated (`dormant_flush`,
-      2026-09-28).** Two consecutive faults in the first minutes of a
-      campaign on `2a46123`. A worker wrote into its own buffer after the
-      chunk was released, and the release saw the header USED. Not
-      reproduced since: 0 of 30 each, old and new binaries side by side under
-      full load; 0 of 344 in the two campaigns before. The next sighting
-      wants `GCRY_TRACE_LARGE=1`. Through campaign-048 (2026-10-03, 400 runs
-      with it armed) the lane has run about 3 400 more times without this
-      fault. Campaign-036's two
-      stalls were captures of the harness parent only, not release faults.
+- [ ] **A cached large chunk released while something still read its block
+      header (`dormant_flush`, 2026-09-28; narrowed 2026-10-21).** One run on
+      `2a46123` (seed 20012, 2 of 6 queued children) faulted. The old
+      description was wrong in both halves. The header recorded at release
+      was `FREE | LARGE` (`0x9_0000_a000`, where a live block in this harness
+      also has `ATOMIC`), so the chunk came from the large cache. "1 block
+      still allocated" was `guard_occupied` asking `BlockHeader.free?`, which
+      is always false on headerless (fixed). The access was to the block
+      header's `flags` word (+36), not to a worker's buffer.
+      Not the 0.38.0 dormancy bug: this lane sweeps after the stop, and the
+      chunk was large. The same binary's unsafe control
+      (`GCRY_TRIM_IMMEDIATE=1`) prints the sighting's report line exactly: 2
+      of 3 children at +36 in `free_large?` ← `sweep_large_one` after the
+      lazy sweep waited for `@alloc_lock`, 1 at +0 in the walk. In the
+      queued arm, `@live_chunk_walk` should rule this out, and no path that
+      skips it was found. The one other reader at +36, the owner's `GC.free`,
+      needs the sweep to have cached a live block, and `lg_by_sweep` was 0
+      in every rerun. Seed 20013's failure is unattributed: its only quoted
+      line is the start-up note. Reruns with `GCRY_TRACE_LARGE=1`: 0 of 404
+      on the old binary and 0 of 320 on the current tree with trims restored.
+      Since 2026-10-03 the gate's workers never trimmed (0 mutator unmaps a
+      child, stress control 0 of 18), so later lanes did not test this. They
+      trim after every free again (control 66 of 66), and the parent now
+      prints the failing child's whole report, writer pc included: resolve
+      it with `addr2line` on the campaign's binary at the next sighting.
+      `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`,
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
 - [x] **Freeing a large object costs O(live large chunks), so freeing many is
       quadratic (diagnosed 2026-10-01) — closed 2026-10-14.** Measured with
