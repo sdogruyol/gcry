@@ -43,6 +43,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`GCRY_CLEAR_STACK`, which leaves every holder in place): no collector
   change.
 
+- **`make dormant-flush-race` exercises mutator unmaps again.** Since the
+  2026-10-03 trim slack, `GC.free` of a large block no longer trims on every
+  free. The gate's four workers then never trimmed (0 mutator releases a
+  child), and its stress control faulted 0 of 18 children. Workers now
+  trim after each free: control 66 of 66, queued arm 0 of 66. When a queued
+  child fails, the parent prints that child's whole crash report, including
+  the faulting pc and return addresses. Before, it printed one line, often
+  the start-up note about `GCRY_MOSTLY_EMPTY`.
+
+### Fixed
+
+- **The unmap guard and the release ledger record whether a released large
+  block was still allocated.** They used to read its FREE flag with
+  `BlockHeader.free?`, which is always `false` on the headerless layout, the
+  default. So every large release there reported `Blocks still allocated at
+  release: 1` under `GCRY_SEGV_REPORT=1`, including the cached free chunks a
+  trim gives back. That figure is why the 2026-09-28 `dormant_flush`
+  sighting read as a chunk released with its block allocated, when the
+  header it recorded was `FREE | LARGE`. The guard now uses `free_large?`;
+  `spec/research_tables_spec.cr` checks both answers.
+  `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`
+
 ## [0.38.0] - 2026-10-21
 
 ### Added
