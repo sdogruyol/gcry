@@ -697,6 +697,10 @@ module Gcry
       CursorSlot.store_word(s, 0)
       s.value.word_base = 0_u64
       unless chunk.null?
+        # Signal fence, as in `cursor_claim_word`: the CURSOR clear is a
+        # relaxed RMW, and nothing else stops the compiler hoisting it above
+        # the slot stores — the order a stop on this thread relies on.
+        Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
         ChunkHeader.set_cursor(chunk, false)
         if hook = @cursor_retire_hook
           hook.call(chunk)
