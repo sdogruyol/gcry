@@ -1,0 +1,19 @@
+2026-10-20T20:15:47Z build crystal build -Dgc_none --release bench/claim_stress.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/claim_stress
+2026-10-20T20:16:09Z build crystal build -Dgc_none bench/claim_stress.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/claim_stress_dbg
+2026-10-20T20:16:12Z build crystal build -Dgc_none --release bench/stw_mt_property_test.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/stw_mt
+2026-10-20T20:16:34Z build crystal build -Dgc_none bench/mt_property_test.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/mt_prop
+2026-10-20T20:16:37Z build crystal build -Dgc_none bench/thread_storm.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/thread_storm
+2026-10-20T20:16:40Z build crystal build -Dgc_none -Dgcry_block_headers bench/nursery_tlab_smoke.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/nursery_tlab_smoke
+2026-10-20T20:16:43Z build crystal build -Dgc_none -Dwithout_mt bench/fork_reinit.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/fork_reinit
+2026-10-20T20:16:46Z build crystal build -Dgc_none --release bench/soak.cr -o /home/naruto/playground/.scratch/kemal3/tip-src/bin/soak
+2026-10-20T20:37:11Z claim-lazy: runs=200 pass=200 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T20:47:05Z claim-instop: runs=100 pass=99 fail=1 stall=0 upstream_deadlock=0
+2026-10-20T20:49:36Z claim-2w-instop-dbg: runs=50 pass=50 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T20:51:37Z claim-invariants: runs=30 pass=30 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T21:04:42Z stw-mt: runs=300 pass=298 fail=0 stall=0 upstream_deadlock=2
+2026-10-20T21:06:23Z mt-prop: runs=50 pass=50 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T21:06:53Z thread-storm: runs=30 pass=30 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T21:23:43Z nursery-tlab: runs=1000 pass=1000 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T21:24:34Z fork: runs=50 pass=50 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T23:24:35Z soak: runs=1 pass=1 fail=0 stall=0 upstream_deadlock=0
+2026-10-20T23:24:35Z DONE
