@@ -47,6 +47,9 @@ in crystal-metric's own `Benchmark::run` frame, whose layout changes with the
 claim's inlining (`../2026-10-19-occupancy-claim-038/`), and Knuckeotide is
 the documented exception to the 1.1× RSS budget. No wall time is slower
 beyond its spread in either session.
+(Later the same day, `../2026-10-21-knuckeotide-pin/`: Boehm's build pins
+the same buffer through the whole run, and the pin costs both collectors
+~11 MB; the row's excess over Boehm is the schedule.)
 
 **Faster:** Binarytrees by 11–14% is the occupancy claim — the allocation hit
 path no longer does a locked OR per block. RegexDna's 19% lower peak comes

@@ -244,6 +244,10 @@ way. This row alone would not block the change. arm64 was not examined with
 gdb [INFERENCE: the same mechanism, from the same counters' signature:
 collections down, Σ scanned down, peak up].
 
+Later (2026-10-21, `../2026-10-21-knuckeotide-pin/`): the Boehm build pins
+the same buffer, in a slot of the same frame, and the dead `seq` buffer
+with it; base's layout was the one that pinned less than Boehm.
+
 ## What is left, precisely
 
 1. **The JSON peaks' +8% on Linux are the pace.** The claim does not change
