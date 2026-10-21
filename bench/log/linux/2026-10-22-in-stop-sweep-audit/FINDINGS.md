@@ -274,6 +274,47 @@ skipped on a heap without freelist chunks):**
 - Every arm ran green 3 of 3 under `GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0` on
   `-Dgcry_block_headers`.
 
+### 84 after review: a lock-order deadlock and the after-world sweep
+
+A review of the branch (`agent://AuditReview`) found two blockers in the
+first version of 84, both confirmed here red→green by new arms of
+regression 84 (now six windows × two arms):
+
+- **Lock order.** Publishing the stash under the class lock made
+  `refill_alloc_batch` take class → batch slot, while
+  `with_small_allocation_excluded` (the world-running page release of
+  `GCRY_PAGE_DONTNEED=1` / `GCRY_MOSTLY_EMPTY=1`) took every batch slot,
+  then the class lock. Fix (`9dbff29f`): TLAB slots, then the class lock,
+  then the batch slots. No other path holds a batch slot while taking a
+  class lock (`alloc_old_small_batched` lets its slot go before it refills;
+  the stop only try-locks). *exclusion* arm: a refill parks under the class
+  lock before its slot, a second thread runs the exclusion, the refill
+  goes on. Fixed: both finish. Control (`small_exclusion_batch_first`): the
+  two threads wait on each other, the child reports it after 5 s and exits.
+- **The after-world sweep.** The stash a flush keeps (slot lock held: the
+  owner frozen in a pop) or a refill frozen under the class lock publishes
+  after the stop is USED, unmarked and linked only through headers. The
+  in-stop sweep skips its class, but the after-world sweep — the default
+  for a multi-mutator heap with TLAB off — takes only the chunk's class
+  lock, found the blocks unmarked once the owner let go, and put them on
+  the class list while the stash still linked them: the next pop from each
+  hands the same block out. Fix (`580cca6a`): a stop that found any frozen
+  freelist class sweeps in the stop, where those classes are left alone
+  (`sweep_frozen_classes_in_stop?`, counted in
+  `stop_frozen_sweeps_in_stop`). Rare — a thread frozen in a few
+  instructions under a class lock — and it costs that one collection the
+  sweep's pause. Marking the kept stash after `clear_all_marks` would not
+  cover a refill's claimed-but-unpublished stash, which is in its registers
+  only. *pop-lazy* and *publish-lazy* arms: the batch windows with
+  `lazy_sweep = true` and two idle threads. Fixed: no held block on the
+  class list, the sweep moved into the stop. Control
+  (`stop_frozen_sweep_in_stop = false`): held blocks on the class list.
+
+And a nit on 82: a signal fence before the CURSOR clear in
+`retire_cursor_slot` (`6bbca28c`), as `cursor_claim_word` has, so the
+compiler cannot move the relaxed RMW above the slot stores. No arm: there is
+no way to make the compiler hoist it on demand.
+
 ## Open: reporting counters (not fixed)
 
 None of these feeds collection triggering or pacing. Those follow
@@ -318,3 +359,14 @@ heavy run held the shared lock, one at a time, bounded by
 | `make claim-stress` (lazy, then `GCRY_DISABLE_LAZY_SWEEP=1`; seed 1) | both arms: drift 0, refused 0, unlisted 0, `dormant_held=0` |
 | `make chunk-list-drift` | ok: 0 stranded over 36 765 mappings, window 0 of 300 (299 of 300 without the splice) |
 | `claim_stress --seconds=5 --workers=4`, release, `GCRY_DISABLE_LAZY_SWEEP=1 GCRY_SEGV_REPORT=1`, seeds 1001–1100 | **100 of 100 clean** (exit 0, every drift 0, `stress/instop100.txt`) |
+
+After the review fixes (on `580cca6a`), each heavy run under the shared lock:
+
+| check | result |
+|---|---|
+| regression 84, all 12 arms (`GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0`, `-Dgcry_block_headers`) | 3 of 3 runs, 24 examples, 0 failures |
+| the deadlock configuration: `stw_mt_property_test` release, header layout, `GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 GCRY_ALLOC_BATCH=8`, alternating `GCRY_PAGE_DONTNEED=1` / `GCRY_MOSTLY_EMPTY=1`, 60 iterations, workers 2,4, seeds 3001–3050, `run_bounded.sh 120` | 49 of 50 pass; run 11 (`GCRY_MOSTLY_EMPTY`, seed 3011) exit 3, the Crystal Parallel-scheduler deadlock (crystal-lang/crystal#17486: threads in `Scheduler#resume`, `parallel/scheduler.cr:97`; `stress/deadlock-run11-scheduler-17486.log`); no gcry stall (`stress/deadlock50.txt`) |
+| `make bitmap-marks-freelist` | ok (331 and 253 examples, 0 failures; the `GCRY INVARIANT FAILURE` line in its log is `spec/invariant_spec.cr`'s deliberate drift) |
+| header `process_spec` (`GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 -Dgcry_block_headers`) | 253 examples, 0 failures |
+| `crystal spec -Dgc_none process_spec` | 252 examples, 0 failures |
+| format, `make lint`, `make windows-typecheck` | clean |

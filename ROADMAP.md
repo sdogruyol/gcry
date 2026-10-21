@@ -2962,10 +2962,20 @@ kept finding the rest.
       dormant flush then skips a cycle), `@expl_freed_bytes_since_gc`, and a
       bitmap `free` frozen between its `occ` and `mark` clears across the
       incremental finishing slice (`live_objects` one low, `free_bytes` one
-      payload high, the block held one cycle). Also seen there, not
-      reproduced: the double `clear_mprotect_cards` of a re-arm frees the
-      retired card state at once, so a re-arm with the world running (after
-      a lazy sweep) can free it under a running fault handler.
+      payload high, the block held one cycle).
+
+- [ ] **Stop-time freelist writes the per-class probe does not cover yet
+      (review of 84, 2026-10-22).** `GCRY_TLAB=1`: `flush_all_tlabs` and
+      `scrub_freelists` still write class lists in the stop whatever
+      `note_frozen_freelists` found. Their mutators hold `@alloc_lock`, and
+      the TLAB epoch discards a refill the stop cut through, but a frozen
+      TLAB-off section of the same class (a nursery pop, a free's push when
+      the world was stopped) is not checked there. And the mprotect barrier
+      (83's neighbour, seen in the audit and confirmed by the review): after
+      a lazy sweep the barrier is re-armed with the world running, and the
+      double `clear_mprotect_cards` of a re-arm frees the retired card state
+      at once, under a fault handler that may be reading it on another CPU.
+      Not reproduced; both need a construction of their own.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**

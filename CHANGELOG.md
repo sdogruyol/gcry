@@ -101,8 +101,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again, or installed a freelist into a chunk the sweep had made dormant (its
   objects then read zero). The stop now notes which class locks are held and
   leaves those classes' lists and chunks alone for that collection
-  (`stop_sweep_freelist_declined`); an allocation batch publishes its stash
-  under the class lock. `process_spec/regression/84`.
+  (`stop_sweep_freelist_declined`), and a collection whose stop found such a
+  class sweeps in the stop rather than after it, so a stash it kept is never
+  swept with the world running. An allocation batch publishes its stash
+  under the class lock, and the page-release exclusion now takes the batch
+  slots after the class lock, in that order. `process_spec/regression/84`.
 
 ## [0.38.0] - 2026-10-21
 
