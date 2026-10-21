@@ -1474,12 +1474,21 @@ module Gcry
     # `-1` means the count is not available rather than zero: a chunk with no
     # occupancy bitmap, i.e. the freelist allocator. A large chunk has exactly
     # one block, so its answer is that block's own FREE flag — 0 or 1.
+    #
+    # Read with `free_large?`, never `free?`. A large block keeps its 16-byte
+    # header in both layouts, but `free?` answers a *small* block's question
+    # and is constant `false` under headerless, the default. Asked that way,
+    # every large release on the default layout recorded "1 block still
+    # allocated", the cached FREE chunks the trim gives back included. That is
+    # how the 2026-09-28 `dormant_flush` sighting came to read as a chunk
+    # released with its block allocated, when the header it recorded was
+    # `FREE | LARGE` (`bench/log/linux/2026-10-21-dormant-flush-sighting/`).
     private def guard_occupied(base : UInt64, len : UInt64, kind : UInt8) : Int32
       if kind == GUARD_KIND_LARGE
         off = ChunkHeader.large_header_offset.to_u64
-        return -1 if len <= off &+ BlockHeader::SIZE.to_u64
+        return -1 if len <= off &+ BlockHeader::LARGE_HEADER_BYTES.to_u64
         header = Pointer(BlockHeader).new(base &+ off)
-        return BlockHeader.free?(header) ? 0 : 1
+        return BlockHeader.free_large?(header) ? 0 : 1
       end
       chunk = Pointer(ChunkHeader).new(base)
       words = chunk.value.bitmap_words
