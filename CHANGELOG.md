@@ -26,6 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captured the wrapper's stack instead of the harness's. The capture now goes
   to the leaves of the tree, and the kill takes all of it.
 
+- **Knuckeotide's 0.38.0 peak rise is a pin Boehm has too; the row's excess
+  is the collection schedule (README, ROADMAP).** 0.38.0's notes put the
+  +21% on a dead buffer pinned by a word in crystal-metric's own
+  `Benchmark::run` frame. Measured on Linux x86_64
+  (`bench/log/linux/2026-10-21-knuckeotide-pin/`): the Boehm build keeps the
+  same two dead objects — the 6.1 MB Fasta output, in a spill slot of the
+  same frame, and a 4 MiB `IO::Memory` buffer — marked at every collection to
+  the end of the run, through 145 244 `GC_clear_stack` calls, which clear
+  only below the stack pointer. Zeroing the dead slots in each binary lowers
+  both peaks by the same ~11 MB; 0.37.0 equals 0.38.0 with them zeroed, so
+  0.37.0's layout pinned less than Boehm's. gcry stays 23–26 MB over Boehm
+  either way, and a fixed 8 MiB threshold takes it to 1.23× with the pin. No
+  collector can drop a dead slot of a live frame or a dead callee-saved
+  register, and gcry already has Boehm's below-SP clearing
+  (`GCRY_CLEAR_STACK`, which leaves every holder in place): no collector
+  change.
+
 ## [0.38.0] - 2026-10-21
 
 ### Added

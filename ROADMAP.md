@@ -4035,6 +4035,25 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       with the atomic quarter: a 40–50 MB process whose Boehm peak itself
       swings 39–64 MB with the same stale-slot lottery, and whose remaining
       excess is pacing doing its job on a rehash burst.
+      **The 0.38 pin is Boehm's pin too (2026-10-21, 0.39.0 item 5,
+      `bench/log/linux/2026-10-21-knuckeotide-pin/`).** On 0.38.0's x86
+      Linux layout, `Benchmark::run` keeps the dead 6.1 MB Fasta output in
+      the spill slot `0x40(%rsp)` and the dead `seq` `IO::Memory` (4 MiB
+      buffer) in `0x70(%rsp)` to the end of the run, and its dead callee-saved
+      `%rbx`/`%r14`/`%rbp`, saved by every callee, hold the output for the
+      first third. The Boehm build holds the same objects (slots `0x70` and
+      `0x60`, same registers): `GC_is_marked` = 1 at every collection from
+      the timed run's first to the process's last (70), through 145 244
+      `GC_clear_stack` calls, which only clear
+      below the SP. Zeroing the dead slots in each binary (a patched call,
+      no ptrace) lowers both peaks by the same ~11 MB; gcry is still 26 MB
+      over Boehm with neither pinning, 0.37.0 equals 0.38.0 with the slots
+      zeroed (+0.8 MB), and a fixed 8 MiB threshold puts gcry at 1.23× with
+      the pin. No collector can drop a dead slot of a live frame or a dead
+      callee-saved register, and gcry already has Boehm's below-SP clearing
+      (`GCRY_CLEAR_STACK`, which leaves every holder in place, and the
+      default collection scrub): no gcry change. Knuckeotide's excess is the
+      schedule, as above.
 - [x] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
@@ -4118,8 +4137,10 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       Linux, 84% → 100% on arm64, 126% → 146% on macos-15-intel, 89% → 93%
       on the M1 and 119% → 121% on Windows. Revcomp +1.4% on ubuntu-latest
       is inside placement. Knuckeotide's peak (+20–24% Linux) is stack
-      pinning in crystal-metric's own `Benchmark::run` frame. Accepted as
-      they are: JSON-row peak rises of +0.2–1.1% on arm64 and macos-15-intel,
+      pinning in crystal-metric's own `Benchmark::run` frame — the same pin
+      Boehm's build has, as measured 2026-10-21 under the RSS budget item.
+      Accepted as they are: JSON-row peak rises of +0.2–1.1% on arm64 and
+      macos-15-intel,
       every row at or under 0.90× Boehm's peak, not attributed. Left on the
       M1: Binarytrees at 93%.
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
