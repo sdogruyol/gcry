@@ -2889,8 +2889,22 @@ kept finding the rest.
       (`moved=0`, and an immortal index changed nothing) and an unwritten slot
       (zero-filling changed nothing).
 
-- [ ] **A mutator frozen while holding `@index_lock` would wedge the sweep —
-      and the precondition does not occur on this tree (measured 2026-09-13).**
+- [x] **A mutator frozen while holding `@index_lock` wedged the sweep —
+      closed 2026-10-22: there was one such section in the stop, and it is
+      gone.** The 2026-09-13 counts below cover `index_insert` and
+      `index_remove` only. The audit of what the stop does under frozen lock
+      holders (`bench/log/linux/2026-10-22-in-stop-sweep-audit/FINDINGS.md`)
+      found a third section they missed: an in-stop sweep that queued empty
+      chunks for unmap recomputed the heap bounds under `@index_lock`, taken
+      blocking (`update_heap_bounds_after_unmap`). A thread frozen inside a
+      lookup hung it with `STALLED in phase=sweep`, every time
+      (`process_spec/regression/81`, control arm). The flush recomputes the
+      bounds after the release, with the world running, and the collector
+      takes `@index_lock` nowhere in the stop. Reached with the sweep in the
+      stop and empties unmapped beside another mutator
+      (`parallel_empty_chunk_munmap`, or a single-mutator latch).
+      **As written 2026-09-13 — the precondition does not occur on this
+      tree:**
       `index_insert` and `index_remove` now count their sections and whether the
       world was stopped: **1 155 sections alone and 586 with a second mutator
       holding the lock, 0 of them inside the stop.** The sweep's placement is
@@ -2920,6 +2934,38 @@ kept finding the rest.
       collector cannot simply take the unlocked path, since a mutator frozen
       mid-`index_insert` leaves the array itself half-updated — and because
       nothing has yet been seen to hit it.
+
+- [x] **What the stop does to state a frozen thread is holding — audited
+      2026-10-22.** Regressions 75 and 80 were found by random stress, both an
+      in-stop sweep rewriting what a thread frozen inside a locked section
+      was halfway through. The audit read every mutator section against
+      every in-stop step (28 rows,
+      `bench/log/linux/2026-10-22-in-stop-sweep-audit/FINDINGS.md`) and
+      found four more, each forced red→green by a hook with a control arm:
+      the bounds recompute's blocking `@index_lock` (81, a hang); a cursor
+      retire that cleared CURSOR before it was done with the chunk, which the
+      stop then unmapped under it (82, SIGSEGV 3 of 3 on the control); the
+      mprotect barrier's fault handler frozen across a re-arm that freed its
+      card state (83, SIGSEGV inside the handler 3 of 3); and the stop writing
+      class freelists a frozen pop, push, refill or batch claim was inside, on
+      the freelist allocator (84: a freelist installed into a chunk made
+      dormant, its objects zeroed 3 of 3; blocks on a stash and the class
+      list at once). The rest are safe by a lock the stop takes before the
+      signals, by try-lock and decline, by CURSOR/PINNED, or by store order;
+      the table says which.
+
+- [ ] **Reporting counters a frozen thread overwrites after the stop.**
+      From the same audit, left open because none of them drives a
+      collection: `@heap_size` (the in-stop unmap's `sat_sub` against
+      `map_chunk`'s unlocked `+=`, racy between mutators too),
+      `@dormant_chunk_bytes` (a stale revive store can zero it, and the
+      dormant flush then skips a cycle), `@expl_freed_bytes_since_gc`, and a
+      bitmap `free` frozen between its `occ` and `mark` clears across the
+      incremental finishing slice (`live_objects` one low, `free_bytes` one
+      payload high, the block held one cycle). Also seen there, not
+      reproduced: the double `clear_mprotect_cards` of a re-arm frees the
+      retired card state at once, so a re-arm with the world running (after
+      a lazy sweep) can free it under a running fault handler.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**

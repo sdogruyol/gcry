@@ -65,6 +65,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spec/research_tables_spec.cr` checks both answers.
   `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`
 
+- **A sweep inside the stop no longer waits on `@index_lock`.** After
+  queueing empty chunks for release it recomputed the heap bounds under that
+  lock, taken blocking, so a thread the stop had frozen inside a lookup, a
+  `note_mapped` or a large growth hung the collection with every mutator
+  parked (`STALLED in phase=sweep`). The flush recomputes them after the
+  release, with the world running, and the bounds now shrink by the released
+  chunks. Needs the sweep in the stop (`GCRY_DISABLE_LAZY_SWEEP=1`,
+  `GCRY_PAGE_DONTNEED=1`, `lazy_sweep = false`) and empty-chunk unmapping with
+  another mutator (`parallel_empty_chunk_munmap`, or a single-mutator latch).
+  `process_spec/regression/81`,
+  `bench/log/linux/2026-10-22-in-stop-sweep-audit/`.
+
+- **A refill retiring its exhausted chunk can no longer have the chunk
+  unmapped under it.** The retire cleared CURSOR before it read the chunk
+  and cleared its slot; a stop in between found the chunk no cursor's, and
+  with every block dead the in-stop sweep queued it and the flush unmapped
+  it. The thread then read the unmapped header (SIGSEGV, 3 of 3 on the
+  control arm). It now clears the slot first and CURSOR last, and touches
+  the chunk no more after. `process_spec/regression/82`.
+
+- **The mprotect page barrier's fault handler can no longer be frozen by a
+  stop.** A stop that re-armed the barrier freed the card state the handler
+  was using and re-protected its page, which the handler then made writable
+  behind the new cards — a use-after-free in the signal handler and a write
+  the barrier never recorded. The suspend signal now waits for the handler.
+  Affects the mprotect backend (soft-dirty unavailable, or
+  `GCRY_MPROTECT_BARRIER=1`) with incremental marking or a nursery.
+  `process_spec/regression/83`.
+
+- **On the freelist allocator (`GCRY_BITMAP_ALLOC=0` on the header layout,
+  and nursery chunks) the stop writes no class freelist a frozen thread is
+  inside.** A thread frozen in a freelist pop, push, refill or batch claim
+  stored a stale head after the stop, handed out a block the sweep had linked
+  again, or installed a freelist into a chunk the sweep had made dormant (its
+  objects then read zero). The stop now notes which class locks are held and
+  leaves those classes' lists and chunks alone for that collection
+  (`stop_sweep_freelist_declined`); an allocation batch publishes its stash
+  under the class lock. `process_spec/regression/84`.
+
 ## [0.38.0] - 2026-10-21
 
 ### Added
