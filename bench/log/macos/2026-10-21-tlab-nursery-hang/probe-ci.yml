@@ -1,0 +1,66 @@
+name: probe-mac-tlab-hang
+
+# PROBE ONLY (never merged; lives on probe/mac-tlab-hang as
+# .github/workflows/probe-mac-tlab-hang.yml). The Darwin `TLAB+nursery
+# sampler` step's harness, thousands of times, on the two macOS runners:
+#   master  9157672e  v0.38.0
+#   pre     d1549e2f  the build whose sampler step hung (run 36595035838)
+#   v037    16b7e67c  v0.37.0, before a00f5c47 (scan_stack: false fix)
+# Every run is bounded with a `sample` capture (bench/run_bounded.sh, HEAD's).
+on:
+  push:
+    branches: [probe/mac-tlab-hang]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+        arm: [master, pre, v037]
+        shard: [1, 2]
+        exclude:
+          - arm: v037
+            shard: 2
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 330
+    name: probe (${{ matrix.os }}, ${{ matrix.arm }}, ${{ matrix.shard }})
+    env:
+      ARM: ${{ matrix.arm }}
+      STEPS: "25"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build the arm's harness in its own tree
+        run: |
+          case "$ARM" in
+            master) sha=9157672e370e21d7b20ff276b84d65e6aae27364 ;;
+            pre)    sha=d1549e2f3fe5246efc14ccffdae27e201e501a79 ;;
+            v037)   sha=16b7e67c075c7cc6e1c0f5fc03516337ec6d5c72 ;;
+          esac
+          git worktree add --detach "$RUNNER_TEMP/arm" "$sha"
+          cd "$RUNNER_TEMP/arm"
+          git log -1 --format='arm tree %H %s'
+          mkdir -p bin
+          crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr --error-trace
+          crystal --version; sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string
+      - name: Sampler loop (25 steps x 40 runs)
+        run: |
+          bench/log/macos/2026-10-21-tlab-nursery-hang/probe_loop.sh \
+            "$RUNNER_TEMP/arm/bin/stw_mt_property_test_hdr" "$STEPS" plog \
+            "${{ matrix.os }}/$ARM/${{ matrix.shard }}"
+          n=0
+          for f in plog/*.log; do
+            [ -e "$f" ] || continue
+            n=$((n+1)); [ $n -le 3 ] && { echo "--- $f"; head -c 20000 "$f"; }
+          done
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plog-${{ matrix.os }}-${{ matrix.arm }}-${{ matrix.shard }}
+          path: plog

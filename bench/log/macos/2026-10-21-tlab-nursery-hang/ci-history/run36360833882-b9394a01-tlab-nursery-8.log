@@ -1,0 +1,33 @@
+gcry: WARNING: this kernel's page size is 16384 and gcry is compiled for 4096. Page-aligned decisions — dormancy's madvise, the pagemap low-water probe, the fiber guard offset — are computed on the wrong unit here
+Process-GC STW + concurrent mutation property test
+  seed=8 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=true (requested=true)
+
+  STW-MT workers=2 iterations=50 seed=8
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 4 listed, 4 bounded, 3 staged. collection 0
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 5 listed, 5 bounded, 4 staged. collection 1
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 5 listed, 5 bounded, 4 staged. collection 2
+    allocs=409 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10008
+Failed to raise an exception: END_OF_STACK
+[0x10044ff6c] *Exception::CallStack::print_backtrace:Nil +112 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x10042e580] __crystal_raise +56 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x1004b99ec] *Gcry::Heap#oom!<String, UInt64>:NoReturn +328 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x1004b8030] *Gcry::Heap#tlab_alloc_small<UInt32, UInt32, Int32, Bool, UInt64>:Pointer(Void) +1496 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x100475444] *Gcry::Heap#allocate<UInt64, Bool, Bool>:Pointer(Void) +852 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x100472178] *Gcry::Heap#malloc<UInt64>:Pointer(Void) +140 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x10045740c] *GC::malloc<UInt64>:Pointer(Void) +52 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x10042db50] __crystal_malloc64 +16 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x100574f88] *Fiber::new<Pointer(Void), Thread>:Fiber +36 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x100549290] *Thread#start:(Exception+ | Nil) +52 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x100574cd4] *Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void) +56 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x10042f46c] ~procProc(Pointer(Void), Pointer(Void))@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/pthread.cr:22 +12 in /Users/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr
+[0x18de1fc58] _pthread_start +136 in /usr/lib/system/libsystem_pthread.dylib
+
+Tried to raise:: failed to refill TLAB size class 192 (Gcry::OutOfMemoryError)
+Error while trying to dump the backtrace: Thread#current_fiber cannot be nil (NilAssertionError)

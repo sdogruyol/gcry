@@ -1,0 +1,9 @@
+2026-09-29T16:14:03.5028900Z ##[group]Run TLAB_NURSERY_RUNS=30 TLAB_ONLY_RUNS=10 make tlab-nursery-sample
+2026-09-29T16:14:03.5029900Z [36;1mTLAB_NURSERY_RUNS=30 TLAB_ONLY_RUNS=10 make tlab-nursery-sample[0m
+2026-09-29T16:14:03.5101890Z shell: /bin/bash -e {0}
+2026-09-29T16:14:03.5102270Z env:
+2026-09-29T16:14:03.5102620Z   PKG_CONFIG_PATH: /opt/homebrew/Cellar/openssl@3/3.6.4/lib/pkgconfig
+2026-09-29T16:14:03.5103120Z ##[endgroup]
+2026-09-29T16:14:03.5965510Z crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr --error-trace
+2026-09-29T16:24:58.9569690Z ##[error]The operation was canceled.
+2026-09-29T16:24:58.9712830Z ##[group]Run actions/upload-artifact@v7

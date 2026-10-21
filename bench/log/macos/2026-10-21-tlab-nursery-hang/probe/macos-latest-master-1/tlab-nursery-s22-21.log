@@ -1,0 +1,226 @@
+Process-GC STW + concurrent mutation property test
+  seed=21 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=true (requested=true)
+
+  STW-MT workers=2 iterations=50 seed=21
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 4 listed, 4 bounded, 3 staged. collection 0
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 5 listed, 5 bounded, 4 staged. collection 1
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 5 listed, 5 bounded, 4 staged. collection 2
+STALLED: still running after 120 s
+--- stall capture: pid 27582 (macOS sample, 2 s)
+Analysis of sampling stw_mt_property_test_hdr (pid 27582) every 1 millisecond
+Process:         stw_mt_property_test_hdr [27582]
+Path:            /Users/USER/*/stw_mt_property_test_hdr
+Load Address:    0x1005a4000
+Identifier:      stw_mt_property_test_hdr
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [27578]
+Target Type:     live task
+
+Date/Time:       2026-10-21 21:33:59.020 +0000
+Launch Time:     2026-10-21 21:31:50.337 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         6849K
+Physical footprint (peak):  6849K
+Idle exit:                  untracked
+----
+
+Call graph:
+    1423 Thread_301554   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 1423 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1005ae1fc]  fiber.cr:103
+    +   1423 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x10068b444]  fiber.cr:168
+    +     1423 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1005ae1e8]  scheduler.cr:44
+    +       1423 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x1006e8b50]  scheduler.cr:159
+    +         1423 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 812  [0x1006e8f7c]  scheduler.cr:221
+    +           1423 *Crystal::EventLoop::Polling+@Crystal::EventLoop::Polling#run<Pointer(Fiber::List), Bool>:Nil  (in stw_mt_property_test_hdr) + 292  [0x1006eae8c]  kqueue.cr:49
+    +             1423 *Crystal::System::Kqueue#wait<Slice(LibC::Kevent), (Time::Span | Nil)>:Slice(LibC::Kevent)  (in stw_mt_property_test_hdr) + 276  [0x1006e7790]  kqueue.cr:59
+    +               1423 kevent  (in libsystem_kernel.dylib) + 8  [0x18be25fc4]
+    1423 Thread_301559: SYSMON
+    + 1423 thread_start  (in libsystem_pthread.dylib) + 8  [0x18be5ec1c]
+    +   1423 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18be63c58]
+    +     1423 ~procProc(Pointer(Void), Pointer(Void))@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/pthread.cr:22  (in stw_mt_property_test_hdr) + 12  [0x1005a7344]  pthread.cr:22
+    +       1423 *Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 56  [0x10066e388]  pthread.cr:47
+    +         1423 *Thread#start:(Exception+ | Nil)  (in stw_mt_property_test_hdr) + 172  [0x10066a56c]  thread.cr:249
+    +           1423 ~procProc(Thread, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/monitor.cr:19  (in stw_mt_property_test_hdr) + 16  [0x1005ae214]  monitor.cr:19
+    +             1423 *Fiber::ExecutionContext::Monitor#run_loop:NoReturn  (in stw_mt_property_test_hdr) + 28  [0x1006fadd0]  monitor_gate.cr:270
+    +               1411 *Fiber::ExecutionContext::Monitor#run_loop':NoReturn  (in stw_mt_property_test_hdr) + 52  [0x1006fae04]  monitor.cr:55
+    +               ! 1411 *Thread::sleep<Time::Span>:Nil  (in stw_mt_property_test_hdr) + 48  [0x10066aefc]  thread.cr:197
+    +               !   1409 *Crystal::System::Thread::sleep<Time::Span>:Nil  (in stw_mt_property_test_hdr) + 72  [0x10066e42c]  pthread.cr:111
+    +               !   : 1403 nanosleep  (in libsystem_c.dylib) + 220  [0x18bcfecc0]
+    +               !   : | 1403 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x18be23308]
+    +               !   : 4 nanosleep  (in libsystem_c.dylib) + 116  [0x18bcfec58]
+    +               !   : | 3 clock_get_time  (in libsystem_kernel.dylib) + 116  [0x18be25580]
+    +               !   : | + 3 mach_msg2_internal  (in libsystem_kernel.dylib) + 76  [0x18be325a4]
+    +               !   : | +   3 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x18be1fc34]
+    +               !   : | 1 clock_get_time  (in libsystem_kernel.dylib) + 0  [0x18be2550c]
+    +               !   : 1 nanosleep  (in libsystem_c.dylib) + 228  [0x18bcfecc8]
+    +               !   : | 1 __error  (in libsystem_kernel.dylib) + 0  [0x18be20618]
+    +               !   : 1 nanosleep  (in libsystem_c.dylib) + 0  [0x18bcfebe4]
+    +               !   1 *Crystal::System::Thread::sleep<Time::Span>:Nil  (in stw_mt_property_test_hdr) + 0  [0x10066e3e4]  pthread.cr:105
+    +               !   1 *Crystal::System::Thread::sleep<Time::Span>:Nil  (in stw_mt_property_test_hdr) + 72  [0x10066e42c]  pthread.cr:111
+    +               4 *Fiber::ExecutionContext::Monitor#run_loop':NoReturn  (in stw_mt_property_test_hdr) + 140  [0x1006fae5c]  monitor.cr:42
+    +               ! 2 *Fiber::ExecutionContext::Monitor#transfer_schedulers_blocked_on_syscall:Nil  (in stw_mt_property_test_hdr) + 24  [0x1006faffc]  monitor_gate.cr:270
+    +               ! : 1 *Gcry::MonitorGate::enter<Int32>:Nil  (in stw_mt_property_test_hdr) + 64  [0x100680cdc]  monitor_gate.cr:192
+    +               ! : | 1 ~Gcry::MonitorGate::site:read  (in stw_mt_property_test_hdr) + 0  [0x1005ae24c]  monitor_gate.cr:43
+    +               ! : 1 *Gcry::MonitorGate::enter<Int32>:Nil  (in stw_mt_property_test_hdr) + 76  [0x100680ce8]  monitor_gate.cr:194
+    +               ! :   1 ~Gcry::MonitorGate::busy:read  (in stw_mt_property_test_hdr) + 0  [0x1005a74c0]  monitor_gate.cr:32
+    +               ! 2 *Fiber::ExecutionContext::Monitor#transfer_schedulers_blocked_on_syscall:Nil  (in stw_mt_property_test_hdr) + 64  [0x1006fb024]  monitor_gate.cr:270
+    +               !   2 *Fiber::ExecutionContext::Monitor#transfer_schedulers_blocked_on_syscall':Nil  (in stw_mt_property_test_hdr) + 944  [0x1006fb3ec]  monitor.cr:78
+    +               !     1 *Fiber::ExecutionContext::Parallel::Scheduler@Fiber::ExecutionContext::Scheduler#detach_syscall?:Bool  (in stw_mt_property_test_hdr) + 0  [0x1006e9384]  scheduler.cr:131
+    +               !     1 *Fiber::ExecutionContext::Parallel::Scheduler@Fiber::ExecutionContext::Scheduler#detach_syscall?:Bool  (in stw_mt_property_test_hdr) + 32  [0x1006e93a4]  scheduler.cr:132
+    +               !       1 *Atomic(UInt32)@Atomic(T)#get<Atomic::Ordering>:UInt32  (in stw_mt_property_test_hdr) + 0  [0x10069dab8]  atomic.cr:329
+    +               3 *Fiber::ExecutionContext::Monitor#run_loop':NoReturn  (in stw_mt_property_test_hdr) + 72  [0x1006fae18]  monitor.cr:57
+    +               ! 3 *Crystal::System::Time::instant:Time::Instant  (in stw_mt_property_test_hdr) + 16  [0x1006a03d4]  time.cr:25
+    +               !   3 *Crystal::System::Time::monotonic:Tuple(Int64, Int32)  (in stw_mt_property_test_hdr) + 32  [0x1006a0444]  time.cr:35
+    +               !     3 clock_gettime  (in libsystem_c.dylib) + 60  [0x18bcffd60]
+    +               !       2 clock_gettime_nsec_np  (in libsystem_c.dylib) + 0  [0x18bcf1fdc]
+    +               !       1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18bcf216c]
+    +               !         1 mach_continuous_time  (in libsystem_kernel.dylib) + 0  [0x18be20024]
+    +               2 *Fiber::ExecutionContext::Monitor#run_loop':NoReturn  (in stw_mt_property_test_hdr) + 408  [0x1006faf68]  monitor.cr:63
+    +               ! 1 *Time::Span@Comparable(T)#clamp<Range(Time::Span, Nil)>:Time::Span  (in stw_mt_property_test_hdr) + 80  [0x1006a139c]  comparable.cr:100
+    +               ! : 1 *Time::Span@Comparable(T)#clamp<Time::Span, Nil>:Time::Span  (in stw_mt_property_test_hdr) + 56  [0x1006a13f0]  comparable.cr:118
+    +               ! :   1 *Time::Span@Comparable(T)#<<Time::Span>:Bool  (in stw_mt_property_test_hdr) + 28  [0x1006a143c]  comparable.cr:24
+    +               ! 1 *Time::Span@Comparable(T)#clamp<Range(Time::Span, Nil)>:Time::Span  (in stw_mt_property_test_hdr) + 92  [0x1006a13a8]  comparable.cr:100
+    +               1 *Fiber::ExecutionContext::Monitor#run_loop':NoReturn  (in stw_mt_property_test_hdr) + 160  [0x1006fae70]  monitor.cr:43
+    +               ! 1 *Fiber::ExecutionContext::Monitor#increase_parallelism<Time::Instant>:Nil  (in stw_mt_property_test_hdr) + 64  [0x1006fb628]  monitor_gate.cr:270
+    +               !   1 *Fiber::ExecutionContext::Monitor#increase_parallelism'<Time::Instant>:Nil  (in stw_mt_property_test_hdr) + 36  [0x1006fb67c]  monitor.cr:98
+    +               1 *Fiber::ExecutionContext::Monitor#run_loop':NoReturn  (in stw_mt_property_test_hdr) + 252  [0x1006faecc]  monitor.cr:63
+    +               ! 1 *Time::Instant#+<Time::Span>:Time::Instant  (in stw_mt_property_test_hdr) + 56  [0x1006a0628]  instant.cr:57
+    +               !   1 *Time::Span::new:seconds:nanoseconds<Int64, Int32>:Time::Span  (in stw_mt_property_test_hdr) + 64  [0x1006a0a18]  span.cr:66
+    +               !     1 *Time::Span#initialize:seconds:nanoseconds<Int64, Int32>:(Int32 | Nil)  (in stw_mt_property_test_hdr) + 624  [0x1006a0c9c]  span.cr:0
+    +               1 *Fiber::ExecutionContext::Monitor#run_loop':NoReturn  (in stw_mt_property_test_hdr) + 372  [0x1006faf44]  monitor.cr:63
+    +                 1 *Range(B, E)::new<Time::Span, Nil, Bool>:Range(Time::Span, Nil)  (in stw_mt_property_test_hdr) + 48  [0x1006a2680]  range.cr:89
+    1423 Thread_301562: stw-mt-2-0
+    + 1423 ~proc3Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1005b0da0]  fiber.cr:103
+    +   1423 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x10068b444]  fiber.cr:168
+    +     1423 ~procProc(Nil)@bench/stw_mt_property_test.cr:255  (in stw_mt_property_test_hdr) + 52  [0x1005b0d58]  stw_mt_property_test.cr:257
+    +       1423 *StwMtPropertyTest#worker_run<Int32, Int64, Channel(Pointer(Void)), Channel(Nil)>:(Array(String) | Nil)  (in stw_mt_property_test_hdr) + 580  [0x10070c064]  stw_mt_property_test.cr:210
+    +         1423 *Channel(Nil)@Channel(T)#receive:Nil  (in stw_mt_property_test_hdr) + 356  [0x10070e860]  channel.cr:227
+    +           1423 *Fiber::suspend:Nil  (in stw_mt_property_test_hdr) + 12  [0x10068ae0c]  fiber.cr:354
+    +             1423 *Fiber::ExecutionContext::reschedule:Nil  (in stw_mt_property_test_hdr) + 108  [0x1006a4240]  execution_context.cr:183
+    +               1423 *Fiber::ExecutionContext::Parallel::Scheduler#reschedule:Nil  (in stw_mt_property_test_hdr) + 120  [0x1006e839c]  scheduler.cr:72
+    +                 1388 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 160  [0x1006e87fc]  scheduler.cr:97
+    +                 ! 1311 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 48  [0x10066ab34]  thread.cr:207
+    +                 ! : 1310 *Thread::yield:Nil  (in stw_mt_property_test_hdr) + 12  [0x100669f60]  thread.cr:230
+    +                 ! : | 1306 *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr) + 16  [0x10066e248]  pthread.cr:56
+    +                 ! : | + 1296 cthread_yield  (in libsystem_pthread.dylib) + 36  [0x18be60c28]
+    +                 ! : | + ! 1295 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x18be1fc88]
+    +                 ! : | + ! 1 DYLD-STUB$$swtch_pri  (in libsystem_pthread.dylib) + 8  [0x18be68820]
+    +                 ! : | + 10 cthread_yield  (in libsystem_pthread.dylib) + 40,28,...  [0x18be60c2c,0x18be60c20,...]
+    +                 ! : | 2 *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr) + 4  [0x10066e23c]  pthread.cr:55
+    +                 ! : | 2 *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr) + 64  [0x10066e278]  pthread.cr:57
+    +                 ! : 1 *Thread::yield:Nil  (in stw_mt_property_test_hdr) + 0  [0x100669f54]  thread.cr:229
+    +                 ! 34 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 64  [0x10066ab44]  int.cr:602
+    +                 ! 12 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 80  [0x10066ab54]  thread.cr:204
+    +                 ! : 11 *Intrinsics::pause:Nil  (in stw_mt_property_test_hdr) + 12  [0x100656f18]  intrinsics.cr:191
+    +                 ! : 1 *Intrinsics::pause:Nil  (in stw_mt_property_test_hdr) + 0  [0x100656f0c]  intrinsics.cr:190
+    +                 ! 9 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 108,96  [0x10066ab70,0x10066ab64]  int.cr:0
+    +                 ! 9 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 112,44  [0x10066ab74,0x10066ab30]  thread.cr:207
+    +                 ! 7 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 16  [0x10066ab14]  thread.cr:202
+    +                 ! 4 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 76  [0x10066ab50]  thread.cr:204
+    +                 ! 2 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 60  [0x10066ab40]  thread.cr:0
+    +                 14 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 44,60  [0x1006e8788,0x1006e8798]  scheduler.cr:0
+    +                 11 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 52  [0x1006e8790]  scheduler.cr:89
+    +                 ! 11 *Fiber#resumable?:Bool  (in stw_mt_property_test_hdr) + 20,0  [0x10068ae44,0x10068ae30]  fiber.cr:225
+    +                 5 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 152  [0x1006e87f4]  scheduler.cr:91
+    +                 4 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 68  [0x1006e87a0]  scheduler.cr:90
+    +                 ! 4 *Fiber#dead?:Bool  (in stw_mt_property_test_hdr) + 20  [0x10068ae28]  fiber.cr:231
+    +                 1 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 52  [0x1006e8790]  scheduler.cr:89
+    1423 Thread_301563: stw-mt-2-1
+    + 1423 ~proc3Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1005b0da0]  fiber.cr:103
+    +   1423 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x10068b444]  fiber.cr:168
+    +     1423 ~procProc(Nil)@bench/stw_mt_property_test.cr:255  (in stw_mt_property_test_hdr) + 52  [0x1005b0d58]  stw_mt_property_test.cr:257
+    +       1423 *StwMtPropertyTest#worker_run<Int32, Int64, Channel(Pointer(Void)), Channel(Nil)>:(Array(String) | Nil)  (in stw_mt_property_test_hdr) + 524  [0x10070c02c]  stw_mt_property_test.cr:207
+    +         1423 *Channel(Pointer(Void))@Channel(T)#send<Pointer(Void)>:Channel(Pointer(Void))  (in stw_mt_property_test_hdr) + 292  [0x10070cb4c]  channel.cr:150
+    +           1423 *Fiber::suspend:Nil  (in stw_mt_property_test_hdr) + 12  [0x10068ae0c]  fiber.cr:354
+    +             1423 *Fiber::ExecutionContext::reschedule:Nil  (in stw_mt_property_test_hdr) + 108  [0x1006a4240]  execution_context.cr:183
+    +               1423 *Fiber::ExecutionContext::Parallel::Scheduler#reschedule:Nil  (in stw_mt_property_test_hdr) + 120  [0x1006e839c]  scheduler.cr:72
+    +                 1379 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 160  [0x1006e87fc]  scheduler.cr:97
+    +                 ! 1289 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 48  [0x10066ab34]  thread.cr:207
+    +                 ! : 1288 *Thread::yield:Nil  (in stw_mt_property_test_hdr) + 12  [0x100669f60]  thread.cr:230
+    +                 ! : | 1281 *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr) + 16  [0x10066e248]  pthread.cr:56
+    +                 ! : | + 1278 cthread_yield  (in libsystem_pthread.dylib) + 36  [0x18be60c28]
+    +                 ! : | + ! 1275 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x18be1fc88]
+    +                 ! : | + ! 3 DYLD-STUB$$swtch_pri  (in libsystem_pthread.dylib) + 8,0  [0x18be68820,0x18be68818]
+    +                 ! : | + 2 cthread_yield  (in libsystem_pthread.dylib) + 40  [0x18be60c2c]
+    +                 ! : | + 1 DYLD-STUB$$sched_yield  (in stw_mt_property_test_hdr) + 4  [0x10077a1f0]
+    +                 ! : | 5 *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr) + 64,20,...  [0x10066e278,0x10066e24c,...]  pthread.cr:57
+    +                 ! : | 2 *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr) + 16  [0x10066e248]  pthread.cr:56
+    +                 ! : 1 *Thread::yield:Nil  (in stw_mt_property_test_hdr) + 0  [0x100669f54]  thread.cr:229
+    +                 ! 39 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 64  [0x10066ab44]  int.cr:602
+    +                 ! 16 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 80  [0x10066ab54]  thread.cr:204
+    +                 ! : 16 *Intrinsics::pause:Nil  (in stw_mt_property_test_hdr) + 12  [0x100656f18]  intrinsics.cr:191
+    +                 ! 10 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 112,44  [0x10066ab74,0x10066ab30]  thread.cr:207
+    +                 ! 8 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 108,96  [0x10066ab70,0x10066ab64]  int.cr:0
+    +                 ! 6 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 28,60  [0x10066ab20,0x10066ab40]  thread.cr:0
+    +                 ! 6 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 76,80  [0x10066ab50,0x10066ab54]  thread.cr:204
+    +                 ! 5 *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr) + 16  [0x10066ab14]  thread.cr:202
+    +                 23 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 44,60  [0x1006e8788,0x1006e8798]  scheduler.cr:0
+    +                 7 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 52  [0x1006e8790]  scheduler.cr:89
+    +                 ! 7 *Fiber#resumable?:Bool  (in stw_mt_property_test_hdr) + 20,0  [0x10068ae44,0x10068ae30]  fiber.cr:225
+    +                 7 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 152  [0x1006e87f4]  scheduler.cr:91
+    +                 5 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 68  [0x1006e87a0]  scheduler.cr:90
+    +                 ! 5 *Fiber#dead?:Bool  (in stw_mt_property_test_hdr) + 20  [0x10068ae28]  fiber.cr:231
+    +                 1 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 52  [0x1006e8790]  scheduler.cr:89
+    +                 1 *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr) + 68  [0x1006e87a0]  scheduler.cr:90
+    1423 Thread_301564
+    + 1423 thread_start  (in libsystem_pthread.dylib) + 8  [0x18be5ec1c]
+    +   1423 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18be63c58]
+    +     1423 ~procProc(Pointer(Void), Pointer(Void))@src/gcry/stw_watchdog.cr:186  (in stw_mt_property_test_hdr) + 12  [0x1005a7280]  stw_watchdog.cr:186
+    +       1423 gcry_stw_watchdog_main  (in stw_mt_property_test_hdr) + 12  [0x1005a7294]  stw_watchdog.cr:35
+    +         1423 *Gcry::StwWatchdog::watch_loop:NoReturn  (in stw_mt_property_test_hdr) + 52  [0x10067e6d8]  stw_watchdog.cr:227
+    +           1423 nanosleep  (in libsystem_c.dylib) + 220  [0x18bcfecc0]
+    +             1423 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x18be23308]
+    1423 Thread_301565
+    + 1423 thread_start  (in libsystem_pthread.dylib) + 8  [0x18be5ec1c]
+    +   1423 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18be63c58]
+    +     1423 ~procProc(Pointer(Void), Pointer(Void))@src/gcry/parallel_mark.cr:172  (in stw_mt_property_test_hdr) + 12  [0x1005a72d0]  parallel_mark.cr:172
+    +       1423 gcry_mark_worker_main  (in stw_mt_property_test_hdr) + 12  [0x1005a72e4]  parallel_mark.cr:43
+    +         1423 *Gcry::Heap::run_mark_worker<Pointer(Void)>:Nil  (in stw_mt_property_test_hdr) + 12  [0x10064ca48]  parallel_mark.cr:139
+    +           1423 *Gcry::Heap#mark_worker_loop:Nil  (in stw_mt_property_test_hdr) + 336  [0x1005fdee8]  parallel_mark.cr:760
+    +             1422 *Gcry::Heap#wait_for_mark_epoch<UInt64, Int32>:Nil  (in stw_mt_property_test_hdr) + 136  [0x1005fe360]  parallel_mark.cr:941
+    +             ! 1422 *Gcry::Heap#mark_wait<Int32, Int32>:Nil  (in stw_mt_property_test_hdr) + 84  [0x1005fe41c]  parallel_mark.cr:872
+    +             !   1421 *Gcry::Heap#wait_on_mark_word<Int32, Int32>:Bool  (in stw_mt_property_test_hdr) + 228  [0x1005fe5a8]  parallel_mark.cr:881
+    +             !   : 1421 __ulock_wait  (in libsystem_kernel.dylib) + 8  [0x18be21af8]
+    +             !   1 *Gcry::Heap#wait_on_mark_word<Int32, Int32>:Bool  (in stw_mt_property_test_hdr) + 84  [0x1005fe518]  parallel_mark.cr:881
+    +             !     1 *Int32@Int#//<Int32>:Int32  (in stw_mt_property_test_hdr) + 0  [0x1005c4e5c]  int.cr:111
+    +             1 *Gcry::Heap#wait_for_mark_epoch<UInt64, Int32>:Nil  (in stw_mt_property_test_hdr) + 228  [0x1005fe3bc]  parallel_mark.cr:943
+    +               1 *Atomic(Int32)@Atomic(T)#add<Int32>:Int32  (in stw_mt_property_test_hdr) + 36  [0x10064dd0c]  atomic.cr:132
+    +                 1 *Atomic::Ordering#relaxed?:Bool  (in stw_mt_property_test_hdr) + 0  [0x100656ca4]  atomic.cr:28
+    1423 Thread_301566: gc-idle
+      1423 thread_start  (in libsystem_pthread.dylib) + 8  [0x18be5ec1c]
+        1423 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18be63c58]
+          1423 ~procProc(Pointer(Void), Pointer(Void))@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/pthread.cr:22  (in stw_mt_property_test_hdr) + 12  [0x1005a7344]  pthread.cr:22
+            1423 *Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 56  [0x10066e388]  pthread.cr:47
+              1423 *Thread#start:(Exception+ | Nil)  (in stw_mt_property_test_hdr) + 152  [0x10066a558]  thread.cr:249
+                1423 ~procProc(Thread, Nil)@src/gcry/idle_release.cr:169  (in stw_mt_property_test_hdr) + 12  [0x1005a7d98]  idle_release.cr:169
+                  1423 *Gcry::IdleRelease::loop_forever:NoReturn  (in stw_mt_property_test_hdr) + 576  [0x100680754]  idle_release.cr:250
+                    1423 nanosleep  (in libsystem_c.dylib) + 220  [0x18bcfecc0]
+                      1423 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x18be23308]
+
+Total number in stack (recursive counted multiple, when >=5):
+
+Sort by top of stack, same collapsed (when >= 5):
+        __semwait_signal  (in libsystem_kernel.dylib)        4249
+        swtch_pri  (in libsystem_kernel.dylib)        2570
+        kevent  (in libsystem_kernel.dylib)        1423
+        __ulock_wait  (in libsystem_kernel.dylib)        1421
+        *Thread::delay<Int32>:Int32  (in stw_mt_property_test_hdr)        139
+        *Fiber::ExecutionContext::Parallel::Scheduler#resume<Fiber>:Nil  (in stw_mt_property_test_hdr)        52
+        *Intrinsics::pause:Nil  (in stw_mt_property_test_hdr)        28
+        *Fiber#resumable?:Bool  (in stw_mt_property_test_hdr)        18
+        cthread_yield  (in libsystem_pthread.dylib)        12
+        *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr)        11
+        *Fiber#dead?:Bool  (in stw_mt_property_test_hdr)        9
+
+Binary Images: [trimmed for the repository; the full capture is in the run artifact]
+STALL CLASSIFIED: Crystal Parallel-scheduler resume deadlock (upstream, not gcry)

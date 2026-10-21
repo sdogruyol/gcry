@@ -1,0 +1,11 @@
+macos-15-intel-master-2/tlab-only-s11-9.log: workers=2 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-2-0(receive),stw-mt-2-1(send) main:kevent 
+macos-15-intel-master-2/tlab-only-s15-10.log: workers=2 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-2-0(send),stw-mt-2-1(receive) main:kevent 
+macos-15-intel-pre-2/tlab-nursery-s14-6.log: workers=2 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-2-0(send),stw-mt-2-1(receive) main:kevent 
+macos-15-intel-pre-2/tlab-only-s11-4.log: workers=4 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-4-0(receive),stw-mt-4-2(receive) main:kevent 
+macos-15-intel-v037-1/tlab-only-s8-8.log: workers=4 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-4-1(receive),stw-mt-4-2(receive) main:kevent 
+macos-latest-master-1/tlab-nursery-s22-21.log: workers=2 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-2-0(receive),stw-mt-2-1(send) main:kevent 
+macos-latest-master-1/tlab-only-s21-1.log: workers=4 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-4-0(receive),stw-mt-4-2(receive) main:kevent 
+macos-latest-pre-1/tlab-nursery-s16-22.log: workers=2 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-2-0(receive),stw-mt-2-1(receive) main:kevent 
+macos-latest-pre-1/tlab-only-s1-6.log: workers=4 audits=3 stalled=False upstream=False watchdog=False collector_frame=False spinning@97=-  after collect #151: root 11 DEAD
+macos-latest-pre-1/tlab-only-s9-7.log: workers=2 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-2-0(receive),stw-mt-2-1(receive) main:kevent 
+macos-latest-v037-1/tlab-only-s13-3.log: workers=2 audits=3 stalled=True upstream=True watchdog=False collector_frame=False spinning@97=stw-mt-2-0(send),stw-mt-2-1(receive) main:kevent 
