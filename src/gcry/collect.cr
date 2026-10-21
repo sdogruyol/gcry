@@ -3073,7 +3073,7 @@ module Gcry
           # the time the after-world sweep runs a churning program has created
           # threads that change the answer. See `latch_sweep_mutator_count`.
           latch_sweep_mutator_count
-          @lazy_sweep_pending = sweep_after_world?
+          @lazy_sweep_pending = sweep_after_world? && !sweep_frozen_classes_in_stop?
           StwWatchdog.enter(StwWatchdog::PHASE_SWEEP)
           unless @lazy_sweep_pending
             collection_event(CollectionEvent::ReclaimStart)

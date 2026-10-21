@@ -739,6 +739,38 @@ module Gcry
       @stop_frozen_nursery_classes = 0_u64
     end
 
+    # Research only: false leaves the sweep after the world even when the
+    # stop found a frozen freelist class — the code before 2026-10-22, the
+    # control arm of regression 84's lazy windows.
+    property stop_frozen_sweep_in_stop : Bool = true
+    # Collections whose sweep ran in the stop rather than after it because a
+    # thread the stop froze was inside a freelist class.
+    getter stop_frozen_sweeps_in_stop : UInt64 = 0_u64
+
+    # Should this collection sweep inside the stop, though it would sweep
+    # after the world? Yes when the stop found a class a frozen thread is
+    # inside (`note_frozen_freelists`, `flush_all_alloc_batches`).
+    #
+    # Only the in-stop sweep honours those classes: it leaves their chunks
+    # unswept. The after-world sweep takes each chunk's class lock instead,
+    # and that covers a thread *inside* the lock but not what it leaves
+    # behind once it lets go. Two such things are an allocation batch's
+    # stash, USED blocks linked only through their headers, which no scan
+    # reads and no mark covers: one the flush kept because its slot lock was
+    # held (the owner frozen in a pop), and one a refill frozen under the
+    # class lock claimed before the stop and publishes after it. With the
+    # world running the sweep found those blocks unmarked and put them on
+    # the class list while the stash still linked them, and the next pop
+    # from either handed the same block out twice. Such a stop is rare —
+    # a thread frozen in a few instructions under a class lock — and costs
+    # that one collection the pause of its sweep.
+    protected def sweep_frozen_classes_in_stop? : Bool
+      return false unless @stop_frozen_sweep_in_stop
+      return false if (@stop_frozen_classes | @stop_frozen_nursery_classes) == 0_u64
+      @stop_frozen_sweeps_in_stop &+= 1
+      true
+    end
+
     @[AlwaysInline]
     private def stop_frozen_class?(class_index : Int32, nursery : Bool) : Bool
       mask = nursery ? @stop_frozen_nursery_classes : @stop_frozen_classes

@@ -202,8 +202,87 @@ private def freelist84_batch_heap : Gcry::Heap?
   heap
 end
 
+# The batch windows with the sweep after the world, where a multi-mutator
+# heap with TLAB off sweeps by default. The after-world sweep takes each
+# chunk's class lock, which covers a thread inside it but not the stash it
+# leaves: a stash the flush kept (*pop*) or one published after the stop
+# (*publish*) is USED and unmarked, so the sweep put its blocks on the class
+# list. The stop now sweeps in the stop instead when it found a frozen class
+# (`sweep_frozen_classes_in_stop?`). Two idle threads keep the heap
+# multi-mutator, as the reviewer's case is.
+private def freelist84_lazy_window(heap : Gcry::Heap, publish : Bool) : {Int32, Bool}
+  heap.lazy_sweep = true
+  stop = Atomic(Int32).new(0)
+  idlers = Array(Thread).new(2) do
+    Thread.new do
+      # A bare thread has no event loop to `sleep` on.
+      until stop.get == 1
+        Intrinsics.pause
+        Thread.yield
+      end
+    end
+  end
+  begin
+    freelist84_batch_window(heap, publish)
+  ensure
+    stop.set(1)
+    idlers.each(&.join)
+  end
+end
+
+# A batch refill publishes its stash into its slot under the class lock
+# (class → batch slot); a page release takes every slot and the class lock
+# (`with_small_allocation_excluded`). With the batch slots first there, a
+# refill parked under the class lock before its slot and a release that has
+# taken the slots wait on each other for good. Returns whether both
+# finished within five seconds.
+private def freelist84_exclusion_window(heap : Gcry::Heap) : Bool
+  class_index = Gcry::SizeClasses.index_of(FREELIST84_BYTES.to_u32)
+  parked = Atomic(Int32).new(0)
+  go = Atomic(Int32).new(0)
+  done = Atomic(Int32).new(0)
+  # On the refilling thread, under the class lock, before its slot lock:
+  # allocates nothing.
+  # Only the class under test: every other thread's batch refills (the
+  # main thread's `Thread.new` among them) pass straight through.
+  heap.alloc_batch_publish_hook = ->(u : Void*) do
+    if parked.get == 0 && Gcry::BlockHeader.from_user(u).value.size == FREELIST84_BYTES
+      parked.set(1)
+      until go.get == 1
+        Intrinsics.pause
+      end
+    end
+    nil
+  end
+  refiller = Thread.new do
+    GC.malloc(FREELIST84_BYTES)
+    done.add(1)
+  end
+  deadline = Time.instant + 10.seconds
+  until parked.get == 1 || Time.instant >= deadline
+    sleep 1.millisecond
+  end
+  fail "the refill never reached its publish" unless parked.get == 1
+  releaser = Thread.new do
+    heap.exclude_small_allocation_for_spec(class_index)
+    done.add(1)
+  end
+  # Long enough for the releaser to take every lock it can and wait.
+  sleep 200.milliseconds
+  go.set(1)
+  deadline = Time.instant + 5.seconds
+  until done.get == 2 || Time.instant >= deadline
+    sleep 1.millisecond
+  end
+  return false unless done.get == 2
+  refiller.join
+  releaser.join
+  heap.alloc_batch_publish_hook = nil
+  true
+end
+
 describe "Regression: an in-stop sweep writes no freelist a frozen thread is inside" do
-  {"refill", "pop", "publish"}.each do |window|
+  {"refill", "pop", "publish", "pop-lazy", "publish-lazy", "exclusion"}.each do |window|
     {"fixed", "control"}.each do |arm|
       it "#{window} #{arm} arm in a process of its own" do
         captured = IO::Memory.new
@@ -214,7 +293,13 @@ describe "Regression: an in-stop sweep writes no freelist a frozen thread is ins
           ["-e", "stop-sweep-frozen-freelist-holder child #{window} #{arm}"],
           env: env, output: captured, error: captured)
         fail "child #{status.inspect}:\n#{captured}" unless status.success?
-        captured.to_s.should contain("1 examples, 0 failures")
+        if window == "exclusion" && arm == "control"
+          # Or skipped: no batch path on this heap.
+          text = captured.to_s
+          text.should match(/freelist84: the release and the refill deadlocked|1 examples, 0 failures/)
+        else
+          captured.to_s.should contain("1 examples, 0 failures")
+        end
       end
     end
   end
@@ -272,5 +357,43 @@ describe "Regression: an in-stop sweep writes no freelist a frozen thread is ins
       stops.should be > 0
       shared.should be_true
     end
+
+    it "stop-sweep-frozen-freelist-holder child #{window}-lazy fixed" do
+      next unless ENV["GCRY_FROZEN_FREELIST_CHILD"]? == "#{window}-lazy-fixed"
+      next unless heap = freelist84_batch_heap
+      in_stop = heap.stop_frozen_sweeps_in_stop
+      stops, shared = freelist84_lazy_window(heap, window == "publish")
+      stops.should be > 0
+      # Swept in the stop because of the frozen class, not by luck.
+      (heap.stop_frozen_sweeps_in_stop - in_stop).should be > 0
+      shared.should be_false
+    end
+
+    it "stop-sweep-frozen-freelist-holder child #{window}-lazy control" do
+      next unless ENV["GCRY_FROZEN_FREELIST_CHILD"]? == "#{window}-lazy-control"
+      next unless heap = freelist84_batch_heap
+      heap.stop_frozen_sweep_in_stop = false
+      stops, shared = freelist84_lazy_window(heap, window == "publish")
+      stops.should be > 0
+      shared.should be_true
+    end
+  end
+
+  it "stop-sweep-frozen-freelist-holder child exclusion fixed" do
+    next unless ENV["GCRY_FROZEN_FREELIST_CHILD"]? == "exclusion-fixed"
+    next unless heap = freelist84_batch_heap
+    freelist84_exclusion_window(heap).should be_true
+  end
+
+  it "stop-sweep-frozen-freelist-holder child exclusion control" do
+    next unless ENV["GCRY_FROZEN_FREELIST_CHILD"]? == "exclusion-control"
+    next unless heap = freelist84_batch_heap
+    heap.small_exclusion_batch_first = true
+    finished = freelist84_exclusion_window(heap)
+    finished.should be_false
+    STDOUT.puts "freelist84: the release and the refill deadlocked"
+    STDOUT.flush
+    # Two threads spin on each other's locks for good.
+    LibC._exit(0)
   end
 end
