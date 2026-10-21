@@ -3837,26 +3837,49 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `GCRY_TLS_ROOTS=0` still kills it. So something besides the TLS range
       keeps it alive there, and the harness may be proving less than it
       claims.
-- [ ] **macOS: `tlab-nursery-sample` hung twice (2026-09-29).** The job was
-      cancelled at its 20-minute limit on `8bc11c8` and on `d1549e2`, both
-      after the fiber list began to be held across the stop, and both in that
-      step, which normally takes 100–120 s. The one log that survived is
-      `tlab-only` seed 10: it printed nothing after collection 2, and the
-      watchdog printed nothing either. Rate: about 2 in 280 runs. A probe
-      branch then ran 180 runs on the same runner with no hang, which chance
-      allows (p ≈ 0.3). Each run is now bounded, and a stall is captured with
-      `sample` (`bench/run_bounded.sh` / `stall_capture.sh` work on macOS),
-      so the next one fails the step with every thread's stack instead of
-      eating the job. Headered TLAB is unsupported; the default layout was
-      never seen doing this.
-      **Probable cause found (2026-09-29), still open until the sampler has
-      run clean long enough to say so.** `make thread-birth-fiber` hung on
-      macOS in 24 of 50 runs. `sample` showed the stop asking libpthread
-      for a thread's Mach port while a suspended thread held libpthread's
-      list lock inside `pthread_create`. The sampler's Parallel contexts
-      start their threads while other workers allocate and collect, which is
-      the same shape. Fixed by resolving every port and bound before the first suspend:
-      0 stalls in 20 runs (`bench/log/macos/2026-09-29-pthread-list-lock/`).
+- [x] **macOS: `tlab-nursery-sample` hung twice (2026-09-29) — closed
+      2026-10-21: it hung once, and that was Crystal's Parallel-scheduler
+      deadlock (crystal-lang/crystal#17486), not gcry.** The `8bc11c8`
+      cancellation was never in this step. The sampler was skipped there,
+      and the job ran out of time in `make fiber-list-exit-race`'s red arm,
+      which `dba51e27` capped that afternoon. "Nothing after collection 2" is
+      the dying-type audit's three-report limit. The `d1549e2` log matches,
+      line for line, the twelve macOS stalls of this harness that `sample`
+      has since captured: two on CI (runs 36786111983 and 37437660646) and
+      ten in a probe. Each of the twelve is two workers spinning at
+      `scheduler.cr:97` with no collector frame, and the watchdog thread is
+      alive and silent because no stop is open. Probe run 39653275203 ran
+      10 000 bounded runs of the step's harness on macos-latest and
+      macos-15-intel. Master (`9157672e`), the hung build (`d1549e2f`) and
+      v0.37.0 had **0 gcry stalls** (0 of 4 000 on master, a 95% bound of
+      0.075% a run) and the same #17486 rate (4 / 4 000, 4 / 4 000,
+      2 / 2 000), which `run_bounded.sh` classifies and does not count. The
+      freed-main-fiber defect (`a00f5c47`) is unreachable here: nothing in
+      the harness or in `src/` collects with `scan_stack: false`. The
+      pthread list-lock fix below was not the cause either: that deadlock
+      sits in a stop phase the watchdog reports, and `d1549e2f` never hit it
+      in 4 000 runs. CI history: 18 950 runs of the step, 11 200 of them
+      bounded, 0 gcry stalls.
+      `bench/log/macos/2026-10-21-tlab-nursery-hang/FINDINGS.md`
+      The original note: the job was cancelled at its 20-minute limit on
+      `8bc11c8` and on `d1549e2`, both after the fiber list began to be held
+      across the stop, and both in that step, which normally takes 100–120 s.
+      The one log that survived is `tlab-only` seed 10: it printed nothing
+      after collection 2, and the watchdog printed nothing either. Rate:
+      about 2 in 280 runs. A probe branch then ran 180 runs on the same
+      runner with no hang, which chance allows (p ≈ 0.3). Each run is now
+      bounded, and a stall is captured with `sample` (`bench/run_bounded.sh`
+      / `stall_capture.sh` work on macOS), so the next one fails the step
+      with every thread's stack instead of eating the job. Headered TLAB is
+      unsupported; the default layout was never seen doing this. Probable
+      cause found (2026-09-29): `make thread-birth-fiber` hung on macOS in
+      24 of 50 runs. `sample` showed the stop asking libpthread for a
+      thread's Mach port while a suspended thread held libpthread's list
+      lock inside `pthread_create`. The sampler's Parallel contexts start
+      their threads while other workers allocate and collect, which is the
+      same shape. Fixed by resolving every port and bound before the first
+      suspend: 0 stalls in 20 runs
+      (`bench/log/macos/2026-09-29-pthread-list-lock/`).
 - [x] **macOS: `nursery-tlab-smoke` faulted in `scan_all_fiber_roots`
       (2026-10-16) — closed 2026-10-20.** CI run `38975094005`, darwin
       arm64 gates: SIGSEGV at `0x6c696665725f6271`, "ab_refil" + 16 —
