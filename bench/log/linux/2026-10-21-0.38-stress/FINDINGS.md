@@ -16,7 +16,7 @@ dormancy fix not yet):
 | claim_stress, sweep in the stop, 2 workers, 2 s, debug | 50 | 50 | 0 | 0 |
 | claim_stress, `GCRY_DEBUG_INVARIANTS=1`, 3 s, debug | 30 | 30 | 0 | 0 |
 | stw_mt_property_test, 200 iterations, workers 2,4, release, poisoned frees | 300 | 298 | 0 | 2 |
-| mt_property_test, 500 iterations, workers 2,4,8 | 50 | 50 | 0 | 0 |
+| mt_property_test, 500 iterations, workers 2,4,8, built `-Dgc_none` (the process heap; `make mt-property-test` builds it without, the library-heap arm, which `stress038-full.sh` runs) | 50 | 50 | 0 | 0 |
 | thread_storm, 1000 iterations, 10 workers | 30 | 30 | 0 | 0 |
 | nursery_tlab_smoke (header layout, freelist) | 1000 | 1000 | 0 | 0 |
 | fork_reinit | 50 | 50 | 0 | 0 |

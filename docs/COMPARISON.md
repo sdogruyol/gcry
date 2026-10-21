@@ -46,7 +46,7 @@ The fat-app rows were measured while the 256 KiB STW stack lags were still the d
 
 - You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (unsupported in gcry)
 - You target anything outside Linux, macOS and Windows on x86_64 / aarch64
-- Your workload grows large buffers in a hot loop and wall time is the bar: gcry runs Revcomp at 92% of Boehm's speed on 12-CPU Linux x86_64 (0.36.0, `bench/log/linux/2026-10-14-0.36-integration-ab/`), 96–97% on Windows x86_64 and 98% on macOS arm64 (0.38.0, `bench/log/{windows,macos}/2026-10-21-0.38-runners/`); JsonParseSerializable, which used to trail too, is at 99–106% on those three since in-place `realloc` growth
+- Your workload grows large buffers in a hot loop and wall time is the bar: gcry runs Revcomp at 97% of Boehm's speed on 12-CPU Linux x86_64 (`bench/log/linux/2026-10-21-0.38-crystal-metric/`), 96–97% on Windows x86_64 and 98% on macOS arm64 (0.38.0, `bench/log/{windows,macos}/2026-10-21-0.38-runners/`); JsonParseSerializable, which used to trail too, is at 99–106% on those three since in-place `realloc` growth
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
 
 Secondary CLI shapes (tree/JSON/channel): vendored crystal-metric GC subset —
