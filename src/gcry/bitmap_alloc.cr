@@ -330,6 +330,16 @@ module Gcry
     # between a taker's check and its take, every time
     # (`process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`).
     property pool_take_hook : Proc(ChunkHeader*, Nil)? = nil
+    # Research only: called by `retire_cursor_slot` on the allocating thread,
+    # under its class lock, right after it clears CURSOR on the chunk it is
+    # retiring; must not allocate. A hook that parks its thread there until a
+    # stop has come and gone puts the stop's sweep in the window
+    # (`process_spec/regression/82_stop_sweep_frozen_cursor_retire_spec.cr`).
+    property cursor_retire_hook : Proc(ChunkHeader*, Nil)? = nil
+    # Research only: false retires a cursor slot in the order before
+    # 2026-10-22 — CURSOR cleared, then the chunk read, then the slot
+    # cleared — the control arm of regression 82 (`retire_cursor_slot`).
+    property cursor_retire_slot_first : Bool = true
 
     # A failed capacity search remains true until a free, sweep, or retirement
     # publishes capacity for this (class, kind). The same generation invalidates
@@ -354,8 +364,17 @@ module Gcry
     property pool_index_disabled : Bool = false
 
     private def bitmap_capacity_changed(chunk : ChunkHeader*) : Nil
+      bitmap_capacity_bump(bitmap_capacity_slot(chunk))
+    end
+
+    @[AlwaysInline]
+    private def bitmap_capacity_slot(chunk : ChunkHeader*) : Int32
       slot = chunk.value.size_class.to_i32
       slot += SIZE_CLASS_COUNT if ChunkHeader.atomic?(chunk)
+      slot
+    end
+
+    private def bitmap_capacity_bump(slot : Int32) : Nil
       # A signal can suspend an explicit free while the collector also frees
       # this class. Atomic addition prevents losing either invalidation.
       # Release/acquire publishes the preceding occupancy/ownership changes
@@ -635,15 +654,68 @@ module Gcry
     # guarantees the owner is outside its allocation window — a stop with the
     # set not mid-allocation, or the owner's own thread — so the stored mask
     # is exactly the blocks not handed out.
+    #
+    # Everything this reads of the chunk it reads while the chunk is still
+    # CURSOR, then it clears the slot, and clearing CURSOR is the last
+    # access. The order is what a stop that freezes the owner part-way relies
+    # on, because the in-stop sweep honours CURSOR and nothing else: it
+    # cannot take the class lock the owner holds, and the finishing slice of
+    # an incremental cycle runs no settle to pin anything. Until 2026-10-22
+    # CURSOR went first, and then the chunk was read
+    # (`bitmap_pool_candidate?`, `bitmap_capacity_changed`) and the slot
+    # cleared. A refill that retires an exhausted chunk is frozen there with
+    # the chunk no cursor's: if its blocks are all dead by then, the sweep
+    # releases it — queued, then unmapped by the flush after `start_world`
+    # — and the owner resumes into the chunk's header, and its slot names
+    # the chunk for a later settle to write PINNED into. Frozen in this order
+    # instead: before CURSOR is cleared the chunk is CURSOR and no slot
+    # names it, which the sweep keeps, as it keeps a chunk a taker has just
+    # set CURSOR on; after, nothing touches the chunk again.
+    # `process_spec/regression/82_stop_sweep_frozen_cursor_retire_spec.cr`.
+    #
+    # Whether to publish capacity is decided before CURSOR is cleared, so a
+    # free landing between the read and the clear is not seen here; it
+    # published its own (`bitmap_free_block`), and a pool that missed both
+    # finds the chunk at the next publication of its class.
     private def retire_cursor_slot(s : CursorSlot*, exhausted : Bool = false) : Nil
+      return retire_cursor_slot_cursor_first(s, exhausted) unless @cursor_retire_slot_first
       chunk = s.value.chunk
+      slot = 0
+      publish = false
       unless chunk.null?
         cursor_release_claim(s, chunk)
-        ChunkHeader.set_cursor(chunk, false)
+        slot = bitmap_capacity_slot(chunk)
         # A concurrent free can restore a bit in a word this cursor already
         # passed. Another thread may have cached "empty" while we still owned
         # the chunk. Publish that capacity when ownership ends, even though
         # this cursor reached its last word. Scan this chunk only, not the heap.
+        # Not for a reserve chunk, which no other cursor takes.
+        publish = !exhausted || (!ChunkHeader.reserve?(chunk) && bitmap_chunk_has_free_block?(chunk))
+      end
+      CursorSlot.store_chunk(s, Pointer(ChunkHeader).null)
+      CursorSlot.publish_mask(s, 0_u64)
+      CursorSlot.store_word(s, 0)
+      s.value.word_base = 0_u64
+      unless chunk.null?
+        ChunkHeader.set_cursor(chunk, false)
+        if hook = @cursor_retire_hook
+          hook.call(chunk)
+        end
+        bitmap_capacity_bump(slot) if publish
+      end
+    end
+
+    # The order before 2026-10-22, for the control arm of regression 82
+    # (`cursor_retire_slot_first = false`): CURSOR cleared, the chunk read,
+    # then the slot cleared.
+    private def retire_cursor_slot_cursor_first(s : CursorSlot*, exhausted : Bool) : Nil
+      chunk = s.value.chunk
+      unless chunk.null?
+        cursor_release_claim(s, chunk)
+        ChunkHeader.set_cursor(chunk, false)
+        if hook = @cursor_retire_hook
+          hook.call(chunk)
+        end
         if !exhausted || bitmap_pool_candidate?(chunk, chunk.value.size_class.to_i32, ChunkHeader.atomic?(chunk))
           bitmap_capacity_changed(chunk)
         end
@@ -1346,6 +1418,11 @@ module Gcry
       return false unless ChunkHeader.atomic?(chunk) == atomic
       return false unless ChunkHeader.reserve?(chunk) == reserve
       return false if ChunkHeader.dormant?(chunk) || ChunkHeader.nursery?(chunk) || ChunkHeader.cursor?(chunk)
+      bitmap_chunk_has_free_block?(chunk)
+    end
+
+    # Whether `occ` (and the blacklist) leaves any block of *chunk* free.
+    private def bitmap_chunk_has_free_block?(chunk : ChunkHeader*) : Bool
       nblocks = chunk_block_count(chunk)
       return false if nblocks == 0
       words = ((nblocks + 63) >> 6).to_i32
