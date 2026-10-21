@@ -36,6 +36,12 @@ module Gcry
     # holds the list lock, the code before 2026-10-21 — the control arm of
     # `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`.
     property stop_sweep_dormant_lock : Bool = true
+    # Research only: false recomputes the heap bounds at the end of an
+    # in-stop sweep that queued empty chunks, taking `@index_lock` with the
+    # world stopped — the code before 2026-10-22, and the control arm of
+    # `process_spec/regression/81_stop_sweep_frozen_index_holder_spec.cr`.
+    # The bounds are recomputed by `flush_pending_empty_chunks` either way.
+    property stop_sweep_index_lock : Bool = true
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -545,18 +551,24 @@ module Gcry
         # recalc was an extra O(blocks) walk after every empty/HOLED rebuild.
       end
 
-      if any_drop
-        # Same reason as `trim_large_cache`: this walks the chunk list and
-        # rewrites `@heap_min` / `@heap_max`, the bounds `find_block` reads to
-        # decide whether an address is gcry's at all. In the lazy path
-        # (`after_world`) the mutators are running and can be mapping chunks
-        # underneath the walk, so it needs the allocator's lock; in the stopped
-        # world nothing else runs and taking it would be pointless.
-        if after_world && !@trim_unlocked
-          with_alloc_lock { update_heap_bounds_after_unmap }
-        else
-          update_heap_bounds_after_unmap
-        end
+      # The heap bounds are recomputed by `flush_pending_empty_chunks`, after
+      # the release, with the world running. Here they used to be recomputed
+      # at once, under `@index_lock` taken with a blocking `sync`
+      # (`update_heap_bounds_after_unmap`). In the stop that is the 0.21.1
+      # `@chunk_list_lock` hang one lock over, which is why `index_remove`
+      # was moved out of this branch: a thread the stop froze inside any
+      # `@index_lock` section — a free's or a realloc's `chunk_containing`,
+      # `note_mapped`, `publish_large_growth` — never lets go, and the
+      # collector spun on it with every mutator parked, for good. The
+      # chunk-list try-lock does not cover it: `chunk_containing` takes the
+      # index lock alone. Nor did the recompute shrink anything by this
+      # sweep's drops: it reads the bounds off the index, and the dropped
+      # chunks stay in the index until the flush removes them. It only caught
+      # up with the chunks earlier flushes had removed, which the flush now
+      # does itself. The lazy arm's call, under `@alloc_lock`, was the same.
+      # `bench/log/linux/2026-10-22-in-stop-sweep-audit/FINDINGS.md`.
+      if any_drop && !after_world && !@stop_sweep_index_lock
+        update_heap_bounds_after_unmap
       end
     ensure
       # A raise between the try-lock and the store must not leave the list
@@ -794,6 +806,11 @@ module Gcry
         # search to finish before unmapping its queued chunks, just as large
         # trims wait for list readers before detaching their mappings.
         @chunk_list_lock.sync { flush_pending_empty_chunks_locked(chunk) }
+        # Here rather than in the sweep: the released chunks are out of the
+        # index now, so the bounds can shrink by them, and the world runs, so
+        # a thread holding `@index_lock` is one this waits for, not one the
+        # stop froze (`Heap#sweep`, `stop_sweep_index_lock`).
+        update_heap_bounds_after_unmap
       end
     end
 
