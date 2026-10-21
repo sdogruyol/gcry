@@ -41,3 +41,35 @@ in flight. 0.37.0's stress had 6 in 300 of the same release arm
 **Soak:** 7200 s, start RSS 4616 kB, end 4496 kB, 7198 collections over
 7.2 M allocations, 715 650 finalizable objects and 71 940 weak refs; `# result: PASS`
 (`soak-2h.log`).
+
+## The 0.37.0 stress set on the tree that ships (`8c7004b4`), 2026-10-21
+
+`stress038-full.sh` is `../2026-10-18-0.37-stress/stress037.sh` with two
+claim arms added (`claim_stress --seconds=5 --workers=4`, release, through
+`run_bounded.sh`), run on `8c7004b4` (the dormancy fix in) so the record
+compares with 0.37.0's line for line: `full-summary.txt`,
+`full-failures.log`.
+
+| gate | 0.38.0 | 0.37.0 |
+|---|---|---|
+| fuzz 60 s / property-test / mt-property-test | 0/30, 0/20, 0/100 failed | 0/30, 0/20, 0/100 |
+| stw-mt, debug | 200/200 | 200/200 |
+| stw-mt, release, 400 iterations | 295/300, 5 scheduler deadlocks | 294/300, 6 |
+| stw-mt, header layout + freelist | **1/150 failed** (see below) | 0/150 |
+| pattern-fuzz, both layouts | 0/30, 0/30 | 0/30, 0/30 |
+| claim_stress, lazy sweep | 200/200 | — |
+| claim_stress, sweep in the stop | 300/300 | — |
+| thread-storm release, the make gates (parallel mark ×2, mark-audit, chunk-list-drift, large-cache-race, counter-loss, realloc-move-stress, thread-churn-uaf, soak-smoke, soft-soak-ec4-smoke) | 0 failed | 0 failed |
+| process_spec ×4, invariants ×2, headers+freelist ×2, Crystal 1.22 ×2 | 0 failed | invariants 2/2 failed (spec 75's control arm under the checker, a spec bug fixed before 0.37.0 shipped), the rest 0 |
+
+**The header-layout freelist failure was a hang, not an error.** Seed
+22868 printed its banner and nothing else; the arm took 1287 s against
+0.37.0's 98 s, so that one run sat until `timeout 1200` killed it. That loop
+does not go through `run_bounded.sh`, so there is no capture of it. The same
+binary rerun 200 times through `run_bounded.sh` (20 at seed 22868, 180 at
+random seeds): 199 passed, seed 22868 20 of 20, and one stalled
+(`hdr-freelist-rerun-sched-seed10507.log.gz`) in the scheduler deadlock's
+shape — threads spinning in `Scheduler#resume` (`parallel/scheduler.cr:97`),
+the six mark helpers parked in `mark_wait`, no collection in flight. The
+original hang is most likely the same deadlock [INFERENCE: it has no
+capture].
