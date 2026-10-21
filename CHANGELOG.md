@@ -9,17 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **README, COMPARISON and WINDOWS carry 0.38's macOS, Windows and Linux
-  arm64 numbers,** from `perf-ab.yml` against v0.37.0 and Boehm on all five
-  runners, measured at 8b9e7eab (runs 39487147696, 39497374362;
-  `bench/log/{linux,macos,windows}/2026-10-21-0.38-runners/`). Binarytrees
-  is faster everywhere: arm64 Linux 77% → 90% of Boehm, macOS Intel 129–133%
-  → 149%, M1 88% → 92%. macOS arm64: crystal-metric 98–107% of Boehm on 7
-  of 9 rows, JsonParsePure's peak 1.07× → 0.94×, Kemal `/json` 103.5% at
-  1.39× (level with 0.37.0); Windows: 94–122%, no row slower than 0.37.0 in
-  both runs. Heavier: Knuckeotide's peak on Linux, +18% on `ubuntu-latest`
-  (1.29× → 1.59×) and +15% on arm64 (1.08× → 1.35×), at 2.5–4% less wall
-  time — the `Benchmark::run` frame pin named under the occupancy claim.
+- **README, COMPARISON, WINDOWS and the RFC carry 0.38.0's numbers on every
+  platform.** Linux x86_64 on the 12-vCPU host, against v0.37.0 and Boehm
+  in two sessions (`bench/log/linux/2026-10-21-0.38-crystal-metric/`,
+  `bench/log/linux/2026-10-21-0.38-kemal/`): Binarytrees 99% → 114% of
+  Boehm (−11.2% wall), every other row level, RegexDna's peak 0.60× →
+  0.48×; Kemal `/json` 104.3–105.4% at 1.23×, level with 0.37.0. The other
+  four from `perf-ab.yml` on the GitHub runners, measured at 8b9e7eab (runs
+  39487147696, 39497374362;
+  `bench/log/{linux,macos,windows}/2026-10-21-0.38-runners/`): Binarytrees
+  is faster everywhere: arm64 Linux 77% → 90% of Boehm, macOS Intel
+  129–133% → 149%, M1 88% → 92%. macOS arm64: crystal-metric 98–107% of
+  Boehm on 7 of 9 rows, JsonParsePure's peak 1.07× → 0.94×, Kemal `/json`
+  103.5% at 1.39× (level with 0.37.0); Windows: 94–122%, no row slower than
+  0.37.0 in both runs. Heavier: Knuckeotide's peak on Linux, +21% on the
+  12-vCPU host (1.45× → 1.71×), +18% on `ubuntu-latest` (1.29× → 1.59×) and
+  +15% on arm64 (1.08× → 1.35×), at 2.5–4% less wall time — the
+  `Benchmark::run` frame pin named under the occupancy claim.
 
 - **`Perf A/B` probes Kemal's code placement and work per request.** `pads`
   now builds every placement arm as a Kemal server too (`N` pads ahead of
