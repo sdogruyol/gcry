@@ -147,10 +147,18 @@ module Gcry
     end
 
     # Every lock a small allocation of `index` can take, held together: each
-    # TLAB slot and allocation-batch slot (their fast paths hand out blocks
-    # that are still FREE-headed and off the global freelist), then the class
-    # freelist. Slot locks first — the TLAB path holds its slot lock when it
-    # refills under the freelist lock, so that is the order it establishes.
+    # TLAB slot, then the class freelist, then each allocation-batch slot
+    # (the slots' fast paths hand out blocks that are still FREE-headed and
+    # off the global freelist). TLAB slots before the class lock — the TLAB
+    # path holds its slot lock when it refills under the freelist lock, so
+    # that is the order it establishes. Batch slots after it: a batch refill
+    # publishes its stash into its slot while it holds the class lock
+    # (`refill_alloc_batch`, class → batch slot). Until 2026-10-22 the batch
+    # slots were taken first, with the TLAB slots, and a refill holding the
+    # class lock and waiting for its slot deadlocked against a release
+    # holding every slot and waiting for the class lock
+    # (`process_spec/regression/84_stop_sweep_frozen_freelist_holder_spec.cr`,
+    # the exclusion arms).
     #
     # This is what makes a post-STW page release sound: a run of free pages is
     # computed from block headers and then handed to `madvise` with the world
@@ -159,22 +167,53 @@ module Gcry
     # before this). Under these locks nothing can be handed out until the
     # syscall has returned. Only the opt-in release walks pay for it.
     protected def with_small_allocation_excluded(index : Int32, nursery : Bool, &)
+      batch_first = @small_exclusion_batch_first
       i = 0
       while i < MAX_TLABS
         (@tlab_slot_locks.to_unsafe + i).value.lock
-        (@alloc_batch_slot_locks.to_unsafe + i).value.lock
+        (@alloc_batch_slot_locks.to_unsafe + i).value.lock if batch_first
         i += 1
       end
       begin
-        with_freelist_lock(index, nursery) { yield }
+        with_freelist_lock(index, nursery) do
+          unless batch_first
+            i = 0
+            while i < MAX_TLABS
+              (@alloc_batch_slot_locks.to_unsafe + i).value.lock
+              i += 1
+            end
+          end
+          begin
+            yield
+          ensure
+            unless batch_first
+              i = MAX_TLABS - 1
+              while i >= 0
+                (@alloc_batch_slot_locks.to_unsafe + i).value.unlock
+                i -= 1
+              end
+            end
+          end
+        end
       ensure
         i = MAX_TLABS - 1
         while i >= 0
-          (@alloc_batch_slot_locks.to_unsafe + i).value.unlock
+          (@alloc_batch_slot_locks.to_unsafe + i).value.unlock if batch_first
           (@tlab_slot_locks.to_unsafe + i).value.unlock
           i -= 1
         end
       end
+    end
+
+    # Research only: true takes the allocation-batch slot locks with the TLAB
+    # slots, before the class lock — the order before 2026-10-22, and the
+    # control arm of regression 84's exclusion window.
+    property small_exclusion_batch_first : Bool = false
+
+    # For regression 84: run `with_small_allocation_excluded` with an empty
+    # block, as a release walk does.
+    def exclude_small_allocation_for_spec(index : Int32) : Nil
+      with_small_allocation_excluded(index, false) { }
     end
 
     private def current_thread_key : UInt64
