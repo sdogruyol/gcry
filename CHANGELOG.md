@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bench/stress_overnight.sh` is the release overnight stress, in the
+  tree.** The set 0.37.0 and 0.38.0 ran from their logs, with the claim
+  arms and `make claim-stress`, and every run through `bench/run_bounded.sh`
+  with its seed in the name of any log it leaves. Half of the loops used to
+  run under a bare `timeout`, so the one hang of 0.38.0's night (seed 22868,
+  header layout and freelist) was killed with no capture. A scale argument
+  shrinks every loop for a smoke of the script itself (0.01: 27 loops, 16
+  minutes, all passing).
+
+### Changed
+
+- **`bench/run_bounded.sh` captures and kills the stalled command's whole
+  process tree.** A command that is a wrapper (`make <gate>`, `env`,
+  `crystal spec`) left its stalled harness running after the kill and
+  captured the wrapper's stack instead of the harness's. The capture now goes
+  to the leaves of the tree, and the kill takes all of it.
+
 ## [0.38.0] - 2026-10-21
 
 ### Added
