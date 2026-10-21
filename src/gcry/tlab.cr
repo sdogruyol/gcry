@@ -611,6 +611,101 @@ module Gcry
       end
     end
 
+    # Classes, as `1 << class`, whose freelist a thread the stop froze may be
+    # in the middle of: its class lock (`freelist_lock_ptr`) was held when the
+    # stop tried it (`note_frozen_freelists`), or one of its USED stash chains
+    # sits in an allocation-batch slot whose lock was held
+    # (`flush_all_alloc_batches`). Old and nursery lists apart, as their
+    # locks are. Valid from `note_frozen_freelists` to
+    # `clear_frozen_freelists`, both inside the stop.
+    @stop_frozen_classes = 0_u64
+    @stop_frozen_nursery_classes = 0_u64
+    # Header (freelist) chunks an in-stop sweep left unswept because their
+    # class was frozen (`Heap#sweep`).
+    getter stop_sweep_freelist_declined : UInt64 = 0_u64
+    # Research only: false writes every class's freelist in the stop whoever
+    # holds its lock, the code before 2026-10-22 — the control arm of
+    # `process_spec/regression/84_stop_sweep_frozen_freelist_holder_spec.cr`.
+    property stop_freelist_try_lock : Bool = true
+    # Research only: called by `refill_size_class` on the allocating thread
+    # with the chunk it has just laid out, every block FREE and on no list
+    # yet, before it stores the list head — under the class lock (TLAB off),
+    # so it must not allocate. Regression 84 parks a thread there across a
+    # stop.
+    property refill_publish_hook : Proc(ChunkHeader*, Nil)? = nil
+    # Research only, for regression 84's batch arms; both run on the
+    # allocating thread and must not allocate. `alloc_batch_pop_hook`: in
+    # `alloc_old_small_batched` under the batch slot lock, with the stash
+    # head read and checked and its `next_free` not yet stored.
+    # `alloc_batch_publish_hook`: as `refill_alloc_batch` publishes a stash,
+    # before it takes the slot lock.
+    property alloc_batch_pop_hook : Proc(Void*, Nil)? = nil
+    property alloc_batch_publish_hook : Proc(Void*, Nil)? = nil
+    # Research only: false publishes a batch's stash after the class lock is
+    # released, the order before 2026-10-22 (`refill_alloc_batch`).
+    property alloc_batch_publish_locked : Bool = true
+
+    # In the stop, before anything writes a freelist: which class locks are
+    # held? With every mutator frozen, a held one is held by a thread the stop
+    # froze inside its section — a pop (`alloc_old_small_locked`,
+    # `alloc_nursery_locked`), a free's push (`push_size_class_free`), a
+    # refill that has laid a chunk out as FREE blocks and not yet stored the
+    # head (`refill_size_class`), a batch claim (`refill_alloc_batch`) — with
+    # a list head, a `next_free` or a whole chunk in its registers that it
+    # stores when it resumes. Those classes are frozen for this stop: their
+    # lists are not written and their freelist chunks not swept (`Heap#sweep`,
+    # `flush_all_alloc_batches`), as the in-stop sweep already leaves
+    # `@chunks` alone under a frozen list-lock holder. Waiting is not an
+    # option: the holder is frozen (the 0.21.1 `@chunk_list_lock` hang).
+    # Before this the stop wrote them regardless, and the resumed thread
+    # stored a stale head over the sweep's pushes and rebuilds, popped a block
+    # the rebuild had linked again, or installed a freelist into a chunk the
+    # sweep had found all FREE and made dormant or queued for unmap.
+    # `bench/log/linux/2026-10-22-in-stop-sweep-audit/FINDINGS.md`.
+    #
+    # A lock that is free is given straight back. A frozen holder cannot let
+    # go before the world restarts, so the answer stands for the whole stop,
+    # and the only threads that could take a free one now are the ones that
+    # could before — the collector itself, from a hook that allocates against
+    # the rule, which holding the lock would hang.
+    #
+    # Only on a heap with freelist chunks: the header allocator, or a nursery.
+    # A bitmap chunk keeps no freelist; its cursor protocol is the settle's.
+    protected def note_frozen_freelists : Nil
+      @stop_frozen_classes = 0_u64
+      @stop_frozen_nursery_classes = 0_u64
+      return unless @stop_freelist_try_lock
+      return if @bitmap_alloc && !@nursery_enabled
+      i = 0
+      while i < SIZE_CLASS_COUNT
+        bit = 1_u64 << i
+        lock = freelist_lock_ptr(i, false)
+        if try_lock_spinlock(lock)
+          lock.value.unlock
+        else
+          @stop_frozen_classes |= bit
+        end
+        lock = freelist_lock_ptr(i, true)
+        if try_lock_spinlock(lock)
+          lock.value.unlock
+        else
+          @stop_frozen_nursery_classes |= bit
+        end
+        i += 1
+      end
+    end
+
+    protected def clear_frozen_freelists : Nil
+      @stop_frozen_classes = 0_u64
+      @stop_frozen_nursery_classes = 0_u64
+    end
+
+    @[AlwaysInline]
+    private def stop_frozen_class?(class_index : Int32, nursery : Bool) : Bool
+      mask = nursery ? @stop_frozen_nursery_classes : @stop_frozen_classes
+      (mask & (1_u64 << class_index)) != 0
+    end
+
     # Flush TLAB freelists back to global (call under STW / before sweep / destroy).
     # Bump epoch first so resumed mid-alloc abandons stale TLAB heads already
     # published here. Walks each chain and splices only FREE nodes.
@@ -800,6 +895,9 @@ module Gcry
             ab.value.freelists[index] = Pointer(Void).null
             user = Pointer(Void).null
           else
+            if hook = @alloc_batch_pop_hook
+              hook.call(user)
+            end
             ab.value.freelists[index] = header.value.next_free
             BlockHeader.set_used(header, payload, flags)
             heap_set_mark_allocating(header) if @incremental_marking || @collecting
@@ -896,51 +994,92 @@ module Gcry
           end
           break
         end
+
+        # Published before the class lock goes, the order the lock order
+        # (freelist → alloc-batch slot) already allows. Published after it,
+        # until 2026-10-22, a stop could freeze this thread between the two
+        # holding neither lock, with the stash — USED blocks linked only
+        # through headers no scan reads, and none of them yet in any slot —
+        # in its registers: the in-stop sweep reclaimed all but the head onto
+        # the class list, and the publish then made the same blocks this
+        # thread's stash. Under the lock, a frozen thread is one
+        # `note_frozen_freelists` sees.
+        publish_alloc_batch_stash(class_index, stash_head) if @alloc_batch_publish_locked
       end
+
+      publish_alloc_batch_stash(class_index, stash_head) unless @alloc_batch_publish_locked
 
       return Pointer(Void).null if first.null?
 
       free_bytes_sub(payload.to_u64 * claimed.to_u64)
       @alloc_batch_refills += 1
 
-      unless stash_head.null?
-        ab = current_alloc_batch
-        slot = alloc_batch_slot_index(ab)
-        lock_alloc_batch_slot(slot)
-        begin
-          # Prepend new stash in front of any residual (should be empty).
-          tail = stash_head
-          loop do
-            h = BlockHeader.from_user(tail)
-            nxt = h.value.next_free
-            break if nxt.null?
-            tail = nxt
-          end
-          hv = BlockHeader.from_user(tail).value
-          hv.next_free = ab.value.freelists[class_index]
-          BlockHeader.from_user(tail).value = hv
-          ab.value.freelists[class_index] = stash_head
-        ensure
-          unlock_alloc_batch_slot(slot)
-        end
-      end
-
       first
+    end
+
+    # Put *stash_head*'s chain in front of this thread's stash of the class.
+    private def publish_alloc_batch_stash(class_index : Int32, stash_head : Void*) : Nil
+      return if stash_head.null?
+      if hook = @alloc_batch_publish_hook
+        hook.call(stash_head)
+      end
+      ab = current_alloc_batch
+      slot = alloc_batch_slot_index(ab)
+      lock_alloc_batch_slot(slot)
+      begin
+        # Prepend new stash in front of any residual (should be empty).
+        tail = stash_head
+        loop do
+          h = BlockHeader.from_user(tail)
+          nxt = h.value.next_free
+          break if nxt.null?
+          tail = nxt
+        end
+        hv = BlockHeader.from_user(tail).value
+        hv.next_free = ab.value.freelists[class_index]
+        BlockHeader.from_user(tail).value = hv
+        ab.value.freelists[class_index] = stash_head
+      ensure
+        unlock_alloc_batch_slot(slot)
+      end
     end
 
     # Return unused USED-stash nodes to the global freelist (STW / destroy).
     # Bump epoch so a resumed mid-claim abandons stale stash heads.
+    #
+    # A slot's lock is tried, not waited on, and a slot whose lock is held is
+    # left as it is. Its owner was frozen by the stop inside
+    # `alloc_old_small_batched` or the publish of `refill_alloc_batch`, with a
+    # stash head and its `next_free` in hand: flushed, its stash went onto
+    # the class list as FREE nodes, and the owner resumed to store the stale
+    # `next_free` as its stash and hand out a block that list also held —
+    # the epoch above was never read. Its stash nodes are USED and reachable
+    # only through their headers, which no scan reads, so their classes are
+    # frozen for the sweep as well (`note_frozen_freelists`), or it
+    # would reclaim them under the stash. A class frozen already keeps every
+    # slot's stash: its list is not written in this stop.
     protected def flush_all_alloc_batches : Nil
       return if @alloc_batch <= 0
       return unless @alloc_batches_booted
       @alloc_batch_epoch.add(1)
-      # No per-slot locks under STW (same rationale as flush_all_tlabs).
+      held = 0_u64
       MAX_TLABS.times do |i|
         next unless @alloc_batches[i].live
+        next if !@stop_freelist_try_lock || try_lock_spinlock(@alloc_batch_slot_locks.to_unsafe + i)
+        held |= 1_u64 << i
+        ab = @alloc_batches.to_unsafe + i
+        SIZE_CLASS_COUNT.times do |c|
+          @stop_frozen_classes |= 1_u64 << c unless ab.value.freelists[c].null?
+        end
+      end
+      MAX_TLABS.times do |i|
+        next unless @alloc_batches[i].live
+        next if (held & (1_u64 << i)) != 0
         ab = @alloc_batches.to_unsafe + i
         SIZE_CLASS_COUNT.times do |c|
           head = ab.value.freelists[c]
           next if head.null?
+          next if stop_frozen_class?(c, false)
           ab.value.freelists[c] = Pointer(Void).null
           payload = SizeClasses.payload(c)
           user = head
@@ -958,6 +1097,7 @@ module Gcry
           free_bytes_add(payload.to_u64 * n) if n > 0
           @freelist_clean[c] = false if n > 0
         end
+        unlock_alloc_batch_slot(i) if @stop_freelist_try_lock
       end
     end
   end

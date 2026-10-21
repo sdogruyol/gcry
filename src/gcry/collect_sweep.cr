@@ -205,7 +205,20 @@ module Gcry
               fl_locked = true
             end
             begin
-              counts = sweep_small_blocks(chunk, class_index, major, fl_locked)
+              counts = if !after_world && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
+                          !bitmap_alloc_chunk?(chunk) && stop_frozen_class?(class_index, ChunkHeader.nursery?(chunk))
+                         # A thread the stop froze is inside this class's
+                         # freelist (`note_frozen_freelists`): the chunk
+                         # is not swept, so nothing in it is linked, rebuilt,
+                         # or found empty — it may be the chunk that thread
+                         # is laying out, or hold the block it is popping.
+                         # Its garbage waits for a stop that finds the lock
+                         # free.
+                         @stop_sweep_freelist_declined &+= 1
+                         unswept_freelist_chunk_counts(chunk, class_index)
+                       else
+                         sweep_small_blocks(chunk, class_index, major, fl_locked)
+                       end
               any_live = counts.any_live
               live_payload = counts.live_payload
               usable_payload = counts.usable_payload
@@ -525,6 +538,20 @@ module Gcry
         end
         ChunkHeader.set_next(tail, @pending_empty_chunks)
         @pending_empty_chunks = to_unmap
+      end
+
+      # A frozen class's list is not rebuilt in this stop: the thread inside
+      # it stores what it read when it resumes (`note_frozen_freelists`).
+      # The request carries over to the next sweep, which has the lock or
+      # carries it again. Only a bit a TLAB discard requested gets here: this
+      # sweep swept no chunk of a frozen class to set one.
+      unless after_world
+        held = rebuild_mask & @stop_frozen_classes
+        held_nursery = rebuild_nursery_mask & @stop_frozen_nursery_classes
+        @freelist_rebuild_request |= held
+        @freelist_rebuild_request_nursery |= held_nursery
+        rebuild_mask &= ~held
+        rebuild_nursery_mask &= ~held_nursery
       end
 
       # Page-HOLED + empty dormant/munmap: one freelist rebuild per touched class.
@@ -1618,6 +1645,17 @@ module Gcry
         i += 1
       end
       {freed, live}
+    end
+
+    # What the policy is told of a freelist chunk the stop leaves unswept
+    # (`Heap#sweep`, frozen class): all of it live, as nothing in it is
+    # reclaimed — kept, not empty, not HOLED or SPARSE.
+    private def unswept_freelist_chunk_counts(chunk : ChunkHeader*, class_index : Int32) : SmallSweepCounts
+      payload = SizeClasses.payload(class_index).to_u64
+      block_bytes = BlockHeader::SIZE.to_u64 + payload
+      span = ChunkHeader.data_end(chunk).address &- ChunkHeader.data_start(chunk).address
+      usable = (span // block_bytes) &* payload
+      SmallSweepCounts.new(true, usable, usable, 0_u64)
     end
 
     # The header-walk arm of the size-class sweep.

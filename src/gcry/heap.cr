@@ -2628,6 +2628,13 @@ module Gcry
         added += payload
       end
 
+      # Every block FREE and on no list until the store below: a stop that
+      # froze this thread here, with its class lock held, finds a chunk to
+      # call empty. It leaves the class alone (`note_frozen_freelists`).
+      if hook = @refill_publish_hook
+        hook.call(chunk)
+      end
+
       if nursery
         @nursery_freelists[index] = free_head
         @nursery_freelist_clean[index] = true
@@ -4153,20 +4160,25 @@ module Gcry
     # `@chunk_list_lock` if it is free, without waiting: true when this call
     # took it. For the in-stop sweep, which may not wait on a lock a frozen
     # thread can hold and must not relink the list under one (`Heap#sweep`).
+    private def try_lock_chunk_list : Bool
+      try_lock_spinlock(pointerof(@chunk_list_lock))
+    end
+
+    # *lock* if it is free, without waiting: true when this call took it.
     # `Crystal::SpinLock` has no try, so this is its `lock` without the spin,
     # on its one field; the macro check turns a stdlib change to that layout
     # into a compile error rather than a store into the wrong word. Under
     # `-Dwithout_mt` off Windows the lock compiles to nothing and no other
     # thread can hold it.
-    private def try_lock_chunk_list : Bool
+    protected def try_lock_spinlock(lock : Crystal::SpinLock*) : Bool
       {% if flag?(:without_mt) && !flag?(:win32) %}
         true
       {% else %}
         {% ivars = Crystal::SpinLock.instance_vars %}
         {% unless ivars.size == 1 && ivars[0].name.stringify == "m" && ivars[0].type.stringify == "Atomic(Int32)" %}
-          {% raise "Heap#try_lock_chunk_list: Crystal::SpinLock is no longer one `@m : Atomic(Int32)`" %}
+          {% raise "Heap#try_lock_spinlock: Crystal::SpinLock is no longer one `@m : Atomic(Int32)`" %}
         {% end %}
-        _, ok = Atomic::Ops.cmpxchg(pointerof(@chunk_list_lock).as(Int32*), 0, 1,
+        _, ok = Atomic::Ops.cmpxchg(lock.as(Int32*), 0, 1,
           LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::SequentiallyConsistent)
         ok
       {% end %}

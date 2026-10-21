@@ -2143,7 +2143,11 @@ module Gcry
             collection_event(CollectionEvent::MarkEnd)
             enqueue_unreachable_finalizers
             collection_event(CollectionEvent::ReclaimStart)
+            # Before the sweep writes a freelist: which classes a frozen
+            # thread is inside (`note_frozen_freelists`).
+            note_frozen_freelists
             sweep(major: true)
+            clear_frozen_freelists
             collection_event(CollectionEvent::ReclaimEnd)
             adapt_after_sweep
             @bytes_since_gc.set(0_u64)
@@ -2906,6 +2910,9 @@ module Gcry
           collection_event(CollectionEvent::PostStopWorld)
           @last_phase_stw_stop_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_FLUSH)
+          # Before the flushes below and the sweep write any freelist: which
+          # classes a frozen thread is inside (`note_frozen_freelists`).
+          note_frozen_freelists
           flush_all_tlabs
           # TLAB-off USED stash → freelist before mark (unscanned thread locals).
           flush_all_alloc_batches
@@ -3104,6 +3111,7 @@ module Gcry
         ensure
           t0 = monotonic_ns
           StwWatchdog.enter(StwWatchdog::PHASE_RESUME)
+          clear_frozen_freelists
           collection_event(CollectionEvent::PreStartWorld) if stw_reported
           start_world
           collection_event(CollectionEvent::PostStartWorld) if stw_reported
