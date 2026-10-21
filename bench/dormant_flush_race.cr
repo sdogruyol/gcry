@@ -235,6 +235,16 @@ if ARGV.includes?("--child")
           unless heap.free_result(p).freed?
             Verdict.refused!(p, heap.release_note(p.address))
           end
+          # The mutator-side unmap this gate races against the flush walks.
+          # `GC.free` of a large block used to trim the cache to the retain (0 on
+          # Linux) every time; since 2026-10-03 it trims only once the cache is
+          # 2 MiB past it, which four workers cycling one 40 KiB block each never
+          # reach — measured on the 0.38.0 tree, 0 mutator trims in a child
+          # (`live_walk_direct` and `live_walk_queued` both 0, also at 48
+          # workers), so the stress arms had stopped producing the traffic they
+          # exist for. The explicit trim puts it back
+          # (`bench/log/linux/2026-10-21-dormant-flush-sighting/`).
+          heap.trim_large_cache
         end
       ensure
         # **`ensure`, and that is the whole of this gate's silent-hang family.**
@@ -369,14 +379,45 @@ puts "=== post-STW flush walk vs. mutator unmap ==="
 puts "#{WORKERS} workers × #{ROUNDS} rounds of #{PAYLOAD} B, one collector, #{BALLAST} ballast objects"
 puts ""
 
+# The first failing child's whole crash report, not one line of it.
+#
+# The 2026-09-28 sighting kept only the line `run` quotes, and that line says
+# *where* the fault landed and never *who* made it: the writer's pc and its
+# return addresses (`gcry: writer — …`, `SegvReport.report_writer_frames`) were
+# printed by the child and dropped here, and nothing was left to say which
+# thread touched the released chunk's block header
+# (`bench/log/linux/2026-10-21-dormant-flush-sighting/`). Every `gcry:` line,
+# bounded, but not `GCRY_TRACE_LARGE`'s map lines, which are one per large
+# allocation — except those naming the released chunk's base, which tie the
+# release to its allocation.
+REPORT_LINES = 40
+
+# The headerless build's start-up note about `GCRY_MOSTLY_EMPTY`, which every
+# child prints. Quoted as a failing child's "first line", it hid what the
+# child died of in two of the three 2026-09-28 lane failures.
+def startup_note?(line : String) : Bool
+  line.includes?("is ignored on the headerless layout")
+end
+
+def crash_report(output : String) : Array(String)
+  lines = output.lines
+  report = lines.select { |l| l.starts_with?("gcry:") && !l.starts_with?("gcry: large ") && !startup_note?(l) }.first(REPORT_LINES)
+  if m = output.match(/RELEASED — base 0x([0-9a-f]+)/)
+    base = "base=0x#{m[1]} "
+    report.concat(lines.select { |l| l.starts_with?("gcry: large ") && l.includes?(base) }.last(4))
+  end
+  report
+end
+
 # Bounded, and hangs counted apart from faults — see the same change in
 # `page_release_corruption.cr`. A bare `Process.run` with no deadline turns a
 # hung child into a hung gate, and a hung gate reads as a slow one; that is how
 # the stop-the-world hang fixed in 0.21.1 stayed invisible for a day.
-def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?}
+def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?, Array(String)}
   bad = 0
   hung = 0
   first = nil
+  report = [] of String
   attempts.times do
     result = BoundedChild.run(exe, ["--child"], env)
     unless result.ok
@@ -394,8 +435,9 @@ def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?}
       # is often Crystal's unhandled-exception header rather than a gcry
       # report or a SEGV.
       first ||= result.output.lines.find do |l|
-        l.includes?("gcry:") || l.includes?("Invalid memory access") ||
-          l.includes?("Unhandled exception") || l.includes?("refused 0x")
+        !startup_note?(l) &&
+          (l.includes?("gcry:") || l.includes?("Invalid memory access") ||
+            l.includes?("Unhandled exception") || l.includes?("refused 0x"))
       end
       # A child killed on the deadline with nothing quotable above still
       # said *something* before it wedged; the last lines are the only
@@ -404,9 +446,10 @@ def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?}
         tail = result.output.lines.last(6)
         first = "killed on the deadline; last output: " + (tail.empty? ? "(none)" : tail.join(" | "))
       end
+      report = crash_report(result.output) if report.empty?
     end
   end
-  {bad, hung, first}
+  {bad, hung, first, report}
 end
 
 # The watchdog is armed in every child: a child killed on the deadline with
@@ -430,12 +473,17 @@ puts "  scheduled walk: queued=#{scheduled_safe.ok ? "safe" : "FAILED"}, immedia
 failures << "the scheduled queued walk failed: #{scheduled_safe.output}" unless scheduled_safe.ok
 failures << "the scheduled immediate walk did not fault at the held chunk: #{scheduled_unsafe.output}" unless scheduled_fault
 
-queued_bad, queued_hung, queued_note = run(exe, base, attempts)
+queued_bad, queued_hung, queued_note, queued_report = run(exe, base, attempts)
 puts "  queued (default):    #{queued_bad} of #{attempts} failed" \
      "#{queued_hung > 0 ? " (#{queued_hung} timed out)" : ""}" \
      "#{queued_note ? "\n     #{queued_note.strip}" : ""}"
+# Only on the arm being gated: the control faults by design, every run.
+unless queued_report.empty?
+  puts "     first failing child's report:"
+  queued_report.each { |l| puts "       #{l.strip}" }
+end
 
-immediate_bad, immediate_hung, immediate_note = run(exe, immediate, attempts)
+immediate_bad, immediate_hung, immediate_note, _ = run(exe, immediate, attempts)
 puts "  immediate (old):     #{immediate_bad} of #{attempts} failed" \
      "#{immediate_hung > 0 ? " (#{immediate_hung} timed out)" : ""}" \
      "#{immediate_note ? "\n     #{immediate_note.strip}" : ""}"
