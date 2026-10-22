@@ -634,10 +634,7 @@ module Gcry
         Trace.after_malloc(u, size.to_u64, atomic: false)
         return u
       end
-      ptr = allocate(size.to_u64, atomic: false, clear: true)
-      Invariant.after_malloc(self, ptr, size.to_u64)
-      Trace.after_malloc(ptr, size.to_u64, atomic: false)
-      ptr
+      allocate_entry(size.to_u64, false, true)
     end
 
     # Bytes added to every atomic request. Boehm adds one byte to every
@@ -663,11 +660,49 @@ module Gcry
         Trace.after_malloc(u, n, atomic: true)
         return u
       end
-      ptr = allocate(n, atomic: true, clear: false)
-      Invariant.after_malloc(self, ptr, n)
-      Trace.after_malloc(ptr, n, atomic: true)
+      allocate_entry(n, true, false)
+    end
+
+    # The slow path of `malloc` and `malloc_atomic`: two tail calls, so that
+    # no frame the hit path wrote is live across a collection the slow path
+    # triggers, and no frame built for it reads what the hit path left.
+    #
+    # The hit path is inlined into the allocation entry (`GC.malloc_atomic` is
+    # `Heap#malloc_atomic` with `fast_alloc` folded in), and it spills: block
+    # addresses, the cursor's word base, a block size. On the slow path those
+    # slots are not written, so when the entry called `allocate` itself they
+    # sat in a live frame above `collect_entry_sp` holding whatever the last
+    # frame at that depth had left there — and the conservative scan kept it.
+    # Measured on crystal-metric (`bench/log/linux/2026-10-22-regexdna-peak/`):
+    # RegexDna's 19% lower peak with the occupancy claim was one such slot
+    # going away (the pre-claim `Heap#malloc_atomic`'s `0x58(%rsp)`, holding
+    # the dead `Fasta` and so its 64 MiB buffer through three collections),
+    # and on 0.39.0 the entry's slots hold Knuckeotide's dead hash buffers.
+    #
+    # Called in tail position, this is reached by a `jmp` once the entry has
+    # popped its frame. It has no frame of its own: it zeroes the stack below
+    # its return address, which is where the entry's frame was, and jumps on
+    # to `allocate_traced`, whose frame and the collector's are then built
+    # over zeros and hold only what they write. Where the entry is inlined
+    # into its caller instead, the caller's own frame is the caller's affair,
+    # as it is under any conservative collector.
+    @[NoInline]
+    private def allocate_entry(size : UInt64, atomic : Bool, clear : Bool) : Void*
+      Roots.wipe_below_sp if @slow_entry_wipe
+      allocate_traced(size, atomic, clear)
+    end
+
+    @[NoInline]
+    private def allocate_traced(size : UInt64, atomic : Bool, clear : Bool) : Void*
+      ptr = allocate(size, atomic: atomic, clear: clear)
+      Invariant.after_malloc(self, ptr, size)
+      Trace.after_malloc(ptr, size, atomic: atomic)
       ptr
     end
+
+    # Research knob, `GCRY_SLOW_ENTRY_WIPE=0`: skip `allocate_entry`'s wipe,
+    # the control arm of the measurement and of its regression.
+    property slow_entry_wipe : Bool = true
 
     # Boehm's `GC_realloc`: null is `malloc(size)`, and size 0 frees
     # `pointer` and answers null (`mallocx.c`, as C's `realloc` does in glibc).

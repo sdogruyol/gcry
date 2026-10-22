@@ -142,6 +142,41 @@ module Gcry
       {% end %}
     end
 
+    # Zero the 1 KiB below the SP. Inlined into `Heap#allocate_entry`, which
+    # keeps nothing on the stack (it has no frame and tail-calls on), so
+    # everything below the SP it reads is dead. 1 KiB covers the allocation
+    # slow path's frames down to `collect_entry_sp` (168 bytes on x86-64 Linux
+    # at 0.39.0: `allocate_traced`, `collect`, `run_collection`), below which
+    # `run_collection`'s own entry scrub takes over (`Heap#collect_scrub_bytes`).
+    # A loop in the asm and not a `memset`, which would push its return
+    # address into the range it clears; and on scratch registers only (`r11`;
+    # `x9`/`x10`), so the arguments in `rdi`/`rsi`/`rdx`/`rcx` (`x0`-`x3`)
+    # pass straight through to the tail call and the function needs no frame
+    # to keep them. Windows grows stacks through `PAGE_GUARD`, which a blind
+    # store may not touch (`OS.clear_dead_stack` walks `VirtualQuery` for it),
+    # so there it does nothing.
+    @[AlwaysInline]
+    def self.wipe_below_sp : Nil
+      {% if flag?(:win32) %}
+        # Nothing: see above.
+      {% elsif flag?(:x86_64) %}
+        asm("leaq -1024(%rsp), %r11
+             1:
+             movq $$0, (%r11)
+             movq $$0, 8(%r11)
+             addq $$16, %r11
+             cmpq %rsp, %r11
+             jb 1b" ::: "r11", "memory", "cc" : "volatile")
+      {% elsif flag?(:aarch64) %}
+        asm("mov x10, sp
+             sub x9, x10, #1024
+             1:
+             stp xzr, xzr, [x9], #16
+             cmp x9, x10
+             b.lo 1b" ::: "x9", "x10", "memory", "cc" : "volatile")
+      {% end %}
+    end
+
     {% if flag?(:win32) %}
       REGISTER_BUFFER_SIZE = 1248
     {% else %}
