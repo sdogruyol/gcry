@@ -891,6 +891,12 @@ module Gcry
     property collect_skip_when_busy : Bool = false
     @incremental_marking = false
     @inc_active = false
+    # Research only: false leaves TLABs and allocation-batch stashes
+    # unflushed in the incremental finishing slice (`collect_a_little`), the
+    # code before 2026-10-22 — the control arm of
+    # `process_spec/regression/85_frozen_class_gaps_spec.cr`'s *slice-stash*
+    # and *slice-tlab* windows.
+    property inc_finish_flush : Bool = true
     @world_stopped = false
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
@@ -2143,9 +2149,30 @@ module Gcry
             collection_event(CollectionEvent::MarkEnd)
             enqueue_unreachable_finalizers
             collection_event(CollectionEvent::ReclaimStart)
-            # Before the sweep writes a freelist: which classes a frozen
-            # thread is inside (`note_frozen_freelists`).
+            # Before the flushes and the sweep write a freelist: which
+            # classes a frozen thread is inside (`note_frozen_freelists`).
             note_frozen_freelists
+            # The same flushes as a stop-the-world collection's
+            # (`run_collection_body`), here because this is the stop that
+            # sweeps. Until 2026-10-22 no stop of an incremental cycle made
+            # them. An allocation-batch stash claimed before the cycle began
+            # is USED, unmarked (allocate-black marks only what is claimed or
+            # popped while marking) and linked only through its headers, so
+            # this sweep reclaimed it onto the class list while the slot still
+            # linked it, and the next pop from the slot handed out a block the
+            # list hands out as well. A TLAB's chain is FREE and on no list,
+            # so a rebuild of the class list (one the sweep makes after
+            # releasing an empty chunk of the class) linked the chain onto it
+            # while the TLAB still held it, with the same result; and a chunk
+            # holding nothing but chain blocks could be found empty and made
+            # dormant under it. A frozen class's stash and chains stay put,
+            # as in that stop, and so do its chunks.
+            # `process_spec/regression/85_frozen_class_gaps_spec.cr`.
+            if @inc_finish_flush
+              flush_all_tlabs
+              flush_all_alloc_batches
+              scrub_freelists
+            end
             sweep(major: true)
             clear_frozen_freelists
             collection_event(CollectionEvent::ReclaimEnd)
