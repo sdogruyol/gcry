@@ -634,7 +634,15 @@ module Gcry
         Trace.after_malloc(u, size.to_u64, atomic: false)
         return u
       end
-      allocate_entry(size.to_u64, false, true)
+      {% if flag?(:win32) %}
+        # The slow path in this frame, as before 0.39.0: see `allocate_entry`.
+        ptr = allocate(size.to_u64, atomic: false, clear: true)
+        Invariant.after_malloc(self, ptr, size.to_u64)
+        Trace.after_malloc(ptr, size.to_u64, atomic: false)
+        ptr
+      {% else %}
+        allocate_entry(size.to_u64, false, true)
+      {% end %}
     end
 
     # Bytes added to every atomic request. Boehm adds one byte to every
@@ -660,7 +668,15 @@ module Gcry
         Trace.after_malloc(u, n, atomic: true)
         return u
       end
-      allocate_entry(n, true, false)
+      {% if flag?(:win32) %}
+        # The slow path in this frame, as before 0.39.0: see `allocate_entry`.
+        ptr = allocate(n, atomic: true, clear: false)
+        Invariant.after_malloc(self, ptr, n)
+        Trace.after_malloc(ptr, n, atomic: true)
+        ptr
+      {% else %}
+        allocate_entry(n, true, false)
+      {% end %}
     end
 
     # The slow path of `malloc` and `malloc_atomic`: two tail calls, so that
@@ -687,6 +703,14 @@ module Gcry
     # over zeros and hold only what they write (`Roots.wipe_below_sp`). Where the
     # entry is inlined into its caller instead, the caller's own frame is the
     # caller's affair, as it is under any conservative collector.
+    #
+    # Not on Windows. There the wipe does nothing (`Roots.wipe_below_sp`), so
+    # the two extra frames were all the change left: in a debug build, where
+    # nothing is a tail call, `allocate_entry` and `allocate_traced` added
+    # unwritten slots between the allocation and the collector, and
+    # regression 79 read 75 stale words on windows-latest x86-64 (gates and
+    # freelist jobs, run 39775800632; under 64 before). Windows keeps the
+    # slow path in the entry's frame, as before 0.39.0.
     @[NoInline]
     private def allocate_entry(size : UInt64, atomic : Bool, clear : Bool) : Void*
       Roots.wipe_below_sp if @slow_entry_wipe
