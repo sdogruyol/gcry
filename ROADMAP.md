@@ -3022,6 +3022,21 @@ kept finding the rest.
       `free` or sweep path. Regression 85's *bitmap-free* window: the block
       occupied afterwards on the control arm, free on the fixed.
 
+- [x] **Regression 84's *publish-lazy* "double hand-out" — closed
+      2026-10-22, a spec construction, not a collector bug.** The fixed
+      child failed at `shared.should be_false` in about one run in twenty
+      (header layout, freelist allocator, allocation batch). In every
+      failure the batch hook had parked one of the window's idle threads,
+      publishing a 192 B batch of its own, rather than the worker. The
+      worker allocated through before the stop, and the stop's flush
+      returned its stash to the class list as it should; the list of held
+      blocks, read before the stop, still named them. The hooks now park
+      only the worker on the class under test, and a bystander thread
+      allocating inside the armed window in every run turns a hook that
+      parks anyone else into a failure every run (30 of 30 on the old
+      hook, 0 of 220 on the new). Nothing in `src/` changed.
+      `bench/log/linux/2026-10-22-r84-double-handout/FINDINGS.md`.
+
 - [ ] **A bitmap `free`'s `mark` clear can wipe a concurrent claim's mark
       ([INFERENCE], found 2026-10-22, not reproduced).** Between the free's
       `occ` clear and its `mark` clear, the chunk's cursor owner can advance
