@@ -150,24 +150,13 @@ describe "Regression: an in-stop sweep makes no chunk dormant under a frozen poo
       env["GCRY_DEBUG_INVARIANTS"] = nil if arm == "control"
       status = Process.run(Process.executable_path.not_nil!, ["-e", "stop-sweep-frozen-pool-taker child #{arm}"],
         env: env, output: captured, error: captured)
-      # On Windows a dormant chunk's pages are decommitted, not zeroed
-      # (`Platform.release_reusable_pages`, MEM_DECOMMIT). The control child
-      # releases its taker only after the collection and its flush have
-      # returned and it has printed TAKER80_CONTROL_MARK having seen the chunk
-      # dormant with the taker still parked, so on Windows the taker then
-      # clears its block in a decommitted page and the child dies with an
-      # access violation in `clear_block`, every time. That is the old code
-      # failing, and it counts only after the mark: a crash without it, or the
-      # mark without a crash, fails the arm. (Before the hold, which of the
-      # flush and the taker came first was a race: CI run 39681882864.)
-      {% if flag?(:win32) %}
-        if arm == "control"
-          captured.to_s.should contain(TAKER80_CONTROL_MARK)
-          status.success?.should be_false
-          captured.to_s.should contain("clear_block")
-          next
-        end
-      {% end %}
+      # Both children release their taker only after the collection, its
+      # dormant flush included, has returned. That matters on Windows, where
+      # the flush decommits a dormant chunk's pages and recommits them at once
+      # (`Platform.release_physical_pages`): a control-arm taker that wrote
+      # between the two died with an access violation in `clear_block` (CI run
+      # 39681882864). After the flush the pages are committed and zero again,
+      # as on Linux, and the control child's assertions hold on every platform.
       fail "child #{status.inspect}:\n#{captured}" unless status.success?
       captured.to_s.should contain("1 examples, 0 failures")
     end
