@@ -210,18 +210,28 @@ Where the entry is inlined into its caller, the caller's frame is the
 caller's, as under any conservative collector. `GCRY_SLOW_ENTRY_WIPE=0`
 turns the wipe off (research, the control arm).
 
-**Bound.** The wipe stores into the 1 KiB below the SP without the stack's
-bounds. `clear_stack_body` clamps to the guard page, but it gets the bounds
-from `Fiber`/`Thread` or libc, which the allocation path may not call (they
-allocate during a thread's TLS setup). Not clamped: a thread or fiber whose
-SP is within 1 KiB of its guard page now overflows (SIGSEGV, "Stack
-overflow") on a slow path that would not have gone that deep, such as a
-cursor refill (`refill_size_class` is 0x1f8 bytes plus pushes). Any slow
-path that collects goes deeper than the wipe anyway (`run_collection_body`
-alone is 0x518 bytes plus six pushes on x86-64 Linux). So the wipe changes
-only which allocation overflows first, on a stack already within 1 KiB of
-overflowing. Documented in `Roots.wipe_below_sp` and the knob's row in
-`docs/HARDENING.md`.
+**Bound** (branch `wipe-clamp-039`, after review). The first version stored
+into the 1 KiB below the SP without the stack's bounds, so a thread or fiber
+with less than 1 KiB above its guard page would have overflowed on a slow path
+that did not go that deep itself. The bound needs no allocation and no
+syscall: `Fiber.current?` is `Thread.current?` — one thread-local load, which
+LLVM emits as a call to a five-instruction accessor (`%fs` plus an offset) —
+and the nilable `current_fiber?`, and `Fiber#@stack` holds the bounds Crystal
+computed when the fiber was made (the mapped span, guard page lowest, for a
+spawned fiber; `pthread_getattr_np`'s for a thread's main fiber). These are
+the bounds `clear_stack_body` already takes for the collector's scrub.
+`Roots.wipe_floor` clamps the wipe to the page above the stack's lowest,
+rounded so the 16-byte loop ends at the SP, and skips it when there is no
+current fiber (a thread whose `Thread` is not set yet; `Fiber.current` without
+`?` would make one, which allocates) or the SP is outside the fiber's stack
+(a signal on an alternate stack, a fiber switch mid-swap). The accessor call
+gives `allocate_entry` a frame (six pushes and the accessor's 8-byte slot,
+every word written, popped before the tail `jmp`); the wipe starts below it.
+Regression 86 still reads 0 stale words with it (control 2). Its new
+guard-page arms: a child fiber recurses until 340–640 bytes are left above
+its guard page and wipes there. The bounded wipe lives, with its floor
+clamped to the guard's top (not skipped); the first version's unbounded loop
+dies with "Stack overflow".
 
 Cost is on the slow path only — a cursor refill, a large block, a
 collection — 64 iterations of two stores. The hit path's code changes

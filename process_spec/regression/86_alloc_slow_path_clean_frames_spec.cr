@@ -106,3 +106,125 @@ describe "Regression: an allocation's slow path collects on frames built over ze
     {% end %}
   end
 end
+
+# The wipe stores below the SP, so it must stop above the running fiber's
+# guard page: a fiber with less than 1 KiB of stack left would otherwise
+# fault on a slow path that does not go that deep itself (the review of the
+# first version, 2026-10-22, `bench/log/linux/2026-10-22-regexdna-peak/`).
+# `Roots.wipe_floor` clamps it to the page above the stack's lowest. A child
+# fiber recurses until it has 340-640 bytes above its guard page and wipes
+# there: the fixed child uses `Roots.wipe_below_sp` and must survive with the
+# floor clamped (not skipped); the control child runs the first version's
+# unbounded loop and must die on the guard page, or the fixed child would
+# pass on a layout where 1 KiB was never past the guard. Each in a process
+# of its own. Any build, x86-64 and arm64 outside Windows (where the wipe
+# is off); elsewhere both children say they skipped.
+private GUARD86_SKIP_MARK = "guard86: no wipe on this target, skipped"
+private GUARD86_FIXED_OK  = "guard86: fixed child wiped down to its guard page and lived"
+
+{% if (flag?(:x86_64) || flag?(:aarch64)) && !flag?(:win32) %}
+  # The first version's wipe: 1 KiB below the SP, no bound.
+  @[AlwaysInline]
+  private def guard86_unbounded_wipe : Nil
+    {% if flag?(:x86_64) %}
+      asm("leaq -1024(%rsp), %r11
+           1:
+           movq $$0, (%r11)
+           movq $$0, 8(%r11)
+           addq $$16, %r11
+           cmpq %rsp, %r11
+           jb 1b" ::: "r11", "memory", "cc" : "volatile")
+    {% else %}
+      asm("mov x10, sp
+           sub x9, x10, #1024
+           1:
+           stp xzr, xzr, [x9], #16
+           cmp x9, x10
+           b.lo 1b" ::: "x9", "x10", "memory", "cc" : "volatile")
+    {% end %}
+  end
+
+  # Near the guard page nothing deeper may be called: the floor is only
+  # recorded here and checked once the descent has unwound.
+  @[NoInline]
+  private def guard86_wipe(arm : String, floor_out : UInt64*) : Nil
+    if arm == "fixed"
+      floor_out.value = Gcry::Roots.wipe_floor(Gcry::Roots.hardware_stack_pointer.address)
+      Gcry::Roots.wipe_below_sp
+    else
+      guard86_unbounded_wipe
+    end
+  end
+
+  # Each level holds 256 bytes of its own, so the descent stops with
+  # 340-640 bytes above the guard page.
+  @[NoInline]
+  private def guard86_descend(arm : String, guard_top : UInt64, floor_out : UInt64*) : Nil
+    pad = uninitialized StaticArray(UInt64, 32)
+    asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
+    if Gcry::Roots.hardware_stack_pointer.address &- guard_top > 640
+      guard86_descend(arm, guard_top, floor_out)
+    else
+      guard86_wipe(arm, floor_out)
+    end
+    # Not a tail call: the frame stays while the deeper levels run.
+    asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
+  end
+
+  private def guard86_child(arm : String) : Nil
+    done = Channel(Nil).new
+    spawn do
+      stack = Fiber.current.@stack
+      guard_top = stack.pointer.address &+ Gcry::Roots.runtime_page_size
+      floor = 0_u64
+      guard86_descend(arm, guard_top, pointerof(floor))
+      if arm == "fixed"
+        # Clamped to the guard's top: not skipped, and not past it.
+        raise "guard86: floor #{floor} not clamped to #{guard_top}" unless floor >= guard_top && floor < guard_top + 16
+        STDERR.puts GUARD86_FIXED_OK
+      end
+      done.send(nil)
+    end
+    done.receive
+  end
+{% end %}
+
+describe "Regression: the slow path's wipe stays above the fiber's guard page" do
+  it "wipes down to the guard page and no further" do
+    {% if (flag?(:x86_64) || flag?(:aarch64)) && !flag?(:win32) %}
+      {"fixed", "control"}.each do |arm|
+        captured = IO::Memory.new
+        status = Process.run(Process.executable_path.not_nil!, ["-e", "wipe-guard child #{arm}"],
+          env: {"GCRY_WIPE_GUARD86_CHILD" => arm}, output: captured, error: captured)
+        text = captured.to_s
+        if arm == "fixed"
+          fail "fixed child #{status.inspect}:\n#{text}" unless status.success? && text.includes?(GUARD86_FIXED_OK)
+        else
+          # Crystal's handler reports the fault on a guard page as a stack
+          # overflow and exits non-zero.
+          fail "control child did not fault on the guard page (#{status.inspect}):\n#{text}" if status.success?
+        end
+      end
+    {% else %}
+      STDERR.puts GUARD86_SKIP_MARK
+    {% end %}
+  end
+
+  it "wipe-guard child fixed" do
+    next unless ENV["GCRY_WIPE_GUARD86_CHILD"]? == "fixed"
+    {% if (flag?(:x86_64) || flag?(:aarch64)) && !flag?(:win32) %}
+      guard86_child("fixed")
+    {% else %}
+      STDERR.puts GUARD86_SKIP_MARK
+    {% end %}
+  end
+
+  it "wipe-guard child control" do
+    next unless ENV["GCRY_WIPE_GUARD86_CHILD"]? == "control"
+    {% if (flag?(:x86_64) || flag?(:aarch64)) && !flag?(:win32) %}
+      guard86_child("control")
+    {% else %}
+      STDERR.puts GUARD86_SKIP_MARK
+    {% end %}
+  end
+end

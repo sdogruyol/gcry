@@ -143,58 +143,93 @@ module Gcry
     end
 
     # Zero the 1 KiB below the SP. Inlined into `Heap#allocate_entry`, which
-    # keeps nothing of its own on the stack and tail-calls on, so everything
-    # below the SP it reads is dead. 1 KiB covers the allocation slow path's
-    # frames down to `collect_entry_sp` (168 bytes on x86-64 Linux at 0.39.0:
-    # `allocate_traced`, `collect`, `run_collection`), below which
-    # `run_collection`'s own entry scrub takes over (`Heap#collect_scrub_bytes`).
-    # A loop in the asm and not a `memset`, which would push its return
-    # address into the range it clears; and on scratch registers only (`r11`;
-    # `x9`/`x10`), so the arguments in `rdi`/`rsi`/`rdx`/`rcx` (`x0`-`x3`)
-    # pass straight through to the tail call. On Linux (x86-64 and arm64)
-    # `allocate_entry` then has no prologue at all. On both Darwin targets
-    # LLVM keeps its frame-pointer convention: it pushes a frame record
-    # around the loop alone (`push %rbp` / `stp x29, x30, [sp, #-16]!`) and
-    # pops it before the tail branch, so the wipe starts 8 or 16 bytes lower
-    # and skips only that record — a saved frame pointer and return address,
-    # a stack address and a code address. A debug build does not inline it:
-    # there it is a leaf with no frame that zeroes below its own return
-    # address, which is as dead.
+    # keeps nothing of its own on the stack that it has not written, and
+    # tail-calls on, so everything below the SP it reads is dead. 1 KiB covers
+    # the allocation slow path's frames down to `collect_entry_sp` (168 bytes
+    # on x86-64 Linux at 0.39.0: `allocate_traced`, `collect`,
+    # `run_collection`), below which `run_collection`'s own entry scrub takes
+    # over (`Heap#collect_scrub_bytes`). A loop in the asm and not a `memset`,
+    # which would push its return address into the range it clears. The bound
+    # below reads `Fiber.current?`, whose thread-local load LLVM makes a call
+    # to a small accessor (`Crystal::System::Thread::current_thread`: `%fs`
+    # plus an offset, no allocation), so `allocate_entry` has a frame: on
+    # x86-64 Linux six callee-saved pushes and one 8-byte slot the accessor
+    # writes, every word of it written, popped before the `jmp` to
+    # `allocate_traced`. The wipe starts below that frame. The dead entry
+    # frame it is there for lies below the SP either way, and the words
+    # `allocate_entry`'s frame puts over part of it are the mutator's
+    # callee-saved registers (which `allocate_traced` pushes again) and a
+    # thread-local address, not stale heap pointers. A debug build does not
+    # inline it.
     #
-    # Unlike `Heap#clear_stack_body` it does not clamp to the stack's guard
-    # page: that needs the stack's bounds, and the allocation path may not
-    # ask `Fiber`/`Thread` for them (they allocate during a thread's TLS
-    # setup). So a thread or fiber whose SP is within 1 KiB of its guard page
-    # faults here, as a stack overflow, on a slow path that would not
-    # otherwise have gone that deep — a refill, say, whose frames reach a few
-    # hundred bytes. Any slow path that collects reaches deeper than the wipe
-    # (`run_collection_body`'s frame alone is 0x518 bytes plus six pushes on
-    # x86-64 Linux), so this only moves which allocation overflows first on a
-    # stack that is already within 1 KiB of overflowing.
+    # Bounded by the running fiber's stack, read with a few loads and no call
+    # that can allocate: `Fiber.current?` is `Thread.current?` (a thread-local
+    # load; `pthread_getspecific` on OpenBSD/Android) and its nilable
+    # `current_fiber?`, and `Fiber#@stack` holds the bounds Crystal computed
+    # when the fiber was made — the mapped span for a spawned fiber, whose
+    # lowest page is its guard, and `pthread_getattr_np`'s for a thread's main
+    # fiber. These are the bounds `Heap#clear_stack_body` takes for the
+    # collector's scrub. `Fiber.current` and `Thread.current`, without the
+    # `?`, may not be used here: on a thread whose `Thread` is not set yet they
+    # make one, which allocates (`wipe_floor`). The wipe is skipped when there
+    # is no current fiber (a thread being born, a thread Crystal did not
+    # start) or the SP is not inside its stack (a signal handler on an
+    # alternate stack, a fiber switch between `current_fiber=` and the
+    # swap), and clamped to the page above the stack's lowest when the stack
+    # has less than 1 KiB left, so it never stores into a guard page.
     #
     # Windows grows stacks through `PAGE_GUARD`, which a blind store may not
     # touch (`OS.clear_dead_stack` walks `VirtualQuery` for it), so there it
     # does nothing.
+    WIPE_BELOW_SP_BYTES = 1024_u64
+
     @[AlwaysInline]
     def self.wipe_below_sp : Nil
       {% if flag?(:win32) %}
         # Nothing: see above.
       {% elsif flag?(:x86_64) %}
-        asm("leaq -1024(%rsp), %r11
+        low = wipe_floor(hardware_stack_pointer.address)
+        return if low == 0
+        asm("movq $0, %r11
              1:
              movq $$0, (%r11)
              movq $$0, 8(%r11)
              addq $$16, %r11
              cmpq %rsp, %r11
-             jb 1b" ::: "r11", "memory", "cc" : "volatile")
+             jb 1b" :: "r"(low) : "r11", "memory", "cc" : "volatile")
       {% elsif flag?(:aarch64) %}
+        low = wipe_floor(hardware_stack_pointer.address)
+        return if low == 0
         asm("mov x10, sp
-             sub x9, x10, #1024
+             mov x9, $0
              1:
              stp xzr, xzr, [x9], #16
              cmp x9, x10
-             b.lo 1b" ::: "x9", "x10", "memory", "cc" : "volatile")
+             b.lo 1b" :: "r"(low) : "x9", "x10", "memory", "cc" : "volatile")
       {% end %}
+    end
+
+    # The lowest address `wipe_below_sp` stores to for a stack pointer *sp*,
+    # or 0 for no wipe: `sp - WIPE_BELOW_SP_BYTES`, raised to the page above
+    # the running fiber's stack's lowest (its guard), and to a whole number
+    # of 16-byte steps below *sp*, since the loop stores 16 bytes a step and
+    # stops at the SP; 0 when there is no current fiber, *sp* is not on its
+    # stack, or nothing is left to wipe. Public for regression 86.
+    @[AlwaysInline]
+    def self.wipe_floor(sp : UInt64) : UInt64
+      fiber = Fiber.current?
+      return 0_u64 unless fiber
+      stack = fiber.@stack
+      lo = stack.pointer.address
+      hi = stack.bottom.address
+      return 0_u64 unless lo < sp && sp <= hi
+      guard_top = lo &+ runtime_page_size
+      return 0_u64 if sp <= guard_top
+      room = sp &- guard_top
+      room = WIPE_BELOW_SP_BYTES if room > WIPE_BELOW_SP_BYTES
+      room &= ~15_u64
+      return 0_u64 if room == 0
+      sp &- room
     end
 
     {% if flag?(:win32) %}

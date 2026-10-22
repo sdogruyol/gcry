@@ -680,12 +680,11 @@ module Gcry
     # and on 0.39.0 the entry's slots hold Knuckeotide's dead hash buffers.
     #
     # Called in tail position, this is reached by a `jmp` once the entry has
-    # popped its frame. It keeps nothing of its own on the stack: it zeroes
-    # the stack below its return address, which is where the entry's frame
-    # was, and jumps on to `allocate_traced`, whose frame and the collector's
-    # are then built over zeros and hold only what they write. (On Linux it
-    # has no prologue at all; on Darwin LLVM pushes a frame record around the
-    # wipe and pops it before the jump — `Roots.wipe_below_sp`.) Where the
+    # popped its frame. It keeps nothing on the stack it has not written: it
+    # zeroes the stack below its own small frame, which is where the entry's
+    # frame was, down to the running fiber's guard page at most, and jumps on
+    # to `allocate_traced`, whose frame and the collector's are then built
+    # over zeros and hold only what they write (`Roots.wipe_below_sp`). Where the
     # entry is inlined into its caller instead, the caller's own frame is the
     # caller's affair, as it is under any conservative collector.
     @[NoInline]
