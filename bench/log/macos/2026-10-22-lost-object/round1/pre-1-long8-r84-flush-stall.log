@@ -1,0 +1,434 @@
+gcry: WARNING: this kernel's page size is 16384 and gcry is compiled for 4096. Page-aligned decisions — dormancy's madvise, the pagemap low-water probe, the fiber guard offset — are computed on the wrong unit here
+Process-GC STW + concurrent mutation property test
+  seed=4 iterations=1000 workers=[8]
+  stop_the_world=true
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=8 iterations=1000 seed=4
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 4 listed, 4 bounded, 3 staged. collection 0
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 5 listed, 5 bounded, 4 staged. collection 1
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 6 listed, 6 bounded, 5 staged. collection 2
+gcry: STOP-THE-WORLD STALLED 10039 ms in phase=flush — every mutator is frozen and the collector is not
+gcry: it is waiting on something a suspended thread holds; reported once per stop
+STALLED: still running after 300 s
+--- stall capture: pid 92523 (macOS sample, 2 s)
+Analysis of sampling stw_mt_property_test_hdr (pid 92523) every 1 millisecond
+Process:         stw_mt_property_test_hdr [92523]
+Path:            /Users/USER/*/stw_mt_property_test_hdr
+Load Address:    0x1001a0000
+Identifier:      stw_mt_property_test_hdr
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [92519]
+Target Type:     live task
+
+Date/Time:       2026-10-22 08:15:03.622 +0000
+Launch Time:     2026-10-22 08:09:32.848 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         7137K
+Physical footprint (peak):  7377K
+Idle exit:                  untracked
+----
+
+Call graph:
+    1014 Thread_430726   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 1014 start  (in dyld) + 6992  [0x1816904e4]
+    +   1014 main  (in stw_mt_property_test_hdr) + 32  [0x1001aa70c]  main.cr:9
+    +     1014 *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32  (in stw_mt_property_test_hdr) + 64  [0x10033390c]  main.cr:115
+    +       1014 __crystal_main  (in stw_mt_property_test_hdr) + 4320  [0x1001a18e0]  stw_mt_property_test.cr:388
+    +         1014 *StwMtPropertyTest#run_one<Int32, Int32, Int64>:Bool  (in stw_mt_property_test_hdr) + 1468  [0x10037cd08]  stw_mt_property_test.cr:304
+    +           1014 *GC::collect:Nil  (in stw_mt_property_test_hdr) + 60  [0x1001cb8e8]  gc_override.cr:1529
+    +             1014 *Gcry::Heap#collect:release_warm<Bool>:Nil  (in stw_mt_property_test_hdr) + 472  [0x10023a6e4]  collect.cr:1799
+    +               1014 *Gcry::Heap#run_collection<Bool, Bool, Nil, Bool, Bool>:Nil  (in stw_mt_property_test_hdr) + 104  [0x1001ea6a8]  collect.cr:2401
+    +                 1014 *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool>:Nil  (in stw_mt_property_test_hdr) + 956  [0x1001eb23c]  collect.cr:2474
+    +                   1014 *Gcry::Heap#scrub_freelists:Nil  (in stw_mt_property_test_hdr) + 104  [0x1001f6bf8]  tlab.cr:663
+    +                     460 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 152  [0x1001f6cc0]  tlab.cr:675
+    +                     ! 432 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 32  [0x1001f21b4]  collect.cr:2056
+    +                     ! : 123 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 216  [0x1001f2330]  collect.cr:2019
+    +                     ! : | 111 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 232  [0x1001e7664]  heap.cr:2845
+    +                     ! : | + 29 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 1060  [0x1001e7b00]  heap.cr:2903
+    +                     ! : | + ! 19 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 136,48,...  [0x1002c70ac,0x1002c7054,...]  block.cr:0
+    +                     ! : | + ! 4 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 56  [0x1002c705c]  block.cr:504
+    +                     ! : | + ! : 2 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 16  [0x1002c701c]  block.cr:468
+    +                     ! : | + ! : 1 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 8  [0x1002c7014]  block.cr:467
+    +                     ! : | + ! : 1 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 16  [0x1002c701c]  block.cr:468
+    +                     ! : | + ! :   1 *Pointer(UInt8)@Pointer(T)#+<UInt32>:Pointer(UInt8)  (in stw_mt_property_test_hdr) + 20  [0x1001bfd6c]  pointer.cr:96
+    +                     ! : | + ! 3 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 12,20  [0x1002c7030,0x1002c7038]  block.cr:490
+    +                     ! : | + ! 3 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 112,128,...  [0x1002c7094,0x1002c70a4,...]  block.cr:507
+    +                     ! : | + 25 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 256,60,...  [0x1001e77dc,0x1001e7718,...]  heap.cr:2852
+    +                     ! : | + 16 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 972,1048,...  [0x1001e7aa8,0x1001e7af4,...]  heap.cr:0
+    +                     ! : | + 15 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 960,504,...  [0x1001e7a9c,0x1001e78d4,...]  heap.cr:2901
+    +                     ! : | + 13 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 1016,984,...  [0x1001e7ad4,0x1001e7ab4,...]  heap.cr:2903
+    +                     ! : | + 4 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 20,0  [0x1001e76f0,0x1001e76dc]  heap.cr:2851
+    +                     ! : | + 3 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 780  [0x1001e79e8]  heap.cr:2903
+    +                     ! : | + ! 3 *Pointer(Gcry::ChunkHeader)@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr) + 16  [0x10023fa08]  pointer.cr:82
+    +                     ! : | + 2 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 116  [0x1001e7750]  heap.cr:2864
+    +                     ! : | + 1 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 124  [0x1001e7758]  heap.cr:2864
+    +                     ! : | + ! 1 *Pointer(Pointer(Pointer(Gcry::ChunkHeader)))@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr) + 4  [0x10023d1b8]  pointer.cr:82
+    +                     ! : | + 1 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 348  [0x1001e7838]  heap.cr:2890
+    +                     ! : | + 1 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 500  [0x1001e78d0]  heap.cr:2900
+    +                     ! : | + 1 *Pointer(Pointer(Gcry::ChunkHeader))@Pointer(T)#+<Int32>:Pointer(Pointer(Gcry::ChunkHeader))  (in stw_mt_property_test_hdr) + 32  [0x10023fde4]  pointer.cr:96
+    +                     ! : | 3 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 48,224  [0x1001e75ac,0x1001e765c]  heap.cr:0
+    +                     ! : | 3 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 60  [0x1001e75b8]  heap.cr:2837
+    +                     ! : | 3 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 260,252  [0x1001e7680,0x1001e7678]  spin_lock.cr:31
+    +                     ! : | 2 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 36  [0x1001e75a0]  heap.cr:2833
+    +                     ! : | 1 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 244  [0x1001e7670]  heap.cr:2845
+    +                     ! : 65 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1216  [0x1001f2718]  collect.cr:2045
+    +                     ! : | 20 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 36,84  [0x1002b90ac,0x1002b90dc]  indexable.cr:1002
+    +                     ! : | 13 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240  [0x1002b9178]  indexable.cr:57
+    +                     ! : | + 5 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b91a0]  static_array.cr:124
+    +                     ! : | + ! 2 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 12  [0x1002423c4]  pointer.cr:133
+    +                     ! : | + ! : 2 *Pointer(UInt64)@Pointer(T)#+<Int32>:Pointer(UInt64)  (in stw_mt_property_test_hdr) + 28  [0x10024239c]  pointer.cr:96
+    +                     ! : | + ! 2 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 12,16  [0x1002423c4,0x1002423c8]  pointer.cr:133
+    +                     ! : | + ! 1 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 0  [0x1002423b8]  pointer.cr:132
+    +                     ! : | + 4 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28,20  [0x1002b91a0,0x1002b9198]  static_array.cr:124
+    +                     ! : | + 2 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 0,12  [0x1002b9184,0x1002b9190]  static_array.cr:123
+    +                     ! : | + 2 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20  [0x1002b9198]  static_array.cr:124
+    +                     ! : | +   2 *StaticArray(UInt64, 40)@StaticArray(T, N)#to_unsafe:Pointer(UInt64)  (in stw_mt_property_test_hdr) + 0,8  [0x1002b8efc,0x1002b8f04]  static_array.cr:379
+    +                     ! : | 9 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 124,136,...  [0x1002b9104,0x1002b9110,...]  indexable.cr:1003
+    +                     ! : | 8 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 208,160  [0x1002b9158,0x1002b9128]  indexable.cr:0
+    +                     ! : | 6 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 232  [0x1002b9170]  indexable.cr:54
+    +                     ! : | 4 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240,236  [0x1002b9178,0x1002b9174]  indexable.cr:57
+    +                     ! : | 3 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 176  [0x1002b9138]  indexable.cr:1003
+    +                     ! : | + 3 *StaticArray(UInt64, 40)@StaticArray(T, N)#size:Int32  (in stw_mt_property_test_hdr) + 12,4  [0x1002b9050,0x1002b9048]  static_array.cr:138
+    +                     ! : | 1 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20  [0x1002b909c]  indexable.cr:88
+    +                     ! : | 1 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b90a4]  indexable.cr:89
+    +                     ! : 44 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1004  [0x1001f2644]  collect.cr:2035
+    +                     ! : | 14 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240  [0x1002b9178]  indexable.cr:57
+    +                     ! : | + 6 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b91a0]  static_array.cr:124
+    +                     ! : | + ! 3 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 4,0  [0x1002423bc,0x1002423b8]  pointer.cr:132
+    +                     ! : | + ! 3 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 16,8  [0x1002423c8,0x1002423c0]  pointer.cr:133
+    +                     ! : | + 3 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 12  [0x1002b9190]  static_array.cr:123
+    +                     ! : | + 3 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b91a0]  static_array.cr:124
+    +                     ! : | + 2 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20  [0x1002b9198]  static_array.cr:124
+    +                     ! : | +   2 *StaticArray(UInt64, 40)@StaticArray(T, N)#to_unsafe:Pointer(UInt64)  (in stw_mt_property_test_hdr) + 8  [0x1002b8f04]  static_array.cr:379
+    +                     ! : | 8 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 208,160  [0x1002b9158,0x1002b9128]  indexable.cr:0
+    +                     ! : | 8 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 136,124,...  [0x1002b9110,0x1002b9104,...]  indexable.cr:1003
+    +                     ! : | 5 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 36,84  [0x1002b90ac,0x1002b90dc]  indexable.cr:1002
+    +                     ! : | 5 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240  [0x1002b9178]  indexable.cr:57
+    +                     ! : | 2 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 176  [0x1002b9138]  indexable.cr:1003
+    +                     ! : | + 2 *StaticArray(UInt64, 40)@StaticArray(T, N)#size:Int32  (in stw_mt_property_test_hdr) + 4,12  [0x1002b9048,0x1002b9050]  static_array.cr:138
+    +                     ! : | 1 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 232  [0x1002b9170]  indexable.cr:54
+    +                     ! : | 1 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b90a4]  indexable.cr:89
+    +                     ! : 36 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1228  [0x1001f2724]  collect.cr:2045
+    +                     ! : | 24 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 60  [0x1001e7fe8]  chunk_layout.cr:112
+    +                     ! : | + 14 *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr) + 84,164,...  [0x1001d0154,0x1001d01a4,...]  int.cr:0
+    +                     ! : | + 6 *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr) + 88  [0x1001d0158]  int.cr:278
+    +                     ! : | + 3 *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr) + 16,0  [0x1001d0110,0x1001d0100]  int.cr:272
+    +                     ! : | + 1 *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr) + 68  [0x1001d0144]  int.cr:275
+    +                     ! : | 8 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 48  [0x1001e7fdc]  chunk_layout.cr:0
+    +                     ! : | 2 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 0  [0x1001e7fac]  chunk_layout.cr:111
+    +                     ! : | 2 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 60  [0x1001e7fe8]  chunk_layout.cr:112
+    +                     ! : 24 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1264,452,...  [0x1001f2748,0x1001f241c,...]  collect.cr:0
+    +                     ! : 21 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 924,916,...  [0x1001f25f4,0x1001f25ec,...]  collect.cr:2033
+    +                     ! : 18 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 464,292,...  [0x1001f2428,0x1001f237c,...]  collect.cr:2020
+    +                     ! : 14 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 440,136,...  [0x1001f2410,0x1001f22e0,...]  collect.cr:2017
+    +                     ! : 13 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1328,1524,...  [0x1001f2788,0x1001f284c,...]  collect.cr:2046
+    +                     ! : 11 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1152,1024,...  [0x1001f26d8,0x1001f2658,...]  collect.cr:2042
+    +                     ! : 11 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1208,1196  [0x1001f2710,0x1001f2704]  collect.cr:2044
+    +                     ! : 10 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 628,652,...  [0x1001f24cc,0x1001f24e4,...]  collect.cr:2028
+    +                     ! : 9 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1244,1276  [0x1001f2734,0x1001f2754]  collect.cr:2045
+    +                     ! : 8 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 24,16  [0x1001f2270,0x1001f2268]  collect.cr:2014
+    +                     ! : 6 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1016  [0x1001f2650]  collect.cr:2041
+    +                     ! : | 4 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 0,8  [0x1002c700c,0x1002c7014]  block.cr:467
+    +                     ! : | 2 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 16  [0x1002c701c]  block.cr:468
+    +                     ! : 5 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1000  [0x1001f2640]  collect.cr:2035
+    +                     ! : 4 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1400,1424,...  [0x1001f27d0,0x1001f27e8,...]  collect.cr:2048
+    +                     ! : 3 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 212  [0x1001f232c]  collect.cr:2019
+    +                     ! : 3 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 532  [0x1001f246c]  collect.cr:2022
+    +                     ! : | 3 *Gcry::ChunkHeader::large?<Pointer(Gcry::ChunkHeader)>:Bool  (in stw_mt_property_test_hdr) + 20  [0x1002c70f8]  block.cr:510
+    +                     ! : 2 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 32  [0x1001f2278]  collect.cr:2015
+    +                     ! : | 2 *Pointer(Void)@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr) + 0,16  [0x100240b88,0x100240b98]  pointer.cr:82
+    +                     ! : 2 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 528  [0x1001f2468]  collect.cr:2022
+    +                     ! 18 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 80,184,...  [0x1001f21e4,0x1001f224c,...]  collect.cr:2057
+    +                     ! 4 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 24,16  [0x1001f21ac,0x1001f21a4]  collect.cr:2055
+    +                     ! 4 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1456,1460  [0x1001f2808,0x1001f280c]  collect.cr:2048
+    +                     ! 2 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 44,64  [0x1001f21c0,0x1001f21d4]  collect.cr:2056
+    +                     455 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 388  [0x1001f6dac]  tlab.cr:682
+    +                     ! 434 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 32  [0x1001f21b4]  collect.cr:2056
+    +                     ! : 160 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 216  [0x1001f2330]  collect.cr:2019
+    +                     ! : | 150 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 232  [0x1001e7664]  heap.cr:2845
+    +                     ! : | + 35 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 260,972,...  [0x1001e77e0,0x1001e7aa8,...]  heap.cr:0
+    +                     ! : | + 35 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 1060  [0x1001e7b00]  heap.cr:2903
+    +                     ! : | + ! 18 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 48,136,...  [0x1002c7054,0x1002c70ac,...]  block.cr:0
+    +                     ! : | + ! 5 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 128,180  [0x1002c70a4,0x1002c70d8]  block.cr:507
+    +                     ! : | + ! 4 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 56  [0x1002c705c]  block.cr:504
+    +                     ! : | + ! : 2 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 16  [0x1002c701c]  block.cr:468
+    +                     ! : | + ! : 1 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 8  [0x1002c7014]  block.cr:467
+    +                     ! : | + ! : 1 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 16  [0x1002c701c]  block.cr:468
+    +                     ! : | + ! :   1 *Pointer(UInt8)@Pointer(T)#+<UInt32>:Pointer(UInt8)  (in stw_mt_property_test_hdr) + 20  [0x1001bfd6c]  pointer.cr:96
+    +                     ! : | + ! 3 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 20  [0x1002c7038]  block.cr:490
+    +                     ! : | + ! 3 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 28  [0x1002c7040]  block.cr:501
+    +                     ! : | + ! : 3 *Gcry::ChunkHeader::large?<Pointer(Gcry::ChunkHeader)>:Bool  (in stw_mt_property_test_hdr) + 20,8  [0x1002c70f8,0x1002c70ec]  block.cr:510
+    +                     ! : | + ! 2 *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr) + 80  [0x1002c7074]  block.cr:501
+    +                     ! : | + 28 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 248,256,...  [0x1001e77d4,0x1001e77dc,...]  heap.cr:2852
+    +                     ! : | + 13 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 520,940,...  [0x1001e78e4,0x1001e7a88,...]  heap.cr:2901
+    +                     ! : | + 10 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 1104  [0x1001e7b2c]  heap.cr:2910
+    +                     ! : | + ! 5 *Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 256  [0x1001e7d54]  heap.cr:0
+    +                     ! : | + ! 3 *Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 152  [0x1001e7cec]  heap.cr:2917
+    +                     ! : | + ! : 2 *Int32@Int#//<Int32>:Int32  (in stw_mt_property_test_hdr) + 32  [0x1001c1454]  int.cr:112
+    +                     ! : | + ! : | 1 *Int32@Int#check_div_argument<Int32>:Nil  (in stw_mt_property_test_hdr) + 172  [0x1001c0e6c]  int.cr:0
+    +                     ! : | + ! : | 1 *Int32@Int#check_div_argument<Int32>:Nil  (in stw_mt_property_test_hdr) + 160  [0x1001c0e60]  int.cr:151
+    +                     ! : | + ! : 1 *Int32@Int#//<Int32>:Int32  (in stw_mt_property_test_hdr) + 56  [0x1001c146c]  int.cr:115
+    +                     ! : | + ! 1 *Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 308  [0x1001e7d88]  heap.cr:2923
+    +                     ! : | + ! 1 *Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 408  [0x1001e7dec]  heap.cr:2929
+    +                     ! : | + 8 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 984,788,...  [0x1001e7ab4,0x1001e79f0,...]  heap.cr:2903
+    +                     ! : | + 7 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 764  [0x1001e79d8]  heap.cr:2902
+    +                     ! : | + ! 7 *Pointer(Pointer(Gcry::ChunkHeader))@Pointer(T)#+<Int32>:Pointer(Pointer(Gcry::ChunkHeader))  (in stw_mt_property_test_hdr) + 28  [0x10023fde0]  pointer.cr:96
+    +                     ! : | + 5 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 780  [0x1001e79e8]  heap.cr:2903
+    +                     ! : | + ! 5 *Pointer(Gcry::ChunkHeader)@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr) + 16,0  [0x10023fa08,0x10023f9f8]  pointer.cr:82
+    +                     ! : | + 4 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 124  [0x1001e7758]  heap.cr:2864
+    +                     ! : | + ! 4 *Pointer(Pointer(Pointer(Gcry::ChunkHeader)))@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr) + 0,4  [0x10023d1b4,0x10023d1b8]  pointer.cr:82
+    +                     ! : | + 4 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 336,348  [0x1001e782c,0x1001e7838]  heap.cr:2890
+    +                     ! : | + 1 *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 116  [0x1001e7750]  heap.cr:2864
+    +                     ! : | 4 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 224,48  [0x1001e765c,0x1001e75ac]  heap.cr:0
+    +                     ! : | 2 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 60  [0x1001e75b8]  heap.cr:2837
+    +                     ! : | 2 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 228,244  [0x1001e7660,0x1001e7670]  heap.cr:2845
+    +                     ! : | 2 *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr) + 260  [0x1001e7680]  spin_lock.cr:31
+    +                     ! : 57 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1216  [0x1001f2718]  collect.cr:2045
+    +                     ! : | 18 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240  [0x1002b9178]  indexable.cr:57
+    +                     ! : | + 5 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20  [0x1002b9198]  static_array.cr:124
+    +                     ! : | + ! 5 *StaticArray(UInt64, 40)@StaticArray(T, N)#to_unsafe:Pointer(UInt64)  (in stw_mt_property_test_hdr) + 8,0  [0x1002b8f04,0x1002b8efc]  static_array.cr:379
+    +                     ! : | + 4 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 12  [0x1002b9190]  static_array.cr:123
+    +                     ! : | + 4 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b91a0]  static_array.cr:124
+    +                     ! : | + ! 2 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 16  [0x1002423c8]  pointer.cr:133
+    +                     ! : | + ! 1 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 0  [0x1002423b8]  pointer.cr:132
+    +                     ! : | + ! 1 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 12  [0x1002423c4]  pointer.cr:133
+    +                     ! : | + !   1 *Pointer(UInt64)@Pointer(T)#+<Int32>:Pointer(UInt64)  (in stw_mt_property_test_hdr) + 28  [0x10024239c]  pointer.cr:96
+    +                     ! : | + 4 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b91a0]  static_array.cr:124
+    +                     ! : | + 1 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20  [0x1002423cc]  pointer.cr:133
+    +                     ! : | 11 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 84,36  [0x1002b90dc,0x1002b90ac]  indexable.cr:1002
+    +                     ! : | 8 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 208,160  [0x1002b9158,0x1002b9128]  indexable.cr:0
+    +                     ! : | 7 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 176  [0x1002b9138]  indexable.cr:1003
+    +                     ! : | + 7 *StaticArray(UInt64, 40)@StaticArray(T, N)#size:Int32  (in stw_mt_property_test_hdr) + 12,4  [0x1002b9050,0x1002b9048]  static_array.cr:138
+    +                     ! : | 4 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 168,136,...  [0x1002b9130,0x1002b9110,...]  indexable.cr:1003
+    +                     ! : | 4 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240  [0x1002b9178]  indexable.cr:57
+    +                     ! : | 2 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 228,232  [0x1002b916c,0x1002b9170]  indexable.cr:54
+    +                     ! : | 2 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b90a4]  indexable.cr:89
+    +                     ! : | 1 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20  [0x1002b909c]  indexable.cr:88
+    +                     ! : 47 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1004  [0x1001f2644]  collect.cr:2035
+    +                     ! : | 18 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240  [0x1002b9178]  indexable.cr:57
+    +                     ! : | + 7 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 28  [0x1002b91a0]  static_array.cr:124
+    +                     ! : | + ! 4 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 8,16  [0x1002423c0,0x1002423c8]  pointer.cr:133
+    +                     ! : | + ! 2 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 12  [0x1002423c4]  pointer.cr:133
+    +                     ! : | + ! : 2 *Pointer(UInt64)@Pointer(T)#+<Int32>:Pointer(UInt64)  (in stw_mt_property_test_hdr) + 28  [0x10024239c]  pointer.cr:96
+    +                     ! : | + ! 1 *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 4  [0x1002423bc]  pointer.cr:132
+    +                     ! : | + 4 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 12  [0x1002b9190]  static_array.cr:123
+    +                     ! : | + 4 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20,28  [0x1002b9198,0x1002b91a0]  static_array.cr:124
+    +                     ! : | + 3 *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr) + 20  [0x1002b9198]  static_array.cr:124
+    +                     ! : | +   3 *StaticArray(UInt64, 40)@StaticArray(T, N)#to_unsafe:Pointer(UInt64)  (in stw_mt_property_test_hdr) + 8  [0x1002b8f04]  static_array.cr:379
+    +                     ! : | 11 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 208,160  [0x1002b9158,0x1002b9128]  indexable.cr:0
+    +                     ! : | 6 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 84,36  [0x1002b90dc,0x1002b90ac]  indexable.cr:1002
+    +                     ! : | 6 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 136,124,...  [0x1002b9110,0x1002b9104,...]  indexable.cr:1003
+    +                     ! : | 2 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 232  [0x1002b9170]  indexable.cr:54
+    +                     ! : | 2 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 240  [0x1002b9178]  indexable.cr:57
+    +                     ! : | 2 *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 0,4  [0x1002b9088,0x1002b908c]  indexable.cr:88
+    +                     ! : 24 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 92,1264,...  [0x1001f22b4,0x1001f2748,...]  collect.cr:0
+    +                     ! : 23 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1228  [0x1001f2724]  collect.cr:2045
+    +                     ! : | 11 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 60  [0x1001e7fe8]  chunk_layout.cr:112
+    +                     ! : | + 8 *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr) + 164,148  [0x1001d01a4,0x1001d0194]  int.cr:0
+    +                     ! : | + 2 *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr) + 88  [0x1001d0158]  int.cr:278
+    +                     ! : | + 1 *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr) + 68  [0x1001d0144]  int.cr:275
+    +                     ! : | 7 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 48  [0x1001e7fdc]  chunk_layout.cr:0
+    +                     ! : | 3 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 28,0  [0x1001e7fc8,0x1001e7fac]  chunk_layout.cr:111
+    +                     ! : | 2 *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr) + 60  [0x1001e7fe8]  chunk_layout.cr:112
+    +                     ! : 19 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 448,440,...  [0x1001f2418,0x1001f2410,...]  collect.cr:2017
+    +                     ! : 17 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 464,292,...  [0x1001f2428,0x1001f237c,...]  collect.cr:2020
+    +                     ! : 13 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1152,1024,...  [0x1001f26d8,0x1001f2658,...]  collect.cr:2042
+    +                     ! : 11 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 628,592,...  [0x1001f24cc,0x1001f24a8,...]  collect.cr:2028
+    +                     ! : 11 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 996,924,...  [0x1001f263c,0x1001f25f4,...]  collect.cr:2033
+    +                     ! : 10 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1328,1488,...  [0x1001f2788,0x1001f2828,...]  collect.cr:2046
+    +                     ! : 6 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1208,1196  [0x1001f2710,0x1001f2704]  collect.cr:2044
+    +                     ! : 6 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1276,1228,...  [0x1001f2754,0x1001f2724,...]  collect.cr:2045
+    +                     ! : 5 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 24  [0x1001f2270]  collect.cr:2014
+    +                     ! : 5 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1016  [0x1001f2650]  collect.cr:2041
+    +                     ! : | 4 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 8  [0x1002c7014]  block.cr:467
+    +                     ! : | 1 *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 16  [0x1002c701c]  block.cr:468
+    +                     ! : 4 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 532  [0x1001f246c]  collect.cr:2022
+    +                     ! : | 4 *Gcry::ChunkHeader::large?<Pointer(Gcry::ChunkHeader)>:Bool  (in stw_mt_property_test_hdr) + 20  [0x1002c70f8]  block.cr:510
+    +                     ! : 4 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 524,528  [0x1001f2464,0x1001f2468]  collect.cr:2022
+    +                     ! : 3 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 32  [0x1001f2278]  collect.cr:2015
+    +                     ! : 3 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 216,228  [0x1001f2330,0x1001f233c]  collect.cr:2019
+    +                     ! : 3 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1000,1008  [0x1001f2640,0x1001f2648]  collect.cr:2035
+    +                     ! : 2 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 32  [0x1001f2278]  collect.cr:2015
+    +                     ! : | 2 *Pointer(Void)@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr) + 16  [0x100240b98]  pointer.cr:82
+    +                     ! : 1 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1400  [0x1001f27d0]  collect.cr:2048
+    +                     ! 11 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 184,80,...  [0x1001f224c,0x1001f21e4,...]  collect.cr:2057
+    +                     ! 4 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 32,64  [0x1001f21b4,0x1001f21d4]  collect.cr:2056
+    +                     ! 3 *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr) + 24  [0x1001f21ac]  collect.cr:2055
+    +                     ! 3 *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr) + 1456  [0x1001f2808]  collect.cr:2048
+    +                     25 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 496,376,...  [0x1001f6e18,0x1001f6da0,...]  tlab.cr:0
+    +                     21 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 248,212,...  [0x1001f6d20,0x1001f6cfc,...]  tlab.cr:675
+    +                     19 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 504,380,...  [0x1001f6e20,0x1001f6da4,...]  tlab.cr:682
+    +                     13 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 264  [0x1001f6d30]  tlab.cr:676
+    +                     ! 9 *Gcry::BlockHeader::from_user<Pointer(Void)>:Pointer(Gcry::BlockHeader)  (in stw_mt_property_test_hdr) + 16  [0x1002433a8]  block.cr:93
+    +                     ! : 5 *Pointer(UInt8)@Pointer(T)#-<Int32>:Pointer(UInt8)  (in stw_mt_property_test_hdr) + 28  [0x1001bfd28]  pointer.cr:114
+    +                     ! : | 3 *Int64#-:Int64  (in stw_mt_property_test_hdr) + 44  [0x100243acc]  int.cr:1519
+    +                     ! : | 2 *Int64#-:Int64  (in stw_mt_property_test_hdr) + 20  [0x100243ab4]  int.cr:1518
+    +                     ! : 4 *Pointer(UInt8)@Pointer(T)#-<Int32>:Pointer(UInt8)  (in stw_mt_property_test_hdr) + 12,0  [0x1001bfd18,0x1001bfd0c]  pointer.cr:110
+    +                     ! 3 *Gcry::BlockHeader::from_user<Pointer(Void)>:Pointer(Gcry::BlockHeader)  (in stw_mt_property_test_hdr) + 16  [0x1002433a8]  block.cr:93
+    +                     ! 1 *Pointer(UInt8)@Pointer(T)#-<Int32>:Pointer(UInt8)  (in stw_mt_property_test_hdr) + 48  [0x1001bfd3c]  pointer.cr:114
+    +                     6 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 132  [0x1001f6cac]  tlab.cr:674
+    +                     6 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 276  [0x1001f6d3c]  tlab.cr:677
+    +                     ! 6 *Gcry::BlockHeader::free?<Pointer(Gcry::BlockHeader)>:Bool  (in stw_mt_property_test_hdr) + 16,0  [0x100243718,0x100243708]  block.cr:121
+    +                     5 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 300,268,...  [0x1001f6d54,0x1001f6d34,...]  tlab.cr:677
+    +                     4 *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr) + 340  [0x1001f6d7c]  tlab.cr:682
+    +                       4 *Pointer(Void)@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr) + 16  [0x100240b98]  pointer.cr:82
+    1014 Thread_430732: SYSMON
+    + 1014 thread_start  (in libsystem_pthread.dylib) + 8  [0x181a56c1c]
+    +   1014 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x181a5bc58]
+    +     1014 ~procProc(Pointer(Void), Pointer(Void))@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/pthread.cr:22  (in stw_mt_property_test_hdr) + 12  [0x1001a346c]  pthread.cr:22
+    +       1014 *Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 56  [0x1002e8d1c]  pthread.cr:47
+    +         1014 *Thread#start:(Exception+ | Nil)  (in stw_mt_property_test_hdr) + 172  [0x1002bd350]  thread.cr:249
+    +           1014 ~procProc(Thread, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/monitor.cr:19  (in stw_mt_property_test_hdr) + 16  [0x1001aa9e4]  monitor.cr:19
+    +             1014 *Fiber::ExecutionContext::Monitor#run_loop:NoReturn  (in stw_mt_property_test_hdr) + 52  [0x10036c624]  monitor.cr:55
+    +               1014 *Thread::sleep<Time::Span>:Nil  (in stw_mt_property_test_hdr) + 48  [0x1002bdcbc]  thread.cr:197
+    +                 1014 *Crystal::System::Thread::sleep<Time::Span>:Nil  (in stw_mt_property_test_hdr) + 72  [0x1002e8e0c]  pthread.cr:111
+    +                   1014 nanosleep  (in libsystem_c.dylib) + 220  [0x1818f6cc0]
+    +                     1014 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x181a1b308]
+    1014 Thread_430734: stw-mt-8-0
+    + 1014 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+    +   1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+    +     1014 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+    +       1014 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+    +         1014 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 160  [0x10035a9ec]  scheduler.cr:282
+    +           1014 *Thread::yield:Nil  (in stw_mt_property_test_hdr) + 12  [0x1002bd938]  thread.cr:230
+    +             1014 *Crystal::System::Thread::yield_current:Nil  (in stw_mt_property_test_hdr) + 16  [0x1002e8d88]  pthread.cr:56
+    +               1014 cthread_yield  (in libsystem_pthread.dylib) + 36  [0x181a58c28]
+    +                 1014 swtch_pri  (in libsystem_kernel.dylib) + 8  [0x181a17c88]
+    1014 Thread_430735: stw-mt-8-1
+    + 1014 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+    +   1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+    +     1014 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+    +       1014 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+    +         1014 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 1272  [0x10035ae44]  parallel.cr:305
+    +           1014 *Thread::ConditionVariable#wait<Thread::Mutex>:Nil  (in stw_mt_property_test_hdr) + 56  [0x100335c20]  pthread_condition_variable.cr:32
+    +             1014 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x181a5c128]
+    +               1014 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x181a1b50c]
+    1014 Thread_430736
+    + 1014 thread_start  (in libsystem_pthread.dylib) + 8  [0x181a56c1c]
+    +   1014 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x181a5bc58]
+    +     1014 ~procProc(Pointer(Void), Pointer(Void))@src/gcry/stw_watchdog.cr:186  (in stw_mt_property_test_hdr) + 12  [0x1001a33d4]  stw_watchdog.cr:186
+    +       1014 gcry_stw_watchdog_main  (in stw_mt_property_test_hdr) + 12  [0x1001a33e8]  stw_watchdog.cr:35
+    +         1014 *Gcry::StwWatchdog::watch_loop:NoReturn  (in stw_mt_property_test_hdr) + 52  [0x1002ebdf8]  stw_watchdog.cr:227
+    +           1014 nanosleep  (in libsystem_c.dylib) + 220  [0x1818f6cc0]
+    +             1014 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x181a1b308]
+    1014 Thread_430737: gc-idle
+    + 1014 thread_start  (in libsystem_pthread.dylib) + 8  [0x181a56c1c]
+    +   1014 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x181a5bc58]
+    +     1014 ~procProc(Pointer(Void), Pointer(Void))@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/pthread.cr:22  (in stw_mt_property_test_hdr) + 12  [0x1001a346c]  pthread.cr:22
+    +       1014 *Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void)  (in stw_mt_property_test_hdr) + 56  [0x1002e8d1c]  pthread.cr:47
+    +         1014 *Thread#start:(Exception+ | Nil)  (in stw_mt_property_test_hdr) + 152  [0x1002bd33c]  thread.cr:249
+    +           1014 ~procProc(Thread, Nil)@src/gcry/idle_release.cr:135  (in stw_mt_property_test_hdr) + 12  [0x1001a4188]  idle_release.cr:135
+    +             1014 *Gcry::IdleRelease::loop_forever:NoReturn  (in stw_mt_property_test_hdr) + 452  [0x1002e8808]  idle_release.cr:194
+    +               1014 nanosleep  (in libsystem_c.dylib) + 220  [0x1818f6cc0]
+    +                 1014 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x181a1b308]
+    1014 Thread_430738: stw-mt-8-2
+    + 1014 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+    +   1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+    +     1014 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+    +       1014 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+    +         1014 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 812  [0x10035ac78]  scheduler.cr:221
+    +           1014 *Crystal::EventLoop::Polling+@Crystal::EventLoop::Polling#run<Pointer(Fiber::List), Bool>:Nil  (in stw_mt_property_test_hdr) + 292  [0x10035cb88]  kqueue.cr:49
+    +             1014 *Crystal::System::Kqueue#wait<Slice(LibC::Kevent), (Time::Span | Nil)>:Slice(LibC::Kevent)  (in stw_mt_property_test_hdr) + 276  [0x10035948c]  kqueue.cr:59
+    +               1014 kevent  (in libsystem_kernel.dylib) + 8  [0x181a1dfc4]
+    1014 Thread_430739: stw-mt-8-3
+    + 1014 ~proc3Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001abbec]  fiber.cr:103
+    +   1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+    +     1014 ~procProc(Nil)@bench/stw_mt_property_test.cr:255  (in stw_mt_property_test_hdr) + 52  [0x1001abba4]  stw_mt_property_test.cr:257
+    +       1014 *StwMtPropertyTest#worker_run<Int32, Int64, Channel(Pointer(Void)), Channel(Nil)>:(Array(String) | Nil)  (in stw_mt_property_test_hdr) + 232  [0x10037cff8]  stw_mt_property_test.cr:196
+    +         1014 *GC::malloc_atomic<Int32>:Pointer(Void)  (in stw_mt_property_test_hdr) + 16  [0x1001cafe8]  gc.cr:121
+    +           1014 *GC::malloc_atomic<UInt64>:Pointer(Void)  (in stw_mt_property_test_hdr) + 52  [0x1001cac68]  gc_override.cr:1499
+    +             1014 *Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)  (in stw_mt_property_test_hdr) + 140  [0x10023a228]  heap.cr:569
+    +               1014 *Gcry::Heap#allocate<UInt64, Bool, Bool>:Pointer(Void)  (in stw_mt_property_test_hdr) + 1288  [0x1001e95c0]  heap.cr:1131
+    +                 1014 *Gcry::Heap#tlab_alloc_small<UInt32, UInt32, Int32, Bool, UInt64>:Pointer(Void)  (in stw_mt_property_test_hdr) + 260  [0x10022babc]  tlab.cr:478
+    +                   1014 *Gcry::Heap#lock_tlab_slot<Int32>:Nil  (in stw_mt_property_test_hdr) + 44  [0x100235fb0]  tlab.cr:108
+    +                     1014 *Crystal::SpinLock#lock:Nil  (in stw_mt_property_test_hdr) + 72  [0x10023d3d4]  spin_lock.cr:11
+    +                       1014 *Atomic(Int32)@Atomic(T)#get<Atomic::Ordering>:Int32  (in stw_mt_property_test_hdr) + 56  [0x10023d7d8]  atomic.cr:332
+    +                         1014 *Atomic(Int32)@Atomic(T)#cast_from<Int32>:Int32  (in stw_mt_property_test_hdr) + 24  [0x10023d794]  atomic.cr:439
+    1014 Thread_430740: stw-mt-8-4
+    + 1014 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+    +   1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+    +     1014 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+    +       1014 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+    +         1014 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 1272  [0x10035ae44]  parallel.cr:305
+    +           1014 *Thread::ConditionVariable#wait<Thread::Mutex>:Nil  (in stw_mt_property_test_hdr) + 56  [0x100335c20]  pthread_condition_variable.cr:32
+    +             1014 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x181a5c128]
+    +               1014 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x181a1b50c]
+    1014 Thread_430741: stw-mt-8-5
+    + 1014 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+    +   1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+    +     1014 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+    +       1014 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+    +         1014 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 1272  [0x10035ae44]  parallel.cr:305
+    +           1014 *Thread::ConditionVariable#wait<Thread::Mutex>:Nil  (in stw_mt_property_test_hdr) + 56  [0x100335c20]  pthread_condition_variable.cr:32
+    +             1014 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x181a5c128]
+    +               1014 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x181a1b50c]
+    1014 Thread_430742: stw-mt-8-6
+    + 1014 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+    +   1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+    +     1014 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+    +       1014 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+    +         1014 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 1272  [0x10035ae44]  parallel.cr:305
+    +           1014 *Thread::ConditionVariable#wait<Thread::Mutex>:Nil  (in stw_mt_property_test_hdr) + 56  [0x100335c20]  pthread_condition_variable.cr:32
+    +             1014 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x181a5c128]
+    +               1014 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x181a1b50c]
+    1014 Thread_430743: stw-mt-8-7
+      1014 ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+        1014 *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+          1014 ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+            1014 *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+              1014 *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 1272  [0x10035ae44]  parallel.cr:305
+                1014 *Thread::ConditionVariable#wait<Thread::Mutex>:Nil  (in stw_mt_property_test_hdr) + 56  [0x100335c20]  pthread_condition_variable.cr:32
+                  1014 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x181a5c128]
+                    1014 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x181a1b50c]
+
+Total number in stack (recursive counted multiple, when >=5):
+        8       *Fiber#run:Nil  (in stw_mt_property_test_hdr) + 88  [0x1002e996c]  fiber.cr:168
+        7       *Fiber::ExecutionContext::Parallel::Scheduler#run_loop:Nil  (in stw_mt_property_test_hdr) + 140  [0x10035a84c]  scheduler.cr:159
+        7       ~proc2Proc(Fiber, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber.cr:103  (in stw_mt_property_test_hdr) + 12  [0x1001aa9cc]  fiber.cr:103
+        7       ~procProc(Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/parallel/scheduler.cr:44  (in stw_mt_property_test_hdr) + 16  [0x1001aa9b8]  scheduler.cr:44
+        5       *Fiber::ExecutionContext::Parallel::Scheduler#find_next_runnable:(Fiber | Nil)  (in stw_mt_property_test_hdr) + 1272  [0x10035ae44]  parallel.cr:305
+        5       *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr) + 0  [0x1002423b8]  pointer.cr:133
+        5       *Thread::ConditionVariable#wait<Thread::Mutex>:Nil  (in stw_mt_property_test_hdr) + 56  [0x100335c20]  pthread_condition_variable.cr:32
+        5       __psynch_cvwait  (in libsystem_kernel.dylib) + 0  [0x181a1b504]
+        5       _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x181a5c128]
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        5070
+        __semwait_signal  (in libsystem_kernel.dylib)        3042
+        *Atomic(Int32)@Atomic(T)#cast_from<Int32>:Int32  (in stw_mt_property_test_hdr)        1014
+        kevent  (in libsystem_kernel.dylib)        1014
+        swtch_pri  (in libsystem_kernel.dylib)        1014
+        *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in stw_mt_property_test_hdr)        296
+        *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr)        166
+        *StaticArray(UInt64, 40)@Indexable(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr)        138
+        *Gcry::Heap#scrub_one_freelist<Int32, Bool>:Nil  (in stw_mt_property_test_hdr)        76
+        *Gcry::ChunkHeader::contains?<Pointer(Gcry::ChunkHeader), UInt64>:Bool  (in stw_mt_property_test_hdr)        53
+        *Gcry::Heap#find_block<Pointer(Void)>:(Pointer(Gcry::BlockHeader) | Nil)  (in stw_mt_property_test_hdr)        42
+        *UInt64@Int#>><Int32>:UInt64  (in stw_mt_property_test_hdr)        35
+        *StaticArray(UInt64, 40)@StaticArray(T, N)#unsafe_fetch<Int32>:UInt64  (in stw_mt_property_test_hdr)        28
+        *Gcry::Heap::block_ordinal<UInt64, UInt64>:UInt64  (in stw_mt_property_test_hdr)        24
+        *Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr)        22
+        *Pointer(UInt64)@Pointer(T)#[]<Int32>:UInt64  (in stw_mt_property_test_hdr)        18
+        *Gcry::ChunkHeader::data_start<Pointer(Gcry::ChunkHeader)>:Pointer(Void)  (in stw_mt_property_test_hdr)        17
+        *StaticArray(UInt64, 40)@StaticArray(T, N)#size:Int32  (in stw_mt_property_test_hdr)        12
+        *StaticArray(UInt64, 40)@StaticArray(T, N)#to_unsafe:Pointer(UInt64)  (in stw_mt_property_test_hdr)        12
+        *Gcry::ChunkHeader::large?<Pointer(Gcry::ChunkHeader)>:Bool  (in stw_mt_property_test_hdr)        10
+        *Pointer(Gcry::ChunkHeader)@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr)        8
+        *Pointer(Pointer(Gcry::ChunkHeader))@Pointer(T)#+<Int32>:Pointer(Pointer(Gcry::ChunkHeader))  (in stw_mt_property_test_hdr)        8
+        *Pointer(Void)@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr)        8
+        *Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in stw_mt_property_test_hdr)        7
+        *Gcry::BlockHeader::free?<Pointer(Gcry::BlockHeader)>:Bool  (in stw_mt_property_test_hdr)        6
+        *Int64#-:Int64  (in stw_mt_property_test_hdr)        5
+        *Pointer(Pointer(Pointer(Gcry::ChunkHeader)))@Pointer(T)#null?:Bool  (in stw_mt_property_test_hdr)        5
+        *Pointer(UInt64)@Pointer(T)#+<Int32>:Pointer(UInt64)  (in stw_mt_property_test_hdr)        5
+        *Pointer(UInt8)@Pointer(T)#-<Int32>:Pointer(UInt8)  (in stw_mt_property_test_hdr)        5
+

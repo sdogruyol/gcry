@@ -1,0 +1,7 @@
+pre/4: rounds=110 runs=873
+  seed6: runs=110 rc={'0': 110} lost_runs=0 collects~44220 p50=6.28s max=15.42s
+  base: runs=109 rc={'0': 109} lost_runs=0 collects~43818 p50=6.25s max=15.40s
+  long4: runs=109 rc={'0': 109} lost_runs=0 collects~109109 p50=13.96s max=35.70s
+  long4x3: runs=327 rc={'0': 327} lost_runs=0 collects~327327 p50=18.25s max=45.00s
+  long8: runs=109 rc={'0': 107, '1': 1, '2': 1} lost_runs=1 collects~108108 p50=16.33s max=42.60s
+  births: runs=109 rc={'0': 109} lost_runs=0 collects~44690 p50=10.68s max=27.21s

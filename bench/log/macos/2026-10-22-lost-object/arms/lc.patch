@@ -1,0 +1,20 @@
+diff --git a/src/gcry/collect_stw.cr b/src/gcry/collect_stw.cr
+index 962472c7..ee86d630 100644
+--- a/src/gcry/collect_stw.cr
++++ b/src/gcry/collect_stw.cr
+@@ -818,7 +818,14 @@ module Gcry
+ 
+       current_thread = Thread.current
+       {% if (flag?(:darwin) || flag?(:win32)) %}
+-        {% if flag?(:win32) %} @world_stopped = false {% end %}
++        # Before the resume, as on Linux below and for the same reason:
++        # `chunk_containing` skips `@index_lock` while this flag is set, and a
++        # resumed thread that still sees it reads the index unlocked against a
++        # peer's insert or remove. Darwin cleared it after the resume until
++        # 2026-10-01, and `make stw-index-race` counted 90 such reads in 200
++        # collections on macos-latest. `GCRY_STW_LATE_CLEAR=1` restores that
++        # order, which is the gate's red arm here too.
++        @world_stopped = false unless @stw_late_clear
+         Platform.start_world_threads(current_thread)
+         unlock_fiber_list_after_stop
+         Platform.clear_thread_sps

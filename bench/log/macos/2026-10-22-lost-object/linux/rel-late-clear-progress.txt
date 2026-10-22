@@ -1,0 +1,84 @@
+run 1 rc=0 115s heap_collections=283 heap_collections=456 
+run 2 rc=0 6s heap_collections=280 heap_collections=463 
+run 3 rc=0 6s heap_collections=264 heap_collections=484 
+run 4 rc=0 6s heap_collections=263 heap_collections=458 
+run 5 rc=0 6s heap_collections=257 heap_collections=443 
+run 6 rc=0 6s heap_collections=250 heap_collections=448 
+run 7 rc=0 5s heap_collections=279 heap_collections=449 
+run 8 rc=0 5s heap_collections=264 heap_collections=447 
+run 9 rc=0 6s heap_collections=247 heap_collections=480 
+run 10 rc=0 6s heap_collections=279 heap_collections=481 
+run 11 rc=0 6s heap_collections=251 heap_collections=456 
+run 12 rc=0 6s heap_collections=261 heap_collections=471 
+run 13 rc=0 6s heap_collections=267 heap_collections=450 
+run 14 rc=1 2s 
+run 15 rc=1 4s heap_collections=270 heap_collections=264 
+  ERROR: after collect #118: root 9 DEAD (Pointer(Void)@0x75b04875bfb0) heap_ptr=true block={found: true, free: true, size: 80, flags: 1, first_word: 13907096144816631297, offset: 0} heap_collections_since_verify=3
+run 16 rc=0 6s heap_collections=272 heap_collections=455 
+run 17 rc=0 5s heap_collections=263 heap_collections=434 
+run 18 rc=0 5s heap_collections=277 heap_collections=426 
+run 19 rc=0 5s heap_collections=256 heap_collections=415 
+run 20 rc=0 5s heap_collections=275 heap_collections=443 
+run 21 rc=0 7s heap_collections=271 heap_collections=390 
+run 22 rc=0 5s heap_collections=261 heap_collections=430 
+run 23 rc=0 6s heap_collections=274 heap_collections=461 
+run 24 rc=0 6s heap_collections=263 heap_collections=433 
+run 25 rc=0 6s heap_collections=270 heap_collections=438 
+run 26 rc=0 5s heap_collections=253 heap_collections=418 
+run 27 rc=2 303s heap_collections=266 
+run 28 rc=0 18s heap_collections=274 heap_collections=434 
+run 29 rc=0 18s heap_collections=274 heap_collections=462 
+run 30 rc=0 16s heap_collections=239 heap_collections=469 
+run 31 rc=0 6s heap_collections=276 heap_collections=462 
+run 32 rc=2 389s heap_collections=262 
+run 33 rc=0 41s heap_collections=298 heap_collections=496 
+run 34 rc=0 138s heap_collections=250 heap_collections=512 
+run 35 rc=2 303s heap_collections=275 
+run 36 rc=0 5s heap_collections=250 heap_collections=442 
+run 37 rc=0 6s heap_collections=285 heap_collections=488 
+run 38 rc=0 6s heap_collections=264 heap_collections=429 
+run 39 rc=0 5s heap_collections=259 heap_collections=418 
+run 40 rc=0 6s heap_collections=271 heap_collections=473 
+run 41 rc=0 5s heap_collections=271 heap_collections=437 
+run 42 rc=0 5s heap_collections=269 heap_collections=425 
+run 43 rc=0 6s heap_collections=275 heap_collections=467 
+run 44 rc=0 6s heap_collections=259 heap_collections=453 
+run 45 rc=0 5s heap_collections=284 heap_collections=431 
+run 46 rc=0 5s heap_collections=253 heap_collections=434 
+run 47 rc=0 6s heap_collections=260 heap_collections=456 
+run 48 rc=0 6s heap_collections=269 heap_collections=487 
+run 49 rc=0 6s heap_collections=268 heap_collections=480 
+run 50 rc=0 7s heap_collections=261 heap_collections=455 
+run 51 rc=0 5s heap_collections=251 heap_collections=431 
+run 52 rc=0 5s heap_collections=263 heap_collections=396 
+run 53 rc=0 6s heap_collections=268 heap_collections=470 
+run 54 rc=0 5s heap_collections=264 heap_collections=415 
+run 55 rc=1 2s 
+run 56 rc=0 6s heap_collections=292 heap_collections=492 
+run 57 rc=0 5s heap_collections=269 heap_collections=450 
+run 58 rc=0 5s heap_collections=274 heap_collections=440 
+run 59 rc=2 303s heap_collections=274 
+run 60 rc=0 6s heap_collections=241 heap_collections=464 
+run 61 rc=0 6s heap_collections=268 heap_collections=431 
+run 62 rc=0 5s heap_collections=250 heap_collections=428 
+run 63 rc=0 5s heap_collections=277 heap_collections=433 
+run 64 rc=0 6s heap_collections=271 heap_collections=481 
+run 65 rc=0 6s heap_collections=256 heap_collections=475 
+run 66 rc=0 5s heap_collections=269 heap_collections=403 
+run 67 rc=0 6s heap_collections=282 heap_collections=494 
+run 68 rc=0 6s heap_collections=260 heap_collections=448 
+run 69 rc=0 5s heap_collections=267 heap_collections=420 
+run 70 rc=2 303s heap_collections=271 
+run 71 rc=0 5s heap_collections=284 heap_collections=445 
+run 72 rc=1 5s heap_collections=262 heap_collections=389 
+  ERROR: after collect #164: root 9 DEAD (Pointer(Void)@0x7404a855ffb0) heap_ptr=true block={found: true, free: true, size: 80, flags: 1, first_word: 13907096144816631297, offset: 0} heap_collections_since_verify=3
+run 73 rc=0 5s heap_collections=274 heap_collections=454 
+run 74 rc=0 5s heap_collections=271 heap_collections=453 
+run 75 rc=0 5s heap_collections=288 heap_collections=466 
+run 76 rc=0 5s heap_collections=276 heap_collections=434 
+run 77 rc=0 5s heap_collections=283 heap_collections=448 
+run 78 rc=0 5s heap_collections=268 heap_collections=425 
+run 79 rc=0 5s heap_collections=272 heap_collections=428 
+run 80 rc=0 5s heap_collections=275 heap_collections=447 
+run 81 rc=0 5s heap_collections=268 heap_collections=432 
+run 82 rc=0 6s heap_collections=286 heap_collections=428 

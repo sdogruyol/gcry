@@ -1,0 +1,28 @@
+Process-GC STW + concurrent mutation property test
+  seed=14 iterations=200 workers=[2, 4]
+  stop_the_world=true worker_collect=0
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=200 seed=14
+Unhandled exception: failed to refill TLAB size class 48 (Gcry::OutOfMemoryError)
+  from src/gcry/heap.cr:1470:9 in 'oom!'
+  from src/gcry/tlab.cr:571:11 in 'tlab_alloc_small'
+  from src/gcry/heap.cr:1732:26 in 'allocate:atomic:clear'
+  from src/gcry/heap.cr:666:13 in 'malloc_atomic'
+  from src/gcry/gc_override.cr:1479:9 in 'malloc_atomic'
+  from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/gc.cr:121:5 in 'malloc_atomic'
+  from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string/builder.cr:18:15 in 'initialize'
+  from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string/builder.cr:11:3 in 'new'
+  from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string/builder.cr:25:5 in 'interpolation'
+  from bench/stw_mt_property_test.cr:322:21 in 'run_one'
+  from bench/stw_mt_property_test.cr:405:3 in '__crystal_main'
+  from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'
+  from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/main.cr:115:7 in 'main'
+  from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/main.cr:9:3 in 'main'
+  from /usr/lib/x86_64-linux-gnu/libc.so.6 in '??'
+  from /usr/lib/x86_64-linux-gnu/libc.so.6 in '__libc_start_main'
+  from bin/h in '_start'
+  from ???
