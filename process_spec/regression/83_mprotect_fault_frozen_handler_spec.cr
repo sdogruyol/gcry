@@ -147,6 +147,15 @@ describe "Regression: no stop freezes the mprotect barrier's fault handler" do
       next unless ENV["GCRY_FROZEN_MPROTECT_CHILD"]? == "control"
       # Read when the handler is installed, at the first arm.
       Gcry::Platform.mprotect_block_suspend = false
+      # And the handler and the card reclamation as they were then. Since
+      # regression 85 a retired state outlives any handler inside, and a
+      # handler that resumes into a re-armed page retries the fault into
+      # the new cards, which would rescue this parked handler too: the code
+      # before has neither.
+      Gcry::Platform.mprotect_defer_free = false
+      Gcry::Platform.mprotect_retry_unclaimed = false
+      Gcry::Platform.mprotect_revalidate = false
+      Gcry::Platform.mprotect_claim_unprotects = false
       inside, dirty = mprotect83_window(Gcry.default_heap)
       inside.should be > 0
       # The page is writable under cards that call it protected and clean.

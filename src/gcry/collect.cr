@@ -3154,6 +3154,8 @@ module Gcry
               CrystalTrace.finish("collect:sweep", trace_sweep)
               collection_event(CollectionEvent::ReclaimEnd)
               @lazy_sweep_pending = false
+              # The re-arm runs with the world running, against fault
+              # handlers on other threads: see `disarm_mprotect_barrier`.
               if major
                 arm_page_barrier_after_major
               else
