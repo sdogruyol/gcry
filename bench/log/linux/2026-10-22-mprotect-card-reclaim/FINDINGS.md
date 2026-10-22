@@ -266,7 +266,9 @@ Default path: untouched except one atomic store in a forked child's reset
   here, at `shared.should be_false`. Unrelated to this branch: it fails on
   `origin/release-0.39.0` at `32ce703a` 4 of 40 runs (2 of 40 on this
   branch), and the barrier is not armed in it. Reported to the release
-  owner.
+  owner. Explained later the same day: the spec's batch hook had parked an
+  idle thread instead of the worker. The heap handed nothing out twice
+  (`../2026-10-22-r84-double-handout/FINDINGS.md`).
 
 ## CI probe
 
