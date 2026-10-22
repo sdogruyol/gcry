@@ -62,7 +62,7 @@ module Gcry
     # anywhere in its few dozen instructions when the cards and the
     # protection change under it. Until 2026-10-22 that went wrong four
     # ways, each forced red by
-    # `process_spec/regression/85_mprotect_rearm_running_handler_spec.cr`:
+    # `process_spec/regression/87_mprotect_rearm_running_handler_spec.cr`:
     #
     # - The re-arm's two swaps freed the cards a running handler had read:
     #   `disarm_mprotect_barrier` retired them and `mprotect_set_heap_range`
@@ -158,24 +158,24 @@ module Gcry
     # the page is touched. Must not allocate. A hook that parks the handler
     # there puts a stop in the window
     # (`process_spec/regression/83_mprotect_fault_frozen_handler_spec.cr`),
-    # or a re-arm with the world running (`85_mprotect_rearm_running_handler_spec.cr`).
+    # or a re-arm with the world running (`87_mprotect_rearm_running_handler_spec.cr`).
     class_property mprotect_fault_hook : Proc(UInt64, Nil)? = nil
     # Research only: the same, in the handler before the generation and the
     # card state are read — where a handler stands whose fault was taken
-    # under protection a re-arm is about to replace (regression 85).
+    # under protection a re-arm is about to replace (regression 87).
     class_property mprotect_entry_hook : Proc(UInt64, Nil)? = nil
     # Research only: the same, after the handler has claimed the page in the
-    # cards and before its `mprotect` makes the page writable (regression 85).
+    # cards and before its `mprotect` makes the page writable (regression 87).
     class_property mprotect_claim_hook : Proc(UInt64, Nil)? = nil
     # Research only: called by `mprotect_protect_range`, on the collector,
     # with the page range, after the protected bits are set and before the
-    # pages are protected (regression 85).
+    # pages are protected (regression 87).
     class_property mprotect_protect_hook : Proc(UInt64, UInt64, Nil)? = nil
     # Research only: false installs the handler with the stop's suspend
     # signal deliverable inside it, the code before 2026-10-22 — the control
     # arm of regression 83. Read when the handler is installed.
     class_property mprotect_block_suspend : Bool = true
-    # Research only, the control arms of regression 85: each false restores
+    # Research only, the control arms of regression 87: each false restores
     # the code before 2026-10-22 for one of the four hazards described above
     # `@@mp_state`. False frees a retired state at the next swap whether or
     # not a handler is inside.

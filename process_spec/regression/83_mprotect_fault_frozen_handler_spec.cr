@@ -148,7 +148,7 @@ describe "Regression: no stop freezes the mprotect barrier's fault handler" do
       # Read when the handler is installed, at the first arm.
       Gcry::Platform.mprotect_block_suspend = false
       # And the handler and the card reclamation as they were then. Since
-      # regression 85 a retired state outlives any handler inside, and a
+      # regression 87 a retired state outlives any handler inside, and a
       # handler that resumes into a re-armed page retries the fault into
       # the new cards, which would rescue this parked handler too: the code
       # before has neither.
