@@ -31,6 +31,10 @@ require "spec"
 private FREELIST84_BYTES =                     24576
 private FREELIST84_STAMP = 0x7A4E_84C0_FFEE_0084_u64
 private FREELIST84_LAST  = FREELIST84_BYTES // 8 - 1
+# The batch windows' bystander (`freelist84_batch_window`): a class of its
+# own (3 072 B), so its first allocation is a batch refill and its second a
+# pop.
+private FREELIST84_BYSTANDER_BYTES = 3072
 
 private def freelist84_heap : Gcry::Heap?
   heap = Gcry.default_heap
@@ -138,6 +142,23 @@ end
 #   list at once. (The scan may find a few stash blocks in stale stack
 #   slots; a batch of 32 leaves most of them to be reclaimed.)
 #
+# Only the worker parks, and only on the class under test. The hooks are
+# global: every thread's batch refills and pops run them. Until 2026-10-22
+# they parked whichever thread reached one first once the worker had armed
+# them, and in the lazy windows one of the two idle threads, still starting
+# up, published a batch of a 192 B class inside the worker's window: 6 of
+# 180 *publish-lazy* fixed runs at 52c0c3f5, 11 of 100 in the run that
+# reported it.
+# The stop then froze the idler, not the worker. The worker had allocated
+# straight through before the stop, and the stop's flush gave its stash back
+# to the class list, as a flush should: three blocks FREE and in no stash.
+# `held`, read before the stop, still named them, so `shared` read true on a
+# heap that had handed no block out twice. A bystander thread now allocates
+# a class of its own, a refill and then a pop, inside the armed window in
+# every run, so a hook that parks any thread but the worker fails every run
+# at the parked-thread check below instead of now and then at `shared`
+# (`bench/log/linux/2026-10-22-r84-double-handout/`).
+#
 # Returns the stops that ended while the thread was parked and whether a
 # block the thread holds — handed out, or in its stash — is on the class
 # list as well.
@@ -147,13 +168,22 @@ private def freelist84_batch_window(heap : Gcry::Heap, publish : Bool) : {Int32,
   armed = Atomic(Int32).new(0)
   parked = Atomic(Int32).new(0)
   stops_seen = Atomic(Int32).new(0)
+  worker_id = Atomic(UInt64).new(0_u64)
+  parker_id = Atomic(UInt64).new(0_u64)
+  go = Atomic(Int32).new(0)
+  bystander_done = Atomic(Int32).new(0)
   heap.post_stw_hook = ->(stage : Symbol) do
     starts.add(1) if stage == :after_start_world
     nil
   end
   # On the allocating thread, under the slot or class lock: allocates nothing.
-  park = ->(_u : Void*) do
-    if armed.get == 1 && parked.get == 0
+  # Every thread's batch refills and pops come through here; only the
+  # worker's, of the class under test, park.
+  park = ->(u : Void*) do
+    t = Thread.current?
+    if armed.get == 1 && parked.get == 0 && t && t.object_id == worker_id.get &&
+       Gcry::BlockHeader.from_user(u).value.size == FREELIST84_BYTES
+      parker_id.set(t.object_id)
       entered = starts.get
       parked.set(1)
       deadline = Time.instant + 10.seconds
@@ -170,13 +200,41 @@ private def freelist84_batch_window(heap : Gcry::Heap, publish : Bool) : {Int32,
     heap.alloc_batch_pop_hook = park
   end
 
+  # Its first allocation of a class of its own is a batch refill that
+  # publishes a stash, its second a pop from that stash: the two paths the
+  # hooks sit on, taken while they are armed.
+  bystander = Thread.new do
+    until go.get == 1
+      Intrinsics.pause
+    end
+    GC.malloc(FREELIST84_BYSTANDER_BYTES)
+    GC.malloc(FREELIST84_BYSTANDER_BYTES)
+    bystander_done.set(1)
+  end
   held = [] of Void*
   thread = Thread.new do
+    worker_id.set(Thread.current.object_id)
+    # In the window, and before this thread's own allocation reaches the
+    # hook: the bystander allocates and finishes, or is parked by a hook
+    # that parks anyone. A bare thread has no event loop to `sleep` on.
+    let_bystander_through = -> do
+      go.set(1)
+      deadline = Time.instant + 10.seconds
+      until bystander_done.get == 1 || parked.get == 1 || Time.instant >= deadline
+        Intrinsics.pause
+      end
+    end
     # *publish*: the first allocation's refill claims a batch and publishes
     # it. *pop*: the second allocation pops the stash the first published.
-    armed.set(1) if publish
+    if publish
+      armed.set(1)
+      let_bystander_through.call
+    end
     first = GC.malloc(FREELIST84_BYTES)
-    armed.set(1)
+    unless publish
+      armed.set(1)
+      let_bystander_through.call
+    end
     second = GC.malloc(FREELIST84_BYTES)
     held.concat(heap.freelist84_my_stash(class_index))
     held << first << second
@@ -188,9 +246,14 @@ private def freelist84_batch_window(heap : Gcry::Heap, publish : Bool) : {Int32,
   fail "the thread never reached the batch window" unless parked.get == 1
   GC.collect
   thread.join
+  bystander.join
   heap.alloc_batch_pop_hook = nil
   heap.alloc_batch_publish_hook = nil
   heap.post_stw_hook = nil
+  # Parked anyone else, the worker ran through the window before the stop,
+  # and the stop's flush took back the stash `held` still names.
+  fail "the hook parked a thread other than the worker" unless parker_id.get == worker_id.get
+  bystander_done.get.should eq(1)
   {stops_seen.get, held.any? { |p| heap.freelist84_listed?(class_index, p) }}
 end
 
