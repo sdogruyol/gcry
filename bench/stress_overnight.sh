@@ -13,8 +13,8 @@
 # one hang of that night left no capture
 # (`bench/log/linux/2026-10-21-0.38-stress/`).
 #
-# Each run holds the host-wide heavy lock (HEAVY_LOCK, default the scratch
-# lock), so other work interleaves between runs. `scale` multiplies every run
+# Each run holds the host-wide heavy lock (HEAVY_LOCK, default
+# $TMPDIR/gcry-heavy.lock), so other work interleaves between runs. `scale` multiplies every run
 # count (default 1; 0.1 for a smoke of the script itself, at least one run per
 # loop). Output: <outdir>/summary.txt, one line per loop:
 #   <time> <name> runs=N pass=N fail=N stall=N crystal_scheduler_deadlock=N (S s)
@@ -25,7 +25,7 @@ tree=$1 out=$2 scale=${3:-1}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 cd "$tree" || exit 1
-LOCK=${HEAVY_LOCK:-/home/naruto/playground/.scratch/heavy.lock}
+LOCK=${HEAVY_LOCK:-${TMPDIR:-/tmp}/gcry-heavy.lock}
 SUM="$out/summary.txt"
 : > "$SUM"
 

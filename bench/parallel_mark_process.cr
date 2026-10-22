@@ -132,10 +132,14 @@ begin
   # 300 locally on 12 and on 3 CPUs. Up to eight more collections give the
   # workers the chance; a marker that cannot steal at all still reads 0, and
   # the disabled arm must stay at 0 through all of them.
+  extra = 0
   8.times do
     break if h.parallel_mark_stolen > before_stolen
     GC.collect
+    extra += 1
   end
+  # Printed, so a pass that needed the extra collections is visible in a log.
+  puts "extra collections for a steal: #{extra}" unless disabled
 
   runs = h.parallel_mark_runs
   stolen = h.parallel_mark_stolen
