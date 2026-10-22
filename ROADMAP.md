@@ -2959,20 +2959,23 @@ kept finding the rest.
       collection: `@heap_size` (the in-stop unmap's `sat_sub` against
       `map_chunk`'s unlocked `+=`, racy between mutators too),
       `@dormant_chunk_bytes` (a stale revive store can zero it, and the
-      dormant flush then skips a cycle), `@expl_freed_bytes_since_gc`, and a
-      bitmap `free` frozen between its `occ` and `mark` clears across the
-      incremental finishing slice (`live_objects` one low, `free_bytes` one
-      payload high, the block held one cycle).
+      dormant flush then skips a cycle) and `@expl_freed_bytes_since_gc`.
+      (The fourth, a bitmap `free` frozen between its `occ` and `mark`
+      clears across the incremental finishing slice, is fixed: see below.)
 
-- [ ] **Stop-time freelist writes the per-class probe does not cover yet
-      (review of 84, 2026-10-22).** `GCRY_TLAB=1`: `flush_all_tlabs` and
-      `scrub_freelists` still write class lists in the stop whatever
-      `note_frozen_freelists` found. Their mutators hold `@alloc_lock`, and
-      the TLAB epoch discards a refill the stop cut through, but a frozen
-      TLAB-off section of the same class (a nursery pop, a free's push when
-      the world was stopped) is not checked there. Not reproduced; it needs a
-      construction of its own. (The mprotect half of this item is closed
-      below.)
+- [x] **Stop-time freelist writes the per-class probe did not cover —
+      closed 2026-10-22.** With `GCRY_TLAB=1`, `flush_all_tlabs` and
+      `scrub_freelists` wrote every class list in the stop, whatever
+      `note_frozen_freelists` had found. A thread frozen inside a class
+      lock then stored its stale head over the chains the flush had
+      spliced in. With TLAB on, that thread is an allocation that read
+      `@world_stopped` true (`tlab_bypass`), or one that read
+      `@tlab_enabled` false before a runtime switch. Forced in regression
+      85's *tlab-flush* window: on the control arm all three of a TLAB's
+      blocks ended in no TLAB and on no list. Fixed: a frozen class's
+      chains stay in their TLAB, and its lists are not scrubbed
+      (`stop_tlab_flush_frozen_kept`).
+      `bench/log/linux/2026-10-22-frozen-class-gaps/FINDINGS.md`.
 
 - [x] **The mprotect barrier re-armed with the world running — fixed
       2026-10-22.** 83's neighbour, seen in the audit and confirmed by its
@@ -2995,17 +2998,40 @@ kept finding the rest.
       (incremental or nursery on the mprotect backend).
       `bench/log/linux/2026-10-22-mprotect-card-reclaim/FINDINGS.md`.
 
-- [ ] **The incremental cycle never flushes allocation-batch stashes
-      (pre-existing, from the re-review of 84, 2026-10-22).** Only
-      `run_collection_body`'s stop calls `flush_all_alloc_batches`; the
-      stops that begin an incremental cycle and its slices do not. A stash
-      claimed before the cycle began is USED, unmarked (allocate-black marks
-      only claims made while marking) and linked only through headers, so
-      the finishing slice's in-stop sweep can reclaim it onto the class list
-      while the slot still links it — a class nobody holds frozen, so
-      `note_frozen_freelists` does not save it. Header layout with
-      `GCRY_BITMAP_ALLOC=0`, `GCRY_ALLOC_BATCH` and `GCRY_INCREMENTAL=1`.
-      Read, not reproduced.
+- [x] **The incremental cycle never flushed allocation-batch stashes or
+      TLABs — closed 2026-10-22.** The finishing slice sweeps inside its
+      stop, and no stop of the cycle flushed. A stash claimed before the
+      cycle (USED, unmarked, linked only through headers) was reclaimed
+      onto the class list while its slot still linked it. A TLAB chain
+      (FREE, on no list) was relinked onto the class list by the rebuild
+      that follows an empty chunk's release. Either way two allocations
+      hand out one block. Regression 85's *slice-stash* and *slice-tlab*
+      windows: blocks in a stash or chain and on the class list on the
+      control arm, none on the fixed. The finishing slice now runs the
+      stop-the-world collection's flushes before its sweep, frozen classes
+      excepted.
+
+- [x] **A bitmap `free` frozen between its two clears across the
+      incremental finishing slice — fixed 2026-10-22.** The slice's
+      `occ = mark` occupied the block again, owned by nobody. Measured
+      permanent: `live_objects` one below the walked count after three more
+      collections, and `free_bytes` one payload high. The slice now tries
+      each bitmap class lock. Where one is held, it clears marks with no
+      occupancy behind them in that class's chunks before it sweeps
+      (`clear_frozen_bitmap_stray_marks`). Nothing changes on the default
+      `free` or sweep path. Regression 85's *bitmap-free* window: the block
+      occupied afterwards on the control arm, free on the fixed.
+
+- [ ] **A bitmap `free`'s `mark` clear can wipe a concurrent claim's mark
+      ([INFERENCE], found 2026-10-22, not reproduced).** Between the free's
+      `occ` clear and its `mark` clear, the chunk's cursor owner can advance
+      lock-free into the word and claim the freed bit. While a sweep can run
+      before the next stop (lazy sweep pending, or incremental marking), the
+      claim marks it, and the free then clears that mark. The sweep's
+      `occ = mark` takes the block from under the claim. The window is two
+      adjacent atomics on one thread, widened only by preemption. Needs a
+      construction of its own (the frozen-class-gaps FINDINGS has the
+      reading).
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**

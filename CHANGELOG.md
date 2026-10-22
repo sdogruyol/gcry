@@ -146,6 +146,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the class lock, and the page-release exclusion now takes the batch
   slots after the class lock, in that order. `process_spec/regression/84`.
 
+- **With `GCRY_TLAB=1` the stop no longer splices TLABs into, or scrubs, a
+  class list a frozen thread is inside.** A thread frozen under the class
+  lock (an allocation that ran while a stop was in progress, or one from
+  before a runtime TLAB switch) stored its stale head when it resumed. The
+  TLAB blocks the flush had put in front of that head ended up in no TLAB
+  and on no list. The chains of such a class now stay in their TLAB for
+  that collection. `process_spec/regression/85`,
+  `bench/log/linux/2026-10-22-frozen-class-gaps/`.
+
+- **The incremental cycle (`GCRY_INCREMENTAL=1`) flushes allocation-batch
+  stashes and TLABs before its finishing slice sweeps.** No stop of the
+  cycle flushed them. A stash claimed before the cycle was reclaimed onto
+  the class list while its thread still held it, and a TLAB chain was
+  relinked onto the class list by a rebuild: either way one block was
+  handed out twice. Affects the freelist allocator (`GCRY_BITMAP_ALLOC=0` on
+  the header layout) with `GCRY_ALLOC_BATCH` or `GCRY_TLAB=1`.
+  `process_spec/regression/85`.
+
+- **A `free` that an incremental finishing slice froze between its two
+  bitmap clears no longer comes back occupied.** The slice's sweep put the
+  block back in the allocated set, owned by nobody. That left
+  `live_objects` one low and `free_bytes` one block high for good, and the
+  block unused for a cycle. The slice now clears, in a class whose lock is
+  held, marks with no occupancy behind them. Bitmap allocator with
+  `GCRY_INCREMENTAL=1`. `process_spec/regression/85`.
+
 ## [0.38.0] - 2026-10-21
 
 ### Added
