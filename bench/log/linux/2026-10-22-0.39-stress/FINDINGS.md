@@ -41,3 +41,12 @@ Crystal scheduler deadlock (one capture kept,
 before. The clamp and the Windows split that came after (`395023e9`,
 `e460d60d`) ran their own checks (regression 86's guard-page arms, process_spec
 on three layouts, the Windows runners), not this set.
+
+## The final tree, `61f66d7a` (2026-10-23)
+
+The same script on `61f66d7a`, which adds the wipe's guard-page clamp and the
+Windows slow-path split to round 2 (`summary-final.txt`; the regression 81
+spec change after it, `de79dd4e`, touches no source). Every gcry gate passed:
+0 failures and 0 stalls in every loop. Four runs were the Crystal scheduler
+deadlock: 3 of 300 in stw-mt release, 1 of 200 in stw-mt debug (one capture
+kept, `final-stw-mt-property-test-release-sched-205-seed1063833854.log.gz`).
