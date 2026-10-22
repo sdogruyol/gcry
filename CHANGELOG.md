@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An allocation's slow path no longer collects on frames the hit path
+  left stale (pending its keep-rule run).** `Heap#malloc`/`malloc_atomic`
+  reach the slow path by a tail call, and `Heap#allocate_entry` zeroes 1 KiB
+  below the stack pointer first (not on Windows), so the conservative scan no
+  longer reads dead objects out of slots only the hit path writes. That slot
+  class was RegexDna's 19% higher peak before 0.38.0 and holds Knuckeotide's
+  dead hash buffers on 0.39.0 (64 → 56 MB locally;
+  `bench/log/linux/2026-10-22-regexdna-peak/`, regression 85).
+  `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off.
+
 - **`bench/run_bounded.sh` captures and kills the stalled command's whole
   process tree.** A command that is a wrapper (`make <gate>`, `env`,
   `crystal spec`) left its stalled harness running after the kill and

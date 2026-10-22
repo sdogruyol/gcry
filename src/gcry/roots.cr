@@ -152,9 +152,11 @@ module Gcry
     # address into the range it clears; and on scratch registers only (`r11`;
     # `x9`/`x10`), so the arguments in `rdi`/`rsi`/`rdx`/`rcx` (`x0`-`x3`)
     # pass straight through to the tail call and the function needs no frame
-    # to keep them. Windows grows stacks through `PAGE_GUARD`, which a blind
-    # store may not touch (`OS.clear_dead_stack` walks `VirtualQuery` for it),
-    # so there it does nothing.
+    # to keep them. A debug build does not inline it: there it is a frameless
+    # leaf that zeroes below its own return address, which is as dead.
+    # Windows grows stacks through `PAGE_GUARD`, which a blind store may not
+    # touch (`OS.clear_dead_stack` walks `VirtualQuery` for it), so there it
+    # does nothing.
     @[AlwaysInline]
     def self.wipe_below_sp : Nil
       {% if flag?(:win32) %}
