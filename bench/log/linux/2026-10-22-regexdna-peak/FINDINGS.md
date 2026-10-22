@@ -37,7 +37,7 @@ lever: hiding every such word from the scan on 0.39.0 moves only Knuckeotide
 (about −23% under gdb), nothing else. This branch makes it a default: the
 slow path leaves the entry frame by a tail call and zeroes the stack below
 it, so the frames a collection runs on hold only what they write
-(`Heap#allocate_entry`, regression 85). Knuckeotide's peak −12% locally;
+(`Heap#allocate_entry`, regression 86). Knuckeotide's peak −12% locally;
 the five-runner keep-rule run is dispatched and not yet read (section 4).
 
 ## 1. Reproduction
@@ -209,14 +209,14 @@ path's code changes because its arguments must reach the tail call (it now
 spills `self` and the size around the TLS lookup, two stores and two loads,
 `raw/disasm-proto-gc-malloc_atomic.txt` against the tip's).
 
-**Regression 85** (`process_spec/regression/85_alloc_slow_path_clean_frames_spec.cr`,
+**Regression 86** (`process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr`,
 run by `make alloc-entry-frame`, `--release`, in CI's x86-64 test job): a
 deeper call fills 8 KiB of stack with a pattern, an allocation at the same
 depth triggers a collection, and the hook counts pattern words left between
 the allocating call and `collect_entry_sp`. Tree before: **13** (fails).
 With the change: control arm (`slow_entry_wipe = false`, the tail calls
 alone) **2**, fixed arm **0** (passes). A debug build, Windows, and
-architectures without the asm print `stale85: … skipped`.
+architectures without the asm print `stale86: … skipped`.
 
 ### Local A/B (`ab.py`, 11 interleaved reps, `raw/ab-proto11-runs.json`)
 
@@ -242,7 +242,7 @@ This host's noise floor is Brainfuck's +2.3%: no wall delta here is outside
 it. An earlier 5-rep session with the wipe-off arm
 (`raw/ab-proto5-runs.json`): Knuckeotide tip 71 MB, proto 58 MB, proto with
 `GCRY_SLOW_ENTRY_WIPE=0` 69 MB — the wipe, not the tail calls alone, is most
-of the gain, as regression 85's 2 words suggest.
+of the gain, as regression 86's 2 words suggest.
 
 ### Five runners: dispatched, not yet read
 

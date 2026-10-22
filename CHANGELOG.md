@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer reads dead objects out of slots only the hit path writes. That slot
   class was RegexDna's 19% higher peak before 0.38.0 and holds Knuckeotide's
   dead hash buffers on 0.39.0 (64 → 56 MB locally;
-  `bench/log/linux/2026-10-22-regexdna-peak/`, regression 85).
+  `bench/log/linux/2026-10-22-regexdna-peak/`, regression 86).
   `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off.
 
 - **`bench/run_bounded.sh` captures and kills the stalled command's whole

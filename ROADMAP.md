@@ -4209,7 +4209,7 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       gcry's frames at every collection on 0.39.0 moves only Knuckeotide
       (71.5 → 52.3 MiB under gdb). Branch `regexdna-peak-039` (`cb092ae5`)
       leaves the entry frame by a tail call and zeroes 1 KiB below it before
-      the slow path (regression 85: 13 stale words before, 0 after);
+      the slow path (regression 86: 13 stale words before, 0 after);
       Knuckeotide 64 → 56 MB locally, other rows level. Open: the five-runner
       keep rule (Perf A/B 39738092074, not yet read).
 - [x] **Large `realloc` growth maps, faults and copies every step

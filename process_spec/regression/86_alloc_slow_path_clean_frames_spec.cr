@@ -36,28 +36,28 @@ require "spec"
 # skipped. The control arm's count is the layout's, so only x86-64 Linux,
 # where it was measured, requires it to be non-zero.
 
-private STALE85_PATTERN   = 0x5a5a_c3c3_5a5a_c385_u64
-private STALE85_WORDS     =                      1024
-private STALE85_SKIP_MARK = "stale85: needs a --release build on x86-64 or arm64 outside Windows, skipped"
+private STALE86_PATTERN   = 0x5a5a_c3c3_5a5a_c386_u64
+private STALE86_WORDS     =                      1024
+private STALE86_SKIP_MARK = "stale86: needs a --release build on x86-64 or arm64 outside Windows, skipped"
 
 @[NoInline]
-private def stale85_fill_below : Nil
-  buf = uninitialized StaticArray(UInt64, STALE85_WORDS)
-  STALE85_WORDS.times { |i| buf[i] = STALE85_PATTERN }
+private def stale86_fill_below : Nil
+  buf = uninitialized StaticArray(UInt64, STALE86_WORDS)
+  STALE86_WORDS.times { |i| buf[i] = STALE86_PATTERN }
   # Keep the stores: the array is otherwise dead.
   asm("" :: "r"(buf.to_unsafe) : "memory" : "volatile")
 end
 
 # One allocation that collects, from the same depth as the fill.
 @[NoInline]
-private def stale85_alloc_collecting(sp_out : UInt64*) : Void*
+private def stale86_alloc_collecting(sp_out : UInt64*) : Void*
   sp_out.value = Gcry::Roots.hardware_stack_pointer.address
   GC.malloc_atomic(LibC::SizeT.new(64))
 end
 
 # Pattern words in `[collect_entry_sp, caller SP)` at the collection, with the
 # slow path's wipe on or off.
-private def stale85_count(wipe : Bool) : Int32
+private def stale86_count(wipe : Bool) : Int32
   heap = Gcry.default_heap
   saved_threshold = heap.gc_threshold
   caller_sp = 0_u64
@@ -70,7 +70,7 @@ private def stale85_count(wipe : Bool) : Int32
       n = 0
       p = h.collect_entry_sp & ~7_u64
       while p < caller_sp
-        n += 1 if Pointer(UInt64).new(p).value == STALE85_PATTERN
+        n += 1 if Pointer(UInt64).new(p).value == STALE86_PATTERN
         p &+= 8
       end
       stale = n
@@ -78,9 +78,9 @@ private def stale85_count(wipe : Bool) : Int32
     nil
   end
   begin
-    stale85_fill_below
+    stale86_fill_below
     heap.gc_threshold = 1_u64
-    stale85_alloc_collecting(pointerof(caller_sp))
+    stale86_alloc_collecting(pointerof(caller_sp))
   ensure
     heap.gc_threshold = saved_threshold
     heap.post_stw_hook = nil
@@ -94,15 +94,15 @@ end
 describe "Regression: an allocation's slow path collects on frames built over zeros" do
   it "leaves no stale word between the allocation and the collector" do
     {% if flag?(:release) && (flag?(:x86_64) || flag?(:aarch64)) && !flag?(:win32) %}
-      control = stale85_count(wipe: false)
-      fixed = stale85_count(wipe: true)
-      STDERR.puts "stale85: control #{control}, fixed #{fixed}"
+      control = stale86_count(wipe: false)
+      fixed = stale86_count(wipe: true)
+      STDERR.puts "stale86: control #{control}, fixed #{fixed}"
       {% if flag?(:x86_64) && flag?(:linux) %}
         control.should be > 0
       {% end %}
       fixed.should eq(0)
     {% else %}
-      STDERR.puts STALE85_SKIP_MARK
+      STDERR.puts STALE86_SKIP_MARK
     {% end %}
   end
 end

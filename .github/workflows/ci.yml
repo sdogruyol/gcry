@@ -843,7 +843,7 @@ jobs:
       # allocation triggers; a buffer in it that nothing writes is read as
       # roots (process_spec regression/79), and since the slow path leaves it
       # by a tail call and zeroes below, no stale word may remain at all
-      # (regression/85). Release build.
+      # (regression/86). Release build.
       - name: No unwritten slot in the allocation entry frames
         run: |
           make alloc-entry-frame

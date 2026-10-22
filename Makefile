@@ -1832,14 +1832,14 @@ counter-loss: $(BIN)
 # triggers, so a block of it nothing writes is read as roots. `--release`,
 # because only inlining puts `check_fork_poison!`'s message buffer there: 73
 # stale words with it inline, 13 without, on x86-64 Linux. A debug build
-# reads 21 either way. Regression 85 then asks for none at all: the slow path
+# reads 21 either way. Regression 86 then asks for none at all: the slow path
 # leaves the entry by a tail call and zeroes the stack below it
 # (`Heap#allocate_entry`), so the frames the collection runs on hold only
 # what they write (13 before, 2 with the wipe off, 0).
 .PHONY: alloc-entry-frame
 alloc-entry-frame: $(BIN)
 	$(CRYSTAL) spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr \
-	  process_spec/regression/85_alloc_slow_path_clean_frames_spec.cr
+	  process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr
 
 # The occupancy claim (`bitmap_alloc.cr`, "Occupancy is claimed a word at a
 # time") under four allocating threads, cross-thread `GC.free` and a
