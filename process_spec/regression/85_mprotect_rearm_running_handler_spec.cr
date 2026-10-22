@@ -96,14 +96,22 @@ end
 private class Mprotect85Writer
   getter go = Mprotect85Flag.new
   getter done = Mprotect85Flag.new
+  @ready = Mprotect85Flag.new
 
   def initialize(addr : UInt64)
     @thread = Thread.new do
+      @ready.set
       if @go.await(60)
         Pointer(UInt8).new(addr).value = 1_u8
         @done.set
       end
     end
+    # Started, and past every allocation it makes, before anything is asked
+    # of it. A thread still starting when a collection's post-stop section
+    # begins can wait there for the heap (`@block_other_heap`), in the
+    # section where the main thread waits for it: 1 of 20 children of a
+    # scratch copy without this never saw the write fault.
+    fail "the writer thread never started" unless @ready.await(30)
   end
 
   def join : Nil
