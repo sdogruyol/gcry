@@ -340,7 +340,8 @@ Found in passing, not reproduced: [INFERENCE] the same double
 `clear_mprotect_cards` frees the retired card state with the world running
 when the barrier is re-armed after a lazy sweep, so a handler running on
 another CPU at that moment reads freed memory. 83 closes only the in-stop
-freeze.
+freeze. (Since reproduced with three more hazards of the same window and
+fixed, regression 87: `../2026-10-22-mprotect-card-reclaim/FINDINGS.md`.)
 
 ## Checks and stress after the fixes
 

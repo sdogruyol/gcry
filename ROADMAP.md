@@ -2970,12 +2970,30 @@ kept finding the rest.
       `note_frozen_freelists` found. Their mutators hold `@alloc_lock`, and
       the TLAB epoch discards a refill the stop cut through, but a frozen
       TLAB-off section of the same class (a nursery pop, a free's push when
-      the world was stopped) is not checked there. And the mprotect barrier
-      (83's neighbour, seen in the audit and confirmed by the review): after
-      a lazy sweep the barrier is re-armed with the world running, and the
-      double `clear_mprotect_cards` of a re-arm frees the retired card state
-      at once, under a fault handler that may be reading it on another CPU.
-      Not reproduced; both need a construction of their own.
+      the world was stopped) is not checked there. Not reproduced; it needs a
+      construction of its own. (The mprotect half of this item is closed
+      below.)
+
+- [x] **The mprotect barrier re-armed with the world running — fixed
+      2026-10-22.** 83's neighbour, seen in the audit and confirmed by its
+      review: after a lazy sweep the barrier is re-armed outside the stop,
+      and a fault handler on another thread could be anywhere in it. Four
+      hazards, each forced red→green by a hook with a control arm
+      (`process_spec/regression/87`): the re-arm's double
+      `clear_mprotect_cards` freed the card state a running handler held
+      (use-after-free); a handler that had claimed its page under the old
+      cards made it writable after the re-arm had protected it again
+      (writes unrecorded); a fault taken before the disarm and handled after
+      it read as foreign, which uninstalled the barrier and sent a re-armed
+      page's write to Crystal's handler (`Invalid memory access`, exit 11);
+      and a claim between the re-arm's protected bit and its `mprotect` left
+      the page read-only and "claimed", every later writer faulting until
+      the next collection. Fixed by a count of handlers inside that defers
+      freeing retired cards, a generation check after the handler's
+      `mprotect`, one retry before an unclaimed protection fault is
+      forwarded, and claimers that always unprotect. Opt-in paths only
+      (incremental or nursery on the mprotect backend).
+      `bench/log/linux/2026-10-22-mprotect-card-reclaim/FINDINGS.md`.
 
 - [ ] **The incremental cycle never flushes allocation-batch stashes
       (pre-existing, from the re-review of 84, 2026-10-22).** Only

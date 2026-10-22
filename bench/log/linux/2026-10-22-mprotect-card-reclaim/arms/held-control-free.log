@@ -1,0 +1,2 @@
+mprotect87 held: re-armed with the handler inside; freed under it 1, retired and kept 0
+mprotect87: control freed the cards the handler holds

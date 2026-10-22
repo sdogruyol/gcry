@@ -94,6 +94,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GCRY_MPROTECT_BARRIER=1`) with incremental marking or a nursery.
   `process_spec/regression/83`.
 
+- **The mprotect page barrier copes with being re-armed while a fault
+  handler runs.** After a lazy sweep, the default, the barrier is re-armed
+  after the stop, with the world running, and a handler on another thread
+  could be anywhere in it. The re-arm freed the card state a running
+  handler was reading, a use-after-free in the signal handler. A handler
+  that had claimed its page under the old cards made it writable after the
+  re-arm had protected it again, so writes to it went unrecorded. A fault
+  taken before the disarm and handled after it read as foreign: the barrier
+  uninstalled itself, and a write to a page the re-arm had protected again
+  went to Crystal's handler (`Invalid memory access`). And a handler that
+  claimed its page just before the re-arm protected it left every later
+  writer faulting until the next collection. Retired card state is now freed
+  only once no handler is inside, a handler records its page in whatever
+  cards replaced its own, an unclaimed protection fault is retried once
+  before it is forwarded, and every handler that claims a page makes it
+  writable itself. Same reach as the previous entry. `process_spec/regression/87`,
+  `bench/log/linux/2026-10-22-mprotect-card-reclaim/`.
+
 - **On the freelist allocator (`GCRY_BITMAP_ALLOC=0` on the header layout,
   and nursery chunks) the stop writes no class freelist a frozen thread is
   inside.** A thread frozen in a freelist pop, push, refill or batch claim
