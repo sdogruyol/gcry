@@ -233,6 +233,25 @@ its guard page and wipes there. The bounded wipe lives, with its floor
 clamped to the guard's top (not skipped); the first version's unbounded loop
 dies with "Stack overflow".
 
+The bound's cost, `Perf A/B`
+[39804931643](https://github.com/sdogruyol/gcry/actions/runs/39804931643):
+var `29ceed11` (`wipe-clamp-039`), base `07cc4a7f` (`release-0.39.0`, the
+unbounded wipe), 15 reps, ubuntu-latest and macos-latest
+(`clamp-<runner>/summary.md`). Paired, var over base, median [IQR]:
+
+| runner | Binarytrees wall | JsonParsePure wall | Knuckeotide wall | Knuckeotide peak |
+|---|---:|---:|---:|---:|
+| ubuntu-latest | +1.2% [−2.7, +2.6] | −0.1% [−1.4, +2.4] | +2.0% [−0.8, +2.9] | +2.6% [−1.0, +8.8] (1.35× → 1.41× Boehm) |
+| macos-latest | +3.8% [−3.3, +9.8] | +1.7% [−3.6, +6.8] | +5.9% [−3.2, +14.7] | +0.1% [−0.0, +2.2] (1.32× both) |
+
+Every interval contains zero; no row is slower or bigger beyond its spread.
+On aarch64 Darwin (`--cross-compile`, disassembled) `allocate_entry`'s frame
+is `sub sp, #0x60` with five register pairs at `0x10`–`0x5f` and the
+accessor's slot at `0x8`; the word at `0x0` is not written
+[INFERENCE: one word the wipe no longer covers there, which
+`allocate_traced`'s frame may or may not overwrite; the macos-latest
+Knuckeotide peak above is level with the unbounded version's].
+
 Cost is on the slow path only — a cursor refill, a large block, a
 collection — 64 iterations of two stores. The hit path's code changes
 because its arguments must reach the tail call: it now spills `self` and the
