@@ -306,3 +306,17 @@ changes comment references and nothing else: the format check passes; 87
 alone on the default layout gives 14 examples, 0 failures, with every child
 as before (`arms/` refreshed); and 83 with 87 gives 18 examples, 0 failures
 on the header layout and on header with `GCRY_BITMAP_ALLOC=0`.
+
+After review (`agent://MprotectReview`, no blockers), two fixes:
+
+- The handler's thread-local "last unclaimed fault" address is kept
+  complemented. Thread-local storage is a conservative root, so the raw
+  heap address could have pinned an object for the life of the thread.
+- 83 and 87 size their block at least two pages and target the first page
+  boundary past its start. Rounding the middle of a 64 KiB block down lands
+  before the block on a 64 KiB-page arm64 kernel, so the writes would have
+  gone to a neighbour.
+
+After them, 83 with 87 gives 18 examples, 0 failures on each of the default,
+header and header + `GCRY_BITMAP_ALLOC=0` layouts. The format check,
+`make lint`, `make windows-typecheck` and the darwin cross-compile also pass.
