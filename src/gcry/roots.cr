@@ -143,17 +143,35 @@ module Gcry
     end
 
     # Zero the 1 KiB below the SP. Inlined into `Heap#allocate_entry`, which
-    # keeps nothing on the stack (it has no frame and tail-calls on), so
-    # everything below the SP it reads is dead. 1 KiB covers the allocation
-    # slow path's frames down to `collect_entry_sp` (168 bytes on x86-64 Linux
-    # at 0.39.0: `allocate_traced`, `collect`, `run_collection`), below which
+    # keeps nothing of its own on the stack and tail-calls on, so everything
+    # below the SP it reads is dead. 1 KiB covers the allocation slow path's
+    # frames down to `collect_entry_sp` (168 bytes on x86-64 Linux at 0.39.0:
+    # `allocate_traced`, `collect`, `run_collection`), below which
     # `run_collection`'s own entry scrub takes over (`Heap#collect_scrub_bytes`).
     # A loop in the asm and not a `memset`, which would push its return
     # address into the range it clears; and on scratch registers only (`r11`;
     # `x9`/`x10`), so the arguments in `rdi`/`rsi`/`rdx`/`rcx` (`x0`-`x3`)
-    # pass straight through to the tail call and the function needs no frame
-    # to keep them. A debug build does not inline it: there it is a frameless
-    # leaf that zeroes below its own return address, which is as dead.
+    # pass straight through to the tail call. On Linux (x86-64 and arm64)
+    # `allocate_entry` then has no prologue at all. On both Darwin targets
+    # LLVM keeps its frame-pointer convention: it pushes a frame record
+    # around the loop alone (`push %rbp` / `stp x29, x30, [sp, #-16]!`) and
+    # pops it before the tail branch, so the wipe starts 8 or 16 bytes lower
+    # and skips only that record — a saved frame pointer and return address,
+    # a stack address and a code address. A debug build does not inline it:
+    # there it is a leaf with no frame that zeroes below its own return
+    # address, which is as dead.
+    #
+    # Unlike `Heap#clear_stack_body` it does not clamp to the stack's guard
+    # page: that needs the stack's bounds, and the allocation path may not
+    # ask `Fiber`/`Thread` for them (they allocate during a thread's TLS
+    # setup). So a thread or fiber whose SP is within 1 KiB of its guard page
+    # faults here, as a stack overflow, on a slow path that would not
+    # otherwise have gone that deep — a refill, say, whose frames reach a few
+    # hundred bytes. Any slow path that collects reaches deeper than the wipe
+    # (`run_collection_body`'s frame alone is 0x518 bytes plus six pushes on
+    # x86-64 Linux), so this only moves which allocation overflows first on a
+    # stack that is already within 1 KiB of overflowing.
+    #
     # Windows grows stacks through `PAGE_GUARD`, which a blind store may not
     # touch (`OS.clear_dead_stack` walks `VirtualQuery` for it), so there it
     # does nothing.

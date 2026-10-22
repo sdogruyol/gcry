@@ -680,12 +680,14 @@ module Gcry
     # and on 0.39.0 the entry's slots hold Knuckeotide's dead hash buffers.
     #
     # Called in tail position, this is reached by a `jmp` once the entry has
-    # popped its frame. It has no frame of its own: it zeroes the stack below
-    # its return address, which is where the entry's frame was, and jumps on
-    # to `allocate_traced`, whose frame and the collector's are then built
-    # over zeros and hold only what they write. Where the entry is inlined
-    # into its caller instead, the caller's own frame is the caller's affair,
-    # as it is under any conservative collector.
+    # popped its frame. It keeps nothing of its own on the stack: it zeroes
+    # the stack below its return address, which is where the entry's frame
+    # was, and jumps on to `allocate_traced`, whose frame and the collector's
+    # are then built over zeros and hold only what they write. (On Linux it
+    # has no prologue at all; on Darwin LLVM pushes a frame record around the
+    # wipe and pops it before the jump — `Roots.wipe_below_sp`.) Where the
+    # entry is inlined into its caller instead, the caller's own frame is the
+    # caller's affair, as it is under any conservative collector.
     @[NoInline]
     private def allocate_entry(size : UInt64, atomic : Bool, clear : Bool) : Void*
       Roots.wipe_below_sp if @slow_entry_wipe
