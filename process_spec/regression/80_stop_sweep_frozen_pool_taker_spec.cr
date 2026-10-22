@@ -159,6 +159,8 @@ describe "Regression: an in-stop sweep makes no chunk dormant under a frozen poo
       # as on Linux, and the control child's assertions hold on every platform.
       fail "child #{status.inspect}:\n#{captured}" unless status.success?
       captured.to_s.should contain("1 examples, 0 failures")
+      # The control child saw the chunk dormant under its parked taker.
+      captured.to_s.should contain(TAKER80_CONTROL_MARK) if arm == "control"
     end
   end
 
