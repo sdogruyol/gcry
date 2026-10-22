@@ -1,0 +1,5 @@
+hdr-freelist runs=300 pass=300 fail=0 stall=0 sched=0
+hdr-freelist-instop runs=300 pass=299 fail=0 stall=0 sched=1
+hdr-freelist-rel-instop runs=200 pass=200 fail=0 stall=0 sched=0
+hdr-tlab-nursery-instop runs=200 pass=200 fail=0 stall=0 sched=0
+pf-hdr-freelist runs=30 pass=30 fail=0 stall=0 sched=0

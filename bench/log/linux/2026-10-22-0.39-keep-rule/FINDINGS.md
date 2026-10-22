@@ -46,7 +46,7 @@ bounds recompute moving from the in-stop sweep into the release flush
   same way (Revcomp +6.4% timed on `ubuntu-latest` with 81, −0.3% with 82;
   JsonGenerate +1.9% on Windows with 81, −2.0% with 82). Nothing in either
   commit runs on the mutator's path in these benches except the cursor
-  retire, which 82 makes no longer. [INFERENCE] The five-runner rise is
+  retire, where 82 reorders two stores and adds a compiler fence. [INFERENCE] The five-runner rise is
   where the code lands, as in the Windows pad arms, not a cost of 81 or 82.
 
 **Verdict:** no row is slower than 0.38.0 beyond what placement moves on the
