@@ -25,7 +25,9 @@ require "spec"
 # Linux only, the one platform with the mprotect barrier.
 # `bench/log/linux/2026-10-22-in-stop-sweep-audit/FINDINGS.md`.
 
-private MPROTECT83_BYTES = 64 * 1024
+# At least two pages, so a whole page lies inside the block whatever the
+# page size (64 KiB on some arm64 kernels).
+private MPROTECT83_BYTES = Math.max(64 * 1024, 2 * Gcry::Platform::PAGE.to_i32)
 private MPROTECT83_SPAN  = 64 * 1024 * 1024
 
 private def mprotect83_page_dirty?(page : UInt64) : Bool
@@ -49,7 +51,11 @@ private def mprotect83_window(heap : Gcry::Heap) : {Int32, Bool}
   GC.collect
   heap.barrier_backend_name.should eq("mprotect")
   page_size = Gcry::Platform::PAGE
-  target = ((block.address + MPROTECT83_BYTES // 2) & ~(page_size - 1))
+  # The first page boundary past the block's start: with the block two pages
+  # long the whole page is inside it. Rounding the middle of a 64 KiB block
+  # down instead lands before the block on a 64 KiB-page kernel, and the
+  # writes below would go to a neighbour.
+  target = ((block.address + page_size) & ~(page_size - 1))
 
   starts = Atomic(Int32).new(0)
   parked = Atomic(Int32).new(0)

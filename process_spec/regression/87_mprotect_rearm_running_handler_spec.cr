@@ -41,11 +41,22 @@ require "spec"
 # Linux only, the one platform with the mprotect barrier.
 # `bench/log/linux/2026-10-22-mprotect-card-reclaim/FINDINGS.md`.
 
-private MPROTECT87_BYTES     = 64 * 1024
+# At least two pages, so a whole page lies inside the block past its first
+# byte whatever the page size (64 KiB on some arm64 kernels).
+private MPROTECT87_BYTES     = Math.max(64 * 1024, 2 * Gcry::Platform::PAGE.to_i32)
 private MPROTECT87_SKIP_MARK = "mprotect87: the re-arm ran inside the stop, skipped"
 
 private def mprotect87_page(addr : UInt64) : UInt64
   addr & ~(Gcry::Platform::PAGE - 1)
+end
+
+# The first page boundary strictly past the block's start. With the block
+# two pages long, that page and the writes at its first 24 bytes are inside
+# the block, and the block's first byte, which the children check is
+# untouched, is not in it. Rounding the middle of the block *down* instead
+# landed before the block's start on a 64 KiB-page kernel.
+private def mprotect87_target(block : UInt8*) : UInt64
+  mprotect87_page(block.address + Gcry::Platform::PAGE)
 end
 
 private def mprotect87_page_dirty?(page : UInt64) : Bool
@@ -170,7 +181,7 @@ end
 private def mprotect87_held(arm : String) : Nil
   heap = Gcry.default_heap
   block = mprotect87_arm(heap)
-  target = mprotect87_page(block.address + MPROTECT87_BYTES // 2)
+  target = mprotect87_target(block)
   writer = Mprotect87Writer.new(target)
   parked = Mprotect87Flag.new
   release = Mprotect87Flag.new
@@ -215,7 +226,7 @@ end
 private def mprotect87_stale(arm : String) : Nil
   heap = Gcry.default_heap
   block = mprotect87_arm(heap)
-  target = mprotect87_page(block.address + MPROTECT87_BYTES // 2)
+  target = mprotect87_target(block)
   writer = Mprotect87Writer.new(target)
   parked = Mprotect87Flag.new
   release = Mprotect87Flag.new
@@ -252,7 +263,7 @@ end
 private def mprotect87_straggler(arm : String) : Nil
   heap = Gcry.default_heap
   block = mprotect87_arm(heap)
-  target = mprotect87_page(block.address + MPROTECT87_BYTES // 2)
+  target = mprotect87_target(block)
   writer = Mprotect87Writer.new(target)
   parked = Mprotect87Flag.new
   release = Mprotect87Flag.new
