@@ -30,6 +30,22 @@ conservative collector may treat as dead and which Boehm's `GC_clear_stack`
 it changes nothing here. What separates gcry from Boehm on Knuckeotide is the
 collection schedule, with or without the pin. **No gcry change.**
 
+> **Corrected 2026-10-22** (`../2026-10-22-regexdna-peak/`). Everything
+> above about crystal-metric's own frame stands: the `Benchmark::run` slots
+> and the callee-saved registers are the mutator's, and neither collector
+> can drop them. But they were not the only holders, and "the rest is the
+> schedule" was too strong. gcry's own allocation entry, `GC.malloc_atomic`
+> with the hit path inlined, was also live across every collection an
+> allocation triggered, and its slots that only the hit path writes held
+> dead objects. In the timed run its `0x30`/`0x60` slots held 786 KiB
+> hash-entry buffers, below this directory's 1 MB `MINPAY`, so
+> `holders_gcry.py` did not report them. That frame is gcry's, so gcry can
+> drop it: the slow path now leaves the entry frame by a tail call and
+> zeroes the 1 KiB below it (`Heap#allocate_entry`, regression 86). On the
+> five perf runners Knuckeotide's peak falls from 1.44–1.78× to
+> 1.28–1.63× Boehm's (Perf A/B 39738092074). What is left over Boehm is the
+> crystal-metric pin both collectors pay, plus the schedule.
+
 ## Tools (this directory)
 
 - `holders_gcry.py` (gdb): at the entry of every
@@ -238,6 +254,11 @@ does not drop them either, and gcry already has Boehm's below-SP clearing.
 The documentation is corrected: Knuckeotide's 0.38.0 rise is the pin Boehm
 has too, 0.37.0's layout happened to pin less, and the row's excess over
 Boehm's peak is the collection schedule (README, ROADMAP, CHANGELOG).
+
+(2026-10-22: right for the mutator's frame, incomplete for the row. gcry's
+own allocation-entry frame held more of Knuckeotide's dead buffers, and
+gcry now wipes that frame; see the correction at the top and
+`../2026-10-22-regexdna-peak/`.)
 
 ## Not established
 

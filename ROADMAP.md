@@ -4192,11 +4192,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       no ptrace) lowers both peaks by the same ~11 MB; gcry is still 26 MB
       over Boehm with neither pinning, 0.37.0 equals 0.38.0 with the slots
       zeroed (+0.8 MB), and a fixed 8 MiB threshold puts gcry at 1.23× with
-      the pin. No collector can drop a dead slot of a live frame or a dead
-      callee-saved register, and gcry already has Boehm's below-SP clearing
-      (`GCRY_CLEAR_STACK`, which leaves every holder in place, and the
-      default collection scrub): no gcry change. Knuckeotide's excess is the
-      schedule, as above.
+      the pin. No collector can drop a dead slot of the program's own live
+      frame or a dead callee-saved register, and gcry already has Boehm's
+      below-SP clearing (`GCRY_CLEAR_STACK`, which leaves every holder in
+      place, and the default collection scrub): nothing to change for that
+      pin. "Knuckeotide's excess is the schedule" was too strong. gcry's own
+      allocation-entry frame held more of its dead buffers: 786 KiB hash
+      buffers, under the 1 MB threshold that holder search used. Next note.
       **RegexDna's 0.38 peak drop was gcry's own frame, and so is part of
       Knuckeotide's excess (2026-10-22,
       `bench/log/linux/2026-10-22-regexdna-peak/`).** Before the occupancy
@@ -4207,12 +4209,14 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       219 MB, the timed run's own peak on both). The claim's inlining moved
       the slot; the schedule is unchanged. Hiding every non-push word of
       gcry's frames at every collection on 0.39.0 moves only Knuckeotide
-      (71.5 → 52.3 MiB under gdb). Branch `regexdna-peak-039` (`cb092ae5`)
-      leaves the entry frame by a tail call and zeroes 1 KiB below it before
-      the slow path (regression 86: 13 stale words before, 0 after);
-      Knuckeotide 1.44–1.78× → 1.28–1.63× Boehm's peak on the five runners,
-      no row slower beyond its spread (Perf A/B 39738092074); JsonGenerate's
-      M1 peak 0.64× → 0.71× is not attributed.
+      (71.5 → 52.3 MiB under gdb). Unlike the mutator's frame, that frame is
+      gcry's to clean: the slow path now leaves the entry frame by a tail
+      call and zeroes 1 KiB below it (`Heap#allocate_entry`, regression 86:
+      13 stale words before, 0 after). Knuckeotide 1.44–1.78× → 1.28–1.63×
+      Boehm's peak on the five runners, no row slower beyond its spread
+      (Perf A/B 39738092074); JsonGenerate's M1 peak 0.64× → 0.71× is not
+      attributed. What remains over the budget is the crystal-metric pin,
+      which both collectors pay, plus the schedule.
 - [x] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
@@ -4297,7 +4301,9 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       on the M1 and 119% → 121% on Windows. Revcomp +1.4% on ubuntu-latest
       is inside placement. Knuckeotide's peak (+20–24% Linux) is stack
       pinning in crystal-metric's own `Benchmark::run` frame — the same pin
-      Boehm's build has, as measured 2026-10-21 under the RSS budget item.
+      Boehm's build has, as measured 2026-10-21 under the RSS budget item —
+      plus dead buffers in gcry's own allocation-entry frame, which 0.39.0
+      wipes (2026-10-22, same item).
       Accepted as they are: JSON-row peak rises of +0.2–1.1% on arm64 and
       macos-15-intel,
       every row at or under 0.90× Boehm's peak, not attributed. Left on the

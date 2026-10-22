@@ -21,15 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **An allocation's slow path no longer collects on frames the hit path
-  left stale.** `Heap#malloc`/`malloc_atomic`
-  reach the slow path by a tail call, and `Heap#allocate_entry` zeroes 1 KiB
-  below the stack pointer first (not on Windows), so the conservative scan no
-  longer reads dead objects out of slots only the hit path writes. That slot
-  class was RegexDna's 19% higher peak before 0.38.0 and holds Knuckeotide's
-  dead hash buffers on 0.39.0: Knuckeotide's peak 1.53× → 1.31× Boehm's on
-  x86 Linux, 1.44× → 1.28× arm64, 1.58× → 1.32× M1, 1.78× → 1.56× Intel Mac,
-  1.73× → 1.63× Windows, no row slower beyond its spread (Perf A/B
-  39738092074; `bench/log/linux/2026-10-22-regexdna-peak/`, regression 86).
+  left stale.** `Heap#malloc`/`malloc_atomic` reach the slow path by a tail
+  call, and `Heap#allocate_entry` zeroes 1 KiB below the stack pointer first
+  (not on Windows), so the conservative scan no longer reads dead objects
+  out of slots only the hit path writes. RegexDna's peak was 19% higher
+  before 0.38.0 because of one such slot: `Heap#malloc_atomic`'s
+  `0x58(%rsp)` held the dead Fasta generator and its 64 MiB buffer, and the
+  occupancy claim's inlining happened to move it. On 0.39.0 the entry's
+  slots hold Knuckeotide's dead hash buffers. Knuckeotide's peak, × Boehm's:
+
+  | runner | before | after |
+  |---|---:|---:|
+  | x86 Linux | 1.53× | 1.31× |
+  | arm64 Linux | 1.44× | 1.28× |
+  | M1 | 1.58× | 1.32× |
+  | Intel Mac | 1.78× | 1.56× |
+  | Windows (tail calls only, no wipe) | 1.73× | 1.63× |
+
+  No row is slower beyond its spread (Perf A/B 39738092074;
+  `bench/log/linux/2026-10-22-regexdna-peak/`, regression 86).
   `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off.
 
 - **`bench/run_bounded.sh` captures and kills the stalled command's whole
@@ -38,22 +48,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captured the wrapper's stack instead of the harness's. The capture now goes
   to the leaves of the tree, and the kill takes all of it.
 
-- **Knuckeotide's 0.38.0 peak rise is a pin Boehm has too; the row's excess
-  is the collection schedule (README, ROADMAP).** 0.38.0's notes put the
-  +21% on a dead buffer pinned by a word in crystal-metric's own
-  `Benchmark::run` frame. Measured on Linux x86_64
+- **Knuckeotide's 0.38.0 peak rise is a pin Boehm has too (README,
+  ROADMAP).** 0.38.0's notes put the +21% on a dead buffer pinned by a word
+  in crystal-metric's own `Benchmark::run` frame. Measured on Linux x86_64
   (`bench/log/linux/2026-10-21-knuckeotide-pin/`): the Boehm build keeps the
   same two dead objects — the 6.1 MB Fasta output, in a spill slot of the
-  same frame, and a 4 MiB `IO::Memory` buffer — marked at every collection to
-  the end of the run, through 145 244 `GC_clear_stack` calls, which clear
+  same frame, and a 4 MiB `IO::Memory` buffer — marked at every collection
+  to the end of the run, through 145 244 `GC_clear_stack` calls, which clear
   only below the stack pointer. Zeroing the dead slots in each binary lowers
   both peaks by the same ~11 MB; 0.37.0 equals 0.38.0 with them zeroed, so
-  0.37.0's layout pinned less than Boehm's. gcry stays 23–26 MB over Boehm
-  either way, and a fixed 8 MiB threshold takes it to 1.23× with the pin. No
-  collector can drop a dead slot of a live frame or a dead callee-saved
-  register, and gcry already has Boehm's below-SP clearing
-  (`GCRY_CLEAR_STACK`, which leaves every holder in place): no collector
-  change.
+  0.37.0's layout pinned less than Boehm's. No collector can drop a dead slot
+  of the program's own live frame or a dead callee-saved register, so
+  nothing changes for that pin. gcry stayed 23–26 MB over Boehm either way,
+  and that excess was not all schedule: gcry's own allocation-entry frame
+  held more of the dead hash buffers, and the slow-path wipe above drops
+  them.
 
 - **`make dormant-flush-race` exercises mutator unmaps again.** Since the
   2026-10-03 trim slack, `GC.free` of a large block no longer trims on every

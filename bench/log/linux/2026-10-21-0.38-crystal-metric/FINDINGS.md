@@ -58,4 +58,9 @@ reps of RegexDna alone (`regexdna-bisect.md`) read 270–271 MB on 0.37.0, on th
 tree before the frame fix (`4fc3fe53`), at the fix (`c2dd2226`) and on the
 last tree before the claim (`d2594ff8`), and 219 MB at `8b9e7eab`. What in
 the claim lowers it — a shifted collection schedule or a frame that no longer
-pins a dead buffer — is not attributed.
+pins a dead buffer — is not attributed. (Attributed 2026-10-22,
+`../2026-10-22-regexdna-peak/`: a frame. Before the claim, a slot of
+`Heap#malloc_atomic` that only the hit path writes, `0x58(%rsp)`, held the
+dead Fasta generator and its 64 MiB buffer through three setup collections.
+The claim's inlining moved that slot. The schedule is the same on both trees,
+and so is the timed run's peak, 219 MB.)

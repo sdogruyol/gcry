@@ -192,22 +192,42 @@ everything below it — is built over zeros (168 bytes deep on this layout).
 
 Sound: the entry's frame is popped before the wipe, its callee-saved pushes
 restored into the registers they came from, and those are pushed again by
-`allocate_traced`; nothing below the SP is live in a frameless function that
-keeps nothing on the stack; a signal landing mid-wipe builds its frame below
-the SP and is done before the wipe resumes over it. Windows does nothing in
-the wipe (stack growth through `PAGE_GUARD`, as `OS.clear_dead_stack`
-handles), so it gets the tail calls only [INFERENCE: the tail calls were
-disassembled on x86-64 Linux only; the arm64 asm was assembled by the
-cross-compiles below, not run here]. A debug build (a `-Dgc_none`
-`samples/hello.cr`, disassembled) makes ordinary calls, and calls the wipe
-as a frameless leaf that zeroes below its own return address. Where the
-entry is inlined into its caller, the caller's frame is the caller's, as
-under any conservative collector. `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe
-off (research, the control arm). Cost is on the slow path only — a cursor
-refill, a large block, a collection — 64 iterations of two stores; the hit
-path's code changes because its arguments must reach the tail call (it now
-spills `self` and the size around the TLS lookup, two stores and two loads,
-`raw/disasm-proto-gc-malloc_atomic.txt` against the tip's).
+`allocate_traced`; nothing below the SP is live in a function that keeps
+nothing of its own on the stack; a signal landing mid-wipe builds its frame
+below the SP and is done before the wipe resumes over it. Windows does
+nothing in the wipe (stack growth through `PAGE_GUARD`, as
+`OS.clear_dead_stack` handles), so it gets the tail calls only. The review
+(agent `WipeReview`, release builds of regression 86 for x86-64 Linux,
+aarch64 Linux, aarch64 and x86-64 Darwin, all disassembled) found the tail
+calls on every target. On Linux `allocate_entry` has no prologue; on both
+Darwin targets LLVM keeps the frame-pointer convention and pushes a frame
+record around the loop alone (`push %rbp` / `stp x29, x30, [sp, #-16]!`),
+popped before the tail branch, so there the wipe starts 8 or 16 bytes lower
+and skips only the saved frame pointer and return address. A debug build (a
+`-Dgc_none` `samples/hello.cr`, disassembled) makes ordinary calls, and calls
+the wipe as a leaf with no frame that zeroes below its own return address.
+Where the entry is inlined into its caller, the caller's frame is the
+caller's, as under any conservative collector. `GCRY_SLOW_ENTRY_WIPE=0`
+turns the wipe off (research, the control arm).
+
+**Bound.** The wipe stores into the 1 KiB below the SP without the stack's
+bounds. `clear_stack_body` clamps to the guard page, but it gets the bounds
+from `Fiber`/`Thread` or libc, which the allocation path may not call (they
+allocate during a thread's TLS setup). Not clamped: a thread or fiber whose
+SP is within 1 KiB of its guard page now overflows (SIGSEGV, "Stack
+overflow") on a slow path that would not have gone that deep, such as a
+cursor refill (`refill_size_class` is 0x1f8 bytes plus pushes). Any slow
+path that collects goes deeper than the wipe anyway (`run_collection_body`
+alone is 0x518 bytes plus six pushes on x86-64 Linux). So the wipe changes
+only which allocation overflows first, on a stack already within 1 KiB of
+overflowing. Documented in `Roots.wipe_below_sp` and the knob's row in
+`docs/HARDENING.md`.
+
+Cost is on the slow path only — a cursor refill, a large block, a
+collection — 64 iterations of two stores. The hit path's code changes
+because its arguments must reach the tail call: it now spills `self` and the
+size around the TLS lookup, two stores and two loads
+(`raw/disasm-proto-gc-malloc_atomic.txt` against the tip's).
 
 **Regression 86** (`process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr`,
 run by `make alloc-entry-frame`, `--release`, in CI's x86-64 test job): a
