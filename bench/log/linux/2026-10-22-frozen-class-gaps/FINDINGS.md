@@ -242,12 +242,22 @@ Arms: header + freelist (`GCRY_BITMAP_ALLOC=0`) plain, `--tlab --nursery`,
 `GCRY_ALLOC_BATCH=8`, `GCRY_INCREMENTAL=1 GCRY_ALLOC_BATCH=8` and
 `GCRY_INCREMENTAL=1 --tlab`, plus the default layout with `GCRY_INCREMENTAL=1`.
 
-**Incomplete.** When this file was committed, only 9 of the 150 seeds per
-arm had run: about 2 per arm at 200 iterations, plus a first 9 at
-40 iterations. All of them passed (exit 0, no stall). Each run takes about
-1 s. The wait for the shared lock between runs is what limits the rate.
-The ≥150-run requirement is still open. The loop keeps running in the
-agent's scratch (`stress/results.txt`).
+All 150 seeds per arm at 200 iterations, 900 runs in all, on the
+fixes' binaries:
+
+| arm | pass | exit 3 (crystal-lang/crystal#17486) | gcry stall / failure |
+|---|---|---|---|
+| header + freelist, plain | 149 | 1 (seed 3068) | 0 |
+| `--tlab --nursery` | 150 | 0 | 0 |
+| `GCRY_ALLOC_BATCH=8` | 150 | 0 | 0 |
+| `GCRY_INCREMENTAL=1 GCRY_ALLOC_BATCH=8` | 150 | 0 | 0 |
+| `GCRY_INCREMENTAL=1 --tlab` | 149 | 1 (seed 3012) | 0 |
+| default layout, `GCRY_INCREMENTAL=1` | 149 | 1 (seed 3149) | 0 |
+
+`run_bounded.sh` classified the three exit-3 runs as the Crystal
+Parallel-scheduler deadlock, not a gcry stall. Their captures are kept in
+the agent's scratch (`stress/logs/`). Each run takes about 1 s; the rate is
+limited by the wait for the shared lock.
 
 ## Found in passing, not reproduced
 
