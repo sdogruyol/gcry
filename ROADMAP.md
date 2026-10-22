@@ -3940,15 +3940,26 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       suspend: 0 stalls in 20 runs
       (`bench/log/macos/2026-09-29-pthread-list-lock/`).
 - [ ] **macOS: one live object lost on `d1549e2f` in the 2026-10-21 probe —
-      unattributed.** `tlab-nursery-sample`'s tlab-only arm, seed 6, four
-      workers, macos-latest: `after collect #151: root 11 DEAD`, its block
-      found free (64 bytes). 1 in 4 000 runs of that build, 0 in 6 000 of
-      v0.37.0 and master. `d1549e2f` predates two Darwin stop fixes (the
-      pthread list lock, 2026-09-30; the late clear of `@world_stopped`,
-      2026-10-01), and either could explain it [INFERENCE]; neither was
-      shown to. If it appears on a build with both, it is a new soundness
-      bug. `bench/log/macos/2026-10-21-tlab-nursery-hang/`
-      (`probe/macos-latest-pre-1/tlab-only-s1-6.log`).
+      attributed to the late clear of `@world_stopped` (2026-10-22); open
+      only for the macOS arm counts of round 2.** `tlab-nursery-sample`'s
+      tlab-only arm: `after collect #151: root 11 DEAD`, block free, `flags:
+      1`, cookie intact. Reproduced on `d1549e2f` at 3 in 569 runs of an
+      eight-worker shape (probe run 39734461333, 0 in 3 996 runs of five other
+      shapes). `flags: 1` is a bare `FREE` header: a carve or relink rewrote
+      the block, not the sweep. On release-0.39.0 with the late clear
+      restored (`GCRY_STW_LATE_CLEAR=1`) the same signature comes on Linux at
+      2 in 82 runs. The same runs had 6 collector stalls walking a cyclic
+      class freelist in `phase=flush`, as `d1549e2f` had on macOS (10 in 569).
+      Shipped release-0.39.0 showed none. Resumed threads that still read the
+      flag take the stopped-world path, which pops the class list under its
+      class lock, while peers refill TLABs from the same list under
+      `@alloc_lock`. They also restart collections from `tlab_refill`, but
+      22 000 worker-started collections without the late clear lost nothing.
+      Not the pthread list lock fix [INFERENCE]. Still to read: run
+      39762990317 (`pre`/`pth`/`lc`/`rel` cherry-pick arms plus `rlc`,
+      `relwc`, interleaved on macos-latest). Close it if `lc` and `rel` are
+      clean and `pre`/`pth` are not, then delete `probe/mac-lost-object`.
+      `bench/log/macos/2026-10-22-lost-object/FINDINGS.md`
 - [ ] **macOS: a TLAB refill out of memory at a new thread's start
       (2026-09-28, `b9394a01`, CI run 36360833882) — unattributed.**
       `Fiber.new` died in `tlab_alloc_small` → `oom!("failed to refill TLAB
