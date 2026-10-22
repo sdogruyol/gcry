@@ -3939,35 +3939,47 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       same shape. Fixed by resolving every port and bound before the first
       suspend: 0 stalls in 20 runs
       (`bench/log/macos/2026-09-29-pthread-list-lock/`).
-- [ ] **macOS: one live object lost on `d1549e2f` in the 2026-10-21 probe —
-      attributed to the late clear of `@world_stopped` (2026-10-22); open
-      only for the macOS arm counts of round 2.** `tlab-nursery-sample`'s
-      tlab-only arm: `after collect #151: root 11 DEAD`, block free, `flags:
-      1`, cookie intact. Reproduced on `d1549e2f` at 3 in 569 runs of an
-      eight-worker shape (probe run 39734461333, 0 in 3 996 runs of five other
-      shapes). `flags: 1` is a bare `FREE` header: a carve or relink rewrote
-      the block, not the sweep. On release-0.39.0 with the late clear
-      restored (`GCRY_STW_LATE_CLEAR=1`) the same signature comes on Linux at
-      2 in 82 runs. The same runs had 6 collector stalls walking a cyclic
-      class freelist in `phase=flush`, as `d1549e2f` had on macOS (10 in 569).
-      Shipped release-0.39.0 showed none. Resumed threads that still read the
-      flag take the stopped-world path, which pops the class list under its
-      class lock, while peers refill TLABs from the same list under
-      `@alloc_lock`. They also restart collections from `tlab_refill`, but
-      22 000 worker-started collections without the late clear lost nothing.
-      Not the pthread list lock fix [INFERENCE]. Still to read: run
-      39762990317 (`pre`/`pth`/`lc`/`rel` cherry-pick arms plus `rlc`,
-      `relwc`, interleaved on macos-latest). Close it if `lc` and `rel` are
-      clean and `pre`/`pth` are not, then delete `probe/mac-lost-object`.
-      `bench/log/macos/2026-10-22-lost-object/FINDINGS.md`
-- [ ] **macOS: a TLAB refill out of memory at a new thread's start
-      (2026-09-28, `b9394a01`, CI run 36360833882) — unattributed.**
-      `Fiber.new` died in `tlab_alloc_small` → `oom!("failed to refill TLAB
-      size class", 192)` on the header layout's TLAB (unsupported in
-      production), and the backtrace dump then failed with
-      `Thread#current_fiber cannot be nil`. The only failure in 18 950 CI runs
-      of the step, none in the probe's 10 000. Same findings directory,
-      `ci-history/run36360833882-b9394a01-tlab-nursery-8.log`.
+- [x] **macOS: one live object lost on `d1549e2f` in the 2026-10-21 probe —
+      closed 2026-10-22: the late clear of `@world_stopped`, fixed by
+      `0d1e2b6a` (2026-10-01).** `tlab-nursery-sample`'s tlab-only arm:
+      `after collect #151: root 11 DEAD`, block free, `flags: 1`, cookie
+      intact. A bare `FREE` header means a carve or relink rewrote the block,
+      not the sweep. Probe run 39762990317 ran an eight-worker tlab-only
+      shape interleaved on macos-latest, about 795 runs per arm:
+      - `d1549e2f`: 3 lost, 9 collector stalls on a cyclic class freelist in
+        `phase=flush`.
+      - plus the pthread list lock fix: 4 lost, 7 stalls. So that fix is not
+        it.
+      - plus `0d1e2b6a` alone: 0 lost, 0 stalls.
+      - release-0.39.0: 0 lost, 0 stalls.
+      - release-0.39.0 with workers starting 360 000 extra collections: 0
+        lost, 0 stalls.
+      - release-0.39.0 with `GCRY_STW_LATE_CLEAR=1`: 1 lost, 2 stalls.
+
+      The same knob reproduces the loss on Linux (2 in 82). In the window, a
+      resumed thread takes the stopped-world path and pops the class list
+      under its class lock, while peers refill TLABs from the same list under
+      `@alloc_lock`. No fix needed; `make stw-index-race`'s late-clear arm
+      guards the order on CI. `bench/log/macos/2026-10-22-lost-object/FINDINGS.md`
+- [x] **macOS: a TLAB refill out of memory at a new thread's start
+      (2026-09-28, `b9394a01`, CI run 36360833882) — closed 2026-10-22: the
+      same late clear.** `Fiber.new` died in `tlab_alloc_small` →
+      `oom!("failed to refill TLAB size class", 192)`, and the backtrace dump
+      then failed with `Thread#current_fiber cannot be nil`. At `b9394a01` a
+      newborn thread reaches that `oom!` only while a resumed thread still
+      reads `@world_stopped`:
+      1. The refill sees the flag set and takes nothing.
+      2. `collect` returns at once, because a thread with no current fiber
+         is not ready to collect.
+      3. The second refill sees the flag again and returns null.
+      4. The bypass check that follows reads the flag already cleared, and
+         the next line is `oom!`.
+
+      The window is gone since `0d1e2b6a`. The Linux late-clear arm raised
+      this OOM 2 times in 82 runs; shipped release-0.39.0 and every macOS
+      arm of run 39762990317 never did. The newborn variant itself was not
+      reproduced [INFERENCE]. `bench/log/macos/2026-10-22-lost-object/FINDINGS.md`,
+      `bench/log/macos/2026-10-21-tlab-nursery-hang/ci-history/run36360833882-b9394a01-tlab-nursery-8.log`
 - [x] **macOS: `nursery-tlab-smoke` faulted in `scan_all_fiber_roots`
       (2026-10-16) — closed 2026-10-20.** CI run `38975094005`, darwin
       arm64 gates: SIGSEGV at `0x6c696665725f6271`, "ab_refil" + 16 —
