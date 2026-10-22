@@ -38,7 +38,7 @@ lever: hiding every such word from the scan on 0.39.0 moves only Knuckeotide
 slow path leaves the entry frame by a tail call and zeroes the stack below
 it, so the frames a collection runs on hold only what they write
 (`Heap#allocate_entry`, regression 86). Knuckeotide's peak −12% locally;
-three of the five keep-rule runners agree (Knuckeotide 1.53× → 1.31× Boehm on x86 Linux, 1.44× → 1.28× on arm64), macOS pending (section 4).
+on five runners Knuckeotide falls from 1.44–1.78× to 1.28–1.63× Boehm's peak with no row slower beyond its spread (section 4).
 
 ## 1. Reproduction
 
@@ -244,29 +244,33 @@ it. An earlier 5-rep session with the wipe-off arm
 `GCRY_SLOW_ENTRY_WIPE=0` 69 MB — the wipe, not the tail calls alone, is most
 of the gain, as regression 86's 2 words suggest.
 
-### Five runners: three read, macOS pending
+### Five runners: the keep rule holds
 
 `Perf A/B` [39738092074](https://github.com/sdogruyol/gcry/actions/runs/39738092074):
 var `cb092ae5` (this change), base `32ce703aac1c10baeddff2e744a3702c1b4089c6`
 (`release-0.39.0`), 15 interleaved reps, ten rows, Boehm arm, `stats=3`,
-extra arm `GCRY_SLOW_ENTRY_WIPE=0` (`var_env`). Linux x86, Linux arm64 and
-Windows finished (`perf-<runner>/summary.md`); both macOS jobs were still
-queued when this was written. % of Boehm's speed / × Boehm's peak, median
+extra arm `GCRY_SLOW_ENTRY_WIPE=0` (`var_env`), all five runners green
+(`perf-<runner>/summary.md`). % of Boehm's speed / × Boehm's peak, median
 [IQR], base → var:
 
-| runner | Knuckeotide peak | var_env (wipe off) | Binarytrees speed | rows slower beyond the IQR |
+| runner | Knuckeotide peak | wipe off | Binarytrees speed | slower beyond the IQR |
 |---|---|---|---|---|
 | ubuntu-latest | 1.53× [1.31, 1.70] → **1.31×** [1.27, 1.46] | 1.50× | 90% → 92% | none |
 | ubuntu-24.04-arm | 1.44× [1.30, 1.48] → **1.28×** [1.23, 1.34] | 1.30× | 102% → 102% | none |
-| windows-latest | 1.73× → 1.63× (wipe is off there) | 1.71× | 123% → 118% (IQRs overlap) | none |
+| macos-latest | 1.58× [1.54, 1.58] → **1.32×** [1.31, 1.32] | 1.32× | 94% → 94% | none |
+| macos-15-intel | 1.78× [1.63, 1.83] → **1.56×** [1.53, 1.56] | 1.56× | 146% → 148% | none |
+| windows-latest | 1.73× → 1.63× (no wipe there) | 1.71× | 123% → 118% (IQRs overlap) | none |
 
-Every other row's peak is level or lower (RegexDna 0.47× → 0.43× and Revcomp
-0.61× → 0.57× on Windows, Revcomp 0.76× → 0.70× on arm64); no peak rises
-outside its IQR. JsonGenerate on ubuntu-latest reads 89% → 87% with
-overlapping IQRs ([87, 90] against [87, 88]). **The keep rule is open until
-macos-latest and macos-15-intel are read**, and a placement run
-(`pads="p16 p64 bp16 bp64"`) is the next step for any row they show slower
-beyond its spread.
+No row is slower beyond its spread on any runner (JsonGenerate on
+ubuntu-latest 89% → 87%, IQRs [87, 90] and [87, 88]; Revcomp is faster on
+macos-15-intel, 90% → 96%). Peaks are level or lower everywhere except
+JsonGenerate on macos-latest, 0.64× [0.64, 0.64] → 0.71× [0.64, 0.77]; the
+wipe-off arm reads 0.77× there, so it is the layout of the tail calls rather
+than the wipe, and it stays far under the 1.1× budget. Not attributed. On
+Darwin the wipe-off arm matches var on Knuckeotide (1.32×, 1.56×): there the
+tail calls alone remove the holder. Every row except Knuckeotide stays within
+1.1× Boehm's peak; Knuckeotide, the budget's one exception, falls 0.10–0.26×
+of Boehm on every runner. **Keep rule: holds.**
 
 ## Tools (this directory)
 
