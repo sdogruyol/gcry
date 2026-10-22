@@ -693,9 +693,10 @@ module Gcry
     # a list head, a `next_free` or a whole chunk in its registers that it
     # stores when it resumes. Those classes are frozen for this stop: their
     # lists are not written and their freelist chunks not swept (`Heap#sweep`,
-    # `flush_all_alloc_batches`), as the in-stop sweep already leaves
-    # `@chunks` alone under a frozen list-lock holder. Waiting is not an
-    # option: the holder is frozen (the 0.21.1 `@chunk_list_lock` hang).
+    # `flush_all_alloc_batches`, `flush_all_tlabs`, `scrub_freelists`), as
+    # the in-stop sweep already leaves `@chunks` alone under a frozen
+    # list-lock holder. Waiting is not an option: the holder is frozen (the
+    # 0.21.1 `@chunk_list_lock` hang).
     # Before this the stop wrote them regardless, and the resumed thread
     # stored a stale head over the sweep's pushes and rebuilds, popped a block
     # the rebuild had linked again, or installed a freelist into a chunk the
@@ -782,12 +783,34 @@ module Gcry
       (mask & (1_u64 << class_index)) != 0
     end
 
+    # Research only: false splices and scrubs every class's list in the stop
+    # whoever holds its lock, the code before 2026-10-22 — the control arm of
+    # `process_spec/regression/85_frozen_class_gaps_spec.cr`'s *tlab-flush*
+    # window.
+    property stop_tlab_flush_frozen_skip : Bool = true
+    # TLAB chains a flush left in their TLAB because their class was frozen.
+    getter stop_tlab_flush_frozen_kept : UInt64 = 0_u64
+
     # Flush TLAB freelists back to global (call under STW / before sweep / destroy).
     # Bump epoch first so resumed mid-alloc abandons stale TLAB heads already
     # published here. Walks each chain and splices only FREE nodes.
+    #
+    # A frozen class's chains stay where they are (`note_frozen_freelists`).
+    # With TLAB on, a class lock is held only by a thread on the class-list
+    # path: an allocation that read `@world_stopped` true (`tlab_bypass`; a
+    # thread the previous stop missed in its birth window), or an allocation
+    # or free that read `@tlab_enabled` false before a runtime switch. Frozen
+    # there, it has the list head in hand and stores it when it resumes: the
+    # chains spliced in front of it here went off every list and out of
+    # every TLAB, FREE blocks nothing would hand out until their chunk
+    # emptied (`scrub_freelists` rewriting the list under it did the same to
+    # the rest of the list). Kept in the TLAB they stay its owner's to hand
+    # out: their chunks are not swept in this stop, so nothing else claims
+    # them, and the next stop that finds the class free flushes them.
     protected def flush_all_tlabs : Nil
       return unless @tlabs_booted && @tlab_enabled
       @tlab_epoch.add(1)
+      skip_frozen = @stop_tlab_flush_frozen_skip
       # No per-slot locks: callers run under STW, and the collector took every
       # slot lock before stopping it (`lock_tlab_slots_for_stop`), so no mutator
       # is stopped inside a slot's critical section.
@@ -797,14 +820,22 @@ module Gcry
         SIZE_CLASS_COUNT.times do |c|
           head = tlab.value.freelists[c]
           unless head.null?
-            @freelists[c] = splice_free_nodes(head, @freelists[c])
-            tlab.value.freelists[c] = Pointer(Void).null
+            if skip_frozen && stop_frozen_class?(c, false)
+              @stop_tlab_flush_frozen_kept &+= 1
+            else
+              @freelists[c] = splice_free_nodes(head, @freelists[c])
+              tlab.value.freelists[c] = Pointer(Void).null
+            end
           end
 
           head = tlab.value.nursery_freelists[c]
           unless head.null?
-            @nursery_freelists[c] = splice_free_nodes(head, @nursery_freelists[c])
-            tlab.value.nursery_freelists[c] = Pointer(Void).null
+            if skip_frozen && stop_frozen_class?(c, true)
+              @stop_tlab_flush_frozen_kept &+= 1
+            else
+              @nursery_freelists[c] = splice_free_nodes(head, @nursery_freelists[c])
+              tlab.value.nursery_freelists[c] = Pointer(Void).null
+            end
           end
         end
       end
@@ -830,11 +861,13 @@ module Gcry
     # Drop USED nodes that leaked onto global freelists (TLAB mid-alloc + STW).
     # Call under STW immediately after flush_all_tlabs. No-op when TLAB is off —
     # scrubbing a fuzz-corrupted freelist would SEGV on !free? / bad next_free.
+    # A frozen class's list is left alone, as `flush_all_tlabs` leaves it.
     protected def scrub_freelists : Nil
       return unless @tlab_enabled
+      skip_frozen = @stop_tlab_flush_frozen_skip
       SIZE_CLASS_COUNT.times do |c|
-        scrub_one_freelist(c, false)
-        scrub_one_freelist(c, true)
+        scrub_one_freelist(c, false) unless skip_frozen && stop_frozen_class?(c, false)
+        scrub_one_freelist(c, true) unless skip_frozen && stop_frozen_class?(c, true)
       end
     end
 
