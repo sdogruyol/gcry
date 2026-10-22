@@ -29,7 +29,28 @@ bounds recompute moving from the in-stop sweep into the release flush
   its spread in this run (JsonParsePull +3.7% [−0.9, +7.5] on M1, −0.2% on
   Intel).
 
+- **JsonParsePull's timed section** was the one row slower on every runner
+  in 39671242540: +1.1% [+0.4, +1.3] `ubuntu-latest`, +0.6% [+0.5, +1.6]
+  arm64, +2.9% [+2.4, +3.6] Windows, +9.6% [+3.3, +23.2] M1, and +3.6% wall
+  on Intel. Placement was probed on Windows and macOS only, so the two
+  default-path commits were measured alone (15 reps, `ubuntu-latest`, arm64,
+  Windows, M1; Primes, the JSON rows, Revcomp):
+  - **Run 39702197449, regression 81 alone** (`9b72182e` against its parent
+    `84a0259f`): JsonParsePull's timed section +0.3% [−0.1, +0.8], +0.9%
+    [+0.5, +1.2], −0.6% [−2.0, −0.1], −4.5% [−8.0, −1.0].
+  - **Run 39702200188, regression 82 alone** (`601bb973` against `9b72182e`):
+    −2.4% [−2.7, −1.9], −1.6% [−1.7, −1.2], +0.7% [−0.9, +2.0], −3.7%
+    [−8.9, +6.1].
+  Neither commit moves the row the same way on two runners, and the two
+  together come out faster as often as slower; the other rows flip sign the
+  same way (Revcomp +6.4% timed on `ubuntu-latest` with 81, −0.3% with 82;
+  JsonGenerate +1.9% on Windows with 81, −2.0% with 82). Nothing in either
+  commit runs on the mutator's path in these benches except the cursor
+  retire, which 82 makes no longer. [INFERENCE] The five-runner rise is
+  where the code lands, as in the Windows pad arms, not a cost of 81 or 82.
+
 **Verdict:** no row is slower than 0.38.0 beyond what placement moves on the
-same runner. JsonParseSerializable's Windows peak (0.87×) and every other row
+same runner (Windows, macOS) or what the commits alone fail to reproduce
+(Linux). JsonParseSerializable's Windows peak (0.87×) and every other row
 stay inside the 1.1× budget; Knuckeotide reads 1.36–1.66× (0.38.0
 1.43–1.68×), the documented exception (`../2026-10-21-knuckeotide-pin/`).
