@@ -40,7 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   No row is slower beyond its spread (Perf A/B 39738092074;
   `bench/log/linux/2026-10-22-regexdna-peak/`, regression 86).
-  `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off.
+  `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off. The wipe stops at the running
+  fiber's guard page, and is skipped on a thread with no current fiber, so a
+  fiber with less than 1 KiB of stack left does not fault in it.
 
 - **`bench/run_bounded.sh` captures and kills the stalled command's whole
   process tree.** A command that is a wrapper (`make <gate>`, `env`,
