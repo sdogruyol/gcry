@@ -7,18 +7,20 @@ true, free: true, size: 64, flags: 1, first_word: 0xC0FFEE42C0FFEE01}`, 1 in
 4 000 runs of that build.
 
 **Verdict: the late clear of `@world_stopped` (fixed by `0d1e2b6a`,
-2026-10-01,
-`bench/log/macos/2026-10-01-darwin-index-late-clear/`), not the pthread
-list lock fix.** The evidence so far:
+2026-10-01, `bench/log/macos/2026-10-01-darwin-index-late-clear/`), not the
+pthread list lock fix. It does not happen on release-0.39.0.**
 
-1. The loss reproduces on `d1549e2f` at a usable rate: 3 in 569 runs of an
-   eight-worker shape on macos-latest, same signature as the sighting
-   (round 1 below).
-2. Restoring the late clear on **release-0.39.0**
-   (`GCRY_STW_LATE_CLEAR=1`, the gate's red-arm knob) reproduces the same
-   signature on Linux at 2 in 82 runs of the CI step's tlab-only shape, and
-   the same flush-phase stalls `d1549e2f` shows. Without the knob,
-   release-0.39.0 shows none (Linux below; macOS: round 2, pending).
+1. Round 2 (run 39762990317, below) interleaved six arms on macos-latest,
+   about 795 runs each. `d1549e2f` lost objects in 3 runs and stalled 9
+   times. With the pthread list lock fix added it was no better (4 lost, 7
+   stalled). With only `0d1e2b6a` added it was clean (0 of 796).
+   release-0.39.0 was clean too (0 of 795), and so was release-0.39.0 with
+   its Parallel workers starting 360 000 extra collections (0 of 792). Put
+   the late clear back into release-0.39.0 with `GCRY_STW_LATE_CLEAR=1` and
+   the loss comes back (1 lost, 2 stalled in 794 runs).
+2. The same knob reproduces the loss on Linux: 2 losses in 82 runs of the
+   CI step's tlab-only shape, plus the same flush-phase stalls `d1549e2f`
+   shows. Without the knob, release-0.39.0 had none.
 3. The mechanism, read from the code at `d1549e2f` and at release-0.39.0
    (`revive_dormant_chunk`, `tlab_refill_locked` and `allocate` are the same
    in both): a thread resumed while `@world_stopped` still read true takes
@@ -29,9 +31,9 @@ list lock fix.** The evidence so far:
    before the resume, only the collector, alone in the stop, can take the
    first path.
 
-The macOS cherry-pick arms (`pth`, `lc`) and `rel` are running in round 2
-(run 39762990317). Their numbers were not in when this was written, and
-the ROADMAP item stays open until they are.
+No fix and no regression test: release-0.39.0 is already fixed, and
+`make stw-index-race`'s late-clear red arm already guards the order on macOS,
+Intel macOS and Windows CI.
 
 ## The signature says "a carve or relink rewrote a live block"
 
@@ -120,10 +122,8 @@ The CI step's environment, `--tlab --iterations=200 --workers=2,4`, seeds
   clear.
 - The two OOMs, `failed to refill TLAB size class 48/80` from `tlab.cr`,
   come from the same window. A refill sees the flag, then the bypass check
-  after it does not, and `oom!` runs. [INFERENCE] The other open macOS item,
-  "a TLAB refill out of memory at a new thread's start (`b9394a01`,
-  2026-09-28)", is this on a build that also predates `0d1e2b6a`. It is not
-  attributed here.
+  after it does not, and `oom!` runs. See "The `b9394a01` TLAB-refill OOM"
+  below.
 
 ### Which race in the window
 
@@ -151,33 +151,95 @@ class takes that class's lock.
 
 ## Was it the pthread list lock (`9c19480b` … `131f6267`)?
 
-[INFERENCE] No. That defect hangs in libpthread, or leaves a thread born
-during the stop unscanned. The loss here is a header rewrite, with the
-collector's mark not involved (`SWEPT` clear), and the Linux reproduction
-has no Darwin stop code at all. The round 2 `pth` arm is the measurement.
+No. Round 2's `pth` arm, which is `d1549e2f` with all four commits applied,
+did no better than `pre`: 4 lost in 796 runs against 3. That defect hangs
+in libpthread, or leaves a thread born during the stop unscanned. The loss
+here is a header rewrite, and the Linux reproduction has no Darwin stop code
+at all.
 
-## Round 2 (running when this was written)
+## Round 2: the arms, interleaved on macos-latest
 
 Run [39762990317](https://github.com/sdogruyol/gcry/actions/runs/39762990317),
-probe commit `8dd6af5f`. Five macos-latest jobs, 290 min each. Each job
-builds six arms and interleaves them, `long8` only (`variants-r2.txt`,
-`probe_loop.sh`, `probe-ci.yml`):
-`pre` (`d1549e2f`), `pth` (+ `arms/pth.patch` = `9c19480b 8bc3b355 e69e36fe
-131f6267`), `lc` (+ `arms/lc.patch` = `0d1e2b6a`), `rel` (`32ce703a`), `rlc`
-(`rel` + `GCRY_STW_LATE_CLEAR=1`), `relwc` (`rel` + `--worker-collect=16`).
-At round 1's rate, `pre` should show about 5 losses and 15 flush stalls.
-Expected outcome if the verdict holds: `pre`, `pth` and `rlc` lose objects
-and stall in `phase=flush`, while `lc`, `rel` and `relwc` do neither, and
-only the first three show extra `heap_collections`. `arms/fp.patch`
-(`6462255f`, FP/SIMD register capture) applies and builds but is not in round
-2: the Linux reproduction captures FP state in the signal frame, so it
-cannot be that.
+probe commit `8dd6af5f`, jobs 119771476149, 119771476216, 119771476089,
+119771476191 and 119771475768, 290 min each, all green. Each job built six
+arms and ran `long8` (`--tlab --iterations=1000 --workers=8`, seeds 1..10)
+round-robin over them (`variants-r2.txt`, `probe_loop.sh`, `probe-ci.yml`):
+
+- `pre`: `d1549e2f`
+- `pth`: `pre` + `arms/pth.patch`, which is `9c19480b 8bc3b355 e69e36fe
+  131f6267`
+- `lc`: `pre` + `arms/lc.patch`, which is `0d1e2b6a`
+- `rel`: release-0.39.0 `32ce703a`
+- `rlc`: `rel` with `GCRY_STW_LATE_CLEAR=1`
+- `relwc`: `rel` with `--worker-collect=16`
+
+The harness was `harness.cr` in every arm.
+
+| arm | runs | lost (DEAD) | stall in `phase=flush` | other stall | other failure | extra heap collections |
+|---|---:|---:|---:|---:|---:|---:|
+| `pre` | 796 | **3** | **9** | 0 | 0 | 55 319 |
+| `pth` | 796 | **4** | **7** | 0 | 0 | 53 817 |
+| `lc` | 796 | 0 | 0 | 0 | 0 | **0** |
+| `rel` | 795 | 0 | 0 | 0 | 0 | **0** |
+| `rlc` | 794 | **1** | **1** | 1 (`MonitorGate.close`) | 0 | 35 650 |
+| `relwc` | 792 | 0 | 0 | 0 | 0 | 360 794 (by design) |
+
+(`round2/failures.txt`, `round2/*-summary.txt`. The loss and `rlc` stall
+logs are in `round2/`.)
+
+- Every loss has the sighting's signature: `free: true, flags: 1`, cookie
+  intact. Five of the eight losing runs lost two roots. One was the `…fa0`
+  top block and the other was within 10 KiB of it, which fits a chain
+  relinked through a handed-out block. `rlc`'s loss is in the 80-byte class.
+- None of the 4 773 runs hit the Crystal scheduler deadlock (#17486), and
+  none ran out of TLAB memory.
+- The `rlc` gate stall has the shape of round 1's: main is in `Thread.new`
+  under `Parallel#wake_scheduler`'s mutex, spinning in `MonitorGate.close`
+  from a `tlab_refill` → `collect`, while SYSMON waits on that mutex. So it
+  is the late clear too.
+- Extra heap collections are collections the harness did not ask for. Only
+  the late-clear arms have them, outside `relwc`, which asks for them by
+  design. They show the window sending workers into `collect` from
+  `tlab_refill`. `relwc` shows that workers collecting is harmless without
+  the window: 360 794 worker-started collections, 0 losses.
+
+So `0d1e2b6a` alone removes the loss and the stalls from `d1549e2f`, the
+pthread list lock fix does not, and putting the late clear back into
+release-0.39.0 brings both back. `arms/fp.patch` (`6462255f`, FP/SIMD
+register capture) applies and builds, but it was not run. It was not needed
+once `lc` was clean.
+
+## The `b9394a01` TLAB-refill OOM (CI run 36360833882) is the same window
+
+The other open macOS item: on `b9394a01` (2026-09-28, before `0d1e2b6a`), a
+new thread's `Fiber.new` died in `tlab_alloc_small` →
+`oom!("failed to refill TLAB size class", 192)`. The backtrace dump then
+failed with `Thread#current_fiber cannot be nil`. Read at `b9394a01`
+(`tlab.cr` lines 264–283, 314 and 536, and `collect.cr` line 1788), a newborn
+thread reaches that `oom!` only in the late-clear window:
+
+1. `tlab_refill_once` sees `@world_stopped` and refills nothing.
+2. `tlab_refill` calls `collect`, which returns at once, because a thread
+   whose `current_fiber` is still nil is `thread_not_ready_for_collect?`.
+   That is the state of a thread allocating its own main `Fiber`.
+3. The second `tlab_refill_once` sees the flag again and returns null.
+4. `tlab_alloc_small`'s `return tlab_bypass(...) if @world_stopped` then
+   reads the flag cleared, and the next line is the `oom!`.
+
+A collection started inside a stop clears the flag before it resumes
+anyone, and `0d1e2b6a` made Darwin do the same. So with the flag set only
+inside the stop, step 1 cannot happen to a running thread. Measured: the
+Linux late-clear arm raised this OOM twice in 82 runs and the shipped tree
+never did; round 2 had none on any macOS arm. The newborn variant itself was
+not reproduced. The steps above are what attribute it [INFERENCE], and the
+CI record has none since 2026-09-28 (`../2026-10-21-tlab-nursery-hang/`).
 
 ## Files
 
 - `probe-ci.yml` (round 2's workflow; round 1's is in the probe branch's
-  history), `probe_loop.sh` (round 2), `probe_loop_r1.sh`,
+  history, which is deleted), `probe_loop.sh` (round 2), `probe_loop_r1.sh`,
   `variants-r1.txt`, `variants-r2.txt`, `harness.cr`, `arms/*.patch`.
-- `round1/`: each job's summary and runs.csv, the three losses, and two
-  stall captures with their Binary Images trimmed.
+- `round1/`, `round2/`: each job's summary and runs.csv, every losing run's
+  log, and stall captures with their Binary Images trimmed. The full outputs
+  are in the two runs' artifacts.
 - `linux/`: progress files and logs of the local runs above.
