@@ -740,6 +740,93 @@ module Gcry
       @stop_frozen_nursery_classes = 0_u64
     end
 
+    # Mark bits the finishing slice cleared because nothing was going to
+    # occupy them (`clear_frozen_bitmap_stray_marks`).
+    getter stop_slice_stray_marks_cleared : UInt64 = 0_u64
+    # Research only: false leaves a bitmap class's marks as they are in the
+    # finishing slice whoever holds its lock, the code before 2026-10-22 —
+    # the control arm of
+    # `process_spec/regression/85_frozen_class_gaps_spec.cr`'s *bitmap-free*
+    # window.
+    property stop_slice_stray_mark_clear : Bool = true
+
+    # The incremental finishing slice, before its sweep. A bitmap `free`
+    # holds its class lock across its two clears, `occ` then `mark`
+    # (`bitmap_free_block`). A thread the slice froze between them leaves the
+    # block `occ=0, mark=1` — the mark the cycle's trace or allocate-black
+    # gave it — and the slice's sweep, which runs on the cycle's marks with
+    # no clear before it, sets `occ = mark`: the block was occupied again,
+    # owned by nobody, while the free went on to subtract it from
+    # `live_objects` and add it to `free_bytes`. The next sweep found it
+    # unmarked and did both again, so each such stop left `live_objects` one
+    # low and `free_bytes` one payload high for good, and the block out of
+    # use for a cycle. Only the finishing slice: a stop-the-world major
+    # clears every mark before it traces, and the trace marks no block whose
+    # `occ` bit is clear.
+    #
+    # Which classes: those whose lock is held, probed as
+    # `note_frozen_freelists` probes the freelist classes and for the same
+    # reason — a held lock is a frozen holder for the whole stop. One
+    # try-lock per class, and a walk only when one is held, so a slice that
+    # froze nobody in a bitmap section pays 40 try-locks.
+    #
+    # What is cleared: in each bitmap chunk of such a class, the marks with
+    # no occupancy behind them. With every mutator frozen, a bit marked and
+    # not occupied is one of three states, each a thread inside a bitmap
+    # section:
+    #
+    # - a `free` between its `occ` clear and its `mark` clear — the case this
+    #   exists for: the block is being freed and is nobody's;
+    # - a claim's release (`cursor_release_claim`, under the class lock)
+    #   between the same two clears: those blocks are being given back;
+    # - a claim between its `mark` OR and its `occ` OR (`cursor_claim_word`).
+    #   Cleared, the sweep leaves the bits free rather than completing the
+    #   claim, and the owner completes it with its own OR when it resumes:
+    #   the chunk is its CURSOR, so no other cursor claims those bits in
+    #   between; no sweep runs before the next stop; and that stop's settle
+    #   marks the claim again (`cursor_premark_claim`).
+    #
+    # The trace marks no block whose `occ` bit is clear, so nothing live is
+    # among them. Plain stores: the world is stopped.
+    protected def clear_frozen_bitmap_stray_marks : Nil
+      return unless @stop_slice_stray_mark_clear
+      return unless @bitmap_alloc
+      held = 0_u64
+      i = 0
+      while i < SIZE_CLASS_COUNT
+        lock = freelist_lock_ptr(i, false)
+        if try_lock_spinlock(lock)
+          lock.value.unlock
+        else
+          held |= 1_u64 << i
+        end
+        i += 1
+      end
+      return if held == 0_u64
+      # The index, as `clear_all_marks` walks it: the marker reaches every
+      # indexed chunk, listed or not.
+      each_indexed_chunk do |chunk|
+        next if ChunkHeader.large?(chunk) || ChunkHeader.dormant?(chunk)
+        next unless bitmap_alloc_chunk?(chunk)
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        next if (held & (1_u64 << class_index)) == 0
+        occ = ChunkHeader.occ_bitmap(chunk)
+        mark = ChunkHeader.mark_bitmap(chunk)
+        next if occ.null? || mark.null?
+        words = chunk.value.bitmap_words.to_i32
+        w = 0
+        while w < words
+          stray = mark[w] & ~occ[w]
+          if stray != 0_u64
+            mark[w] = mark[w] & ~stray
+            @stop_slice_stray_marks_cleared &+= stray.popcount.to_u64
+          end
+          w += 1
+        end
+      end
+    end
+
     # Research only: false leaves the sweep after the world even when the
     # stop found a frozen freelist class — the code before 2026-10-22, the
     # control arm of regression 84's lazy windows.

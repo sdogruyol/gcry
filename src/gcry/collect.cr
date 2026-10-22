@@ -2173,6 +2173,9 @@ module Gcry
               flush_all_alloc_batches
               scrub_freelists
             end
+            # A bitmap `free` frozen between its two clears must not come
+            # back occupied from the sweep (`clear_frozen_bitmap_stray_marks`).
+            clear_frozen_bitmap_stray_marks
             sweep(major: true)
             clear_frozen_freelists
             collection_event(CollectionEvent::ReclaimEnd)
