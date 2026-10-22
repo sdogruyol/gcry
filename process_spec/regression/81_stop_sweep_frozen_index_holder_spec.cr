@@ -46,6 +46,10 @@ private HOLDER81_BLOCKS =     3
 # Long enough that the stop lands inside it, short enough that the fixed
 # arm's flush, which waits for it with the world running, ends promptly.
 private HOLDER81_HOLD_MS = 2000
+# Printed by a control child that came back: the stop restarted the world
+# with the holder inside the lock and the empty chunk left the index, i.e.
+# the old code took the lock-free path it must not have.
+private HOLDER81_REACHED = "holder81: control finished after releasing the chunk under a held lock"
 
 private def holder81_heap : Gcry::Heap
   heap = Gcry.default_heap
@@ -114,30 +118,47 @@ describe "Regression: an in-stop sweep takes no @index_lock a frozen thread may 
   end
 
   it "control arm hangs in the stop" do
-    captured = IO::Memory.new
-    child = Process.new(Process.executable_path.not_nil!, ["-e", "stop-sweep-frozen-index-holder child control"],
-      env: {"GCRY_FROZEN_INDEX_CHILD" => "control", "GCRY_STW_WATCHDOG_MS" => "1000"},
-      output: captured, error: captured)
-    deadline = Time.instant + 20.seconds
-    finished = false
-    while Time.instant < deadline
-      if child.terminated?
+    # A child whose stop did not reach the release branch with the lock held
+    # (the empty chunk not queued for release, or the stop landing after the
+    # hold) finishes without saying anything about the old code: it reports
+    # which, and gets another try. One that did reach it and still finished
+    # fails the arm, and so does a hang that is not this one. A macOS
+    # header-layout child finished once in CI (run 39825990272), without the
+    # report that would say which.
+    text = ""
+    hung = false
+    3.times do
+      captured = IO::Memory.new
+      child = Process.new(Process.executable_path.not_nil!, ["-e", "stop-sweep-frozen-index-holder child control"],
+        env: {"GCRY_FROZEN_INDEX_CHILD" => "control", "GCRY_STW_WATCHDOG_MS" => "1000"},
+        output: captured, error: captured)
+      deadline = Time.instant + 20.seconds
+      finished = false
+      while Time.instant < deadline
+        if child.terminated?
+          child.wait
+          finished = true
+          break
+        end
+        sleep 100.milliseconds
+      end
+      unless finished
+        child.terminate(graceful: false)
         child.wait
-        finished = true
+      end
+      text = captured.to_s
+      # Reached the collection in every case.
+      text.should contain("holder81: collecting with @index_lock held")
+      unless finished
+        hung = true
         break
       end
-      sleep 100.milliseconds
+      # Finished: only a missed setup earns another try.
+      fail "the control arm reached the release with the lock held and finished:\n#{text}" if text.includes?(HOLDER81_REACHED)
     end
-    unless finished
-      child.terminate(graceful: false)
-      child.wait
-    end
-    text = captured.to_s
-    # Reached the collection, and never came back from its stop: the
-    # holder's 2 s hold ended long before the deadline for a thread that
-    # runs, and never for one the stop froze.
-    text.should contain("holder81: collecting with @index_lock held")
-    fail "the control arm finished:\n#{text}" if finished
+    fail "the control arm finished three times without reaching the release with the lock held:\n#{text}" unless hung
+    # Never came back from its stop: the holder's 2 s hold ended long before
+    # the deadline for a thread that runs, and never for one the stop froze.
     text.should contain("STOP-THE-WORLD STALLED")
     text.should contain("phase=sweep")
   end
@@ -158,7 +179,15 @@ describe "Regression: an in-stop sweep takes no @index_lock a frozen thread may 
     next unless ENV["GCRY_FROZEN_INDEX_CHILD"]? == "control"
     heap = holder81_heap
     heap.stop_sweep_index_lock = false
-    holder81_empty_chunk(heap)
-    holder81_window(heap)
+    chunk = holder81_empty_chunk(heap)
+    restarted = holder81_window(heap)
+    released = true
+    heap.each_indexed_chunk { |c| released = false if c.address == chunk }
+    if restarted && released
+      STDOUT.puts HOLDER81_REACHED
+    else
+      STDOUT.puts "holder81: control setup missed: restarted with the lock held=#{restarted} chunk released=#{released}"
+    end
+    STDOUT.flush
   end
 end
