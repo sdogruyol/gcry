@@ -29,3 +29,15 @@ in-stop, debug and release, and with TLAB and nursery, 1 030 bounded runs,
 0 gcry failures, 1 scheduler deadlock. It does not set `GCRY_ALLOC_BATCH`,
 so it says nothing about the two review findings on 84; their arms are in
 regression 84 (`../2026-10-22-in-stop-sweep-audit/`).
+
+## Round 2, on `07cc4a7f` (2026-10-22)
+
+The same script on `07cc4a7f`: round 1 plus the mprotect re-arm fix, the
+frozen-class gaps, the slow-path wipe before its guard-page clamp, and
+regression 84's spec fix (`summary-round2.txt`). Every gcry gate passed: 0
+failures and 0 stalls in every loop. stw-mt release: 292 of 300, 8 runs the
+Crystal scheduler deadlock (one capture kept,
+`round2-stw-mt-release-sched-seed235426305.log.gz`), against 6 the night
+before. The clamp and the Windows split that came after (`395023e9`,
+`e460d60d`) ran their own checks (regression 86's guard-page arms, process_spec
+on three layouts, the Windows runners), not this set.

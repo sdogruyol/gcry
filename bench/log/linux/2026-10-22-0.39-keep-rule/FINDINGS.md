@@ -54,3 +54,45 @@ same runner (Windows, macOS) or what the commits alone fail to reproduce
 (Linux). JsonParseSerializable's Windows peak (0.87×) and every other row
 stay inside the 1.1× budget; Knuckeotide reads 1.36–1.66× (0.38.0
 1.43–1.68×), the documented exception (`../2026-10-21-knuckeotide-pin/`).
+
+## Round 2, on `97c24df5` (2026-10-23)
+
+Round 2 added the mprotect re-arm fix (regression 87; opt-in barrier, one
+store in the fork reset on the default path), the incremental/TLAB frozen-class
+fixes (regression 85; non-default paths), and the allocation slow path's tail
+call with its stack wipe, clamped to the running fiber's guard page
+(regression 86; default path, Windows keeps the old slow path).
+
+- **Run 39810968089**, all five runners against `v0.38.0`, nine benches, 15
+  reps, Kemal 15 trials. macOS, arm64 and Windows: no wall time slower beyond
+  its spread except JsonParsePure +3.7% [+0.7, +6.3] on M1, JsonGenerate
+  +1.7% [+0.3, +2.3] on arm64 and JsonParsePull +3.1% [+0.3, +10.2] on
+  Windows; Knuckeotide's peak −16% on M1, −8% on arm64, −21% on
+  `ubuntu-latest` (1.60× → 1.30× Boehm). `ubuntu-latest` read six rows slower,
+  Binarytrees +4.2% wall [+2.6, +5.9] and RegexDna +2.7% the largest. Kemal
+  `/json` is level on all four runners it runs on (paired spreads overlap; peak
+  1.30–1.39× on both arms).
+- **Run 39821365613**, the round-2 source changes alone (`97c24df5` against
+  `07cc4a7f`, i.e. the guard-page clamp and the Windows split on top of the
+  wipe), `ubuntu-latest` and arm64, nine benches: no row slower beyond its
+  spread on either runner (largest: RegexDna's timed section +0.5% [+0.2,
+  +1.7] on `ubuntu-latest`).
+- **Run 39821365371**, `a47188df` (round 1 plus the mprotect fix, before the
+  wipe) against `v0.38.0` on `ubuntu-latest`: Binarytrees +8.2% wall, the JSON
+  rows +1.7 to +2.4%. Between `a04ce52a`, which read Binarytrees −1.9% on the
+  same runner in 39671242540, and `a47188df` nothing on the mutator's path
+  changed: the mprotect handler (unarmed by default) grew by 300 lines and the
+  fork reset gained one call. The same code reads −1.9% and +8.2% depending on
+  where it lands.
+- **Run 39821292426**, `97c24df5` against `v0.38.0` on `ubuntu-latest` with pad
+  arms: the JSON rows' and Revcomp's timed sections at 16 bytes of padding read
+  what 0.38.0 reads (−4.0% to −5.2% against unpadded 0.39), and 0.38.0 padded
+  by 16 reads what unpadded 0.39 reads (+0.8% to +1.0%). Binarytrees spans
+  1.183–1.205 s padded against 0.38.0's 1.147–1.183 s; RegexDna 2.512–2.602
+  against 2.488–2.561.
+
+**Verdict:** none of round 2's changes carries a cost on the two Linux runners
+when measured alone, and `ubuntu-latest`'s slower rows against 0.38.0 move with
+padding and with code that never runs. [INFERENCE] Placement; Binarytrees on
+`ubuntu-latest` is the row whose padded ranges overlap least and the first to
+re-measure if it persists.
