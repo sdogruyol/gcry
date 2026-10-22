@@ -43,6 +43,7 @@ private TAKER80_STAMP  = 0x7A4E_80C0_FFEE_0080_u64
 # page 0, which no release reaches (`chunk_layout.cr`); it ends pages later.
 private TAKER80_LAST         = TAKER80_BYTES // 8 - 1
 private TAKER80_CONTROL_MARK = "taker80: the stop made the chunk dormant under its parked taker"
+private TAKER80_SKIP_MARK    = "taker80: no bitmap allocator, skipped"
 
 private def taker80_heap : Gcry::Heap
   heap = Gcry.default_heap
@@ -159,15 +160,22 @@ describe "Regression: an in-stop sweep makes no chunk dormant under a frozen poo
       # as on Linux, and the control child's assertions hold on every platform.
       fail "child #{status.inspect}:\n#{captured}" unless status.success?
       captured.to_s.should contain("1 examples, 0 failures")
-      # The control child saw the chunk dormant under its parked taker.
-      captured.to_s.should contain(TAKER80_CONTROL_MARK) if arm == "control"
+      # The control child saw the chunk dormant under its parked taker,
+      # unless its heap has no bitmap allocator (the header layout's freelist
+      # arms), where both children skip and say so.
+      if arm == "control" && !captured.to_s.includes?(TAKER80_SKIP_MARK)
+        captured.to_s.should contain(TAKER80_CONTROL_MARK)
+      end
     end
   end
 
   it "stop-sweep-frozen-pool-taker child fixed" do
     next unless ENV["GCRY_FROZEN_TAKER_CHILD"]? == "fixed"
     heap = taker80_heap
-    next unless heap.bitmap_alloc?
+    unless heap.bitmap_alloc?
+      STDOUT.puts TAKER80_SKIP_MARK
+      next
+    end
     chunk = taker80_empty_chunk(heap)
     relinks = heap.stop_sweep_relinks_declined
     declined = heap.stop_sweep_dormant_declined
@@ -199,7 +207,10 @@ describe "Regression: an in-stop sweep makes no chunk dormant under a frozen poo
   it "stop-sweep-frozen-pool-taker child control" do
     next unless ENV["GCRY_FROZEN_TAKER_CHILD"]? == "control"
     heap = taker80_heap
-    next unless heap.bitmap_alloc?
+    unless heap.bitmap_alloc?
+      STDOUT.puts TAKER80_SKIP_MARK
+      next
+    end
     heap.stop_sweep_dormant_lock = false
     chunk = taker80_empty_chunk(heap)
     stops, p = taker80_window(heap, chunk) do
