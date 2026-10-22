@@ -110,9 +110,13 @@ module Gcry
     @@mp_unsafe_frees = 0_u64
     # This thread's last unclaimed protection fault, and the generation it
     # was taken in (`mprotect_unclaimed`). Literal initializers: read in the
-    # handler, so no `__crystal_once`.
+    # handler, so no `__crystal_once`. The address is kept complemented
+    # (`~addr`): thread-local storage is scanned conservatively as a root
+    # (`linux_roots.cr`, `@@tls_anchor`), and a heap address kept here as is
+    # would pin whatever object holds it for the life of the thread. The
+    # complement of a user-space address is not one.
     @[ThreadLocal]
-    @@mp_unclaimed_addr : UInt64 = 0_u64
+    @@mp_unclaimed_addr_inv : UInt64 = 0_u64
     @[ThreadLocal]
     @@mp_unclaimed_gen : UInt64 = 0_u64
     @@mp_installed = false
@@ -493,13 +497,13 @@ module Gcry
     def self.mprotect_unclaimed(addr : UInt64, code : Int32) : Nil
       if code == SEGV_ACCERR && @@mprotect_retry_unclaimed
         gen = @@mp_gen.get
-        unless addr == @@mp_unclaimed_addr && gen == @@mp_unclaimed_gen
-          @@mp_unclaimed_addr = addr
+        unless ~addr == @@mp_unclaimed_addr_inv && gen == @@mp_unclaimed_gen
+          @@mp_unclaimed_addr_inv = ~addr
           @@mp_unclaimed_gen = gen
           return
         end
       end
-      @@mp_unclaimed_addr = 0_u64
+      @@mp_unclaimed_addr_inv = 0_u64
       # Not our RO page — restore previous action so the retried fault is handled normally.
       LibC.sigaction(LibC::SIGSEGV, pointerof(@@mp_old_sa), nil)
       @@mp_installed = false
