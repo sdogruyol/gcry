@@ -36,13 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | arm64 Linux | 1.44× | 1.28× |
   | M1 | 1.58× | 1.32× |
   | Intel Mac | 1.78× | 1.56× |
-  | Windows (tail calls only, no wipe) | 1.73× | 1.63× |
 
   No row is slower beyond its spread (Perf A/B 39738092074;
   `bench/log/linux/2026-10-22-regexdna-peak/`, regression 86).
   `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off. The wipe stops at the running
   fiber's guard page, and is skipped on a thread with no current fiber, so a
   fiber with less than 1 KiB of stack left does not fault in it.
+  Windows keeps the slow path as it was: it has no wipe, and the tail calls
+  alone added unwritten slots in a debug build (regression 79 read 75 stale
+  words on x86-64, over its 64).
 
 - **`bench/run_bounded.sh` captures and kills the stalled command's whole
   process tree.** A command that is a wrapper (`make <gate>`, `env`,

@@ -196,7 +196,7 @@ restored into the registers they came from, and those are pushed again by
 nothing of its own on the stack; a signal landing mid-wipe builds its frame
 below the SP and is done before the wipe resumes over it. Windows does
 nothing in the wipe (stack growth through `PAGE_GUARD`, as
-`OS.clear_dead_stack` handles), so it gets the tail calls only. The review
+`OS.clear_dead_stack` handles), so it got the tail calls only — and no longer gets those (below, "Windows"). The review
 (agent `WipeReview`, release builds of regression 86 for x86-64 Linux,
 aarch64 Linux, aarch64 and x86-64 Darwin, all disassembled) found the tail
 calls on every target. On Linux `allocate_entry` has no prologue; on both
@@ -342,3 +342,30 @@ of Boehm on every runner. **Keep rule: holds.**
   wrong-checksum run as failed: RegexDna, Knuckeotide, Revcomp and the JSON
   rows print `err result=` on this host in every arm, Boehm's included, the
   same value in each, so the timings stand).
+
+## Windows: the slow path stays in the entry's frame (`wipe-windows-039`)
+
+With no wipe on Windows, the restructuring left only its two extra frames,
+and in a debug build (how `ci/windows.ps1` runs `process_spec`) nothing is a
+tail call, so `allocate_entry` and `allocate_traced` added unwritten slots
+between the allocation and the collector. Regression 79 read **75** stale
+words on windows-latest x86-64 (limit 64) in PR #56's CI at `07cc4a7f`
+(run 39775800632, the gates and freelist jobs). Windows now keeps the slow
+path in the entry's frame, the code before (`{% if flag?(:win32) %}` in
+`Heap#malloc`/`malloc_atomic`); every other target is unchanged source.
+
+Probe (push-triggered `probe/wipe-windows`, deleted after reading):
+regressions 79 and 86 built debug and `--release`, five runs of each, in
+the three layouts ci.yml runs.
+
+- [39807692348](https://github.com/sdogruyol/gcry/actions/runs/39807692348),
+  windows-latest x86-64: base `3ff97bec` (wipe-clamp-039), freelist: debug
+  79 fails 5 of 5, "Expected 75 to be LessThan 64"; default and headers
+  pass. Fix `49479fbb`: 0 failures in all three layouts (20 runs each).
+- [39808315404](https://github.com/sdogruyol/gcry/actions/runs/39808315404),
+  windows-11-arm, fix: 0 failures in all three layouts. (The first run's
+  arm64 jobs failed on the probe script's release-build arguments, not on
+  a spec.)
+
+Cost: Windows gives up the 1.73× → 1.63× Knuckeotide peak the tail calls
+alone bought there (Perf A/B 39738092074).
