@@ -3880,6 +3880,24 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       same shape. Fixed by resolving every port and bound before the first
       suspend: 0 stalls in 20 runs
       (`bench/log/macos/2026-09-29-pthread-list-lock/`).
+- [ ] **macOS: one live object lost on `d1549e2f` in the 2026-10-21 probe —
+      unattributed.** `tlab-nursery-sample`'s tlab-only arm, seed 6, four
+      workers, macos-latest: `after collect #151: root 11 DEAD`, its block
+      found free (64 bytes). 1 in 4 000 runs of that build, 0 in 6 000 of
+      v0.37.0 and master. `d1549e2f` predates two Darwin stop fixes (the
+      pthread list lock, 2026-09-30; the late clear of `@world_stopped`,
+      2026-10-01), and either could explain it [INFERENCE]; neither was
+      shown to. If it appears on a build with both, it is a new soundness
+      bug. `bench/log/macos/2026-10-21-tlab-nursery-hang/`
+      (`probe/macos-latest-pre-1/tlab-only-s1-6.log`).
+- [ ] **macOS: a TLAB refill out of memory at a new thread's start
+      (2026-09-28, `b9394a01`, CI run 36360833882) — unattributed.**
+      `Fiber.new` died in `tlab_alloc_small` → `oom!("failed to refill TLAB
+      size class", 192)` on the header layout's TLAB (unsupported in
+      production), and the backtrace dump then failed with
+      `Thread#current_fiber cannot be nil`. The only failure in 18 950 CI runs
+      of the step, none in the probe's 10 000. Same findings directory,
+      `ci-history/run36360833882-b9394a01-tlab-nursery-8.log`.
 - [x] **macOS: `nursery-tlab-smoke` faulted in `scan_all_fiber_roots`
       (2026-10-16) — closed 2026-10-20.** CI run `38975094005`, darwin
       arm64 gates: SIGSEGV at `0x6c696665725f6271`, "ab_refil" + 16 —
