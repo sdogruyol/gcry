@@ -132,7 +132,10 @@ The tail calls without the wipe read 75 in debug on x86-64 (run
 
 - `ci/windows.ps1` (samples suite, both Windows jobs, three variants) builds
   regressions 79 and 86 `--release` and runs them: the process specs there
-  are debug, where 86's stale-word check skips.
+  are debug, where 86's stale-word check skips. Probe
+  [39936082255](https://github.com/sdogruyol/gcry/actions/runs/39936082255)
+  ran the samples suite at `d3cbb646`: x86-64 default and freelist, arm64
+  headers, all green (86: 0 bytes, fixed 0).
 - `perf-smoke-macos` runs `make alloc-entry-frame` after its perf gate: the
   only macOS job. macos-15-intel has no CI job; the probe above is its
   evidence.
