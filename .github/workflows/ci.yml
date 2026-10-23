@@ -1190,9 +1190,26 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         uses: ./.github/actions/apt-update
+      # install-crystal resolves `latest` off GitHub's releases list, which has
+      # come back empty more than once (2026-08-16, and run 39810925349 on
+      # 2026-10-22: "no releases matching null.*"), failing the job before any
+      # spec ran. `releases/latest` stayed correct both times, so `latest` is
+      # resolved here and the action gets a version number.
+      - name: Resolve the Crystal version
+        id: crystal-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v='${{ matrix.crystal }}'
+          if [ "$v" = latest ]; then
+            v=$(gh api repos/crystal-lang/crystal/releases/latest --jq .tag_name)
+            [ -n "$v" ] || { echo "releases/latest returned nothing"; exit 1; }
+          fi
+          echo "resolved: $v"
+          echo "crystal=$v" >> "$GITHUB_OUTPUT"
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: ${{ matrix.crystal }}
+          crystal: ${{ steps.crystal-version.outputs.crystal }}
 
       - name: Stdlib spec dependencies
         run: sudo apt-get install -y -qq libxml2-dev libyaml-dev libgmp-dev libssl-dev zlib1g-dev libpcre2-dev
