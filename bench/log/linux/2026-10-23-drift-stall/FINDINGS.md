@@ -118,10 +118,11 @@ one hung fast child hung the gate. `bench/bounded_child.cr` exists for this
 `thread_churn_uaf` and `large_cache_race` among them, already use it.
 `chunk_list_drift` did not.
 
-There is nothing to fix in `src/`. The cycle needs the latch off, and the
-latch-off arm exists to rebuild the pre-fix race.
+There is no gcry defect to fix in `src/`. The cycle needs the latch off, and
+the latch-off arm exists to rebuild the pre-fix race. The one `src/` change
+is a research hook that lets the gate make that race on demand (below).
 
-## The fix (`bench/chunk_list_drift.cr`)
+## The fix (`bench/chunk_list_drift.cr`, `Heap.sweep_drop_hook`)
 
 * **Every child runs under `BoundedChild`.** The deadline is
   `max(120 s, rounds / 10)`, or `BENCH_CHILD_TIMEOUT_S`. A fast child that
@@ -131,33 +132,59 @@ latch-off arm exists to rebuild the pre-fix race.
   arm's shipped child) fails the gate and prints that child's thread capture.
 * **The children consent to ptrace** (`PR_SET_PTRACER_ANY`), so
   `stall_capture.sh` gets their stacks under `ptrace_scope=1`.
-* **A refused-releases arm** drives the hang on every run, and makes it a
-  regression with a control. With `GCRY_REFUSE_EMPTY_RELEASE` for 240
-  rounds:
-  * the shipped child must exit cleanly, having refused at least 1 000
-    releases (it refuses about 6 000 to 18 800, because a kept empty chunk is
-    queued and refused again at each major);
-  * the fast child must hang, and is killed at 20 s. It gets up to **ten**
-    tries (`REFUSE_FAST_ATTEMPTS`). Over all 230 tries measured (150 alone,
-    80 inside the 55 gate runs below), 57 escaped: 0.25, and 0.35 at the
-    99.9% upper bound. The tries are separate processes, so all ten escape
-    with probability 0.35^10 = 2.4e-5 per gate run at that bound, and
-    9e-7 at the measured rate. An escaped try costs 1-4 s.
+* **A refused-releases arm** makes the hang on every run, and makes it a
+  regression with a control. Both children refuse every release
+  (`GCRY_REFUSE_EMPTY_RELEASE`) and make the latch-off race on demand
+  (`--refuse-race`, next section):
+  * the shipped child must exit cleanly after 40 rounds, with the race made
+    in every one;
+  * the fast child must hang after making the race, and is killed at 10 s.
 
   If the fast child stops hanging, the construction no longer reaches the
   cycle and the shipped child's clean exit means nothing; that fails the
   gate, like the window control. If the parent were not bounded, this arm
   would hang the gate on every run.
 
-  The first version gave it three tries, and that was red once in 50 gate
-  runs (`gates-3tries-summary.txt`, run 48, `gate-48-three-escapes.log`:
-  three clean exits with 13 366, 9 836 and 17 005 refusals). That matches
-  0.21^3 = 1% a run. Making the hang certain instead would take a research
-  hook in `src/` between the sweep's per-chunk drop and relink decisions, to
-  flip the latch-off mutator count there on demand. That would put a hook
-  into the sweep's chunk loop for a gate whose subject is a harness deadline,
-  so the try count is set from the measured rate instead.
-  The rate is this host's (12 vCPU). CI's 4-vCPU runners are unmeasured.
+### The race made on demand
+
+The first two versions of the arm left the race to chance: 240 rounds of
+the churn workload with every release refused. The cycle needs the latch-off
+race itself: a thread born between the sweep's drop decision for a chunk and
+its relink decisions. On this 12-vCPU host a fast child made it in 79% of
+tries (173 of 230; `pertry-r240.txt` holds the first 150). Three tries were
+red once in 50 gate runs (`gates-3tries-summary.txt`, `gate-48-three-escapes.log`).
+Ten tries were green in 55 here, then red on CI's 4-vCPU `ubuntu-latest`,
+where the fast child did not hang once in ten (run 39997435553).
+
+So the race is now made, not waited for:
+
+* **`Heap.sweep_drop_hook`** (`src/gcry/collect_sweep.cr`) is a class-level
+  research hook. The after-world sweep calls it for each chunk it has just
+  queued for release, with the chunk's address and whether it is the chunk
+  the walk started from. It runs after the class lock is released and while
+  the world is running. Unset, it costs a test of `drop`, which is false on
+  almost every chunk. It is class-level, as `Heap.shared_counter_hook` is,
+  so the heap's layout does not move.
+* **The child (`RefuseRace`)** runs one thread, with no retain budget.
+  Before each `GC.collect` it allocates 3 000-byte blocks until one maps a
+  chunk, which `map_chunk` puts at the head of `@chunks`, then frees that
+  block. The walk then starts at an empty chunk and drops it first. At that
+  drop the hook births two threads that wait for the round to end, and
+  spins until both are on Crystal's thread list.
+* **Latched (shipped):** the walk relinks from the count it read in the
+  stop, without the dropped chunk. The refusal puts the chunk back on the
+  list once, and the round ends.
+* **Latch off (fast):** the walk reads the new count (multi-mutator) for
+  every later relink decision and for the store, and stores nothing.
+  `@chunks` is still the dropped chunk, whose `next` is the release queue.
+  The refusal links it in front of itself, and the next walk of the list
+  never ends. gdb on three such children (`race-cycle-gdb.txt`) found a
+  cycle of 2-3 chunks each time, with the walker in
+  `bitmap_take_pool_chunk`, as in the natural hangs.
+
+A round in which the walk did not start at the armed chunk (the hook did not
+fire) is counted and made again, up to five collections. That happened once
+in 120 rounds here, and the gate prints the count.
 
 ## Red → green
 
@@ -176,28 +203,38 @@ hold, each bounded at 600 s.
 |---|---:|---:|---:|---:|
 | before (overnight, `b888ac96`) | 6 | 5 | **1** | 0 |
 | three refusal tries (`gates-3tries-summary.txt`) | 50 | 49 | 0 | 1, run 48: three escapes |
-| ten refusal tries (`gates-after-summary.txt`) | **55** | **55** | **0** | **0** |
+| ten refusal tries (`gates-after-summary.txt`) | 55 | 55 | 0 | 0 here; red on CI's 4-vCPU runner |
 
-In the final 55 runs, which took 32-160 s each:
+In the ten-try runs, two fast children hung on their own (runs 10 and 29).
+Under the old harness each would have been a 600 s stall; here each was
+killed at 120 s and run again.
 
-* **Fast children:** two runs (10 and 29) had one hang on its own. Under the
-  old harness each would have been a 600 s stall; here it was killed at
-  120 s and run again.
-* **Refusal arm, fast child:** it needed 1 try in 39 runs, 2 in 10, 3 in 3
-  and 4 in 3, so 80 tries in all and 25 escapes.
-* **Refusal arm, shipped child:** it refused 8 837 to 18 801 releases and
-  exited cleanly every time.
+With the race made on demand (`drift-arm-039`), the refused-releases arm was
+the same in every run:
 
-Also, on the three-try harness, Main ran every hand-off check once, all
-exit 0: format, lint, all_specs default and headers, process_spec default,
-headers and headers+freelist, `make alloc-entry-frame counter-loss
-heap-counters mark-audit`, `make windows-typecheck`, `make darwin-typecheck`,
-and `make chunk-list-drift` ×10.
+| where | gate runs | passed | shipped child | fast child |
+|---|---:|---:|---|---|
+| `ubuntu-latest`, 4 vCPU (probe run 40006528739, `probe-drift-arm.yml`) | 20 | **20** | clean, race made 40 of 40, 0 missed | hung after the race, every run |
+| `ubuntu-24.04-arm` (same run) | 10 | **10** | clean, 40 of 40, 0 missed | hung, every run |
+| this host, `make chunk-list-drift` | 10 | **10** | clean, 40 of 40, 0 missed | hung, every run |
+| this host, the children alone | 30 + 13 | — | 30 of 30 clean, 40 of 40 each | 13 of 13 hung after one race |
+
+Each probe run is a whole `make chunk-list-drift` under `bench/run_bounded.sh`.
+The one missed round seen before the retry existed (1 in 120) has not
+recurred in the 2 800 rounds since. The hand-off checks for the `src/`
+change all exited 0 on `f23c99af`:
+
+* format and lint;
+* all_specs, default (296) and headers (318);
+* process_spec, default (298), headers (299) and headers+freelist (299);
+* `make alloc-entry-frame`, `make windows-typecheck`,
+  `make darwin-typecheck`.
 
 ## Not changed
 
-* `src/`: no gcry defect. The refusal's relink assumes a chunk the sweep
-  queued is off the list, and on the shipped tree it is.
+* `src/` behaviour: no gcry defect. The refusal's relink assumes a chunk the
+  sweep queued is off the list, and on the shipped tree it is. The only
+  `src/` change is the research hook, unset outside this arm.
 * The fast arm's semantics. Making it release occupied chunks
   (`release_occupied_anyway`) would turn the hang back into the pre-2026-09-14
   use-after-free, which is a crash and not a cheaper outcome. The arm keeps

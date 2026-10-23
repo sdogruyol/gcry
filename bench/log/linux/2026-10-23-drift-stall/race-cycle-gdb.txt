@@ -1,0 +1,45 @@
+CYCLE: loop of 3 chunk(s) through 759ed3c17000; head 759ed3c17000
+#1  0x000059db22ed9661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x000059db22ed9511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x000059db22ed947a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+#1  0x000059db22ed9661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x000059db22ed9511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x000059db22ed947a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+#1  0x000059db22ed9661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x000059db22ed9511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x000059db22ed947a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+Thread 3 (Thread 0x759ecbfff6c0 (LWP 944575) "chunk_list_drif"):
+#0  0x000059db22f542f2 in pause () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/intrinsics.cr:191
+#1  0x000059db22ed4f4d in wait_if_world_stopped_other_thread () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/collect_stw.cr:104
+#2  0x000059db22ed423a in allocate:atomic:clear () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/heap.cr:1775
+---
+CYCLE: loop of 2 chunk(s) through 733c8f7bf000; head 733c8f75f000
+#1  0x000059fc138d1661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x000059fc138d1511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x000059fc138d147a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+#1  0x000059fc138d1661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x000059fc138d1511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x000059fc138d147a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+#1  0x000059fc138d1661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x000059fc138d1511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x000059fc138d147a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+Thread 1 (Thread 0x733c9198b7c0 (LWP 944608) "chunk_list_drif"):
+#0  bitmap_pool_candidate? () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/bitmap_alloc.cr:1420
+#1  0x000059fc13936b11 in bitmap_take_pool_chunk () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/bitmap_alloc.cr:1313
+#2  0x000059fc13935fd7 in bitmap_refill_pool () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/bitmap_alloc.cr:1249
+---
+CYCLE: loop of 2 chunk(s) through 7ea89b2a0000; head 7ea89b240000
+#1  0x00005db572827661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x00005db572827511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x00005db57282747a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+#1  0x00005db572827661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x00005db572827511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x00005db57282747a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+#1  0x00005db572827661 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:933
+#2  0x00005db572827511 in mark_wait () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:924
+#3  0x00005db57282747a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/parallel_mark.cr:993
+Thread 1 (Thread 0x7ea89c46d7c0 (LWP 944665) "chunk_list_drif"):
+#0  0x00005db57288cb09 in bitmap_take_pool_chunk () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/bitmap_alloc.cr:1313
+#1  0x00005db57288bfd7 in bitmap_refill_pool () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/bitmap_alloc.cr:1249
+#2  0x00005db57288b5ee in bitmap_alloc_locked () at /home/naruto/playground/.scratch/DriftArm/wt/src/gcry/bitmap_alloc.cr:1143
+---
