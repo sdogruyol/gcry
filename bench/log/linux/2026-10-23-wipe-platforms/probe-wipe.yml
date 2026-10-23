@@ -1,0 +1,92 @@
+# The probe workflow of FINDINGS.md section 2, as a template: FIX_SHA,
+# RED_SHA and PROBE_SHA were full SHAs (PROBE_SHA: `${{ github.sha }}`), and
+# the probe branch carried this file in `.github/workflows/` and
+# `probe-wipe.sh` in `probe/`.
+name: probe wipe-platforms
+on:
+  push:
+    branches: [probe/wipe-platforms]
+jobs:
+  darwin:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+        tree: [fix, red]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    name: darwin ${{ matrix.os }} ${{ matrix.tree }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.tree == 'fix' && 'FIX_SHA' || 'RED_SHA' }}
+      - uses: actions/checkout@v7
+        with:
+          ref: PROBE_SHA
+          path: probe
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: regressions 79 and 86, release (as make alloc-entry-frame), three layouts
+        shell: bash
+        run: |
+          if [ "${{ matrix.tree }}" = red ]; then
+            # The red tree: release only, and 86 must fail on the wipe-start check.
+            RUNS=3 EXPECT_RED=1 bash probe/probe/probe-wipe.sh release
+          else
+            RUNS=5 bash probe/probe/probe-wipe.sh release
+          fi
+      - name: fix tree, debug too
+        if: matrix.tree == 'fix'
+        shell: bash
+        run: RUNS=2 bash probe/probe/probe-wipe.sh debug
+
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    name: windows x64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: FIX_SHA
+      - uses: actions/checkout@v7
+        with:
+          ref: PROBE_SHA
+          path: probe
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: regressions 79 and 86, debug (as ci/windows.ps1) and release, three layouts
+        shell: bash
+        run: RUNS=5 bash probe/probe/probe-wipe.sh debug release
+
+  windows-arm64:
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+    name: windows arm64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: FIX_SHA
+      - uses: actions/checkout@v7
+        with:
+          ref: PROBE_SHA
+          path: probe
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: CLANGARM64
+          update: true
+      - name: Install ARM64 linker and libraries (pinned, ci/windows-arm64-msys2.sh)
+        shell: msys2 {0}
+        run: ./ci/windows-arm64-msys2.sh
+      - name: Install pinned native ARM64 Crystal
+        shell: pwsh
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: ./ci/install-windows-arm64.ps1 -Msys2Location $env:MSYS2_LOCATION
+      - name: regressions 79 and 86, debug and release, three layouts
+        shell: bash
+        run: |
+          export CR=$(cygpath -m "$GCRY_CI_CRYSTAL")
+          RUNS=5 bash probe/probe/probe-wipe.sh debug release

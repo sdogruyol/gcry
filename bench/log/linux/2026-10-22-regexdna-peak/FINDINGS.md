@@ -251,6 +251,10 @@ accessor's slot at `0x8`; the word at `0x0` is not written
 [INFERENCE: one word the wipe no longer covers there, which
 `allocate_traced`'s frame may or may not overwrite; the macos-latest
 Knuckeotide peak above is level with the unbounded version's].
+Measured since (`../2026-10-23-wipe-platforms/`): on the M1 `allocate_traced`
+overwrites it, on Intel macOS a stale word did survive between the
+allocation and the collector, and the wipe now starts at the entry's SP
+on every target (the bound is read one frame above the wipe).
 
 Cost is on the slow path only — a cursor refill, a large block, a
 collection — 64 iterations of two stores. The hit path's code changes
@@ -369,3 +373,7 @@ the three layouts ci.yml runs.
 
 Cost: Windows gives up the 1.73× → 1.63× Knuckeotide peak the tail calls
 alone bought there (Perf A/B 39738092074).
+
+Superseded (`wipe-platforms-039`, `../2026-10-23-wipe-platforms/`): Windows
+has the wipe, bounded by the committed stack (`NT_TIB.StackLimit`), and the
+tail calls again; regression 79 reads 12–17 in debug there.
