@@ -43,6 +43,20 @@ static volatile long nsamples;
 static uint64_t bias;
 static volatile int stop;
 
+#ifdef __APPLE__
+// The executable's slide, found by its file type: while an inserted
+// library's constructor runs, image 0 need not be the executable (run 1's
+// first version took image 0 and subtracted another image's slide).
+static uint64_t executable_slide(void) {
+  uint32_t n = _dyld_image_count();
+  for (uint32_t i = 0; i < n; i++) {
+    const struct mach_header *h = _dyld_get_image_header(i);
+    if (h && h->filetype == MH_EXECUTE) return (uint64_t)_dyld_get_image_vmaddr_slide(i);
+  }
+  return 0;
+}
+#endif
+
 static void record(uint64_t pc) {
   long i = __atomic_fetch_add(&nsamples, 1, __ATOMIC_RELAXED);
   if (i < MAX_SAMPLES) samples[i] = pc - bias;
@@ -102,7 +116,7 @@ static int first_object(struct dl_phdr_info *info, size_t size, void *data) {
 __attribute__((constructor)) static void pcprof_start(void) {
   if (!getenv("PCPROF_OUT")) return;
 #ifdef __APPLE__
-  bias = (uint64_t)_dyld_get_image_vmaddr_slide(0);
+  bias = executable_slide();
   target = mach_thread_self();
   pthread_create(&sampler, NULL, sample_loop, NULL);
 #else
