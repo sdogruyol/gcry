@@ -1,0 +1,40 @@
+# The probe workflow of this cut: copied to .github/workflows/ on a
+# `probe/m1-binarytrees` branch only (push-triggered there), never on a real
+# branch. `ref` is the probed commit, a full SHA; arms and reps are the env
+# below, edited per run.
+name: Probe m1-binarytrees
+on:
+  push:
+    branches: ["probe/m1-binarytrees"]
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["macos-latest", "ubuntu-24.04-arm"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: PROBE_SHA
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - env:
+          AB_OUT: bench/log/_ab
+          AB_REPS: "15"
+          PROBE_PROF_RUNS: "10"
+          PROBE_ARMS: "boehm: tip:-Dgc_none"
+        run: bench/log/macos/2026-10-23-m1-binarytrees/probe.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.os }}
+          path: bench/log/_ab/
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,0 +1,17 @@
+Process-GC STW + concurrent mutation property test
+  seed=15 iterations=200 workers=[2, 4]
+  stop_the_world=true worker_collect=0
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=200 seed=15
+    allocs=1610 pinned=1608 collects=201 roots=16 ok=true heap_collections=270
+
+  STW-MT workers=4 iterations=200 seed=10015
+    collects=118 heap_collections=264 (failed)
+
+=== Summary ===
+RESULT: FAIL — seed=15 (re-run with --seed=15)
+  ERROR: after collect #118: root 9 DEAD (Pointer(Void)@0x75b04875bfb0) heap_ptr=true block={found: true, free: true, size: 80, flags: 1, first_word: 13907096144816631297, offset: 0} heap_collections_since_verify=3

@@ -1,0 +1,25 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 57682f8b..47fc827b 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -672,6 +672,7 @@ module Gcry
+       shift = @radix_granule_shift
+       l2_mask = @radix_l2_mask
+       hits = 0_u64
++      plain = shard.nil? && !@mark_parallel
+       p = cursor
+       finish = cursor + words
+       while p < finish
+@@ -708,7 +709,11 @@ module Gcry
+         header = Pointer(BlockHeader).new(header_addr)
+         next if base_only && w != BlockHeader.user_from(header).address
+         # `chunk_set_mark` with its relaxed pre-check already done above.
+-        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++        if plain
++          mark.value = mark.value | bit
++        else
++          Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++        end
+         next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+         mark_stack_push(mark_entry(chunk, header), shard)
+       end

@@ -1,0 +1,9 @@
+# publish-lazy fixed child, GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0, -Dgcry_block_headers, run_bounded 60 s
+base-publish-lazy: pass 197 of 200
+red-publish-lazy: pass 0 of 30
+red-pop: pass 0 of 10
+red-publish: pass 0 of 10
+red-pop-lazy: pass 0 of 10
+green-publish-lazy: pass 220 of 220
+base failures:       3      Failure/Error: shared.should be_false
+red failures:      60      Failure/Error: fail "the hook parked a thread other than the worker" unless parker_id.get == worker_id.get

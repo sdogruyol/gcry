@@ -1191,6 +1191,11 @@ module Gcry
       @soft_dirty_probed = false
       @soft_dirty_works = false
       @soft_dirty_skip_until_major = false
+      {% if flag?(:linux) %}
+        # No fault handler survives the fork, and a count left raised would
+        # keep every retired card state from being freed (`linux_mprotect.cr`).
+        Platform.mprotect_after_fork
+      {% end %}
       disarm_mprotect_barrier if @barrier_backend.mprotect?
       @barrier_backend = Platform::BarrierBackend::None
       reset_mark_workers_after_fork

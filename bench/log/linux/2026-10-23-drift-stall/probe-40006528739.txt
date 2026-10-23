@@ -1,0 +1,96 @@
+[36;1m  grep -E "^=== refused|^  (shipped|fast):|^FAIL|^ok" "run-$i.log" | tail -5[0m
+[36;1mecho "summary: ubuntu-24.04-arm runs=$RUNS pass=$pass fail=$fail stall=$stall"[0m
+run 1 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1618 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 2 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1623 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 3 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1626 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 4 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1616 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 5 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1626 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 6 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1629 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 7 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1621 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 8 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1622 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 9 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1623 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 10 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1622 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+summary: ubuntu-24.04-arm runs=10 pass=10 fail=0 stall=0
+[36;1m  grep -E "^=== refused|^  (shipped|fast):|^FAIL|^ok" "run-$i.log" | tail -5[0m
+[36;1mecho "summary: ubuntu-latest runs=$RUNS pass=$pass fail=$fail stall=$stall"[0m
+run 1 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 2 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 3 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 4 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 5 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 6 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 7 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 8 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 9 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 10 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 11 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 12 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 13 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 14 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 15 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 16 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 17 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 18 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 19 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+run 20 rc=0
+  shipped: exited cleanly, race made 40 time(s) (0 collection(s) missed it and were made again), 1638 release(s) refused
+  fast:    hung, killed after 10 s, race made 1 time(s)
+summary: ubuntu-latest runs=20 pass=20 fail=0 stall=0

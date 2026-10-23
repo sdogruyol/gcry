@@ -1,0 +1,50 @@
+=== does the chunk-list divergence accumulate with uptime? ===
+1200 collections per arm, 8 threads born per collection — the churn
+reproducer's workload. A chunk off `@chunks` is never swept and cannot rejoin the
+list, so `off-list chunks` is monotone and its slope is the leak rate.
+
+=== shipped — mutator count latched in the stop ===
+  collections   off-list   retained B   heap B   chunks mapped
+          200          0            0   19730432            3447
+          400          0            0   21995520            7564
+          600          0            0   20160512           11287
+          800          0            0   20029440           15163
+         1000          0            0   19505152           19505
+         1200          0            0   20029440           23160
+  nothing left the list in 1200 collections and 23160 mappings:
+  the rate is below 1 per 23160 mappings on this arm
+
+fast arm: 1 child(ren) crashed or hung before the first bucket and were run again
+=== fast — `sweep_mutator_latch = false`, the pre-fix reads ===
+  collections   off-list   retained B   heap B   chunks mapped
+          200       2053    269029376   279908352            5787
+          400       3751    491495424   504602624           10884
+          600       5109    669491200   685219840           15219
+          800       6961    912236544   925474816           20077
+          942       8175   1071357952   1077387264           23493
+  rate: 8175 stranded of 23493 chunks mapped = 347.98 per 1000 mappings,
+        1046248.0 KiB retained, 99.4% of the heap at the end
+  last bucket: 3416 mapping(s), 1214 stranded — still losing while it maps
+
+=== shipped, startup regime — 24 processes x 240 collections, thread churn only ===
+  processes that stranded a chunk: 0 of 24
+  stranded: 0 chunk(s) of 1009 mapped
+  nothing stranded: below 1 per 1009 mappings in this regime too
+
+=== window — a chunk mapped between the after-world sweep's walk and its store, 300 collections ===
+  splice:    hook ran 300 time(s), mapped 300 chunk(s) in the window, stranded 0, back-links wrong 0
+  no splice: hook ran 300 time(s), mapped 300 chunk(s) in the window, stranded 299
+
+=== window-free — a large block freed between the after-world sweep's walk and its store, 300 collections ===
+  freed 300 in the window, 300 trim(s) declined; listed and not indexed 0, indexed and not listed 0; large cache 0 B at the end
+  excused: 0 listed chunk(s) whose mapper the stop caught between the list and the index
+
+=== refused releases — every empty-chunk release refused, 240 collections ===
+  shipped: exited cleanly, 6063 release(s) refused
+  fast:    hung, killed after 20 s, 0 release(s) refused by its last bucket
+
+ok — shipped: 0 stranded over 23160 mappings and 0 over 1009 in short processes (cap 0);
+     window: 0 of 300 prepends in the window stranded and no back-link left wrong, 299 of 300 stranded without the splice;
+     window-free: 300 large frees in the window, none released while still listed;
+     refused releases: 6063 chunk(s) back on the shipped list and no cycle; the pre-fix shape's hung, and was killed;
+     the pre-fix shape 348.0 per 1000 and 99.4% of its heap stranded.

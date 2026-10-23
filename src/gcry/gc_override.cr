@@ -936,6 +936,10 @@ module GC
     # Research only: the collector scrub's bounds from libc, which is a
     # `/proc/self/maps` parse per call on the initial thread.
     heap.scrub_libc_bounds = true if env_flag_one?("GCRY_SCRUB_LIBC_BOUNDS")
+    # Research only: skip the allocation slow path's wipe below the entry's
+    # SP (`Heap#allocate_entry`/`allocate_wipe`), the control arm of its
+    # measurement.
+    heap.slow_entry_wipe = false if env_flag_zero?("GCRY_SLOW_ENTRY_WIPE")
     if cse = env_u64("GCRY_CLEAR_STACK_EVERY")
       heap.clear_stack_every = cse.to_i32 if cse >= 1 && cse <= Int32::MAX
     end

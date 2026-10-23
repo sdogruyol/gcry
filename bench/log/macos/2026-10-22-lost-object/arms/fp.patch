@@ -1,0 +1,113 @@
+diff --git a/src/gcry/platform/darwin_stw.cr b/src/gcry/platform/darwin_stw.cr
+index 3fd5ffef..b7f8a4c3 100644
+--- a/src/gcry/platform/darwin_stw.cr
++++ b/src/gcry/platform/darwin_stw.cr
+@@ -43,7 +43,14 @@ module Gcry
+         #   [0..28] x0…x28, [29] fp, [30] lr, then [31] sp, [32] pc.
+         # Stops before sp/pc — the stack is scanned by range and pc is not a
+         # heap pointer.
+-        GREG_WORDS = 31
++        GP_WORDS = 31
++        # ARM_NEON_STATE64 / ARM_NEON_STATE64_COUNT: `__v[32]` (128-bit each)
++        # from offset 0, then fpsr and fpcr.
++        FP_STATE_FLAVOR = 17
++        FP_STATE_COUNT  = 132_u32
++        FP_STATE_OFFSET =   0
++        FP_WORDS        =  64
++        GREG_WORDS      =  95 # GP_WORDS + FP_WORDS
+       {% elsif flag?(:x86_64) %}
+         # x86_THREAD_STATE64 / x86_THREAD_STATE64_COUNT
+         THREAD_STATE_FLAVOR = 4
+@@ -54,13 +61,33 @@ module Gcry
+         # rsp is included rather than skipped: it costs one candidate that
+         # `mark_root_candidate` rejects, and skipping it would put an
+         # index-specific branch in the copy loop for no benefit.
+-        GREG_WORDS = 16
++        GP_WORDS = 16
++        # x86_FLOAT_STATE64 / x86_FLOAT_STATE64_COUNT: `__fpu_xmm0`..`15`
++        # start at byte 168, after the x87 control words and `__fpu_stmm0..7`.
++        FP_STATE_FLAVOR =       5
++        FP_STATE_COUNT  = 131_u32
++        FP_STATE_OFFSET =     168
++        FP_WORDS        =      32
++        GREG_WORDS      =      48 # GP_WORDS + FP_WORDS
+       {% else %}
+         THREAD_STATE_FLAVOR    = 0
+         THREAD_STATE_COUNT     = 0_u32
+         THREAD_STATE_SP_OFFSET = 0
++        GP_WORDS               = 1
++        FP_STATE_FLAVOR        = 0
++        FP_STATE_COUNT         = 0_u32
++        FP_STATE_OFFSET        = 0
++        FP_WORDS               = 0
+         GREG_WORDS             = 1
+       {% end %}
++      # The general-purpose words, then the FP/SIMD register file. The second
++      # half was not captured until 2026-09-30: `thread_suspend` leaves the FP
++      # state in the kernel, so unlike Linux (signal frame below SP, inside the
++      # scan's slack) nothing on the stack carries it, and a pointer whose
++      # only copy was in `d8` / `xmm8` was collected in 5 of 5 runs of
++      # `bench/fp_register_root.cr` on macos-latest. Windows already read its
++      # SIMD registers out of `GetThreadContext`. `GREG_WORDS` above is the
++      # sum, spelled out because a `StaticArray` size must be a literal.
+ 
+       # Back-compat names used by specs / samples (Linux ucontext era).
+       # These are `thread_get_state` offsets, **not** signal-ucontext offsets.
+@@ -184,6 +211,7 @@ module Gcry
+         @@stw_port_count = 0
+         @@stw_threads_suspended = 0_u64
+         @@stw_threads_resumed = 0_u64
++        @@stw_fp_state_failures = 0_u64
+         @@stw_bounded_resume = false
+         @@stw_booted = true
+         StwSlots.configure(GREG_WORDS)
+@@ -299,7 +327,9 @@ module Gcry
+         @@stw_installed = true
+       end
+ 
+-      # One `thread_get_state` per suspended thread, feeding both root sources.
++      # Two `thread_get_state` calls per suspended thread: the general-purpose
++      # state, which also carries the SP, and the FP/SIMD state. Both feed the
++      # register roots.
+       #
+       # The SP half is the clamp and is knob-gated. The register half is not:
+       # `GCRY_DISABLE_SP_CLAMP` trades precision for speed, whereas skipping the
+@@ -323,11 +353,22 @@ module Gcry
+         )
+         return unless kr == KERN_SUCCESS
+ 
++        row = uninitialized StaticArray(UInt64, GREG_WORDS)
++        GP_WORDS.times { |j| row[j] = state.to_unsafe.as(UInt64*)[j] }
++        # The FP half is zeroed rather than left out if the kernel refuses it,
++        # so a stale row from a previous stop cannot be marked.
++        fp = uninitialized StaticArray(UInt32, 132)
++        fp_count = FP_STATE_COUNT
++        fp_ok = LibMach.thread_get_state(port, FP_STATE_FLAVOR, fp.to_unsafe, pointerof(fp_count)) == KERN_SUCCESS
++        @@stw_fp_state_failures &+= 1 unless fp_ok
++        fp_words = (fp.to_unsafe.as(UInt8*) + FP_STATE_OFFSET).as(UInt64*)
++        FP_WORDS.times { |j| row[GP_WORDS + j] = fp_ok ? fp_words[j] : 0_u64 }
++
+         # Both halves land in the slot the caller already claimed. They used to
+         # re-derive it through a linear scan each — twice per thread per stop,
+         # which is O(n^2) inside the pause and the next cliff once the 64-slot
+         # bound came off.
+-        StwSlots.record_gregs(slot, state.to_unsafe.as(UInt64*), GREG_WORDS)
++        StwSlots.record_gregs(slot, row.to_unsafe, GREG_WORDS)
+ 
+         if @@stw_enabled
+           sp = (state.to_unsafe.as(UInt8*) + THREAD_STATE_SP_OFFSET).as(UInt64*).value
+@@ -335,6 +376,14 @@ module Gcry
+         end
+       end
+ 
++      @@stw_fp_state_failures = uninitialized UInt64
++
++      # Suspended threads whose FP/SIMD state the kernel would not return; they
++      # were scanned with their general-purpose registers only.
++      def self.stw_fp_state_failures : UInt64
++        @@stw_fp_state_failures
++      end
++
+       # Synchronous Mach stop of every Crystal OS thread except *current*.
+       def self.stop_world_threads(current : ::Thread) : Nil
+         ensure_stw_table

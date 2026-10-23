@@ -13,6 +13,14 @@
 # crystal-lang/crystal#17486), so a sampler
 # reports it without counting it against gcry.
 #
+# The command may be a wrapper — `make <gate>`, `bash -c`, `env`, `crystal
+# spec` — whose stalled process is a descendant. The capture then goes to the
+# leaves of the command's process tree (every descendant with no child of its
+# own), not to the wrapper, and the kill takes the whole tree: killing only the
+# wrapper left the harness running on, holding a CPU and the lock's slot, and
+# its stall uncaptured (the 0.38.0 overnight header-layout hang,
+# `bench/log/linux/2026-10-21-0.38-stress/`).
+#
 # "Still running" is read from /proc, not `kill -0`: a child that has exited
 # but not been waited for is a zombie, and `kill -0` succeeds on it. And a
 # zombie *leader* with live threads is not finished — it is a process whose
@@ -43,9 +51,31 @@ while running && [ "$t" -lt "$limit" ]; do
   sleep 1
   t=$((t + 1))
 done
+# Every descendant of `$1`, depth first, from one `ps` listing (Linux and
+# macOS both print `pid ppid` with these flags).
+descendants() {
+  ps -A -o pid= -o ppid= 2>/dev/null | awk -v root="$1" '
+    { kids[$2] = kids[$2] " " $1 }
+    function walk(p,   n, a, i) { n = split(kids[p], a, " "); for (i = 1; i <= n; i++) { print a[i]; walk(a[i]) } }
+    END { walk(root) }'
+}
+
 if running; then
   echo "STALLED: still running after ${t} s" >> "$log"
-  "$here/stall_capture.sh" "$pid" >> "$log" 2>&1
+  tree=$(descendants "$pid")
+  # The leaves: the processes doing the work, not the wrappers waiting on
+  # them. With no descendants the command itself is the leaf.
+  leaves=""
+  for p in $tree; do
+    [ -z "$(descendants "$p")" ] && leaves="$leaves $p"
+  done
+  [ -z "$leaves" ] && leaves=$pid
+  for p in $leaves; do
+    [ "$p" != "$pid" ] && echo "--- descendant $p: $(ps -o command= -p "$p" 2>/dev/null | cut -c1-200)" >> "$log"
+    "$here/stall_capture.sh" "$p" >> "$log" 2>&1
+  done
+  # Leaves first, so no wrapper respawns or reports on a half-killed tree.
+  for p in $leaves $tree; do kill -9 "$p" 2>/dev/null; done
   kill -9 "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null
   # gdb names the line; macOS `sample` names the method and not the line.

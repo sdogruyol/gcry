@@ -1,0 +1,99 @@
+name: probe-mac-lost-object
+
+# PROBE ONLY (never merged; lives on probe/mac-lost-object). The 2026-10-21
+# probe saw one pinned object found DEAD on d1549e2f (tlab-only, seed 6,
+# workers=4, macos-latest). Every job builds these arms and runs them
+# interleaved, so each arm meets the same runner:
+#   pre  d1549e2f
+#   pth  d1549e2f + the pthread list lock fix (9c19480b 8bc3b355 e69e36fe 131f6267)
+#   lc   d1549e2f + the early clear of @world_stopped (0d1e2b6a)
+#   fp   d1549e2f + the FP/SIMD register capture (6462255f; buildable, not in
+#        round 2's ARMS)
+#   rel  release-0.39.0 32ce703a
+#   rlc  rel run with GCRY_STW_LATE_CLEAR=1 (the late clear restored)
+#   relwc rel run with --worker-collect=16 (collections also started by the
+#        Parallel workers, which is what the late clear caused)
+# rlc and relwc reuse rel's binary through a wrapper, so they follow rel in
+# ARMS. Each other arm is its commit checked out in its own tree, with the
+# arm's patch from bench/log/macos/2026-10-22-lost-object/arms/ applied. The
+# harness is bench/stw_mt_property_test.cr, identical in every tree, replaced
+# by harness.cr from this directory when HARNESS=probe (it adds
+# --worker-collect=N and prints the heap's collection count).
+on:
+  push:
+    branches: [probe/mac-lost-object]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    runs-on: macos-latest
+    timeout-minutes: 345
+    name: probe (${{ matrix.shard }})
+    env:
+      ARMS: "pre pth lc rel rlc relwc"
+      HARNESS: probe
+      MINUTES: "290"
+      VARIANTS: bench/log/macos/2026-10-22-lost-object/variants-r2.txt
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build every arm's harness in its own tree
+        run: |
+          d="$PWD/bench/log/macos/2026-10-22-lost-object"
+          spec=""
+          for arm in $ARMS; do
+            # rlc / relwc: the rel binary with GCRY_STW_LATE_CLEAR=1, which
+            # restores the late clear on release-0.39.0 (`collect_stw.cr`), or
+            # with workers that call GC.collect.
+            rb="$RUNNER_TEMP/arm-rel/bin/stw_mt_property_test_hdr"
+            if [ "$arm" = rlc ] || [ "$arm" = relwc ]; then
+              w="$RUNNER_TEMP/$arm.sh"
+              if [ "$arm" = rlc ]; then
+                printf '#!/bin/sh\nGCRY_STW_LATE_CLEAR=1 exec "%s" "$@"\n' "$rb" > "$w"
+              else
+                printf '#!/bin/sh\nexec "%s" "$@" --worker-collect=16\n' "$rb" > "$w"
+              fi
+              chmod +x "$w"; cat "$w"
+              spec="$spec${spec:+,}$arm=$w"
+              continue
+            fi
+            case "$arm" in
+              pre|pth|lc|fp) sha=d1549e2f3fe5246efc14ccffdae27e201e501a79 ;;
+              rel)           sha=32ce703aac1c10baeddff2e744a3702c1b4089c6 ;;
+              *) echo "unknown arm $arm"; exit 1 ;;
+            esac
+            t="$RUNNER_TEMP/arm-$arm"
+            git worktree add --detach "$t" "$sha"
+            case "$arm" in
+              pth|lc|fp) git -C "$t" apply --index "$d/arms/$arm.patch" ;;
+            esac
+            [ "$HARNESS" = probe ] && cp "$d/harness.cr" "$t/bench/stw_mt_property_test.cr"
+            echo "== $arm: $(git -C "$t" log -1 --format='%H %s')"
+            git -C "$t" diff --cached --stat
+            git -C "$t" diff --stat
+            (cd "$t" && mkdir -p bin && crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr --error-trace)
+            spec="$spec${spec:+,}$arm=$t/bin/stw_mt_property_test_hdr"
+          done
+          echo "ARM_SPEC=$spec" >> "$GITHUB_ENV"
+          crystal --version; sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string
+      - name: Loop
+        run: |
+          bench/log/macos/2026-10-22-lost-object/probe_loop.sh \
+            "$ARM_SPEC" "$VARIANTS" "$MINUTES" plog "${{ matrix.shard }}"
+          for f in plog/*.log; do
+            [ -e "$f" ] || continue
+            if grep -qE "DEAD|cookie broken" "$f"; then echo "--- $f"; head -c 20000 "$f"; fi
+          done
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plog-${{ matrix.shard }}
+          path: plog

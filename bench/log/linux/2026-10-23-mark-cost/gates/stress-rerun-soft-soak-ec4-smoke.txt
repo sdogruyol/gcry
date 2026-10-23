@@ -1,0 +1,24 @@
+SOFT_SOAK_N=${SOFT_SOAK_N:-5} SOFT_SOAK_DURATION=${SOFT_SOAK_DURATION:-8} ./bench/soft_soak_ec4.sh
+E: Missing shard.lock
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+I: Installing radix (0.4.1)
+I: Installing backtracer (1.2.4)
+I: Installing exception_page (0.5.0)
+I: Installing kemal (1.15.0)
+I: Installing gcry (0.38.0 at ../..)
+I: Writing shard.lock
+gcry lib: /home/naruto/playground/.scratch/MarkCost-2/wt (e3230e5e +dirty)
+Building kemal-gcry (EC4 soft soak)...
+  trial 1/5 OK req/s=50058.24 soft=0 hard=0 alive=1 
+  trial 2/5 OK req/s=76114.66 soft=0 hard=0 alive=1 
+  trial 3/5 OK req/s=194542.35 soft=0 hard=0 alive=1 
+  trial 4/5 OK req/s=226653.97 soft=0 hard=0 alive=1 
+  trial 5/5 OK req/s=135500.89 soft=0 hard=0 alive=1 
+process OK 5/5 fail=0 soft=0 hard=0
+OK thr med=135500.89 (n=5)
+PASS: soft-soak EC4 5/5 soft=0 hard=0
+exit 0

@@ -75,6 +75,8 @@ describe "Regression: the allocation entry's frame holds no unwritten buffer" do
     end
     heap.collections.should be > collections_before
     caller_sp.should_not eq(0)
+    # Printed so a layout's margin under the bound can be read from a log.
+    STDERR.puts "stale79: #{stale}"
     stale.should be >= 0
     stale.should be < 64
   end

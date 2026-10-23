@@ -1,0 +1,11 @@
+crystal build -Dgc_none bench/parallel_mark_process.cr -o bin/parallel_mark_process
+bin/parallel_mark_process
+extra collections for a steal: 0
+arm: shipped (4 workers, stolen must rise)
+workers=4 runs 0->4 stolen 0->232738 wakes 0->27 chain=199936
+parallel_mark_process ok
+GCRY_DISABLE_PARALLEL_MARK=1 bin/parallel_mark_process --disabled
+arm: --disabled (workers pinned at 1, stolen must stay 0)
+workers=1 runs 0->0 stolen 0->0 wakes 0->0 chain=199936
+ok — serial mark kept the chain and stole nothing
+exit 0

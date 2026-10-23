@@ -1,0 +1,14 @@
+2026-09-29T14:03:24.5562810Z crystal build -Dgc_none bench/fiber_list_exit_race.cr -o bin/fiber_list_exit_race --error-trace
+2026-09-29T14:03:28.8372070Z bin/fiber_list_exit_race
+2026-09-29T14:03:28.8413910Z gcry: WARNING: this kernel's page size is 16384 and gcry is compiled for 4096. Page-aligned decisions — dormancy's madvise, the pagemap low-water probe, the fiber guard 
+2026-09-29T14:03:28.8418940Z === fiber list vs a thread leaving it during a stop ===
+2026-09-29T14:03:28.8420330Z 3 runs shipped, 5 red; 40 rounds of 64 threads and holders, walk held 150 µs a fiber
+2026-09-29T14:03:28.8421170Z 
+2026-09-29T14:03:36.4668060Z   shipped: child: holders=2560 lost=0
+2026-09-29T14:03:45.5048020Z   shipped: child: holders=2560 lost=0
+2026-09-29T14:03:53.8691310Z   shipped: child: holders=2560 lost=0
+2026-09-29T14:08:54.0355720Z   red: timed out
+2026-09-29T14:13:54.3285350Z   red: timed out
+2026-09-29T14:13:59.5743230Z   red: child: holders=2560 lost=529
+2026-09-29T14:18:59.7712350Z   red: timed out
+2026-09-29T14:22:24.2105290Z ##[error]The operation was canceled.

@@ -1,0 +1,224 @@
+diff --git a/process_spec/regression/92_mutator_scan_frames_wiped_spec.cr b/process_spec/regression/92_mutator_scan_frames_wiped_spec.cr
+new file mode 100644
+index 00000000..d3c41388
+--- /dev/null
++++ b/process_spec/regression/92_mutator_scan_frames_wiped_spec.cr
+@@ -0,0 +1,110 @@
++require "../../src/gcry"
++require "spec"
++
++# The frames the collector's own-stack scan runs on held what the collector's
++# previous call had left at their depth. `run_collection_body` times the phase
++# with `t0 = monotonic_ns` right before `scan_mutator_stack`, and Linux's vDSO
++# `clock_gettime` spills its `clockid_t` with a 4-byte store into an 8-byte
++# slot whose upper half still held the upper half of a heap address. The
++# scan's frame never writes that slot (`sp+0x430` on x86-64 Linux), so the
++# scan read `(heap's high 32 bits << 32) | 1`, the heap's 4 GiB-aligned
++# address plus one: under ASLR a root into whatever large block straddled
++# that boundary, at every collection. It kept crystal-metric JsonGenerate's
++# dead 128 MiB `IO::Memory` buffer in about 1 run in 15 (peak 892 MB instead
++# of 771) and its dead 32 MiB one in 1 in 30
++# (`bench/log/macos/2026-10-23-jsongen-m1/`).
++#
++# Now the scan zeroes 4 KiB below its caller's SP before it builds its frames
++# (`Heap#scan_mutator_stack`). This makes the residue deterministic: a hook
++# the collector calls from the scan's caller, just before the wipe
++# (`stack_scan_hook`), leaves the address of a dead block in 4 KiB of stack
++# below it, as `monotonic_ns` left its word. The fixed arm must not mark the
++# block. The control arm (`scan_wipe = false`) must, or the fixed arm could
++# pass on a layout where the scan's frames happen to write every slot; both
++# run in this process, one after the other. Measured on x86-64 Linux,
++# Crystal 1.21.0: before the wipe the block is marked, debug and `--release`;
++# with it, not. Whether the scan's frames leave a slot unwritten is the
++# layout's, so only x86-64 Linux, where it was measured, requires the control
++# to mark it. Windows has no wipe, so there both arms only report.
++
++private KEY92   = 0x5a5a_c3c3_5a5a_c392_u64
++private WORDS92 =                       512
++
++# The dead block's address, XORed so no frame of the spec holds it plainly.
++private module Victim92
++  class_property hidden = 0_u64
++  # Read back at run time, so the compiler cannot fold the XOR away.
++  class_property key = KEY92
++  class_property marked = false
++  class_property? seen = false
++end
++
++# Fill 4 KiB below this frame with the dead block's address. The XOR is
++# undone per store, in a register.
++@[NoInline]
++private def fill92_below : Nil
++  buf = uninitialized StaticArray(UInt64, WORDS92)
++  key = Victim92.key
++  WORDS92.times { |i| buf[i] = Victim92.hidden ^ key }
++  asm("" :: "r"(buf.to_unsafe) : "memory" : "volatile")
++end
++
++@[NoInline]
++private def victim92 : Nil
++  ptr = GC.malloc_atomic(LibC::SizeT.new(256))
++  Victim92.hidden = ptr.address ^ KEY92
++end
++
++# The allocation leaves copies of the pointer in dead stack inside the scan
++# window of frames the spec calls next; zero them.
++@[NoInline]
++private def scrub92_dead_stack : Nil
++  buf = uninitialized StaticArray(UInt8, 65536)
++  buf.to_unsafe.clear(buf.size)
++  asm("" :: "r"(buf.to_unsafe) : "memory")
++end
++
++# Whether the block was marked at the collection, with the wipe on or off.
++private def marked92(wipe : Bool) : Bool
++  heap = Gcry.default_heap
++  victim92
++  scrub92_dead_stack
++  Victim92.seen = false
++  Victim92.marked = false
++  heap.scan_wipe = wipe
++  heap.stack_scan_hook = -> { fill92_below }
++  heap.collection_event_hook = ->(event : Gcry::Heap::CollectionEvent) do
++    if event.mark_end? && !Victim92.seen?
++      h = Gcry.default_heap
++      Victim92.seen = true
++      if found = h.find_block_with_chunk(Pointer(Void).new(Victim92.hidden ^ KEY92))
++        header, chunk = found
++        Victim92.marked = h.block_marked_public?(chunk, header)
++      end
++    end
++    nil
++  end
++  begin
++    GC.collect
++  ensure
++    heap.stack_scan_hook = nil
++    heap.collection_event_hook = nil
++    heap.scan_wipe = true
++  end
++  Victim92.seen?.should be_true
++  Victim92.marked
++end
++
++describe "Regression: the mutator-stack scan runs on frames built over zeros" do
++  it "does not read what the collector's previous call left below it" do
++    control = marked92(wipe: false)
++    fixed = marked92(wipe: true)
++    STDERR.puts "scan92: control marked #{control}, fixed marked #{fixed}"
++    {% unless flag?(:win32) %}
++      {% if flag?(:x86_64) && flag?(:linux) %}
++        control.should be_true
++      {% end %}
++      fixed.should be_false
++    {% end %}
++  end
++end
+diff --git a/src/gcry/collect_scan.cr b/src/gcry/collect_scan.cr
+index 22eae76b..f98c0eb9 100644
+--- a/src/gcry/collect_scan.cr
++++ b/src/gcry/collect_scan.cr
+@@ -770,8 +770,88 @@ module Gcry
+       end
+     end
+ 
+-    # Spill GP registers, then scan approx SP→bottom for the running fiber.
++    # The frames the mutator-stack scan runs on are built below the caller's
++    # SP, over whatever the collector's own calls just left there, and a slot
++    # those frames never write is read as a root. `run_collection_body` times
++    # the phase with `t0 = monotonic_ns` right before the scan, and Linux's
++    # vDSO `clock_gettime` spills its `clockid_t` with a 4-byte store
++    # (`mov %edi, 0x10(%rsp)`) into an 8-byte slot whose upper half still held
++    # the upper half of a heap address the static scan had left there.
++    # `scan_mutator_stack`'s frame does not write that slot (`sp+0x430` on
++    # x86-64 Linux, Crystal 1.21.0, `--release`), so the scan read
++    # `(heap's high 32 bits << 32) | 1`: the heap's 4 GiB-aligned address plus
++    # one. Under ASLR that is inside a large block whenever one straddles the
++    # boundary, and the block is kept for as long as the word recurs, which is
++    # every collection. On crystal-metric JsonGenerate it kept the dead
++    # 128 MiB `IO::Memory` buffer the last doubling left in about 1 run in 15
++    # (peak 892 MB instead of 771) and the dead 32 MiB one in 1 in 30, on
++    # every runner the A/B measures (`bench/log/macos/2026-10-23-jsongen-m1/`,
++    # regression 92).
++    #
++    # So the scan's frames are built over zeros: `scan_mutator_stack` is
++    # inlined into its caller, zeroes `SCAN_WIPE_BYTES` below the caller's SP
++    # with stores in the asm (no call, so no return address or spill lands in
++    # the range), and calls the scan. 4 KiB is more than the scan's frames and
++    # the red zone it reads below its own SP need (1.3 KiB on x86-64 Linux).
++    # Bounded below by the page above the running fiber's stack's lowest, its
++    # guard, and skipped when the SP is not on that stack. Windows grows a
++    # stack through `PAGE_GUARD`, which a blind store may not touch, so there
++    # it does nothing, as the allocation slow path's wipe does nothing there.
++    SCAN_WIPE_BYTES = 4096_u64
++
++    # Research knob, `GCRY_SCAN_WIPE=0`: skip the wipe below, the control arm
++    # of its measurement and of regression 92.
++    property scan_wipe : Bool = true
++
++    # Regression 92 only: called right before the wipe, from the same frame, so
++    # what it leaves below the SP is what a call there (`monotonic_ns`) leaves.
++    property stack_scan_hook : Proc(Nil)? = nil
++
++    @[AlwaysInline]
+     private def scan_mutator_stack : Nil
++      if hook = @stack_scan_hook
++        hook.call
++      end
++      {% if (flag?(:x86_64) || flag?(:aarch64)) && !flag?(:win32) %}
++        if @scan_wipe && (fiber = Fiber.current?)
++          stack = fiber.@stack
++          sp = Roots.hardware_stack_pointer.address
++          guard_top = stack.pointer.address &+ Roots.runtime_page_size
++          if guard_top < sp && sp <= stack.bottom.address
++            room = sp &- guard_top
++            room = SCAN_WIPE_BYTES if room > SCAN_WIPE_BYTES
++            room &= ~15_u64
++            wipe_below_sp_to(sp &- room) if room > 0
++          end
++        end
++      {% end %}
++      scan_mutator_stack_body
++    end
++
++    # Zero [low, SP) in 16-byte steps; *low* is 16-byte aligned below the SP.
++    @[AlwaysInline]
++    private def wipe_below_sp_to(low : UInt64) : Nil
++      {% if flag?(:x86_64) %}
++        asm("movq $0, %r11
++             1:
++             movq $$0, (%r11)
++             movq $$0, 8(%r11)
++             addq $$16, %r11
++             cmpq %rsp, %r11
++             jb 1b" :: "r"(low) : "r11", "memory", "cc" : "volatile")
++      {% elsif flag?(:aarch64) %}
++        asm("mov x10, sp
++             mov x9, $0
++             1:
++             stp xzr, xzr, [x9], #16
++             cmp x9, x10
++             b.lo 1b" :: "r"(low) : "x9", "x10", "memory", "cc" : "volatile")
++      {% end %}
++    end
++
++    # Spill GP registers, then scan approx SP→bottom for the running fiber.
++    @[NoInline]
++    private def scan_mutator_stack_body : Nil
+       stack = Fiber.current.@stack
+       bottom = stack.bottom
+       @stack_bottom = bottom
+diff --git a/src/gcry/gc_override.cr b/src/gcry/gc_override.cr
+index 76cded52..3238550b 100644
+--- a/src/gcry/gc_override.cr
++++ b/src/gcry/gc_override.cr
+@@ -939,6 +939,9 @@ module GC
+     # Research only: skip the allocation slow path's wipe below its frame
+     # (`Heap#allocate_entry`), the control arm of its measurement.
+     heap.slow_entry_wipe = false if env_flag_zero?("GCRY_SLOW_ENTRY_WIPE")
++    # Research only: skip the wipe below the collector's frame before the
++    # mutator-stack scan (`Heap#scan_mutator_stack`), its control arm.
++    heap.scan_wipe = false if env_flag_zero?("GCRY_SCAN_WIPE")
+     if cse = env_u64("GCRY_CLEAR_STACK_EVERY")
+       heap.clear_stack_every = cse.to_i32 if cse >= 1 && cse <= Int32::MAX
+     end

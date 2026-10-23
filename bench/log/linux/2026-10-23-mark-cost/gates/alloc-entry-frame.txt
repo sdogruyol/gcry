@@ -1,0 +1,8 @@
+crystal spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr \
+  process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr
+.stale86: control 2, fixed 0
+....
+
+Finished in 8.11 milliseconds
+5 examples, 0 failures, 0 errors, 0 pending
+exit 0

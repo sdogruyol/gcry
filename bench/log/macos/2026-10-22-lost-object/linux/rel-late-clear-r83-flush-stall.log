@@ -1,0 +1,14 @@
+Process-GC STW + concurrent mutation property test
+  seed=83 iterations=200 workers=[2, 4]
+  stop_the_world=true worker_collect=0
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=200 seed=83
+    allocs=1609 pinned=1608 collects=201 roots=16 ok=true heap_collections=266
+
+  STW-MT workers=4 iterations=200 seed=10083
+gcry: STOP-THE-WORLD STALLED 10015 ms in phase=flush — every mutator is frozen and the collector is not
+gcry: it is waiting on something a suspended thread holds; reported once per stop

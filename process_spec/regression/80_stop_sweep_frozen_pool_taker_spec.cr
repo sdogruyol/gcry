@@ -41,7 +41,9 @@ private TAKER80_BLOCKS =                         3
 private TAKER80_STAMP  = 0x7A4E_80C0_FFEE_0080_u64
 # The block's last word as well as its first: block 0 starts in the chunk's
 # page 0, which no release reaches (`chunk_layout.cr`); it ends pages later.
-private TAKER80_LAST = TAKER80_BYTES // 8 - 1
+private TAKER80_LAST         = TAKER80_BYTES // 8 - 1
+private TAKER80_CONTROL_MARK = "taker80: the stop made the chunk dormant under its parked taker"
+private TAKER80_SKIP_MARK    = "taker80: no bitmap allocator, skipped"
 
 private def taker80_heap : Gcry::Heap
   heap = Gcry.default_heap
@@ -84,12 +86,14 @@ private def taker80_drift(& : -> Int64?) : Int64?
 end
 
 # Park a thread allocating TAKER80_BYTES between its check of *chunk* and
-# its take, collect, let it finish. Returns the stops that ended while it
-# was parked and the block it was handed.
-private def taker80_window(heap : Gcry::Heap, chunk : Gcry::ChunkHeader*) : {Int32, Void*}
+# its take, collect, call *before_release* while it is still parked (the
+# collection, its flush included, has returned), then let it finish. Returns
+# the stops that ended while it was parked and the block it was handed.
+private def taker80_window(heap : Gcry::Heap, chunk : Gcry::ChunkHeader*, &before_release : -> Nil) : {Int32, Void*}
   starts = Atomic(Int32).new(0)
   parked = Atomic(Int32).new(0)
   stops_seen = Atomic(Int32).new(0)
+  release = Atomic(Int32).new(0)
   target = chunk.address
   heap.post_stw_hook = ->(stage : Symbol) do
     starts.add(1) if stage == :after_start_world
@@ -106,6 +110,11 @@ private def taker80_window(heap : Gcry::Heap, chunk : Gcry::ChunkHeader*) : {Int
         Intrinsics.pause
       end
       stops_seen.set(starts.get - entered)
+      # Held past the stop until the main thread has looked at the chunk:
+      # what the stop left is read before the taker writes into it.
+      while release.get == 0 && Time.instant < deadline + 10.seconds
+        Intrinsics.pause
+      end
     end
     nil
   end
@@ -123,6 +132,8 @@ private def taker80_window(heap : Gcry::Heap, chunk : Gcry::ChunkHeader*) : {Int
   end
   fail "the thread never took the chunk under test" unless parked.get == 1
   GC.collect
+  before_release.call
+  release.set(1)
   thread.join
   heap.pool_take_hook = nil
   heap.post_stw_hook = nil
@@ -140,19 +151,38 @@ describe "Regression: an in-stop sweep makes no chunk dormant under a frozen poo
       env["GCRY_DEBUG_INVARIANTS"] = nil if arm == "control"
       status = Process.run(Process.executable_path.not_nil!, ["-e", "stop-sweep-frozen-pool-taker child #{arm}"],
         env: env, output: captured, error: captured)
+      # Both children release their taker only after the collection, its
+      # dormant flush included, has returned. That matters on Windows, where
+      # the flush decommits a dormant chunk's pages and recommits them at once
+      # (`Platform.release_physical_pages`): a control-arm taker that wrote
+      # between the two died with an access violation in `clear_block` (CI run
+      # 39681882864). After the flush the pages are committed and zero again,
+      # as on Linux, and the control child's assertions hold on every platform.
       fail "child #{status.inspect}:\n#{captured}" unless status.success?
       captured.to_s.should contain("1 examples, 0 failures")
+      # The control child saw the chunk dormant under its parked taker,
+      # unless its heap has no bitmap allocator (the header layout's freelist
+      # arms), where both children skip and say so.
+      if arm == "control" && !captured.to_s.includes?(TAKER80_SKIP_MARK)
+        captured.to_s.should contain(TAKER80_CONTROL_MARK)
+      end
     end
   end
 
   it "stop-sweep-frozen-pool-taker child fixed" do
     next unless ENV["GCRY_FROZEN_TAKER_CHILD"]? == "fixed"
     heap = taker80_heap
-    next unless heap.bitmap_alloc?
+    unless heap.bitmap_alloc?
+      STDOUT.puts TAKER80_SKIP_MARK
+      next
+    end
     chunk = taker80_empty_chunk(heap)
     relinks = heap.stop_sweep_relinks_declined
     declined = heap.stop_sweep_dormant_declined
-    stops, p = taker80_window(heap, chunk)
+    stops, p = taker80_window(heap, chunk) do
+      # The stop and its flush are over and the taker has not taken yet.
+      Gcry::ChunkHeader.dormant?(chunk).should be_false
+    end
     stops.should be > 0
     # The stop found the list lock held: the taker was inside it.
     (heap.stop_sweep_relinks_declined - relinks).should be > 0
@@ -177,10 +207,20 @@ describe "Regression: an in-stop sweep makes no chunk dormant under a frozen poo
   it "stop-sweep-frozen-pool-taker child control" do
     next unless ENV["GCRY_FROZEN_TAKER_CHILD"]? == "control"
     heap = taker80_heap
-    next unless heap.bitmap_alloc?
+    unless heap.bitmap_alloc?
+      STDOUT.puts TAKER80_SKIP_MARK
+      next
+    end
     heap.stop_sweep_dormant_lock = false
     chunk = taker80_empty_chunk(heap)
-    stops, p = taker80_window(heap, chunk)
+    stops, p = taker80_window(heap, chunk) do
+      # The old code: the stop made the chunk dormant while its taker was
+      # parked between check and take, and the flush has released its pages.
+      Gcry::ChunkHeader.dormant?(chunk).should be_true
+      Gcry::ChunkHeader.cursor?(chunk).should be_false
+      STDOUT.puts TAKER80_CONTROL_MARK
+      STDOUT.flush
+    end
     stops.should be > 0
     # The taker allocated into the chunk the stop made dormant: a cursor's
     # and dormant at once, its block in the counters and out of the walk.

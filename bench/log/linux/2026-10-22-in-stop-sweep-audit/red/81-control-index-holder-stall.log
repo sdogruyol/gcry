@@ -1,0 +1,24 @@
+holder81: collecting with @index_lock held
+gcry: STOP-THE-WORLD STALLED 1000 ms in phase=sweep — every mutator is frozen and the collector is not
+gcry: it is waiting on something a suspended thread holds; reported once per stop
+STALLED: still running after 15 s
+--- stall capture: pid 1116761, 8 thread(s)
+task 1116761 spec81 state=R wchan=0
+task 1116765 SYSMON state=S wchan=0
+task 1116767 gcry-watch state=S wchan=hrtimer_nanosleep
+task 1116768 gcry-mark state=S wchan=futex_do_wait
+task 1116769 gcry-mark state=S wchan=futex_do_wait
+task 1116770 gcry-mark state=S wchan=futex_do_wait
+task 1116771 gc-idle state=S wchan=hrtimer_nanosleep
+task 1116772 spec81 state=S wchan=sigsuspend.isra.0
+--- gdb, attached through task 1116761
+Could not attach to process.  If your uid matches the uid of the target
+process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try
+again as the root user.  For more details, see /etc/sysctl.d/10-ptrace.conf
+ptrace: Inappropriate ioctl for device.
+No threads.
+--- innermost frames with arguments and locals
+Could not attach to process.  If your uid matches the uid of the target
+process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try
+again as the root user.  For more details, see /etc/sysctl.d/10-ptrace.conf
+ptrace: Inappropriate ioctl for device.

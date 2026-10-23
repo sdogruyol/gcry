@@ -7,6 +7,237 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bench/stress_overnight.sh` is the release overnight stress, in the
+  tree.** The set 0.37.0 and 0.38.0 ran from their logs, with the claim
+  arms and `make claim-stress`, and every run through `bench/run_bounded.sh`
+  with its seed in the name of any log it leaves. Half of the loops used to
+  run under a bare `timeout`, so the one hang of 0.38.0's night (seed 22868,
+  header layout and freelist) was killed with no capture. A scale argument
+  shrinks every loop for a smoke of the script itself (0.01: 27 loops, 16
+  minutes, all passing).
+
+### Changed
+
+- **The mark scans small objects in its batch loop.** Each marker's batch
+  scan used to call `scan_object` and `scan_edges_inline` per object, about
+  90 instructions of register saves, spills and flag reloads around a scan
+  of a few words (a quarter of JsonGenerate's mark instructions). It now
+  scans a small object's words itself, with the heap span and radix fields
+  loaded once per batch. ns per marked object with one marker, three
+  sessions on Linux x86_64: Primes −14% to −16%, JsonParsePure −11% to
+  −12%, JsonGenerate −7% to −14%, Binarytrees −18% to −20%. Σ mark on
+  JsonGenerate fell 10–15% on all five CI runners; on other rows the pacing
+  sometimes spends the cheaper mark on one more collection. No row is
+  slower beyond what code placement moves on the same runner (Perf A/B
+  39922915306, with placement probes 39925823114, 39930906562 and
+  39936139933; `bench/log/linux/2026-10-23-mark-cost/`). `make mark-audit`'s
+  planted miss applies on the new path too.
+
+- **An allocation's slow path no longer collects on frames the hit path
+  left stale.** `Heap#malloc`/`malloc_atomic` reach the slow path by a tail
+  call, and `Heap#allocate_wipe` zeroes up to 1 KiB below the stack pointer
+  the slow path was entered with, so the conservative scan no longer reads
+  dead objects out of slots only the hit path writes. RegexDna's peak was
+  19% higher before 0.38.0 because of one such slot: `Heap#malloc_atomic`'s
+  `0x58(%rsp)` held the dead Fasta generator and its 64 MiB buffer, and the
+  occupancy claim's inlining happened to move it. On 0.39.0 the entry's
+  slots hold Knuckeotide's dead hash buffers. Knuckeotide's peak, × Boehm's:
+
+  | runner | before | after |
+  |---|---:|---:|
+  | x86 Linux | 1.53× | 1.31× |
+  | arm64 Linux | 1.44× | 1.28× |
+  | M1 | 1.58× | 1.32× |
+  | Intel Mac | 1.78× | 1.56× |
+  | Windows x86 | 1.81× | 1.59× |
+
+  No row is slower beyond its spread (Perf A/B 39738092074 and, for Windows,
+  39923071007; `bench/log/linux/2026-10-22-regexdna-peak/`,
+  `bench/log/linux/2026-10-23-wipe-platforms/`, regression 86).
+  `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off. The wipe stops at the running
+  fiber's guard page, and is skipped on a thread with no current fiber, so a
+  fiber with less than 1 KiB of stack left does not fault in it. On Windows
+  it also never stores below the running stack's committed part
+  (`NT_TIB.StackLimit`), so it touches no guard page.
+
+- **`bench/run_bounded.sh` captures and kills the stalled command's whole
+  process tree.** A command that is a wrapper (`make <gate>`, `env`,
+  `crystal spec`) left its stalled harness running after the kill and
+  captured the wrapper's stack instead of the harness's. The capture now goes
+  to the leaves of the tree, and the kill takes all of it.
+
+- **Knuckeotide's 0.38.0 peak rise is a pin Boehm has too (README,
+  ROADMAP).** 0.38.0's notes put the +21% on a dead buffer pinned by a word
+  in crystal-metric's own `Benchmark::run` frame. Measured on Linux x86_64
+  (`bench/log/linux/2026-10-21-knuckeotide-pin/`): the Boehm build keeps the
+  same two dead objects — the 6.1 MB Fasta output, in a spill slot of the
+  same frame, and a 4 MiB `IO::Memory` buffer — marked at every collection
+  to the end of the run, through 145 244 `GC_clear_stack` calls, which clear
+  only below the stack pointer. Zeroing the dead slots in each binary lowers
+  both peaks by the same ~11 MB; 0.37.0 equals 0.38.0 with them zeroed, so
+  0.37.0's layout pinned less than Boehm's. No collector can drop a dead slot
+  of the program's own live frame or a dead callee-saved register, so
+  nothing changes for that pin. gcry stayed 23–26 MB over Boehm either way,
+  and that excess was not all schedule: gcry's own allocation-entry frame
+  held more of the dead hash buffers, and the slow-path wipe above drops
+  them.
+
+- **`make dormant-flush-race` exercises mutator unmaps again.** Since the
+  2026-10-03 trim slack, `GC.free` of a large block no longer trims on every
+  free. The gate's four workers then never trimmed (0 mutator releases a
+  child), and its stress control faulted 0 of 18 children. Workers now
+  trim after each free: control 66 of 66, queued arm 0 of 66. When a queued
+  child fails, the parent prints that child's whole crash report, including
+  the faulting pc and return addresses. Before, it printed one line, often
+  the start-up note about `GCRY_MOSTLY_EMPTY`.
+
+- **`make chunk-list-drift` runs every child under a deadline.** Its fast
+  arm (`sweep_mutator_latch = false`, the pre-fix reads) can close the chunk
+  list into a cycle. On that arm the list still runs on into the release
+  queue, and the flush links a chunk it refuses to release back in front of
+  `@chunks`. The child then spun in `flush_pending_dormant_chunks` and the
+  gate with it: 1 run in 6 stalled in 0.39.0's overnight stress, and the
+  tree before round 3 hangs the same way. A hung fast child now counts as a
+  crash; a hung shipped child fails the gate with its threads' stacks, since
+  the children now consent to ptrace. A new arm refuses every empty-chunk
+  release (`GCRY_REFUSE_EMPTY_RELEASE`) and makes the latch-off race on
+  demand: the child puts an empty chunk at the head of the list, and a new
+  research hook, `Heap.sweep_drop_hook`, births two threads when the sweep
+  drops that chunk. The shipped child must exit cleanly after 40 such
+  collections, and the fast child must hang. Left to chance, the race closed
+  the cycle in 79% of tries on a 12-vCPU host and never in ten on CI's
+  4-vCPU runner. `bench/log/linux/2026-10-23-drift-stall/FINDINGS.md`.
+
+### Fixed
+
+- **On macOS, a program run with `DYLD_INSERT_LIBRARIES` has its own
+  globals and main-thread thread-locals as roots.** `GC.init` took dyld's
+  image 0 for the executable, and an inserted library is image 0 for the
+  life of the process. The library's data was scanned as the executable's
+  and its thread-local size (none) taken for the main thread's, so
+  main-thread `@[ThreadLocal]` values were not roots; the executable's data
+  was a root only through the library-roots path. With library roots off,
+  the first collection crashed in `Thread`'s list mutex. The executable is
+  now found by `_NSGetMachExecuteHeader`, for the stack maps too
+  (`make darwin-image0`, red in run 39939811092, green in run 39940435237,
+  macos-latest and macos-15-intel;
+  `bench/log/macos/2026-10-23-darwin-image0/FINDINGS.md`).
+
+- **The unmap guard and the release ledger record whether a released large
+  block was still allocated.** They used to read its FREE flag with
+  `BlockHeader.free?`, which is always `false` on the headerless layout, the
+  default. So every large release there reported `Blocks still allocated at
+  release: 1` under `GCRY_SEGV_REPORT=1`, including the cached free chunks a
+  trim gives back. That figure is why the 2026-09-28 `dormant_flush`
+  sighting read as a chunk released with its block allocated, when the
+  header it recorded was `FREE | LARGE`. The guard now uses `free_large?`;
+  `spec/research_tables_spec.cr` checks both answers.
+  `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`
+
+- **A sweep inside the stop no longer waits on `@index_lock`.** After
+  queueing empty chunks for release it recomputed the heap bounds under that
+  lock, taken blocking, so a thread the stop had frozen inside a lookup, a
+  `note_mapped` or a large growth hung the collection with every mutator
+  parked (`STALLED in phase=sweep`). The flush recomputes them after the
+  release, with the world running, and the bounds now shrink by the released
+  chunks. Needs the sweep in the stop (`GCRY_DISABLE_LAZY_SWEEP=1`,
+  `GCRY_PAGE_DONTNEED=1`, `lazy_sweep = false`) and empty-chunk unmapping with
+  another mutator (`parallel_empty_chunk_munmap`, or a single-mutator latch).
+  `Heap#stop_sweep_bounds_deferred` counts the in-stop sweeps that left the
+  recompute to the flush. `process_spec/regression/81`,
+  `bench/log/linux/2026-10-22-in-stop-sweep-audit/`.
+
+- **A refill retiring its exhausted chunk can no longer have the chunk
+  unmapped under it.** The retire cleared CURSOR before it read the chunk
+  and cleared its slot; a stop in between found the chunk no cursor's, and
+  with every block dead the in-stop sweep queued it and the flush unmapped
+  it. The thread then read the unmapped header (SIGSEGV, 3 of 3 on the
+  control arm). It now clears the slot first and CURSOR last, and touches
+  the chunk no more after. `process_spec/regression/82`.
+
+- **The mprotect page barrier's fault handler can no longer be frozen by a
+  stop.** A stop that re-armed the barrier freed the card state the handler
+  was using and re-protected its page, which the handler then made writable
+  behind the new cards — a use-after-free in the signal handler and a write
+  the barrier never recorded. The suspend signal now waits for the handler.
+  Affects the mprotect backend (soft-dirty unavailable, or
+  `GCRY_MPROTECT_BARRIER=1`) with incremental marking or a nursery.
+  `process_spec/regression/83`.
+
+- **The mprotect page barrier copes with being re-armed while a fault
+  handler runs.** After a lazy sweep, the default, the barrier is re-armed
+  after the stop, with the world running, and a handler on another thread
+  could be anywhere in it. The re-arm freed the card state a running
+  handler was reading, a use-after-free in the signal handler. A handler
+  that had claimed its page under the old cards made it writable after the
+  re-arm had protected it again, so writes to it went unrecorded. A fault
+  taken before the disarm and handled after it read as foreign: the barrier
+  uninstalled itself, and a write to a page the re-arm had protected again
+  went to Crystal's handler (`Invalid memory access`). And a handler that
+  claimed its page just before the re-arm protected it left every later
+  writer faulting until the next collection. Retired card state is now freed
+  only once no handler is inside, a handler records its page in whatever
+  cards replaced its own, an unclaimed protection fault is retried once
+  before it is forwarded, and every handler that claims a page makes it
+  writable itself. Same reach as the previous entry. `process_spec/regression/87`,
+  `bench/log/linux/2026-10-22-mprotect-card-reclaim/`.
+
+- **On the freelist allocator (`GCRY_BITMAP_ALLOC=0` on the header layout,
+  and nursery chunks) the stop writes no class freelist a frozen thread is
+  inside.** A thread frozen in a freelist pop, push, refill or batch claim
+  stored a stale head after the stop, handed out a block the sweep had linked
+  again, or installed a freelist into a chunk the sweep had made dormant (its
+  objects then read zero). The stop now notes which class locks are held and
+  leaves those classes' lists and chunks alone for that collection
+  (`stop_sweep_freelist_declined`), and a collection whose stop found such a
+  class sweeps in the stop rather than after it, so a stash it kept is never
+  swept with the world running. An allocation batch publishes its stash
+  under the class lock, and the page-release exclusion now takes the batch
+  slots after the class lock, in that order. `process_spec/regression/84`.
+
+- **With `GCRY_TLAB=1` the stop no longer splices TLABs into, or scrubs, a
+  class list a frozen thread is inside.** A thread frozen under the class
+  lock (an allocation that ran while a stop was in progress, or one from
+  before a runtime TLAB switch) stored its stale head when it resumed. The
+  TLAB blocks the flush had put in front of that head ended up in no TLAB
+  and on no list. The chains of such a class now stay in their TLAB for
+  that collection. `process_spec/regression/85`,
+  `bench/log/linux/2026-10-22-frozen-class-gaps/`.
+
+- **The incremental cycle (`GCRY_INCREMENTAL=1`) flushes allocation-batch
+  stashes and TLABs before its finishing slice sweeps.** No stop of the
+  cycle flushed them. A stash claimed before the cycle was reclaimed onto
+  the class list while its thread still held it, and a TLAB chain was
+  relinked onto the class list by a rebuild: either way one block was
+  handed out twice. Affects the freelist allocator (`GCRY_BITMAP_ALLOC=0` on
+  the header layout) with `GCRY_ALLOC_BATCH` or `GCRY_TLAB=1`.
+  `process_spec/regression/85`.
+
+- **A `free` that an incremental finishing slice froze between its two
+  bitmap clears no longer comes back occupied.** The slice's sweep put the
+  block back in the allocated set, owned by nobody. That left
+  `live_objects` one low and `free_bytes` one block high for good, and the
+  block unused for a cycle. The slice now clears, in a class whose lock is
+  held, marks with no occupancy behind them. Bitmap allocator with
+  `GCRY_INCREMENTAL=1`. `process_spec/regression/85`.
+
+- **`heap_size`, `dormant_chunk_bytes` and `expl_freed_bytes_since_gc` no
+  longer lose the stop's writes.** Each was a plain read-modify-write from
+  more than one lock domain, and a thread a stop froze between its load and
+  its store put back the value from before the stop: `GC.stats.heap_size`
+  (and `GC_get_heap_usage_safe`, `/gc-stats`) stayed high by every chunk
+  the stop unmapped, `dormant_chunk_bytes` lost every chunk the stop made
+  dormant (at zero the next flush skipped their pages), and
+  `GC.prof_stats.expl_freed_bytes_since_gc` kept the bytes of the cycle
+  before. `heap_size` also lost updates between two threads mapping chunks.
+  The writes are atomic now, and `dormant_chunk_bytes` follows each chunk
+  going dormant and coming back instead of a recount at every major.
+  `heap_size` feeds the tight-grow collect-before-grow trigger
+  (`GCRY_TIGHT_GROW=1`) too. `process_spec/regression/88`,
+  `bench/log/linux/2026-10-23-frozen-counter-rmw/`.
+
 ## [0.38.0] - 2026-10-21
 
 ### Added

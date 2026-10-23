@@ -1,0 +1,7 @@
+5: rounds=164 runs=982
+  pre long8: runs=164 rc={'0': 162, '1': 1, '2': 1} lost_runs=1 collects~163163 extra_heap_collections=11059 p50=15.74s max=22.32s
+  pth long8: runs=164 rc={'0': 163, '2': 1} lost_runs=0 collects~163163 extra_heap_collections=10844 p50=15.88s max=34.87s
+  lc long8: runs=164 rc={'0': 164} lost_runs=0 collects~164164 extra_heap_collections=0 p50=13.89s max=20.97s
+  rel long8: runs=164 rc={'0': 164} lost_runs=0 collects~164164 extra_heap_collections=0 p50=16.09s max=24.50s
+  rlc long8: runs=163 rc={'0': 163} lost_runs=0 collects~163163 extra_heap_collections=6793 p50=17.01s max=30.52s
+  relwc long8: runs=163 rc={'0': 163} lost_runs=0 collects~163163 extra_heap_collections=74329 p50=24.25s max=34.03s

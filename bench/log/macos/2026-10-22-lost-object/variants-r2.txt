@@ -1,0 +1,4 @@
+# Round 2: the one shape that lost objects on d1549e2f in round 1 (3 of 569
+# runs, plus 10 collector stalls in a freelist walk), on every arm.
+# name|parallel|bound_s|collects_per_run|harness args
+long8|1|120|1001|--tlab --iterations=1000 --seed=SEED --workers=8

@@ -1,0 +1,5 @@
+widened span by 64 MiB at 7c59f7fff040
+mprotect85 held: re-armed with the handler inside; freed under it 1, retired and kept 0
+resumed control: freed under it 1; resuming the handler
+resumed control: writer done true, barrier installed true, current cards record the page true
+resumed control: second write done; recorded true

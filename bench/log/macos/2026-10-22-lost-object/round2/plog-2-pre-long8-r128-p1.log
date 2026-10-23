@@ -1,0 +1,19 @@
+gcry: WARNING: this kernel's page size is 16384 and gcry is compiled for 4096. Page-aligned decisions — dormancy's madvise, the pagemap low-water probe, the fiber guard offset — are computed on the wrong unit here
+Process-GC STW + concurrent mutation property test
+  seed=8 iterations=1000 workers=[8]
+  stop_the_world=true worker_collect=0
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=8 iterations=1000 seed=8
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 10 listed, 10 bounded, 9 staged. collection 0
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 11 listed, 11 bounded, 10 staged. collection 1
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 11 listed, 11 bounded, 10 staged. collection 2
+    collects=669 heap_collections=716 (failed)
+
+=== Summary ===
+RESULT: FAIL — seed=8 (re-run with --seed=8)
+  ERROR: after collect #669: root 14 DEAD (Pointer(Void)@0x10eb93fa0) heap_ptr=true block={found: true, free: true, size: 64, flags: 1, first_word: 13907096144816631297, offset: 0} heap_collections_since_verify=4
+  ERROR: after collect #669: root 15 DEAD (Pointer(Void)@0x10eb93f50) heap_ptr=true block={found: true, free: true, size: 64, flags: 1, first_word: 13907096144816631297, offset: 0} heap_collections_since_verify=4

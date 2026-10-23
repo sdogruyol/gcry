@@ -1,0 +1,3 @@
+macos-15-intel/master/2: runs=1000 pass=998 failed=0 stalled=0 upstream=2 unengaged=0 watchdog_lines=0
+  tlab-nursery: n=750 p50=4.37s p99=8.44s max=9.97s
+  tlab-only: n=248 p50=9.91s p99=17.55s max=19.38s

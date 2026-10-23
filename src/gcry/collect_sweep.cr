@@ -36,6 +36,44 @@ module Gcry
     # holds the list lock, the code before 2026-10-21 — the control arm of
     # `process_spec/regression/80_stop_sweep_frozen_pool_taker_spec.cr`.
     property stop_sweep_dormant_lock : Bool = true
+    # Research only: false recomputes the heap bounds at the end of an
+    # in-stop sweep that queued empty chunks, taking `@index_lock` with the
+    # world stopped — the code before 2026-10-22, and the control arm of
+    # `process_spec/regression/81_stop_sweep_frozen_index_holder_spec.cr`.
+    # The bounds are recomputed by `flush_pending_empty_chunks` either way.
+    property stop_sweep_index_lock : Bool = true
+    # In-stop sweeps that queued empty chunks for release and left the heap
+    # bounds to the flush rather than take `@index_lock` in the stop
+    # (`Heap#sweep`, `stop_sweep_index_lock`).
+    getter stop_sweep_bounds_deferred : UInt64 = 0_u64
+    # Research only: called on the collector, in the stop, by an in-stop sweep
+    # that queued empty chunks for release, at the branch that used to
+    # recompute the heap bounds — before it takes `@index_lock` (argument
+    # true, `stop_sweep_index_lock = false`) or defers the recompute to the
+    # flush (false). Every mutator is frozen: it must not allocate, lock, or
+    # write through anything but a raw fd. It is how the control arm of
+    # `process_spec/regression/81` reports, from inside the stop that then
+    # hangs, that the stop reached this branch while another thread held
+    # `@index_lock`, rather than inferring it after the fact.
+    property stop_sweep_bounds_hook : Proc(Bool, Nil)? = nil
+    # Research only: called on the collector by an after-world sweep, in its
+    # walk of `@chunks`, for each empty chunk it has just queued for release
+    # (its `next` now points into the release queue). The arguments are the
+    # chunk's address and whether it is the chunk the walk started from (the
+    # list's head as the walk read it). No lock is held and the world is
+    # running, so the hook may allocate and start threads, as a mutator
+    # would. It is the latch-off race made deterministic: a thread born here
+    # is born between this chunk's drop decision and the walk's relink
+    # decisions, which `sweep_mutator_latch = false` reads live. Then the
+    # rebuild is not stored, the list still reaches the queued chunk, and the
+    # flush that refuses to release the chunk links it back in front, which
+    # closes a cycle. Latched, the walk relinks without it whatever is born
+    # here. The refused-releases arm of `make chunk-list-drift`.
+    #
+    # The class's, as `Heap.shared_counter_hook` is: one instance variable
+    # more can move the allocation hit path's fields
+    # (`bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`).
+    class_property sweep_drop_hook : Proc(UInt64, Bool, Nil)? = nil
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -69,7 +107,9 @@ module Gcry
         @chunk_fill_lt50 = 0_u64
         @chunk_fill_lt75 = 0_u64
         @chunk_fill_ge75 = 0_u64
-        @dormant_chunk_bytes = 0_u64
+        # The control arm's recount (`Heap.shared_counters_atomic = false`):
+        # the counter is otherwise kept by the dormancy transitions themselves.
+        @dormant_chunk_bytes.set(0_u64) unless @@shared_counters_atomic
         @last_sweep_after_world = after_world
         @last_sweep_multi = sweep_multi_mutator?
         @last_sweep_release = release_empty_chunks_this_collect?
@@ -163,7 +203,7 @@ module Gcry
           if major
             mapped = chunk.value.mapped_bytes
             @fully_free_chunk_bytes += mapped
-            @dormant_chunk_bytes += mapped
+            dormant_bytes_add(mapped) unless @@shared_counters_atomic
             dormant_budget_used += mapped
             @sweep_dormant_skips += 1
             @size_class_chunk_count += 1
@@ -199,7 +239,20 @@ module Gcry
               fl_locked = true
             end
             begin
-              counts = sweep_small_blocks(chunk, class_index, major, fl_locked)
+              counts = if !after_world && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
+                          !bitmap_alloc_chunk?(chunk) && stop_frozen_class?(class_index, ChunkHeader.nursery?(chunk))
+                         # A thread the stop froze is inside this class's
+                         # freelist (`note_frozen_freelists`): the chunk
+                         # is not swept, so nothing in it is linked, rebuilt,
+                         # or found empty — it may be the chunk that thread
+                         # is laying out, or hold the block it is popping.
+                         # Its garbage waits for a stop that finds the lock
+                         # free.
+                         @stop_sweep_freelist_declined &+= 1
+                         unswept_freelist_chunk_counts(chunk, class_index)
+                       else
+                         sweep_small_blocks(chunk, class_index, major, fl_locked)
+                       end
               any_live = counts.any_live
               live_payload = counts.live_payload
               usable_payload = counts.usable_payload
@@ -331,9 +384,12 @@ module Gcry
                       end
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                       # Parallel — munmap was the soft-realloc amplifier).
+                      # The bytes before the flag: a revival that finds the
+                      # chunk dormant then always finds them counted, and its
+                      # saturating subtraction cannot run ahead of the add.
+                      dormant_bytes_add(mapped)
                       ChunkHeader.set_dormant(chunk, true)
                       dormant_budget_used += mapped
-                      @dormant_chunk_bytes += mapped
                       if ChunkHeader.nursery?(chunk)
                         rebuild_nursery_mask |= bit
                       else
@@ -346,7 +402,7 @@ module Gcry
                       # Drop FREE bytes that leave the heap (reclaim_small /
                       # freelist_reserve already adjust; skip full recalc).
                       free_bytes_sub(free_payload) if free_payload > 0
-                      @heap_size = sat_sub(@heap_size, mapped)
+                      heap_size_sub(mapped)
                       @bytes_reclaimed_since_gc += mapped
                       @released_chunk_bytes += mapped
                       @last_empty_unmap_bytes &+= mapped
@@ -451,6 +507,13 @@ module Gcry
           end
         end
 
+        # Research only (`Heap.sweep_drop_hook`): a chunk this after-world walk
+        # just queued for release, with the class lock let go. `drop` is false
+        # on almost every chunk, so unset it costs nothing the walk notices.
+        if drop && after_world && (hook = @@sweep_drop_hook)
+          hook.call(chunk.address, chunk == walk_head)
+        end
+
         unless drop
           # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
           # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
@@ -521,6 +584,20 @@ module Gcry
         @pending_empty_chunks = to_unmap
       end
 
+      # A frozen class's list is not rebuilt in this stop: the thread inside
+      # it stores what it read when it resumes (`note_frozen_freelists`).
+      # The request carries over to the next sweep, which has the lock or
+      # carries it again. Only a bit a TLAB discard requested gets here: this
+      # sweep swept no chunk of a frozen class to set one.
+      unless after_world
+        held = rebuild_mask & @stop_frozen_classes
+        held_nursery = rebuild_nursery_mask & @stop_frozen_nursery_classes
+        @freelist_rebuild_request |= held
+        @freelist_rebuild_request_nursery |= held_nursery
+        rebuild_mask &= ~held
+        rebuild_nursery_mask &= ~held_nursery
+      end
+
       # Page-HOLED + empty dormant/munmap: one freelist rebuild per touched class.
       if rebuild_mask != 0 || rebuild_nursery_mask != 0
         SIZE_CLASS_COUNT.times do |i|
@@ -545,15 +622,28 @@ module Gcry
         # recalc was an extra O(blocks) walk after every empty/HOLED rebuild.
       end
 
-      if any_drop
-        # Same reason as `trim_large_cache`: this walks the chunk list and
-        # rewrites `@heap_min` / `@heap_max`, the bounds `find_block` reads to
-        # decide whether an address is gcry's at all. In the lazy path
-        # (`after_world`) the mutators are running and can be mapping chunks
-        # underneath the walk, so it needs the allocator's lock; in the stopped
-        # world nothing else runs and taking it would be pointless.
-        if after_world && !@trim_unlocked
-          with_alloc_lock { update_heap_bounds_after_unmap }
+      # The heap bounds are recomputed by `flush_pending_empty_chunks`, after
+      # the release, with the world running. Here they used to be recomputed
+      # at once, under `@index_lock` taken with a blocking `sync`
+      # (`update_heap_bounds_after_unmap`). In the stop that is the 0.21.1
+      # `@chunk_list_lock` hang one lock over, which is why `index_remove`
+      # was moved out of this branch: a thread the stop froze inside any
+      # `@index_lock` section — a free's or a realloc's `chunk_containing`,
+      # `note_mapped`, `publish_large_growth` — never lets go, and the
+      # collector spun on it with every mutator parked, for good. The
+      # chunk-list try-lock does not cover it: `chunk_containing` takes the
+      # index lock alone. Nor did the recompute shrink anything by this
+      # sweep's drops: it reads the bounds off the index, and the dropped
+      # chunks stay in the index until the flush removes them. It only caught
+      # up with the chunks earlier flushes had removed, which the flush now
+      # does itself. The lazy arm's call, under `@alloc_lock`, was the same.
+      # `bench/log/linux/2026-10-22-in-stop-sweep-audit/FINDINGS.md`.
+      if any_drop && !after_world
+        if hook = @stop_sweep_bounds_hook
+          hook.call(!@stop_sweep_index_lock)
+        end
+        if @stop_sweep_index_lock
+          @stop_sweep_bounds_deferred &+= 1
         else
           update_heap_bounds_after_unmap
         end
@@ -794,6 +884,11 @@ module Gcry
         # search to finish before unmapping its queued chunks, just as large
         # trims wait for list readers before detaching their mappings.
         @chunk_list_lock.sync { flush_pending_empty_chunks_locked(chunk) }
+        # Here rather than in the sweep: the released chunks are out of the
+        # index now, so the bounds can shrink by them, and the world runs, so
+        # a thread holding `@index_lock` is one this waits for, not one the
+        # stop froze (`Heap#sweep`, `stop_sweep_index_lock`).
+        update_heap_bounds_after_unmap
       end
     end
 
@@ -904,7 +999,7 @@ module Gcry
     # sum comes out at what the chunk holds now.
     private def unqueue_kept_chunk_accounting(chunk : ChunkHeader*) : Nil
       mapped = chunk.value.mapped_bytes
-      @heap_size &+= mapped
+      heap_size_add(mapped)
       @released_chunk_bytes = sat_sub(@released_chunk_bytes, mapped)
       @last_empty_unmap_bytes = sat_sub(@last_empty_unmap_bytes, mapped)
       class_index = chunk.value.size_class.to_i32
@@ -1015,7 +1110,7 @@ module Gcry
     # physical pages are released outside STW (kernel VM lock avoided).
     # Coalesces contiguous dormant ranges into a single madvise.
     private def flush_pending_dormant_chunks : Nil
-      return if @dormant_chunk_bytes == 0
+      return if @dormant_chunk_bytes.get == 0
 
       # Dormancy was decided by the sweep, inside the stopped world. This pass
       # runs after `start_world`, holds no lock, and `MADV_DONTNEED` over a
@@ -1603,6 +1698,17 @@ module Gcry
       {freed, live}
     end
 
+    # What the policy is told of a freelist chunk the stop leaves unswept
+    # (`Heap#sweep`, frozen class): all of it live, as nothing in it is
+    # reclaimed — kept, not empty, not HOLED or SPARSE.
+    private def unswept_freelist_chunk_counts(chunk : ChunkHeader*, class_index : Int32) : SmallSweepCounts
+      payload = SizeClasses.payload(class_index).to_u64
+      block_bytes = BlockHeader::SIZE.to_u64 + payload
+      span = ChunkHeader.data_end(chunk).address &- ChunkHeader.data_start(chunk).address
+      usable = (span // block_bytes) &* payload
+      SmallSweepCounts.new(true, usable, usable, 0_u64)
+    end
+
     # The header-walk arm of the size-class sweep.
     #
     # Still inline loops rather than `each_block`: the yield overhead per block
@@ -1793,7 +1899,7 @@ module Gcry
     private def filter_freelist_outside(head : Void*, lo : UInt64, hi : UInt64) : Void*
       new_head = Pointer(Void).null
       user = head
-      max_steps = (@heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
+      max_steps = (heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
       max_steps = 1024_u64 if max_steps < 1024_u64
       steps = 0_u64
       while user
