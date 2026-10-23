@@ -1,0 +1,29 @@
+== natural child 1 exited: Invalid memory access
+signal 11
+== natural child 2 pid 1295862 running after 60 s: 1 buckets; 1 refusal line
+heap=5a404c0dcb40
+chunks head=791e83f60000 index_count=2404
+CYCLE: 11 chunks from the head, then a loop of 40 chunks entered at 791e834c0000
+#0  0x0000791ea9f32d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+#1  0x00005a403549e088 in release_physical_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:133
+#2  0x00005a403549dfb6 in release_reusable_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:147
+#3  0x00005a4035440bfc in flush_pending_dormant_chunks () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect_sweep.cr:1115
+== natural child 3 pid 1295863 running after 60 s: 1 buckets; 1 refusal line
+heap=5b186a565b40
+chunks head=7784dc319000 index_count=1885
+CYCLE: 0 chunks from the head, then a loop of 31 chunks entered at 7784dc319000
+#0  0x0000778503532d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+#1  0x00005b184df42088 in release_physical_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:133
+#2  0x00005b184df41fb6 in release_reusable_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:147
+#3  0x00005b184dee4bfc in flush_pending_dormant_chunks () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect_sweep.cr:1115
+bash: line 13: 1295862 Killed                     CHUNK_DRIFT_ROUNDS=1200 $B --child --fast > runs/natcyc-$i.out 2>&1
+== natural child 4 pid 1295864 running after 60 s: 1 buckets; 1 refusal line
+heap=5d35668ffb40
+chunks head=70b03a235000 index_count=2317
+CYCLE: 0 chunks from the head, then a loop of 27 chunks entered at 70b03a235000
+#0  0x000070b078332d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+#1  0x00005d352aa5f088 in release_physical_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:133
+#2  0x00005d352aa5efb6 in release_reusable_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:147
+#3  0x00005d352aa01bfc in flush_pending_dormant_chunks () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect_sweep.cr:1115
+bash: line 20: 1295863 Killed                     CHUNK_DRIFT_ROUNDS=1200 $B --child --fast > runs/natcyc-$i.out 2>&1
+bash: line 20: 1295864 Killed                     CHUNK_DRIFT_ROUNDS=1200 $B --child --fast > runs/natcyc-$i.out 2>&1

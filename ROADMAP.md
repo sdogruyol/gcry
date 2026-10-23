@@ -4647,6 +4647,13 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       runs were spec 75's control arm under the invariant checker, which
       caught the drift that arm creates on purpose (spec fixed)
       (`bench/log/linux/2026-10-18-0.37-stress/`).
+      2026-10-23, on 0.39.0's round 3: the one stall not of the upstream
+      shape was `make chunk-list-drift`'s fast arm, the pre-fix shape kept on
+      purpose. Its chunk list closes into a cycle when the flush links a
+      refused chunk back in front, and the tree before round 3 hangs the same
+      way. The gate now puts every child under a deadline and forces that
+      cycle on every run, with the shipped tree as its control
+      (`bench/log/linux/2026-10-23-drift-stall/`).
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 

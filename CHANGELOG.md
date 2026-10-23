@@ -93,6 +93,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the faulting pc and return addresses. Before, it printed one line, often
   the start-up note about `GCRY_MOSTLY_EMPTY`.
 
+- **`make chunk-list-drift` runs every child under a deadline.** Its fast
+  arm (`sweep_mutator_latch = false`, the pre-fix reads) can close the chunk
+  list into a cycle. On that arm the list still runs on into the release
+  queue, and the flush links a chunk it refuses to release back in front of
+  `@chunks`. The child then spun in `flush_pending_dormant_chunks` and the
+  gate with it: 1 run in 6 stalled in 0.39.0's overnight stress, and the
+  tree before round 3 hangs the same way. A hung fast child now counts as a
+  crash; a hung shipped child fails the gate with its threads' stacks, since
+  the children now consent to ptrace. A new arm refuses every empty-chunk
+  release (`GCRY_REFUSE_EMPTY_RELEASE`): the shipped child must exit cleanly
+  and the fast child must hang and be killed. Nothing in `src/` changed.
+  `bench/log/linux/2026-10-23-drift-stall/FINDINGS.md`.
+
 ### Fixed
 
 - **On macOS, a program run with `DYLD_INSERT_LIBRARIES` has its own

@@ -1,0 +1,5 @@
+1 rc=0 t=178 fast_hung=0 fast_retried=0 refuse_shipped=9616 refuse_fast_hangs=1 fails=0
+2 rc=0 t=164 fast_hung=1 fast_retried=1 refuse_shipped=8103 refuse_fast_hangs=1 fails=0
+3 rc=0 t=44 fast_hung=0 fast_retried=1 refuse_shipped=8165 refuse_fast_hangs=1 fails=0
+4 rc=0 t=94 fast_hung=0 fast_retried=1 refuse_shipped=8040 refuse_fast_hangs=1 fails=0
+5 rc=0 t=59 fast_hung=0 fast_retried=1 refuse_shipped=8562 refuse_fast_hangs=1 fails=0

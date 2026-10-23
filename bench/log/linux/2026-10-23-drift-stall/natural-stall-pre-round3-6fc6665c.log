@@ -1,0 +1,281 @@
+gcry: the chunk index and the chunk list disagree — 67 chunk(s) indexed but not listed (first 0x7531704b9000, still mapped, size class 9, flags 0x0, 131072 bytes), 0 listed but not indexed. A chunk off the list is never swept and its marks are never cleared, so its objects read marked forever and nothing follows their edges
+gcry: collection 5, indexed 118 chunk(s)
+bucket 200 1590 208343040 223678464 3554
+bucket 400 3459 453222400 463970304 7746
+gcry: refusing to release chunk 0x7531226a9000 — the sweep queued it empty and 1 block(s) are allocated in it now. A mutator took one after the sweep unlinked it and before this flush, through the index entry it still has. Kept mapped; reported once per process
+STALLED: still running after 150 s
+--- stall capture: pid 1169885, 6 thread(s)
+task 1169885 drift-6fc6 state=R wchan=0
+task 1169908 SYSMON state=S wchan=hrtimer_nanosleep
+task 1169940 gcry-mark state=S wchan=futex_do_wait
+task 1169941 gcry-mark state=R wchan=futex_do_wait
+task 1169942 gcry-mark state=S wchan=futex_do_wait
+task 1169944 gc-idle state=S wchan=futex_do_wait
+--- gdb, attached through task 1169885
+[New LWP 1169944]
+[New LWP 1169942]
+[New LWP 1169941]
+[New LWP 1169940]
+[New LWP 1169908]
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.ubuntu.com>
+Enable debuginfod for this session? (y or [n]) [answered N; input not from terminal]
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+0x0000753175932d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+
+warning: 117	../sysdeps/unix/syscall-template.S: No such file or directory
+  Id   Target Id                                        Frame 
+* 1    Thread 0x753175aeb7c0 (LWP 1169885) "drift-6fc6" 0x0000753175932d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+  2    Thread 0x75316bfff6c0 (LWP 1169944) "gc-idle"    __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  3    Thread 0x753169dfd6c0 (LWP 1169942) "gcry-mark"  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+  4    Thread 0x75316a5fe6c0 (LWP 1169941) "gcry-mark"  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+  5    Thread 0x75316adff6c0 (LWP 1169940) "gcry-mark"  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+  6    Thread 0x753173fff6c0 (LWP 1169908) "SYSMON"     __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+
+Thread 6 (Thread 0x753173fff6c0 (LWP 1169908) "SYSMON"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007531758a030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+#2  0x00007531758f5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:48
+#3  0x0000753175903707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#4  0x0000569acb48d93b in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:111
+#5  0x0000569acb48a83d in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:197
+#6  0x0000569acb53c60b in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:55
+#7  0x0000569acb53c5c3 in run_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/monitor_gate.cr:270
+#8  0x0000569acb38c8a9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#9  0x0000569acb489fb2 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+#10 0x0000569acb48d897 in thread_proc () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:47
+#11 0x0000569acb382066 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:22
+#12 0x00007531758a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#13 0x00007531759375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 5 (Thread 0x75316adff6c0 (LWP 1169940) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000569acb3f8961 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:881
+#2  0x0000569acb3f8811 in mark_wait () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:872
+#3  0x0000569acb3f877a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:941
+#4  0x0000569acb3f8315 in mark_worker_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:760
+#5  0x0000569acb4687e6 in run_mark_worker () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:139
+#6  0x0000569acb382016 in gcry_mark_worker_main () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:43
+#7  0x0000569acb382006 in -> () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:172
+#8  0x00007531758a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007531759375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x75316a5fe6c0 (LWP 1169941) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000569acb3f8961 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:881
+#2  0x0000569acb3f8811 in mark_wait () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:872
+#3  0x0000569acb3f877a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:941
+#4  0x0000569acb3f8315 in mark_worker_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:760
+#5  0x0000569acb4687e6 in run_mark_worker () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:139
+#6  0x0000569acb382016 in gcry_mark_worker_main () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:43
+#7  0x0000569acb382006 in -> () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:172
+#8  0x00007531758a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007531759375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 3 (Thread 0x753169dfd6c0 (LWP 1169942) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x0000569acb3f8961 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:881
+#2  0x0000569acb3f8811 in mark_wait () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:872
+#3  0x0000569acb3f877a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:941
+#4  0x0000569acb3f8315 in mark_worker_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:760
+#5  0x0000569acb4687e6 in run_mark_worker () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:139
+#6  0x0000569acb382016 in gcry_mark_worker_main () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:43
+#7  0x0000569acb382006 in -> () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:172
+#8  0x00007531758a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007531759375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x75316bfff6c0 (LWP 1169944) "gc-idle"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007531758a030c in __internal_syscall_cancel (a1=a1@entry=95223146715200, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007531758a06e7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x569addd59840, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x569addd59840, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x569addd59840, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007531758a30c7 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x569addd58258, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x569addd58258) at ./nptl/pthread_cond_wait.c:453
+#7  0x0000569acb3f7d51 in wait_post_stw_turn () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2736
+#8  0x0000569acb3f7e0a in lock_post_stw () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2690
+#9  0x0000569acb3f7a66 in acquire_post_stw () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2786
+#10 0x0000569acb3f5612 in run_collection_body () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2870
+#11 0x0000569acb3f4ac2 in run_collection () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2849
+#12 0x0000569acb44b906 in collect:release_warm:idle () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2051
+#13 0x0000569acb44b707 in idle_collect () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:3323
+#14 0x0000569acb4a71cb in loop_forever () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/idle_release.cr:262
+#15 0x0000569acb3832b6 in -> () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/idle_release.cr:169
+#16 0x0000569acb489f9f in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+#17 0x0000569acb48d897 in thread_proc () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:47
+#18 0x0000569acb382066 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:22
+#19 0x00007531758a3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#20 0x00007531759375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 1 (Thread 0x753175aeb7c0 (LWP 1169885) "drift-6fc6"):
+#0  0x0000753175932d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+#1  0x0000569acb4a3778 in release_physical_pages () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/platform/linux_softdirty.cr:133
+#2  0x0000569acb4a36a6 in release_reusable_pages () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/platform/linux_softdirty.cr:147
+#3  0x0000569acb4463e4 in flush_pending_dormant_chunks () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect_sweep.cr:1089
+#4  0x0000569acb3f72c7 in run_collection_body () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:3211
+#5  0x0000569acb3f4ac2 in run_collection () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2849
+#6  0x0000569acb463a85 in collect:release_warm () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2051
+#7  0x0000569acb3bb2e2 in collect () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/gc_override.cr:1559
+#8  0x0000569acb38024c in __crystal_main () at /home/naruto/playground/.scratch/DriftStall/bisect/bench/chunk_list_drift.cr:550
+#9  0x0000569acb4e0f06 in main_user_code () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/main.cr:129
+#10 0x0000569acb4e0e4f in main () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/main.cr:115
+#11 0x0000569acb387fab in main () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/main.cr:9
+[Inferior 1 (process 1169885) detached]
+--- innermost frames with arguments and locals
+[New LWP 1169944]
+[New LWP 1169942]
+[New LWP 1169941]
+[New LWP 1169940]
+[New LWP 1169908]
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.ubuntu.com>
+Enable debuginfod for this session? (y or [n]) [answered N; input not from terminal]
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+0x0000753175932d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+
+warning: 117	../sysdeps/unix/syscall-template.S: No such file or directory
+
+Thread 6 (Thread 0x753173fff6c0 (LWP 1169908) "SYSMON"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+No locals.
+#1  0x00007531758a030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+        result = <optimized out>
+        pd = <optimized out>
+        ch = <optimized out>
+#2  0x00007531758f5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosleep.c:48
+        r = <optimized out>
+#3  0x0000753175903707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+        ret = <optimized out>
+#4  0x0000569acb48d93b in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:111
+No locals.
+#5  0x0000569acb48a83d in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:197
+No locals.
+#6  0x0000569acb53c60b in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:55
+No locals.
+#7  0x0000569acb53c5c3 in run_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/monitor_gate.cr:270
+No locals.
+
+Thread 5 (Thread 0x75316adff6c0 (LWP 1169940) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+No locals.
+#1  0x0000569acb3f8961 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:881
+No locals.
+#2  0x0000569acb3f8811 in mark_wait () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:872
+No locals.
+#3  0x0000569acb3f877a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:941
+No locals.
+#4  0x0000569acb3f8315 in mark_worker_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:760
+No locals.
+#5  0x0000569acb4687e6 in run_mark_worker () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:139
+No locals.
+#6  0x0000569acb382016 in gcry_mark_worker_main () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:43
+No locals.
+#7  0x0000569acb382006 in -> () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:172
+No locals.
+
+Thread 4 (Thread 0x75316a5fe6c0 (LWP 1169941) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+No locals.
+#1  0x0000569acb3f8961 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:881
+No locals.
+#2  0x0000569acb3f8811 in mark_wait () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:872
+No locals.
+#3  0x0000569acb3f877a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:941
+No locals.
+#4  0x0000569acb3f8315 in mark_worker_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:760
+No locals.
+#5  0x0000569acb4687e6 in run_mark_worker () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:139
+No locals.
+#6  0x0000569acb382016 in gcry_mark_worker_main () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:43
+No locals.
+#7  0x0000569acb382006 in -> () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:172
+No locals.
+
+Thread 3 (Thread 0x753169dfd6c0 (LWP 1169942) "gcry-mark"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+No locals.
+#1  0x0000569acb3f8961 in wait_on_mark_word () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:881
+No locals.
+#2  0x0000569acb3f8811 in mark_wait () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:872
+No locals.
+#3  0x0000569acb3f877a in wait_for_mark_epoch () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:941
+No locals.
+#4  0x0000569acb3f8315 in mark_worker_loop () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:760
+No locals.
+#5  0x0000569acb4687e6 in run_mark_worker () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:139
+No locals.
+#6  0x0000569acb382016 in gcry_mark_worker_main () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:43
+No locals.
+#7  0x0000569acb382006 in -> () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/parallel_mark.cr:172
+No locals.
+
+Thread 2 (Thread 0x75316bfff6c0 (LWP 1169944) "gc-idle"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+No locals.
+#1  0x00007531758a030c in __internal_syscall_cancel (a1=a1@entry=95223146715200, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+        result = <optimized out>
+        pd = <optimized out>
+        ch = <optimized out>
+#2  0x00007531758a06e7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x569addd59840, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+        resultvar = <optimized out>
+        __arg6 = <optimized out>
+        __arg5 = <optimized out>
+        __arg4 = <optimized out>
+        __arg3 = <optimized out>
+        __arg2 = <optimized out>
+        __arg1 = <optimized out>
+        _a6 = <optimized out>
+        _a5 = <optimized out>
+        _a4 = <optimized out>
+        _a3 = <optimized out>
+        _a2 = <optimized out>
+        _a1 = <optimized out>
+#3  __futex_abstimed_wait_common (futex_word=0x569addd59840, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+        err = <optimized out>
+        clockbit = 256
+        op = 393
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x569addd59840, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+No locals.
+#5  0x00007531758a30c7 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x569addd58258, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+        signals = 0
+        g1_start = <optimized out>
+        buffer = {__routine = 0x7531758a2e60 <__condvar_cleanup_waiting>, __arg = 0x75316bffe640, __canceltype = 0, __prev = 0x0}
+        cbuffer = {wseq = 0, cond = 0x569addd59820, mutex = 0x569addd58258, private = 0}
+        err = <optimized out>
+        result = 0
+        wseq = <optimized out>
+        g = <optimized out>
+        seq = 0
+        flags = <optimized out>
+        private = 0
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x569addd58258) at ./nptl/pthread_cond_wait.c:453
+No locals.
+#7  0x0000569acb3f7d51 in wait_post_stw_turn () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2736
+No locals.
+
+Thread 1 (Thread 0x753175aeb7c0 (LWP 1169885) "drift-6fc6"):
+#0  0x0000753175932d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+No locals.
+#1  0x0000569acb4a3778 in release_physical_pages () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/platform/linux_softdirty.cr:133
+No locals.
+#2  0x0000569acb4a36a6 in release_reusable_pages () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/platform/linux_softdirty.cr:147
+No locals.
+#3  0x0000569acb4463e4 in flush_pending_dormant_chunks () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect_sweep.cr:1089
+No locals.
+#4  0x0000569acb3f72c7 in run_collection_body () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:3211
+No locals.
+#5  0x0000569acb3f4ac2 in run_collection () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2849
+No locals.
+#6  0x0000569acb463a85 in collect:release_warm () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/collect.cr:2051
+No locals.
+#7  0x0000569acb3bb2e2 in collect () at /home/naruto/playground/.scratch/DriftStall/bisect/src/gcry/gc_override.cr:1559
+No locals.
+[Inferior 1 (process 1169885) detached]
