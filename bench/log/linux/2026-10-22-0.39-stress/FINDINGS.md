@@ -50,3 +50,25 @@ spec change after it, `de79dd4e`, touches no source). Every gcry gate passed:
 0 failures and 0 stalls in every loop. Four runs were the Crystal scheduler
 deadlock: 3 of 300 in stw-mt release, 1 of 200 in stw-mt debug (one capture
 kept, `final-stw-mt-property-test-release-sched-205-seed1063833854.log.gz`).
+
+## Round 3, on `b888ac96` (2026-10-24)
+
+The same script on `b888ac96`: round 3's mark batch loop, the slow-path wipe
+on every target, the atomic shared counters, Darwin's executable lookup and
+regression 81's rewrite (`summary-round3.txt`). Every gcry gate passed but one
+run: 0 failures; Crystal scheduler deadlocks 3 of 300 in stw-mt release and 1
+of 200 in stw-mt debug (`round3-stw-mt-debug-sched-seed961788382.log.gz`: the
+mark helpers parked in `mark_wait`, workers in `Scheduler#resume`, no
+collector or allocation-entry frame in any thread). The debug arm read 0 on
+the 0.37.0, 0.38.0 and round-1 nights and 1 on each round-2 and round-3 night.
+
+**One stall: `make chunk-list-drift`, 1 of 6 runs**
+(`round3-chunk-list-drift-stall-seed958138121.log`; gdb could not attach,
+ptrace scope). It was the gate's own fast arm, the pre-fix shape it keeps on
+purpose to show the drift: with `sweep_mutator_latch = false` the flush's
+refusal path can link a queued chunk back in front of `@chunks` while the list
+already reaches it through the queue, closing a cycle the next walk spins on.
+The shipped code (latch on) cannot form it; the pre-round-3 tree hangs the
+same way under load. The harness had no deadline for that child. It now runs
+every child under one, consents to ptrace, and has an arm that forces the
+cycle (`../2026-10-23-drift-stall/`).
