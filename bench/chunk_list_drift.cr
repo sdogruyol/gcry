@@ -46,6 +46,12 @@ require "../src/gcry"
   {% raise "chunk_list_drift requires -Dgc_none (gcry as process GC)" %}
 {% end %}
 
+{% if flag?(:linux) %}
+  lib LibDriftPtracer
+    fun prctl(option : Int32, arg2 : UInt64, arg3 : UInt64, arg4 : UInt64, arg5 : UInt64) : Int32
+  end
+{% end %}
+
 # The rate is the reason this is long. On the shipped tree the divergence turns
 # up in about one run in fourteen of `make thread-churn-uaf`, and a run there is
 # 240 collections — so ~1 event per 3000 collections, and a 180-collection
@@ -449,6 +455,13 @@ unless ARGV.includes?("--child")
 end
 
 # ── child ────────────────────────────────────────────────────────────
+# Traceable by any process, so `bench/stall_capture.sh` can attach gdb to a
+# hung child under Ubuntu's default `ptrace_scope=1`. Without it the one stall
+# this gate has had (0.39.0's overnight run, 2026-10-23: a `--fast` child, two
+# threads spinning, 600 s) left nothing but thread states.
+{% if flag?(:linux) %}
+  LibDriftPtracer.prctl(0x59616d61, UInt64::MAX, 0, 0, 0) # PR_SET_PTRACER, ANY
+{% end %}
 heap.chunk_list_audit = true
 # `--plain` is the churn reproducer's shape with nothing added: thread birth
 # only, a heap that never grows past a few MB, and a process that lives for 240
