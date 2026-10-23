@@ -1778,7 +1778,7 @@ mark-clear-index: $(BIN)
 # and it is an RSS question rather than a soundness one. A chunk stranded off
 # `@chunks` by a prepend racing the sweep's walk is never swept and can never
 # rejoin the list, so the loss is permanent — but it rides *mappings*, not
-# uptime, and a heap that has reached its working size stops mapping. Six
+# uptime, and a heap that has reached its working size stops mapping. Seven
 # arms in one run. The shipped tree must strand **nothing**, in steady state and
 # across 24 short processes: the after-world sweep's store now splices back what
 # `map_chunk` prepended during its walk (`Heap#publish_relinked_chunks`), so the
@@ -1801,7 +1801,13 @@ mark-clear-index: $(BIN)
 # `map_chunk`'s list publish and its index insert is in flight, not divergent:
 # the audit excuses exactly that one and the arm prints how many (the idle
 # thread's birth chunk, 38 of 1000 children before it was excused); a mapper
-# the stop left running still counts. ~10-35 s.
+# the stop left running still counts. Every child runs under a deadline
+# (`BoundedChild`): the fast arm hangs as well as crashes, on a cycle its list
+# closes when the flush refuses an occupied release and links the chunk back in
+# front, and one such child stalled this gate for 600 s (0.39.0's night). The
+# refused-releases arm forces that: with every empty-chunk release refused
+# (`GCRY_REFUSE_EMPTY_RELEASE`) the shipped child must exit cleanly and the
+# fast child must hang, and is killed at 20 s. ~50 s.
 chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift

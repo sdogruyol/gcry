@@ -15,7 +15,7 @@
 # open piece of the 2026-08-23 live-object release
 # (`bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`).
 #
-# Six arms. The natural event is rare on the shipped tree — about one run in
+# Seven arms. The natural event is rare on the shipped tree — about one run in
 # fourteen of `make thread-churn-uaf`, then 0 in 12.1 million mappings — and a
 # zero over a natural rate cannot tell "closed" from "not reached", so three
 # arms act in the window on purpose:
@@ -29,11 +29,27 @@
 #   window control    the same with `chunk_list_splice = false`, the old store
 #   window-free       a large block `GC.free`d in that window instead: its
 #                     chunk must not leave the list under the rebuild
+#   refused releases  shipped and fast with every empty-chunk release refused
+#                     (`GCRY_REFUSE_EMPTY_RELEASE`): the shipped list must not
+#                     close into a cycle, the fast one must, and hangs
 #
 # The fast arm restores half of the pre-fix shape, which is why it runs in a
 # child process: that shape faulted 2 of 12 times on the churn reproducer, and a
 # crash mid-measurement must cost the last bucket rather than the whole run.
 # Buckets are printed as they complete for the same reason.
+#
+# It hangs as well, which is why every child runs under a deadline
+# (`BoundedChild`). In that shape the list runs on into the sweep's unmap
+# queue (the dropped chunk's `next` was pointed into it while the chunk stayed
+# listed). When the flush then refuses to release a queued chunk — a mutator
+# took a block from it, or holds it as a cursor (`Heap#refuse_occupied_release`,
+# added 2026-09-14, after the latch) — it links the chunk back in front of
+# `@chunks`, which already reaches it, and the list closes into a cycle. Every
+# walk of it then runs forever: the collector's in
+# `flush_pending_dormant_chunks`, a mutator's in `bitmap_take_pool_chunk`.
+# Unbounded, one such child stalled the whole gate for 600 s in 0.39.0's
+# overnight stress (2026-10-23); the tree before 0.39.0's third round hangs the
+# same way. `bench/log/linux/2026-10-23-drift-stall/FINDINGS.md`.
 #
 # What the numbers mean: `chunk_index_only_now` is the count of chunks the index
 # holds and the list does not, as of the last collection. Monotone, so the slope
@@ -41,6 +57,7 @@
 # retained memory that no sweep will ever visit.
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "chunk_list_drift requires -Dgc_none (gcry as process GC)" %}
@@ -112,12 +129,42 @@ WINDOW_FREE_BYTES = 3_000_000_u64
 MIN_MAPPINGS = 5000_u64
 # The fast arm crashes in a few children in a hundred (4 of 160 on 2026-09-25,
 # all four in one burst of 20; rounds 200 to 1000), the pre-fix shape's
-# use-after-free: the pool walk reading a chunk the sweep has unmapped. Now
-# and then that is before the first bucket, and such a child leaves no rate to
-# read — which the verdict read as a rate of zero, "the workload no longer
-# reaches the race", a red with no defect behind it. Such a child is run
-# again; three in a row is a real finding and fails.
+# use-after-free: the pool walk reading a chunk the sweep has unmapped. It
+# also hangs, on a cycle in `@chunks` (above): 1 gate run in 6 on 0.39.0's
+# night, and on a loaded host (four children at once) about half its children
+# hang and most of the rest crash, on 0.39.0 and on the tree before it alike.
+# Now and then either is before the first bucket, and such a child leaves no
+# rate to read — which the verdict read as a rate of zero, "the workload no
+# longer reaches the race", a red with no defect behind it. Such a child is
+# run again; three in a row is a real finding and fails.
 FAST_ATTEMPTS = 3
+# Every child's deadline (`BoundedChild`). A child of 1200 rounds takes 10-20 s
+# on a developer host, so this is several times that, and it grows with the
+# rounds asked for (6000 by default). `BENCH_CHILD_TIMEOUT_S` sets it outright.
+# A fast child that outlives it is the pre-fix shape hanging, counted with its
+# crashes; any other child that does is a finding, and the gate fails with
+# what its threads were doing.
+CHILD_TIMEOUT = (ENV["BENCH_CHILD_TIMEOUT_S"]?.try(&.to_i?) || Math.max(120, ROUNDS // 10)).seconds
+# The refused-releases arm. Every release the empty-chunk flush would make is
+# refused (a budget no run spends), so every chunk the sweep queued for
+# release is linked back in front of `@chunks`: on the shipped tree, where the
+# sweep took it off the list before queueing it, that is one more chunk on the
+# list; on the fast arm's, which still runs on into the queue, it is the
+# cycle. Short children: a shipped one finishes in about 3 s, and the fast one
+# closed the cycle in 16 of 16 children of 240 rounds, the latest at round 160.
+REFUSE_ENV    = {"GCRY_REFUSE_EMPTY_RELEASE" => "1000000000"}
+REFUSE_ROUNDS = 240
+# The fast child there is expected to hang, so the gate waits this out on
+# every run. One that does not hang finishes 240 rounds in 2-3 s, so a child
+# still running at this is hung and not slow.
+REFUSE_FAST_TIMEOUT = 20.seconds
+# Tries for that child to hang before the arm calls the construction lost.
+REFUSE_FAST_ATTEMPTS = 3
+# Releases the shipped child must have refused for its clean exit to say the
+# relinked chunks closed no cycle, rather than that there were none. It
+# refused 6063 in its 240 rounds: a kept chunk that is still empty is queued
+# again by the next major and refused again.
+REFUSE_MIN = 1000_u64
 
 record Bucket, round : Int32, chunks : UInt64, bytes : UInt64, heap_bytes : UInt64, mapped : UInt64
 
@@ -170,37 +217,56 @@ def parse_buckets(text : String) : Array(Bucket)
   buckets
 end
 
-def run_child(self_path : String, fast : Bool, plain : Bool = false) : {Array(Bucket), Bool}
+# A child under the deadline: its buckets, and how it ended. stdout and stderr
+# both come back in `output` — gcry's diagnostics included, which no reader
+# here mistakes for a line of its own (`bucket`, `window`, `free`, `refused`).
+def run_child(self_path : String, fast : Bool, plain : Bool = false,
+              env : Hash(String, String) = {} of String => String,
+              timeout : Time::Span = CHILD_TIMEOUT) : {Array(Bucket), BoundedChild::Result}
   args = ["--child"]
   args << "--fast" if fast
   args << "--plain" if plain
-  sink = IO::Memory.new
-  env = plain ? {"CHUNK_DRIFT_ROUNDS" => PLAIN_ROUNDS.to_s} : nil
-  status = Process.run(self_path, args, env: env,
-    output: sink, error: Process::Redirect::Close)
-  {parse_buckets(sink.to_s), status.success?}
+  env = env.merge({"CHUNK_DRIFT_ROUNDS" => PLAIN_ROUNDS.to_s}) if plain
+  result = BoundedChild.run(self_path, args, env, timeout)
+  {parse_buckets(result.output), result}
 end
 
-# A window child: its buckets, whether it exited cleanly, and from its last
-# `window` line how often the hook ran, how many chunks it mapped there, and
-# how many large chunks' back-links the audits after its collections found
-# not naming the chunk in front (`Heap#chunk_back_link_faults`, summed).
-def run_window_child(self_path : String, splice : Bool) : {Array(Bucket), Bool, UInt64, UInt64, UInt64}
+# How a child ended, for the reports: "crashed" or "hung", the latter for one
+# `BoundedChild` killed at the deadline.
+def death(result : BoundedChild::Result) : String
+  result.timed_out ? "hung" : "crashed"
+end
+
+# A child that hung where a hang is a finding: the gate fails, and the log
+# carries what `bench/stall_capture.sh` saw before the kill (every thread's
+# state, and its stack where gdb may attach — the child consents, below).
+def hang_finding(label : String, result : BoundedChild::Result, failures : Array(String)) : Nil
+  return unless result.timed_out
+  failures << "the #{label} child hung and was killed at its deadline; its threads are above"
+  puts "--- the #{label} child, still running at its deadline:"
+  puts result.capture || "(no capture)"
+  puts ""
+end
+
+# A window child: its buckets, how it ended, and from its last `window` line
+# how often the hook ran, how many chunks it mapped there, and how many large
+# chunks' back-links the audits after its collections found not naming the
+# chunk in front (`Heap#chunk_back_link_faults`, summed).
+def run_window_child(self_path : String, splice : Bool) : {Array(Bucket), BoundedChild::Result, UInt64, UInt64, UInt64}
   args = ["--child", "--window"]
   args << "--no-splice" unless splice
-  sink = IO::Memory.new
-  status = Process.run(self_path, args, output: sink, error: Process::Redirect::Close)
+  result = BoundedChild.run(self_path, args, timeout: CHILD_TIMEOUT)
   fired = 0_u64
   prepends = 0_u64
   link_faults = 0_u64
-  sink.to_s.each_line do |line|
+  result.output.each_line do |line|
     f = line.split
     next unless f.size == 4 && f[0] == "window"
     fired = f[1].to_u64
     prepends = f[2].to_u64
     link_faults = f[3].to_u64
   end
-  {parse_buckets(sink.to_s), status.success?, fired, prepends, link_faults}
+  {parse_buckets(result.output), result, fired, prepends, link_faults}
 end
 
 # The window-free arm's free: armed before each collection, held in class state
@@ -232,27 +298,38 @@ end
 record FreeReport, freed : UInt64, declined : UInt64, list_only : UInt64,
   index_only : UInt64, cached : UInt64, in_flight : UInt64
 
-# The window-free child: whether it exited cleanly, and its last `free` line —
-# frees made in the window, trims that declined, chunks listed and not indexed
-# and the reverse (summed over the audits), the large cache's bytes, and the
-# listed chunks the audits excused as mid-publication
+# The window-free child: how it ended, and its last `free` line — frees made
+# in the window, trims that declined, chunks listed and not indexed and the
+# reverse (summed over the audits), the large cache's bytes, and the listed
+# chunks the audits excused as mid-publication
 # (`Heap#chunk_list_publishing_excused`).
-def run_free_child(self_path : String) : {Bool, FreeReport?}
-  sink = IO::Memory.new
-  status = Process.run(self_path, ["--child", "--window-free"], output: sink, error: Process::Redirect::Close)
+def run_free_child(self_path : String) : {BoundedChild::Result, FreeReport?}
+  result = BoundedChild.run(self_path, ["--child", "--window-free"], timeout: CHILD_TIMEOUT)
   report = nil
-  sink.to_s.each_line do |line|
+  result.output.each_line do |line|
     f = line.split
     next unless f.size == 7 && f[0] == "free"
     report = FreeReport.new(f[1].to_u64, f[2].to_u64, f[3].to_u64, f[4].to_u64, f[5].to_u64, f[6].to_u64)
   end
-  {status.success?, report}
+  {result, report}
 end
 
-def report(label : String, buckets : Array(Bucket), ok : Bool) : {Float64, UInt64}
+# The last `refused` line of a child: the empty-chunk releases its flushes
+# refused so far (`Heap#release_refused_forced`).
+def refused_count(result : BoundedChild::Result) : UInt64
+  n = 0_u64
+  result.output.each_line do |line|
+    f = line.split
+    n = f[1].to_u64 if f.size == 2 && f[0] == "refused"
+  end
+  n
+end
+
+def report(label : String, buckets : Array(Bucket), result : BoundedChild::Result) : {Float64, UInt64}
+  ok = result.ok
   puts "=== #{label} ==="
   if buckets.empty?
-    puts "  no buckets#{ok ? "" : " — the child crashed before the first one"}"
+    puts "  no buckets#{ok ? "" : " — the child #{death(result)} before the first one"}"
     puts ""
     return {0.0, 0_u64}
   end
@@ -261,7 +338,7 @@ def report(label : String, buckets : Array(Bucket), ok : Bool) : {Float64, UInt6
     puts "  #{b.round.to_s.rjust(11)}   #{b.chunks.to_s.rjust(8)}   #{b.bytes.to_s.rjust(10)}   #{b.heap_bytes.to_s.rjust(6)}   #{b.mapped.to_s.rjust(13)}"
   end
   last = buckets.last
-  puts "  child crashed after bucket #{last.round} — the arm restores half the pre-fix shape" unless ok
+  puts "  child #{death(result)} after bucket #{last.round} — the arm restores half the pre-fix shape" unless ok
   if last.chunks == 0
     puts "  nothing left the list in #{last.round} collections and #{last.mapped} mappings:"
     puts "  the rate is below 1 per #{last.mapped} mappings on this arm"
@@ -287,7 +364,7 @@ def report(label : String, buckets : Array(Bucket), ok : Bool) : {Float64, UInt6
       puts "  last bucket: #{dm} mapping(s), #{dc} stranded — " +
            (dm == 0 && dc == 0 ? "the heap stopped growing and the loss stopped with it" : dc == 0 ? "mapping without losing" : "still losing while it maps")
     else
-      puts "  one bucket only#{ok ? "" : " — the child crashed before a second"}, so there is no slope to read"
+      puts "  one bucket only#{ok ? "" : " — the child #{death(result)} before a second"}, so there is no slope to read"
     end
   end
   puts ""
@@ -303,18 +380,26 @@ unless ARGV.includes?("--child")
   puts "reproducer's workload. A chunk off `@chunks` is never swept and cannot rejoin the"
   puts "list, so `off-list chunks` is monotone and its slope is the leak rate."
   puts ""
-  shipped, shipped_ok = run_child(self_path, false)
-  fast, fast_ok = run_child(self_path, true)
+  failures = [] of String
+  shipped, shipped_run = run_child(self_path, false)
+  fast, fast_run = run_child(self_path, true)
   fast_attempts = 1
+  fast_hangs = fast_run.timed_out ? 1 : 0
   while fast.empty? && fast_attempts < FAST_ATTEMPTS
-    fast, fast_ok = run_child(self_path, true)
+    fast, fast_run = run_child(self_path, true)
     fast_attempts += 1
+    fast_hangs += 1 if fast_run.timed_out
   end
-  _, shipped_mapped = report("shipped — mutator count latched in the stop", shipped, shipped_ok)
+  _, shipped_mapped = report("shipped — mutator count latched in the stop", shipped, shipped_run)
+  hang_finding("shipped", shipped_run, failures)
   if fast_attempts > 1
-    puts "fast arm: #{fast_attempts - 1} child(ren) crashed before the first bucket and were run again"
+    puts "fast arm: #{fast_attempts - 1} child(ren) crashed or hung before the first bucket and were run again"
   end
-  fast_rate, fast_mapped = report("fast — `sweep_mutator_latch = false`, the pre-fix reads", fast, fast_ok)
+  if fast_hangs > 0
+    puts "fast arm: #{fast_hangs} child(ren) hung and were killed after #{CHILD_TIMEOUT.total_seconds.to_i} s — " \
+         "the pre-fix shape hangs as it crashes, on a cycle in `@chunks` (the refused-releases arm forces it)"
+  end
+  fast_rate, fast_mapped = report("fast — `sweep_mutator_latch = false`, the pre-fix reads", fast, fast_run)
 
   # The third arm is a different regime, not a different tree: short-lived
   # processes whose heap is still being built. The steady-state arms above map
@@ -326,15 +411,16 @@ unless ARGV.includes?("--child")
   plain_with_loss = 0
   plain_crashed = 0
   PLAIN_CHILDREN.times do
-    buckets, ok = run_child(self_path, false, plain: true)
-    plain_crashed += 1 unless ok
+    buckets, run = run_child(self_path, false, plain: true)
+    plain_crashed += 1 unless run.ok
+    hang_finding("startup-regime", run, failures)
     next if buckets.empty?
     last = buckets.last
     plain_lost += last.chunks
     plain_mapped += last.mapped
     plain_with_loss += 1 if last.chunks > 0
   end
-  puts "  processes that stranded a chunk: #{plain_with_loss} of #{PLAIN_CHILDREN}#{plain_crashed > 0 ? " (#{plain_crashed} crashed)" : ""}"
+  puts "  processes that stranded a chunk: #{plain_with_loss} of #{PLAIN_CHILDREN}#{plain_crashed > 0 ? " (#{plain_crashed} crashed or hung)" : ""}"
   puts "  stranded: #{plain_lost} chunk(s) of #{plain_mapped} mapped"
   if plain_lost > 0
     puts "  rate: #{(plain_lost * 1000.0 / plain_mapped).round(2)} per 1000 mappings, #{(plain_lost * 128).round} KiB across the run"
@@ -355,37 +441,66 @@ unless ARGV.includes?("--child")
   # store rewrites it, and the audits after each collection count the links
   # left wrong.
   puts "=== window — a chunk mapped between the after-world sweep's walk and its store, #{WINDOW_ROUNDS} collections ==="
-  window, window_ok, window_fired, window_prepends, window_link_faults = run_window_child(self_path, true)
+  window, window_run, window_fired, window_prepends, window_link_faults = run_window_child(self_path, true)
   window_lost = window.empty? ? 0_u64 : window.last.chunks
   puts "  splice:    hook ran #{window_fired} time(s), mapped #{window_prepends} chunk(s) in the window, stranded #{window_lost}, " \
-       "back-links wrong #{window_link_faults}#{window_ok ? "" : " — the child crashed"}"
-  control, control_ok, control_fired, control_prepends, _ = run_window_child(self_path, false)
+       "back-links wrong #{window_link_faults}#{window_run.ok ? "" : " — the child #{death(window_run)}"}"
+  control, control_run, control_fired, control_prepends, _ = run_window_child(self_path, false)
   control_lost = control.empty? ? 0_u64 : control.last.chunks
-  puts "  no splice: hook ran #{control_fired} time(s), mapped #{control_prepends} chunk(s) in the window, stranded #{control_lost}#{control_ok ? "" : " — the child crashed"}"
+  puts "  no splice: hook ran #{control_fired} time(s), mapped #{control_prepends} chunk(s) in the window, stranded #{control_lost}#{control_run.ok ? "" : " — the child #{death(control_run)}"}"
   puts ""
+  hang_finding("window", window_run, failures)
 
   # The rebuild's other edge: a chunk *leaving* the list during the walk. A
   # trim's detach went back on the list in `kept` and was then released while
   # still listed; a trim now declines while the rebuild runs. The tree before
   # faults in the first collection.
   puts "=== window-free — a large block freed between the after-world sweep's walk and its store, #{WINDOW_ROUNDS} collections ==="
-  free_ok, free_report = run_free_child(self_path)
+  free_run, free_report = run_free_child(self_path)
   if r = free_report
     puts "  freed #{r.freed} in the window, #{r.declined} trim(s) declined; listed and not indexed #{r.list_only}, " \
-         "indexed and not listed #{r.index_only}; large cache #{r.cached} B at the end#{free_ok ? "" : " — the child crashed"}"
+         "indexed and not listed #{r.index_only}; large cache #{r.cached} B at the end#{free_run.ok ? "" : " — the child #{death(free_run)}"}"
     puts "  excused: #{r.in_flight} listed chunk(s) whose mapper the stop caught between the list and the index"
   else
-    puts "  no report — the child crashed before its first"
+    puts "  no report — the child #{death(free_run)} before its first"
   end
   puts ""
+  hang_finding("window-free", free_run, failures)
+
+  # The fast arm's hang, forced, and the shipped tree's answer to the same
+  # construction. With every empty-chunk release refused, every chunk the
+  # sweep queued goes back in front of `@chunks`
+  # (`flush_pending_empty_chunks_locked`). The shipped sweep took each off the
+  # list before queueing it, so that is one chunk more on the list and the
+  # child finishes. The fast arm's list still runs on into the queue, so the
+  # relink closes it into a cycle and the child hangs in its next walk of it:
+  # the stall of 2026-10-23, in every child instead of one gate run in six.
+  # It must hang, or the shipped child's clean exit says nothing about
+  # cycles; and the gate must come back from it, which is the deadline every
+  # child runs under — without one, this arm hangs the gate.
+  puts "=== refused releases — every empty-chunk release refused, #{REFUSE_ROUNDS} collections ==="
+  refuse_env = REFUSE_ENV.merge({"CHUNK_DRIFT_ROUNDS" => REFUSE_ROUNDS.to_s})
+  _, refuse_shipped = run_child(self_path, false, env: refuse_env)
+  refused = refused_count(refuse_shipped)
+  puts "  shipped: #{refuse_shipped.ok ? "exited cleanly" : death(refuse_shipped)}, #{refused} release(s) refused"
+  refuse_tries = 0
+  refuse_fast_hung = false
+  while !refuse_fast_hung && refuse_tries < REFUSE_FAST_ATTEMPTS
+    _, run = run_child(self_path, true, env: refuse_env, timeout: REFUSE_FAST_TIMEOUT)
+    refuse_tries += 1
+    refuse_fast_hung = run.timed_out
+    ended = run.timed_out ? "hung, killed after #{REFUSE_FAST_TIMEOUT.total_seconds.to_i} s" : run.ok ? "exited cleanly" : "crashed"
+    puts "  fast:    #{ended}, #{refused_count(run)} release(s) refused by its last bucket"
+  end
+  puts ""
+  hang_finding("refused-releases shipped", refuse_shipped, failures)
 
   shipped_lost = shipped.empty? ? 0_u64 : shipped.last.chunks
-  failures = [] of String
   if shipped_mapped < MIN_MAPPINGS
     failures << "the shipped arm mapped only #{shipped_mapped} chunks (want #{MIN_MAPPINGS}): it measured nothing"
   end
   if fast.empty?
-    failures << "the fast arm crashed before its first bucket #{FAST_ATTEMPTS} times in a row: " +
+    failures << "the fast arm crashed or hung before its first bucket #{FAST_ATTEMPTS} times in a row: " +
                 "it no longer lives long enough to measure anything"
   elsif fast_rate <= FAST_MIN_PER_1000
     failures << "the fast arm stranded #{fast_rate.round(2)} per 1000 mappings (want above #{FAST_MIN_PER_1000}): " +
@@ -399,7 +514,9 @@ unless ARGV.includes?("--child")
     failures << "the startup-regime arm stranded #{plain_lost} of #{plain_mapped} chunks mapped (want #{SHIPPED_MAX_STRANDED}): " +
                 "chunks are leaving the list"
   end
-  if window.empty? || !window_ok
+  if window_run.timed_out
+    # Its own finding, with its threads, above (`hang_finding`).
+  elsif window.empty? || !window_run.ok
     failures << "the window arm #{window.empty? ? "printed no bucket" : "crashed"}: it measured nothing"
   elsif window_prepends < WINDOW_MIN_PREPENDS
     failures << "the window arm mapped #{window_prepends} chunk(s) in the window (want at least #{WINDOW_MIN_PREPENDS}): " +
@@ -416,7 +533,9 @@ unless ARGV.includes?("--child")
     failures << "the window control stranded nothing of #{control_prepends} chunk(s) mapped in the window: " +
                 "the window arm no longer reaches the race it exists to show closed"
   end
-  if !free_ok || free_report.nil?
+  if free_run.timed_out
+    # As the window arm's.
+  elsif !free_run.ok || free_report.nil?
     failures << "the window-free arm crashed: a chunk freed during the sweep's walk was released while still on the list"
   elsif r = free_report
     if r.declined < WINDOW_MIN_PREPENDS
@@ -442,6 +561,18 @@ unless ARGV.includes?("--child")
       failures << "the window-free arm ended with #{r.cached} B in the large cache: a declined trim parked its chunk past the collection"
     end
   end
+  if refuse_shipped.timed_out
+    # As the window arm's: a cycle on the shipped list, most likely.
+  elsif !refuse_shipped.ok
+    failures << "the refused-releases shipped child crashed: a refused chunk linked back in front of `@chunks` broke the list"
+  elsif refused < REFUSE_MIN
+    failures << "the refused-releases shipped child refused #{refused} release(s) (want at least #{REFUSE_MIN}): " +
+                "it queued too little for its clean exit to say anything"
+  end
+  unless refuse_fast_hung
+    failures << "the refused-releases fast child did not hang in #{REFUSE_FAST_ATTEMPTS} tries: the construction " +
+                "no longer closes the pre-fix shape's list into a cycle, so the shipped child's clean exit means nothing"
+  end
   unless failures.empty?
     failures.each { |f| puts "FAIL #{f}" }
     exit 1
@@ -450,6 +581,7 @@ unless ARGV.includes?("--child")
   puts "     window: 0 of #{window_prepends} prepends in the window stranded and no back-link left wrong, " \
        "#{control_lost} of #{control_prepends} stranded without the splice;"
   puts "     window-free: #{free_report.try(&.freed)} large frees in the window, none released while still listed;"
+  puts "     refused releases: #{refused} chunk(s) back on the shipped list and no cycle; the pre-fix shape's hung, and was killed;"
   puts "     the pre-fix shape #{fast_rate.round(1)} per 1000 and #{(fast.last.bytes * 100.0 / fast.last.heap_bytes).round(1)}% of its heap stranded."
   exit 0
 end
@@ -552,11 +684,14 @@ while round < ROUNDS
   live.clear if round % SAWTOOTH == 0
   if heap.heap_size > HEAP_CAP
     puts "bucket #{round} #{heap.chunk_index_only_now} #{heap.chunk_index_only_now_bytes} #{heap.heap_size} #{heap.chunks_mapped}"
+    puts "refused #{heap.release_refused_forced}"
     STDOUT.flush
     break
   end
   if round % every == 0
     puts "bucket #{round} #{heap.chunk_index_only_now} #{heap.chunk_index_only_now_bytes} #{heap.heap_size} #{heap.chunks_mapped}"
+    # The refused-releases arm's count (`GCRY_REFUSE_EMPTY_RELEASE`), 0 elsewhere.
+    puts "refused #{heap.release_refused_forced}"
     STDOUT.flush
   end
 end

@@ -1314,7 +1314,10 @@ jobs:
       # some must without it. Restoring the pre-fix mutator-count reads must
       # still strand over 5 per 1000, which is also how this measured that the
       # latch fix closed a near-total leak (97-99% of the heap) and not only
-      # the rare use-after-free it was landed for.
+      # the rare use-after-free it was landed for. Every child has a deadline:
+      # that pre-fix shape also hangs, on a cycle in the chunk list, and with
+      # every empty-chunk release refused the shipped list must stay acyclic
+      # while the pre-fix one must close.
       - name: No chunk leaves the chunk list
         run: |
           make chunk-list-drift
