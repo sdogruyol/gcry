@@ -1463,54 +1463,26 @@ module GC
   end
 
   # :nodoc:
-  #
-  # The common case in three loads and a tail call, with no frame: the fork
-  # check's exit, `default_heap`'s first `Heap.new` and the bootstrap
-  # allocator are calls the entry returns through, and inline they made
-  # every allocation save and restore two register pairs (`__crystal_malloc64`
-  # on arm64: 9% of Binarytrees on the M1,
-  # `bench/log/macos/2026-10-23-m1-binarytrees/`). They are `malloc_cold`.
   def self.malloc(size : LibC::SizeT) : Void*
     Crystal.trace :gc, "malloc", size: size do
-      if !@@after_fork_child && @@gcry_ready && (heap = Gcry.default_heap?)
-        heap.malloc(size)
+      check_fork_poison!
+      if @@gcry_ready
+        Gcry.default_heap.malloc(size)
       else
-        malloc_cold(size)
+        bootstrap_malloc(size, clear: true)
       end
-    end
-  end
-
-  # `GC.malloc` past its common case: after a fork without reinit, before
-  # `GC.init` has made the heap ready, or with no heap yet.
-  @[NoInline]
-  private def self.malloc_cold(size : LibC::SizeT) : Void*
-    check_fork_poison!
-    if @@gcry_ready
-      Gcry.default_heap.malloc(size)
-    else
-      bootstrap_malloc(size, clear: true)
     end
   end
 
   # :nodoc:
   def self.malloc_atomic(size : LibC::SizeT) : Void*
     Crystal.trace :gc, "malloc", size: size, atomic: 1 do
-      if !@@after_fork_child && @@gcry_ready && (heap = Gcry.default_heap?)
-        heap.malloc_atomic(size)
+      check_fork_poison!
+      if @@gcry_ready
+        Gcry.default_heap.malloc_atomic(size)
       else
-        malloc_atomic_cold(size)
+        bootstrap_malloc(size, clear: false)
       end
-    end
-  end
-
-  # `malloc_cold` for `GC.malloc_atomic`.
-  @[NoInline]
-  private def self.malloc_atomic_cold(size : LibC::SizeT) : Void*
-    check_fork_poison!
-    if @@gcry_ready
-      Gcry.default_heap.malloc_atomic(size)
-    else
-      bootstrap_malloc(size, clear: false)
     end
   end
 
