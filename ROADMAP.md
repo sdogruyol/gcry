@@ -4443,8 +4443,28 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       move the M1 and read 1–7% slower on Linux, so they were backed out. A
       `dc zva` of claimed words did not move it either. Open: prefetch-for-write off
       on aarch64 (−3% on arm64 Binarytrees in 4 of 4 shards; the M1 too noisy
-      to read), the M1's extra faults, and the image-0 assumption in
-      `darwin_roots.cr` under `DYLD_INSERT_LIBRARIES`.
+      to read), the M1's extra faults. The image-0 assumption in
+      `darwin_roots.cr` it raised was a real root-set hole, fixed in 0.39.0
+      (`bench/log/macos/2026-10-23-darwin-image0/`).
+- [ ] **Prefetch-for-write in the allocation hit path on aarch64
+      (2026-10-23).** `GCRY_ALLOC_PFW=0` read −3.2% and −3.6% on
+      `ubuntu-24.04-arm` Binarytrees (Perf A/B 39937695085, 20 reps, two
+      shards); x86 is neutral, and the M1's ±10% spread could not read it
+      (`bench/log/macos/2026-10-23-m1-binarytrees/`). A default change on
+      aarch64 needs the keep rule on all five runners and an M1 run of at least
+      30 reps in one job.
+- [ ] **A large mapping across a 4 GiB boundary is a false root's target
+      (2026-10-23).** A 32-bit store over a stale heap pointer leaves the
+      heap's 4 GiB-aligned address plus a small number in a stack slot: on
+      Linux the vDSO's `clock_gettime` writes its clock id into a slot of the
+      collector's own frame, and crystal-metric's frames hold such words too.
+      Whichever large block covers that boundary is kept, at random with
+      address randomization; it is why JsonGenerate's peak has fixed levels in
+      every arm, Boehm's included. Wiping the collector's frame removed its own
+      word and moved no peak, since the program's frames hold the same kind of
+      word (`bench/log/macos/2026-10-23-jsongen-m1/`, `scan-wipe.patch`).
+      Untried: keeping large mappings off 4 GiB boundaries, which would take
+      the whole class away for gcry.
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
       0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
       output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,
