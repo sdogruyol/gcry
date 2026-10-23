@@ -435,9 +435,26 @@ module Gcry
         return cursor_set_cached if slot == 0_u64
         Gcry::Platform.tsd_read(slot &- 1).as(CursorSet*)
       end
+
+      # `cursor_set_hit` for the lean hit path (`fast_alloc`), which makes no
+      # call: with no slot published it answers null, and the full path asks
+      # `cursor_set_hit`.
+      @[AlwaysInline]
+      protected def cursor_set_lean : CursorSet*
+        slot = @cursor_tsd_slot
+        return Pointer(CursorSet).null if slot == 0_u64
+        Gcry::Platform.tsd_read(slot &- 1).as(CursorSet*)
+      end
     {% else %}
       @[AlwaysInline]
       protected def cursor_set_hit : CursorSet*
+        cursor_set_cached
+      end
+
+      # Crystal's thread-local accessor is a call here too, so the lean hit
+      # path keeps it (and a frame) on Linux and Windows.
+      @[AlwaysInline]
+      protected def cursor_set_lean : CursorSet*
         cursor_set_cached
       end
     {% end %}

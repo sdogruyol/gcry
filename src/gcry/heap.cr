@@ -625,23 +625,36 @@ module Gcry
       @bitmap_alloc = value
     end
 
+    # The hit path, with no frame: every case it does not finish itself —
+    # a refill, the threshold, a medium size, a marking collector, the debug
+    # hooks — leaves by a tail call to `malloc_miss`, which is what this
+    # method was before 0.39.0 (`fast_alloc`, lean). See `fast_alloc` for why.
     def malloc(size : Int) : Void*
-      u = fast_alloc(size.to_u64, false)
+      n = size.to_u64
+      fast_alloc(n, false, lean: true) { return malloc_miss(n) }
+    end
+
+    # Everything `malloc` does when the lean hit path declines: the full hit
+    # path (the word advance, the threshold's out-of-line half, the medium
+    # classes, the hooks) and then the slow path, as one tail call.
+    @[NoInline]
+    private def malloc_miss(size : UInt64) : Void*
+      u = fast_alloc(size, false, lean: false) { Pointer(Void).null }
       unless u.null?
         # The same hooks the slow path runs, so `GCRY_DEBUG_INVARIANTS=1`
         # and the trace cover the hit path rather than closing it.
-        Invariant.after_malloc(self, u, size.to_u64)
-        Trace.after_malloc(u, size.to_u64, atomic: false)
+        Invariant.after_malloc(self, u, size)
+        Trace.after_malloc(u, size, atomic: false)
         return u
       end
       {% if flag?(:win32) %}
         # The slow path in this frame, as before 0.39.0: see `allocate_entry`.
-        ptr = allocate(size.to_u64, atomic: false, clear: true)
-        Invariant.after_malloc(self, ptr, size.to_u64)
-        Trace.after_malloc(ptr, size.to_u64, atomic: false)
+        ptr = allocate(size, atomic: false, clear: true)
+        Invariant.after_malloc(self, ptr, size)
+        Trace.after_malloc(ptr, size, atomic: false)
         ptr
       {% else %}
-        allocate_entry(size.to_u64, false, true)
+        allocate_entry(size, false, true)
       {% end %}
     end
 
@@ -662,7 +675,13 @@ module Gcry
       # Saturating, as Boehm's `SIZET_SAT_ADD`: wrapped, `SIZE_MAX` asked for
       # 0 bytes and got a block; saturated, it fails as `malloc` does.
       n = sat_add(size.to_u64, @atomic_slack)
-      u = fast_alloc(n, true)
+      fast_alloc(n, true, lean: true) { return malloc_atomic_miss(n) }
+    end
+
+    # `malloc_miss` for pointer-free blocks; *size* has the slack added.
+    @[NoInline]
+    private def malloc_atomic_miss(n : UInt64) : Void*
+      u = fast_alloc(n, true, lean: false) { Pointer(Void).null }
       unless u.null?
         Invariant.after_malloc(self, u, n)
         Trace.after_malloc(u, n, atomic: true)
@@ -873,7 +892,7 @@ module Gcry
       # took the locked `allocate`, which was 10% of all allocations on Kemal
       # `/json` (`bitmap_locked_allocations`), and the root list's malloc,
       # free and walk came with it.
-      fresh = fast_alloc(new_size, atomic)
+      fresh = fast_alloc(new_size, atomic, lean: false) { Pointer(Void).null }
       unless fresh.null?
         realloc_copy_enter
         begin
@@ -1572,6 +1591,20 @@ module Gcry
       end
     end
 
+    # `clear_block` for the four classes it unrolls, with no `memset` call
+    # left: the lean hit path takes only those (`fast_alloc`), and the call
+    # alone would give it a frame.
+    @[AlwaysInline]
+    private def clear_block_small(user : Void*, rounded : UInt64) : Nil
+      w = user.as(UInt64*)
+      case rounded
+      when 16_u64 then w[0] = 0_u64; w[1] = 0_u64
+      when 32_u64 then w[0] = 0_u64; w[1] = 0_u64; w[2] = 0_u64; w[3] = 0_u64
+      when 48_u64 then 6.times { |i| w[i] = 0_u64 }
+      else             8.times { |i| w[i] = 0_u64 }
+      end
+    end
+
     # The hit path for a thread-owned bitmap cursor, through the largest
     # small size class. Ownership removes the class lock, and the word's
     # claim (`cursor_claim_word`) removes the per-block occupancy write: a
@@ -1584,21 +1617,40 @@ module Gcry
     # Accounting parity with the slow path: bytes are the class payload
     # rather than the 8-byte-aligned size, which brings a collection forward
     # by at most the per-class slack.
+    #
+    # *lean* (`malloc`, `malloc_atomic`): the same hit, with every case that
+    # needs a call handed to the block instead, which leaves the entry by a
+    # tail call to the full path (`malloc_miss`, *lean* false; there the
+    # block answers null and the counters are kept). With no call left the
+    # entry needs no frame, so a hit saves and restores no callee-saved
+    # register: LLVM does not shrink-wrap this function, and the full path
+    # inlined pushed 12 registers (6 `stp`, 6 `ldp` on arm64) on every
+    # allocation. On the M1 the hit path's one system-register read (`mrs
+    # tpidrro_el0`, `cursor_set_hit`) also waited behind those stores
+    # (`bench/log/macos/2026-10-23-m1-binarytrees/`). The cases: the debug
+    # hooks, a Darwin thread whose key slot is not published, a medium size,
+    # a block past the unrolled clears, the threshold (`debt_at_threshold?`
+    # is out of line), a used-up word (`cursor_advance_word`), and the
+    # allocate-black mark, which *lean* sets in the cursor's own chunk
+    # without the lookup (`lean_set_mark`).
     @[AlwaysInline]
-    private def fast_alloc(size : UInt64, atomic : Bool) : Void*
-      return Pointer(Void).null unless @fast_path
+    private def fast_alloc(size : UInt64, atomic : Bool, lean : Bool, &) : Void*
+      if lean
+        return yield if Invariant.enabled? || Trace.enabled?
+      end
+      return yield unless @fast_path
       if @collecting || @incremental_marking || @lazy_sweep_pending
-        @fast_miss_collecting &+= 1
-        return Pointer(Void).null
+        @fast_miss_collecting &+= 1 unless lean
+        return yield
       end
-      if size > FAST_PATH_MAX
-        @fast_miss_size &+= 1
-        return Pointer(Void).null
+      if size > FAST_PATH_MAX || (lean && size > 2048_u64)
+        @fast_miss_size &+= 1 unless lean
+        return yield
       end
-      set = cursor_set_hit
+      set = lean ? cursor_set_lean : cursor_set_hit
       if set.null? || set.value.no_hit_path != 0_u8
-        @fast_miss_no_set &+= 1
-        return Pointer(Void).null
+        @fast_miss_no_set &+= 1 unless lean
+        return yield
       end
       payload, index = if size <= 2048_u64
                          i = ((size &+ 7) >> 3).to_i32
@@ -1606,11 +1658,18 @@ module Gcry
                        else
                          SizeClasses.fit_medium(size)
                        end
+      if lean
+        # The full path's `@block_bytes[index]` raises out of range; here the
+        # check sends it there. A block the unrolled clears do not cover
+        # (outside 16..64 bytes, or not a multiple of 16) needs `memset`.
+        return yield unless index < SIZE_CLASS_COUNT
+        return yield if !atomic && ((payload &- 16_u32) > 48_u32 || (payload & 15_u32) != 0_u32)
+      end
       s = CursorSet.slot(set, atomic ? index + SIZE_CLASS_COUNT : index)
       if s.value.free_mask == 0_u64 && s.value.chunk.null?
         # No chunk in hand: only the locked path takes one from the pool.
-        @fast_miss_refill &+= 1
-        return Pointer(Void).null
+        @fast_miss_refill &+= 1 unless lean
+        return yield
       end
       local = set.value.bytes_local &+ payload
       # Wrapped (a free subtracted ahead of a credit) reads as zero, as it does
@@ -1620,11 +1679,15 @@ module Gcry
       # above the raw one, so the raw comparison alone keeps every allocation
       # under the threshold on the hit path. Inlined, the two comparisons
       # cost 64-byte allocation-only churn 1.7% (6.465 → 6.575 ns/alloc,
-      # median of 12 interleaved runs); out of line, 6.455 → 6.460.
+      # median of 12 interleaved runs); out of line, 6.455 → 6.460. *lean*
+      # hands the raw case to the full path, which asks the clamp.
       debt = @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited)
-      if debt >= @gc_threshold && debt_at_threshold?(debt)
-        @fast_miss_threshold &+= 1
-        return Pointer(Void).null
+      if debt >= @gc_threshold
+        return yield if lean
+        if debt_at_threshold?(debt)
+          @fast_miss_threshold &+= 1
+          return yield
+        end
       end
       # Mid-allocation from here: a stop-the-world that finds the sentinel
       # pins this set rather than retiring it, so the slot is re-read after
@@ -1634,16 +1697,23 @@ module Gcry
       Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
       mask = s.value.free_mask
       if mask == 0_u64
+        if lean
+          # Out of the window as the full path's refill miss leaves it; the
+          # full path enters it again and advances the word.
+          s.value.in_flight = Pointer(Void).null
+          return yield
+        end
         # The word is used up; the next word of the held chunk needs no lock.
         mask = cursor_advance_word(s, index)
         if mask == 0_u64
           s.value.in_flight = Pointer(Void).null
           @fast_miss_refill &+= 1
-          return Pointer(Void).null
+          return yield
         end
       end
       bit = mask.trailing_zeros_count
-      addr = s.value.word_base &+ bit.to_u64 &* @block_bytes[index]
+      block_bytes = lean ? @block_bytes.to_unsafe[index] : @block_bytes[index]
+      addr = s.value.word_base &+ bit.to_u64 &* block_bytes
       user = Pointer(Void).new(addr &+ BlockHeader::SIZE)
       # Rooted before it is handed out, and the compiler fence keeps the two
       # stores in that order for a stop that lands between them: the block is
@@ -1669,10 +1739,40 @@ module Gcry
       # already marked the block (in the claim it marks, or as `in_flight`);
       # this keeps the promise the locked path makes per block, that every
       # block handed out while marking is black, without leaning on that.
-      heap_set_mark_allocating(header) if @incremental_marking || @collecting
-      clear_block(user, payload.to_u64) unless atomic
+      if @incremental_marking || @collecting
+        if lean
+          lean_set_mark(s, bit)
+        else
+          heap_set_mark_allocating(header)
+        end
+      end
+      unless atomic
+        if lean
+          clear_block_small(user, payload.to_u64)
+        else
+          clear_block(user, payload.to_u64)
+        end
+      end
       s.value.in_flight = Pointer(Void).null
       user
+    end
+
+    # `heap_set_mark_allocating` for the block *bit* of the word slot *s*
+    # holds, with no call: the block came from the slot's chunk and word,
+    # which the window pins, so its ordinal is `word * 64 + bit` there and the
+    # lookup `heap_set_mark_allocating` makes would find the same chunk (a
+    # cursor's chunk is always a bitmap chunk). `chunk_set_mark` with the
+    # shift unchecked, which Crystal's macOS LLVM leaves out of line
+    # otherwise (`bench/log/macos/2026-10-16-binarytrees/`).
+    @[AlwaysInline]
+    private def lean_set_mark(s : CursorSlot*, bit : Int) : Nil
+      mark = ChunkHeader.mark_bitmap(s.value.chunk)
+      return if mark.null?
+      word = mark + s.value.word
+      b = 1_u64.unsafe_shl(bit)
+      return if (word.value & b) != 0
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, word, b,
+        LLVM::AtomicOrdering::Monotonic, false)
     end
 
     # The hit path's threshold test for a raw *debt* already at or above the
