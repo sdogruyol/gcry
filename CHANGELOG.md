@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the children now consent to ptrace. A new arm refuses every empty-chunk
   release (`GCRY_REFUSE_EMPTY_RELEASE`): the shipped child must exit cleanly
   and the fast child must hang and be killed within ten tries (a try escapes
-  32 times in 150). Nothing in `src/` changed.
+  57 times in 230). Nothing in `src/` changed.
   `bench/log/linux/2026-10-23-drift-stall/FINDINGS.md`.
 
 ### Fixed

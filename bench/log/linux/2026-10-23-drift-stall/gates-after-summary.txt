@@ -1,5 +1,56 @@
-1 rc=0 t=178 fast_hung=0 fast_retried=0 refuse_shipped=9616 refuse_fast_hangs=1 fails=0
-2 rc=0 t=164 fast_hung=1 fast_retried=1 refuse_shipped=8103 refuse_fast_hangs=1 fails=0
-3 rc=0 t=44 fast_hung=0 fast_retried=1 refuse_shipped=8165 refuse_fast_hangs=1 fails=0
-4 rc=0 t=94 fast_hung=0 fast_retried=1 refuse_shipped=8040 refuse_fast_hangs=1 fails=0
-5 rc=0 t=59 fast_hung=0 fast_retried=1 refuse_shipped=8562 refuse_fast_hangs=1 fails=0
+1 rc=0 t=44 fast_hung=0 fast_retried=0 refuse_shipped=11056 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+2 rc=0 t=33 fast_hung=0 fast_retried=0 refuse_shipped=11488 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+3 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=12910 refuse_fast_hangs=1 refuse_fast_tries=4 fails=0
+4 rc=0 t=32 fast_hung=0 fast_retried=0 refuse_shipped=15229 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+5 rc=0 t=38 fast_hung=0 fast_retried=0 refuse_shipped=13499 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+6 rc=0 t=37 fast_hung=0 fast_retried=0 refuse_shipped=13125 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+7 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=9954 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+8 rc=0 t=38 fast_hung=0 fast_retried=0 refuse_shipped=12639 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+9 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=12092 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+10 rc=0 t=160 fast_hung=1 fast_retried=1 refuse_shipped=14963 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+11 rc=0 t=39 fast_hung=0 fast_retried=0 refuse_shipped=11174 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+12 rc=0 t=38 fast_hung=0 fast_retried=0 refuse_shipped=13243 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+13 rc=0 t=40 fast_hung=0 fast_retried=0 refuse_shipped=9504 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+14 rc=0 t=44 fast_hung=0 fast_retried=0 refuse_shipped=11620 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+15 rc=0 t=43 fast_hung=0 fast_retried=0 refuse_shipped=9476 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+16 rc=0 t=44 fast_hung=0 fast_retried=0 refuse_shipped=8837 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+17 rc=0 t=44 fast_hung=0 fast_retried=0 refuse_shipped=11563 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+18 rc=0 t=43 fast_hung=0 fast_retried=0 refuse_shipped=16444 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+19 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=12330 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+20 rc=0 t=37 fast_hung=0 fast_retried=0 refuse_shipped=13427 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+21 rc=0 t=38 fast_hung=0 fast_retried=0 refuse_shipped=14078 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+22 rc=0 t=39 fast_hung=0 fast_retried=1 refuse_shipped=12927 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+23 rc=0 t=46 fast_hung=0 fast_retried=0 refuse_shipped=9163 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+24 rc=0 t=40 fast_hung=0 fast_retried=0 refuse_shipped=16594 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+25 rc=0 t=45 fast_hung=0 fast_retried=0 refuse_shipped=10746 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+26 rc=0 t=43 fast_hung=0 fast_retried=0 refuse_shipped=10906 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+27 rc=0 t=45 fast_hung=0 fast_retried=0 refuse_shipped=10406 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+28 rc=0 t=38 fast_hung=0 fast_retried=0 refuse_shipped=13192 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+29 rc=0 t=155 fast_hung=1 fast_retried=1 refuse_shipped=10547 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+30 rc=0 t=45 fast_hung=0 fast_retried=0 refuse_shipped=10205 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+31 rc=0 t=48 fast_hung=0 fast_retried=0 refuse_shipped=10313 refuse_fast_hangs=1 refuse_fast_tries=3 fails=0
+32 rc=0 t=46 fast_hung=0 fast_retried=0 refuse_shipped=10177 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+33 rc=0 t=49 fast_hung=0 fast_retried=0 refuse_shipped=10564 refuse_fast_hangs=1 refuse_fast_tries=4 fails=0
+34 rc=0 t=36 fast_hung=0 fast_retried=1 refuse_shipped=12971 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+35 rc=0 t=33 fast_hung=0 fast_retried=0 refuse_shipped=14989 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+36 rc=0 t=39 fast_hung=0 fast_retried=0 refuse_shipped=11619 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+37 rc=0 t=34 fast_hung=0 fast_retried=0 refuse_shipped=16384 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+38 rc=0 t=32 fast_hung=0 fast_retried=0 refuse_shipped=18801 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+39 rc=0 t=44 fast_hung=0 fast_retried=0 refuse_shipped=10047 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+40 rc=0 t=35 fast_hung=0 fast_retried=0 refuse_shipped=13748 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+41 rc=0 t=43 fast_hung=0 fast_retried=0 refuse_shipped=13626 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+42 rc=0 t=42 fast_hung=0 fast_retried=0 refuse_shipped=11907 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+43 rc=0 t=43 fast_hung=0 fast_retried=0 refuse_shipped=10175 refuse_fast_hangs=1 refuse_fast_tries=3 fails=0
+44 rc=0 t=37 fast_hung=0 fast_retried=0 refuse_shipped=13456 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+45 rc=0 t=34 fast_hung=0 fast_retried=0 refuse_shipped=16457 refuse_fast_hangs=1 refuse_fast_tries=4 fails=0
+46 rc=0 t=37 fast_hung=0 fast_retried=0 refuse_shipped=12848 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+47 rc=0 t=36 fast_hung=0 fast_retried=0 refuse_shipped=13630 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+48 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=11600 refuse_fast_hangs=1 refuse_fast_tries=3 fails=0
+49 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=10315 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+50 rc=0 t=37 fast_hung=0 fast_retried=1 refuse_shipped=11096 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+51 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=11449 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+52 rc=0 t=39 fast_hung=0 fast_retried=0 refuse_shipped=13936 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+53 rc=0 t=42 fast_hung=0 fast_retried=0 refuse_shipped=11912 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+54 rc=0 t=37 fast_hung=0 fast_retried=0 refuse_shipped=12674 refuse_fast_hangs=1 refuse_fast_tries=1 fails=0
+55 rc=0 t=41 fast_hung=0 fast_retried=0 refuse_shipped=10435 refuse_fast_hangs=1 refuse_fast_tries=2 fails=0
+done

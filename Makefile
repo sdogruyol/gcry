@@ -1808,7 +1808,7 @@ mark-clear-index: $(BIN)
 # refused-releases arm forces that: with every empty-chunk release refused
 # (`GCRY_REFUSE_EMPTY_RELEASE`) the shipped child must exit cleanly and the
 # fast child must hang, and is killed at 20 s (up to ten tries: a try escapes
-# about one time in five, so ten all escape about 2e-7 of runs). ~50 s.
+# about one time in four, so ten all escape about 1e-6 of runs). ~50 s.
 chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift

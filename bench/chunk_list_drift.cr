@@ -163,11 +163,12 @@ REFUSE_ROUNDS = 240
 # child still running at this is hung and not slow.
 REFUSE_FAST_TIMEOUT = 20.seconds
 # Tries for that child to hang before the arm calls the construction lost.
-# A try escapes 32 times in 150 (0.21; 0.33 at the 99.9% upper bound), and
-# tries are independent processes, so all of them escaping — a red with no
-# defect behind it — is 0.33^10 = 1.6e-5 a gate run at that bound and 2e-7 at
-# the measured rate. Three tries were 1 red in 50 gate runs (0.21^3 = 1%).
-# An escaped try costs its 1-4 s, and the first try hangs four times in five.
+# A try escapes 57 times in 230 (150 alone, 80 inside 55 gate runs: 0.25,
+# 0.35 at the 99.9% upper bound), and tries are independent processes, so all
+# of them escaping — a red with no defect behind it — is 0.35^10 = 2.4e-5 a
+# gate run at that bound and 9e-7 at the measured rate. Three tries were 1 red
+# in 50 gate runs. An escaped try costs its 1-4 s; 55 gate runs needed 1.45
+# tries on average and 4 at most.
 REFUSE_FAST_ATTEMPTS = 10
 # Releases the shipped child must have refused for its clean exit to say the
 # relinked chunks closed no cycle, rather than that there were none. It

@@ -97,12 +97,17 @@ every queued chunk is linked back (`repro-runs.txt`, `refuse` and
 | child | rounds | outcome |
 |---|---:|---|
 | fast + refusals | 1200 | 4 of 4 hung (+2 of 2 in `forced-cycle-gdb.txt`, both a cycle) |
-| fast + refusals | 240 | 8 of 8 hung, the latest between rounds 160 and 200 |
+| fast + refusals, four at once | 240 | 8 of 8 hung, the latest between rounds 160 and 200 |
+| fast + refusals, alone and serially | 240 | **118 of 150 hung, 32 exited cleanly** in 1.0-3.7 s, 0 crashed (`pertry-r240.txt`, `pertry.sh`) |
 | shipped + refusals | 1200 | 4 of 4 exited cleanly (15-17 s) |
 | shipped + refusals | 240 | 8 of 8 exited cleanly (2-3 s) |
 
-The fast arm's hang comes on demand, and the shipped tree under the same
-refusals keeps an acyclic list.
+The shipped tree keeps an acyclic list under the same refusals. The fast
+arm's hang is likely but not certain: the refusals make every dropped-but-
+listed chunk close the cycle, but the drop itself still needs the latch-off
+race, a thread born between the sweep's drop and relink decisions for the
+same chunk. Run alone, as the gate runs it, a 240-round child escapes 21% of
+the time (32 of 150; 33% at the 99.9% upper bound).
 
 ## What was wrong: the gate waited on a child with no deadline
 
@@ -126,19 +131,33 @@ latch-off arm exists to rebuild the pre-fix race.
   arm's shipped child) fails the gate and prints that child's thread capture.
 * **The children consent to ptrace** (`PR_SET_PTRACER_ANY`), so
   `stall_capture.sh` gets their stacks under `ptrace_scope=1`.
-* **A refused-releases arm** forces the hang on every run, and makes it a
+* **A refused-releases arm** drives the hang on every run, and makes it a
   regression with a control. With `GCRY_REFUSE_EMPTY_RELEASE` for 240
   rounds:
   * the shipped child must exit cleanly, having refused at least 1 000
-    releases (it refuses about 6 000 to 9 600, because a kept empty chunk is
+    releases (it refuses about 6 000 to 18 800, because a kept empty chunk is
     queued and refused again at each major);
-  * the fast child must hang, and is killed at 20 s. It gets up to three
-    tries, and a fast child that did not hang finishes 240 rounds in 2-3 s.
+  * the fast child must hang, and is killed at 20 s. It gets up to **ten**
+    tries (`REFUSE_FAST_ATTEMPTS`). Over all 230 tries measured (150 alone,
+    80 inside the 55 gate runs below), 57 escaped: 0.25, and 0.35 at the
+    99.9% upper bound. The tries are separate processes, so all ten escape
+    with probability 0.35^10 = 2.4e-5 per gate run at that bound, and
+    9e-7 at the measured rate. An escaped try costs 1-4 s.
 
   If the fast child stops hanging, the construction no longer reaches the
   cycle and the shipped child's clean exit means nothing; that fails the
   gate, like the window control. If the parent were not bounded, this arm
   would hang the gate on every run.
+
+  The first version gave it three tries, and that was red once in 50 gate
+  runs (`gates-3tries-summary.txt`, run 48, `gate-48-three-escapes.log`:
+  three clean exits with 13 366, 9 836 and 17 005 refusals). That matches
+  0.21^3 = 1% a run. Making the hang certain instead would take a research
+  hook in `src/` between the sweep's per-chunk drop and relink decisions, to
+  flip the latch-off mutator count there on demand. That would put a hook
+  into the sweep's chunk loop for a gate whose subject is a harness deadline,
+  so the try count is set from the measured rate instead.
+  The rate is this host's (12 vCPU). CI's 4-vCPU runners are unmeasured.
 
 ## Red → green
 
@@ -151,13 +170,29 @@ latch-off arm exists to rebuild the pre-fix race.
 ## After: the gate, bounded
 
 `gates.sh` runs the whole gate (`CHUNK_DRIFT_ROUNDS=1200`) one run per lock
-hold, each bounded at 600 s (`gates-after-summary.txt`). **Interim, 5 of 50
-runs** (the loop was still running at hand-off): 5 passed, 0 stalled.
-Run 2 had a fast child hang naturally. Under the old harness that is a
-stall; here it was killed at 120 s and run again, and the gate passed.
-Runs 2-5 each re-ran a fast child that crashed or hung before its first
-bucket. All 5 refusal arms hung the fast child on the first try, and their
-shipped children refused 8 040 to 9 616 releases and exited cleanly.
+hold, each bounded at 600 s.
+
+| harness | gate runs | passed | stalled | red |
+|---|---:|---:|---:|---:|
+| before (overnight, `b888ac96`) | 6 | 5 | **1** | 0 |
+| three refusal tries (`gates-3tries-summary.txt`) | 50 | 49 | 0 | 1, run 48: three escapes |
+| ten refusal tries (`gates-after-summary.txt`) | **55** | **55** | **0** | **0** |
+
+In the final 55 runs, which took 32-160 s each:
+
+* **Fast children:** two runs (10 and 29) had one hang on its own. Under the
+  old harness each would have been a 600 s stall; here it was killed at
+  120 s and run again.
+* **Refusal arm, fast child:** it needed 1 try in 39 runs, 2 in 10, 3 in 3
+  and 4 in 3, so 80 tries in all and 25 escapes.
+* **Refusal arm, shipped child:** it refused 8 837 to 18 801 releases and
+  exited cleanly every time.
+
+Also, on the three-try harness, Main ran every hand-off check once, all
+exit 0: format, lint, all_specs default and headers, process_spec default,
+headers and headers+freelist, `make alloc-entry-frame counter-loss
+heap-counters mark-audit`, `make windows-typecheck`, `make darwin-typecheck`,
+and `make chunk-list-drift` ×10.
 
 ## Not changed
 

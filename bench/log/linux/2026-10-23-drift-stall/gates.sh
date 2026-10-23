@@ -20,8 +20,9 @@ for i in $(seq 1 "$RUNS"); do
   retried=$(grep -o "fast arm: [0-9]* child(ren) crashed or hung before" "$log" | grep -o "[0-9]*" | head -1)
   refused=$(grep -o "shipped: exited cleanly, [0-9]* release" "$log" | grep -o "[0-9]*" | head -1)
   rfast=$(grep -c "^  fast:    hung" "$log")
+  rtries=$(grep -c "^  fast:    " "$log")
   fails=$(grep -c "^FAIL" "$log")
-  echo "$i rc=$rc t=$((e - s)) fast_hung=${hung:-0} fast_retried=${retried:-0} refuse_shipped=${refused:-?} refuse_fast_hangs=$rfast fails=$fails" >> "$OUT/summary.txt"
+  echo "$i rc=$rc t=$((e - s)) fast_hung=${hung:-0} fast_retried=${retried:-0} refuse_shipped=${refused:-?} refuse_fast_hangs=$rfast refuse_fast_tries=$rtries fails=$fails" >> "$OUT/summary.txt"
   if [ "$rc" = 0 ] && [ -z "$hung" ]; then rm -f "$log"; fi
 done
 echo done >> "$OUT/summary.txt"
