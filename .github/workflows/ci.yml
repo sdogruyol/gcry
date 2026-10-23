@@ -95,12 +95,11 @@ jobs:
           # GitHub's releases-list endpoint for crystal-lang/crystal began
           # returning an empty array — `releases/latest` and the tags stayed
           # correct — so install-crystal, which resolves `latest` off that list,
-          # asked for version `null` and took ten of the twelve jobs down. Every
-          # `latest` in this file is pinned for that reason. 1.21.0 was `latest`
-          # on the day of the pin, so the two arms became the same job and one
-          # was dropped. When the endpoint recovers, a `latest` arm is worth
-          # bringing back: it is the only thing that tells us a compiler release
-          # broke the collector.
+          # asked for version `null` and took ten of the twelve jobs down. 1.21.0
+          # was `latest` on the day of the pin, so the two arms became the same
+          # job and one was dropped. The `latest` arm lives on in `std-spec`,
+          # which resolves it through `releases/latest` itself (2026-10-23): it is
+          # the only thing that tells us a compiler release broke the collector.
           - os: ubuntu-latest
             crystal: "1.21.0"
             arch_label: x86_64
@@ -1203,6 +1202,7 @@ jobs:
           v='${{ matrix.crystal }}'
           if [ "$v" = latest ]; then
             v=$(gh api repos/crystal-lang/crystal/releases/latest --jq .tag_name)
+            v=${v#v}
             [ -n "$v" ] || { echo "releases/latest returned nothing"; exit 1; }
           fi
           echo "resolved: $v"
