@@ -2138,6 +2138,13 @@ darwin-static-root-sections: $(BIN)
 	$(CRYSTAL) build -Dgc_none --link-flags=-Wl,-no_data_const bench/darwin_static_root_sections.cr -o $(BIN)/darwin_static_root_sections_ndc --error-trace
 	$(BIN)/darwin_static_root_sections_ndc
 
+# Is the image gcry reads as the executable the executable? An inserted
+# library is dyld's image 0 for the life of the process; `GC.init` took it for
+# the executable until 2026-10-23. Plain, under DYLD_INSERT_LIBRARIES, with
+# the dylib linked and both (bench/log/macos/2026-10-23-darwin-image0/).
+darwin-image0: $(BIN)
+	bench/log/macos/2026-10-23-darwin-image0/probe.sh
+
 # What is the Darwin free-page walk's bitmap stand-down standing down from?
 #
 # It was written on Linux from a reading of the code — "the mask is built from

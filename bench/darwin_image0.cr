@@ -25,18 +25,18 @@ require "../src/gcry"
 
 {% if flag?(:darwin) %}
   lib LibImage0
-    fun _NSGetMachExecuteHeader : Gcry::Platform::LibDyld::MachHeader64*
     fun _dyld_get_image_name(image_index : UInt32) : UInt8*
   end
 
   module Image0
-    MH_EXECUTE = 2_u32
-    WORDS      = 4096
+    WORDS = 4096
 
     @@keep : Array(UInt64)? = nil
 
+    # Matched by header against `_NSGetMachExecuteHeader`, independently of
+    # the cache gcry keeps.
     def self.exe_slide : UInt64?
-      exe = LibImage0._NSGetMachExecuteHeader
+      exe = Gcry::Platform::LibDyld._NSGetMachExecuteHeader
       n = Gcry::Platform::LibDyld._dyld_image_count
       i = 0_u32
       while i < n
@@ -70,7 +70,7 @@ require "../src/gcry"
 
     def self.run : Int32
       h0 = Gcry::Platform::LibDyld._dyld_get_image_header(0_u32)
-      exe = LibImage0._NSGetMachExecuteHeader
+      exe = Gcry::Platform::LibDyld._NSGetMachExecuteHeader
       STDERR.puts "[crystal-main] image0=#{String.new(LibImage0._dyld_get_image_name(0_u32))} " \
                   "filetype=#{h0.null? ? 0 : h0.value.filetype} image0_is_exe=#{h0 == exe ? 1 : 0}"
 
@@ -81,6 +81,8 @@ require "../src/gcry"
       end
       code = (->Image0.churn).pointer.address
       failed << "identity: own code 0x#{code.to_s(16)} not in gcry's exe __TEXT" unless Gcry::Platform.exe_text?(code)
+      tls_lo, tls_hi = Gcry::Platform.tls_root_range
+      failed << "identity: no main-thread TLS range (the executable's TLV size was not read)" unless tls_hi > tls_lo
 
       Gcry::Platform.shared_lib_roots = false
       plant

@@ -904,13 +904,15 @@ module Gcry
     # --- Mach-O section read (Darwin) --------------------------------------------
 
     {% if flag?(:darwin) %}
-      # Reuse Platform::LibDyld (darwin_roots) — image 0 is the main executable.
+      # Reuse Platform::LibDyld (darwin_roots) — the executable, not image 0.
+      # `GC.init` resolved it; reading that memo keeps a load from a stopped
+      # world off dyld's loaders lock.
       private def self.load_from_macho_exe : Bool
-        mh = Platform::LibDyld._dyld_get_image_header(0_u32)
-        return false if mh.null?
+        exe = Platform.executable_image_cached || Platform.executable_image
+        return false unless exe
+        mh, slide = exe
         return false unless mh.value.magic == Platform::MH_MAGIC_64
 
-        slide = Platform::LibDyld._dyld_get_image_vmaddr_slide(0_u32).to_u64!
         p = Pointer(UInt8).new(mh.address + sizeof(Platform::LibDyld::MachHeader64))
         cmd_i = 0_u32
         while cmd_i < mh.value.ncmds
