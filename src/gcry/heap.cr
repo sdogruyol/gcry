@@ -634,15 +634,7 @@ module Gcry
         Trace.after_malloc(u, size.to_u64, atomic: false)
         return u
       end
-      {% if flag?(:win32) %}
-        # The slow path in this frame, as before 0.39.0: see `allocate_entry`.
-        ptr = allocate(size.to_u64, atomic: false, clear: true)
-        Invariant.after_malloc(self, ptr, size.to_u64)
-        Trace.after_malloc(ptr, size.to_u64, atomic: false)
-        ptr
-      {% else %}
-        allocate_entry(size.to_u64, false, true)
-      {% end %}
+      allocate_entry(size.to_u64, false, true)
     end
 
     # Bytes added to every atomic request. Boehm adds one byte to every
@@ -668,18 +660,10 @@ module Gcry
         Trace.after_malloc(u, n, atomic: true)
         return u
       end
-      {% if flag?(:win32) %}
-        # The slow path in this frame, as before 0.39.0: see `allocate_entry`.
-        ptr = allocate(n, atomic: true, clear: false)
-        Invariant.after_malloc(self, ptr, n)
-        Trace.after_malloc(ptr, n, atomic: true)
-        ptr
-      {% else %}
-        allocate_entry(n, true, false)
-      {% end %}
+      allocate_entry(n, true, false)
     end
 
-    # The slow path of `malloc` and `malloc_atomic`: two tail calls, so that
+    # The slow path of `malloc` and `malloc_atomic`: three tail calls, so that
     # no frame the hit path wrote is live across a collection the slow path
     # triggers, and no frame built for it reads what the hit path left.
     #
@@ -695,26 +679,46 @@ module Gcry
     # the dead `Fasta` and so its 64 MiB buffer through three collections),
     # and on 0.39.0 the entry's slots hold Knuckeotide's dead hash buffers.
     #
-    # Called in tail position, this is reached by a `jmp` once the entry has
-    # popped its frame. It keeps nothing on the stack it has not written: it
-    # zeroes the stack below its own small frame, which is where the entry's
-    # frame was, down to the running fiber's guard page at most, and jumps on
-    # to `allocate_traced`, whose frame and the collector's are then built
-    # over zeros and hold only what they write (`Roots.wipe_below_sp`). Where the
-    # entry is inlined into its caller instead, the caller's own frame is the
-    # caller's affair, as it is under any conservative collector.
+    # Called in tail position, this is reached by a jump once the entry has
+    # popped its frame. It reads how far down the wipe may go
+    # (`Roots.wipe_limit`: the running fiber's stack, a thread-local load that
+    # is a call, so this one has a frame) and jumps on to `allocate_wipe`.
+    # That one has no frame (a frame record on Darwin): it zeroes the stack
+    # below the SP it was entered with, which is where the entry's frame and
+    # this one's were, and jumps on to `allocate_traced`, whose frame and the
+    # collector's are then built over zeros and hold only what they write
+    # (`Roots.wipe_below_sp`). The bound is read a frame above the wipe and
+    # not in it because that frame has a slot nothing writes on aarch64
+    # Darwin (`sub sp, #0x60`, five register pairs at `0x10`-`0x5f`, the
+    # accessor's word at `0x8`, `[sp]` unwritten): wiped from below that
+    # frame, as the first bounded version did, the word was left as it was
+    # (regression 86's entry arm). Where the entry is inlined into its caller
+    # instead, the caller's own frame is the caller's affair, as it is under
+    # any conservative collector.
     #
-    # Not on Windows. There the wipe does nothing (`Roots.wipe_below_sp`), so
-    # the two extra frames were all the change left: in a debug build, where
-    # nothing is a tail call, `allocate_entry` and `allocate_traced` added
-    # unwritten slots between the allocation and the collector, and
-    # regression 79 read 75 stale words on windows-latest x86-64 (gates and
-    # freelist jobs, run 39775800632; under 64 before). Windows keeps the
-    # slow path in the entry's frame, as before 0.39.0.
+    # `allocate_wipe` takes four arguments, `self` included, so that on
+    # Windows x64, which passes four in registers, the jump to it is still a
+    # sibling call: a fifth would go on the stack, in an area the entry's
+    # caller never reserved, and LLVM would make it a call.
+    #
+    # In a debug build nothing is a tail call: the three frames stay, the wipe
+    # (not inlined) clears below its own frame, and `allocate_traced` is built
+    # over that. Regression 79 bounds what is left there.
     @[NoInline]
     private def allocate_entry(size : UInt64, atomic : Bool, clear : Bool) : Void*
-      Roots.wipe_below_sp if @slow_entry_wipe
-      allocate_traced(size, atomic, clear)
+      limit = @slow_entry_wipe ? Roots.wipe_limit(Roots.hardware_stack_pointer.address) : 0_u64
+      flags = (atomic ? 1_u8 : 0_u8) | (clear ? 2_u8 : 0_u8)
+      allocate_wipe(size, flags, limit)
+    end
+
+    @[NoInline]
+    private def allocate_wipe(size : UInt64, flags : UInt8, limit : UInt64) : Void*
+      if (watch = @slow_wipe_watch) != 0
+        sp = Roots.hardware_stack_pointer.address
+        @slow_wipe_sp = sp if @slow_wipe_sp == 0 && sp < watch && watch &- sp < 65536
+      end
+      Roots.wipe_below_sp(limit)
+      allocate_traced(size, flags & 1 != 0, flags & 2 != 0)
     end
 
     @[NoInline]
@@ -725,9 +729,20 @@ module Gcry
       ptr
     end
 
-    # Research knob, `GCRY_SLOW_ENTRY_WIPE=0`: skip `allocate_entry`'s wipe,
+    # Research knob, `GCRY_SLOW_ENTRY_WIPE=0`: skip `allocate_wipe`'s wipe,
     # the control arm of the measurement and of its regression.
     property slow_entry_wipe : Bool = true
+
+    # Regression 86's probe of where the wipe starts. While `slow_wipe_watch`
+    # is an SP (not 0), the first slow path to run within 64 KiB below it
+    # records the SP `allocate_wipe` ran at, the top of its wipe, in
+    # `slow_wipe_sp` (reset to 0 to record again). Scoped to that stack
+    # because gcry's own threads allocate too, and one load when off: a store
+    # into the heap on every thread's slow path would share a line among
+    # them. The regression checks it against the SP the allocation entry was
+    # called with: the wipe must start within a frame record of it.
+    property slow_wipe_watch : UInt64 = 0_u64
+    property slow_wipe_sp : UInt64 = 0_u64
 
     # Boehm's `GC_realloc`: null is `malloc(size)`, and size 0 frees
     # `pointer` and answers null (`mallocx.c`, as C's `realloc` does in glibc).

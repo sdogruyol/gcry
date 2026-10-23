@@ -142,90 +142,147 @@ module Gcry
       {% end %}
     end
 
-    # Zero the 1 KiB below the SP. Inlined into `Heap#allocate_entry`, which
+    # Zero up to 1 KiB below the SP, never below *limit* (`wipe_limit`), and
+    # nothing when *limit* is 0. Inlined into `Heap#allocate_wipe`, which
     # keeps nothing of its own on the stack that it has not written, and
     # tail-calls on, so everything below the SP it reads is dead. 1 KiB covers
     # the allocation slow path's frames down to `collect_entry_sp` (168 bytes
     # on x86-64 Linux at 0.39.0: `allocate_traced`, `collect`,
     # `run_collection`), below which `run_collection`'s own entry scrub takes
-    # over (`Heap#collect_scrub_bytes`). A loop in the asm and not a `memset`,
-    # which would push its return address into the range it clears. The bound
-    # below reads `Fiber.current?`, whose thread-local load LLVM makes a call
-    # to a small accessor (`Crystal::System::Thread::current_thread`: `%fs`
-    # plus an offset, no allocation), so `allocate_entry` has a frame: on
-    # x86-64 Linux six callee-saved pushes and one 8-byte slot the accessor
-    # writes, every word of it written, popped before the `jmp` to
-    # `allocate_traced`. The wipe starts below that frame. The dead entry
-    # frame it is there for lies below the SP either way, and the words
-    # `allocate_entry`'s frame puts over part of it are the mutator's
-    # callee-saved registers (which `allocate_traced` pushes again) and a
-    # thread-local address, not stale heap pointers. A debug build does not
-    # inline it.
+    # over (`Heap#collect_scrub_bytes`).
     #
-    # Bounded by the running fiber's stack, read with a few loads and no call
-    # that can allocate: `Fiber.current?` is `Thread.current?` (a thread-local
-    # load; `pthread_getspecific` on OpenBSD/Android) and its nilable
-    # `current_fiber?`, and `Fiber#@stack` holds the bounds Crystal computed
-    # when the fiber was made — the mapped span for a spawned fiber, whose
-    # lowest page is its guard, and `pthread_getattr_np`'s for a thread's main
-    # fiber. These are the bounds `Heap#clear_stack_body` takes for the
-    # collector's scrub. `Fiber.current` and `Thread.current`, without the
-    # `?`, may not be used here: on a thread whose `Thread` is not set yet they
-    # make one, which allocates (`wipe_floor`). The wipe is skipped when there
-    # is no current fiber (a thread being born, a thread Crystal did not
-    # start) or the SP is not inside its stack (a signal handler on an
-    # alternate stack, a fiber switch between `current_fiber=` and the
-    # swap), and clamped to the page above the stack's lowest when the stack
-    # has less than 1 KiB left, so it never stores into a guard page.
+    # Everything is in the asm, the floor's arithmetic included, on scratch
+    # registers only (`r10`/`r11`; `x9`/`x10`): no call, so no return address
+    # pushed into the range it clears (why it is not a `memset`), and no
+    # spill, so the function it is inlined into needs no frame of its own and
+    # the wipe starts at the SP that function was entered with — where the
+    # frame that computed *limit* was (`Heap#allocate_entry`). Darwin's
+    # frame-pointer convention still pushes a frame record (8 or 16 bytes,
+    # both words written) and the wipe starts below it.
     #
-    # Windows grows stacks through `PAGE_GUARD`, which a blind store may not
-    # touch (`OS.clear_dead_stack` walks `VirtualQuery` for it), so there it
-    # does nothing.
-    WIPE_BELOW_SP_BYTES = 1024_u64
-
+    # The floor is `SP - min(SP - limit, 1 KiB)`, rounded to whole 16-byte
+    # steps so the loop ends exactly at it. The loop runs downward from the
+    # SP, one word after the other, so the first store into a page lies just
+    # below the last one into the page above: on Windows, the order a stack's
+    # guard page must be met in to be committed rather than fault (though
+    # `wipe_limit` keeps it above that page anyway).
     @[AlwaysInline]
-    def self.wipe_below_sp : Nil
-      {% if flag?(:win32) %}
-        # Nothing: see above.
-      {% elsif flag?(:x86_64) %}
-        low = wipe_floor(hardware_stack_pointer.address)
-        return if low == 0
-        asm("movq $0, %r11
+    def self.wipe_below_sp(limit : UInt64) : Nil
+      {% if flag?(:x86_64) %}
+        asm("testq $0, $0
+             jz 2f
+             movq %rsp, %r11
+             subq $0, %r11
+             jbe 2f
+             cmpq $$1024, %r11
+             jbe 3f
+             movl $$1024, %r11d
+             3:
+             andq $$-16, %r11
+             jz 2f
+             negq %r11
+             addq %rsp, %r11
+             movq %rsp, %r10
              1:
-             movq $$0, (%r11)
-             movq $$0, 8(%r11)
-             addq $$16, %r11
-             cmpq %rsp, %r11
-             jb 1b" :: "r"(low) : "r11", "memory", "cc" : "volatile")
+             subq $$16, %r10
+             movq $$0, 8(%r10)
+             movq $$0, (%r10)
+             cmpq %r11, %r10
+             ja 1b
+             2:" :: "r"(limit) : "r10", "r11", "memory", "cc" : "volatile")
       {% elsif flag?(:aarch64) %}
-        low = wipe_floor(hardware_stack_pointer.address)
-        return if low == 0
-        asm("mov x10, sp
-             mov x9, $0
+        asm("cbz $0, 2f
+             mov x10, sp
+             subs x9, x10, $0
+             b.ls 2f
+             cmp x9, #1024
+             b.ls 3f
+             mov x9, #1024
+             3:
+             and x9, x9, #0xfffffffffffffff0
+             cbz x9, 2f
+             sub x9, x10, x9
              1:
-             stp xzr, xzr, [x9], #16
-             cmp x9, x10
-             b.lo 1b" :: "r"(low) : "x9", "x10", "memory", "cc" : "volatile")
+             stp xzr, xzr, [x10, #-16]!
+             cmp x10, x9
+             b.hi 1b
+             2:" :: "r"(limit) : "x9", "x10", "memory", "cc" : "volatile")
       {% end %}
     end
 
-    # The lowest address `wipe_below_sp` stores to for a stack pointer *sp*,
-    # or 0 for no wipe: `sp - WIPE_BELOW_SP_BYTES`, raised to the page above
-    # the running fiber's stack's lowest (its guard), and to a whole number
-    # of 16-byte steps below *sp*, since the loop stores 16 bytes a step and
-    # stops at the SP; 0 when there is no current fiber, *sp* is not on its
-    # stack, or nothing is left to wipe. Public for regression 86.
+    WIPE_BELOW_SP_BYTES = 1024_u64
+
+    # The lowest address the slow path's wipe may store to when the SP is
+    # *sp*, or 0 for no wipe. Read in `Heap#allocate_entry`, the frame the
+    # wipe then covers.
+    #
+    # Bounded by the running fiber's stack, read with a few loads and no call
+    # that can allocate: `Fiber.current?` is `Thread.current?` (a thread-local
+    # load, which LLVM makes a call to a small accessor:
+    # `Crystal::System::Thread::current_thread`, `%fs` plus an offset on
+    # Linux, the TLV descriptor on Darwin, `TlsGetValue` or the TLS slot on
+    # Windows; `pthread_getspecific` on OpenBSD/Android) and its nilable
+    # `current_fiber?`, and `Fiber#@stack` holds the bounds Crystal computed
+    # when the fiber was made — the mapped span for a spawned fiber, whose
+    # lowest page is its guard, and `pthread_getattr_np`'s (or
+    # `GetCurrentThreadStackLimits`') for a thread's main fiber. These are the
+    # bounds `Heap#clear_stack_body` takes for the collector's scrub.
+    # `Fiber.current` and `Thread.current`, without the `?`, may not be used
+    # here: on a thread whose `Thread` is not set yet they make one, which
+    # allocates. No wipe when there is no current fiber (a thread being born,
+    # a thread Crystal did not start) or *sp* is not inside its stack (a
+    # signal handler on an alternate stack, a fiber switch between
+    # `current_fiber=` and the swap); otherwise the page above the stack's
+    # lowest, so a stack with less than 1 KiB left is wiped down to its guard
+    # page and never into it.
+    #
+    # Windows grows a stack through `PAGE_GUARD` pages below the committed
+    # part, and a store that skips one faults; the last ones raise
+    # `STATUS_STACK_OVERFLOW` instead of growing. So there the limit is also
+    # never below the thread's `NT_TIB.StackLimit` (`%gs:0x10`,
+    # `[x18, #16]`), the lowest committed address of the stack running now
+    # (Windows lowers it as it commits; Crystal's `swapcontext` swaps it with
+    # the fiber): the wipe stores only into pages already committed and
+    # touches no guard page. That loses nothing: a word below the committed
+    # part was never written, so it holds nothing stale.
     @[AlwaysInline]
-    def self.wipe_floor(sp : UInt64) : UInt64
+    def self.wipe_limit(sp : UInt64) : UInt64
       fiber = Fiber.current?
       return 0_u64 unless fiber
       stack = fiber.@stack
       lo = stack.pointer.address
       hi = stack.bottom.address
       return 0_u64 unless lo < sp && sp <= hi
-      guard_top = lo &+ runtime_page_size
-      return 0_u64 if sp <= guard_top
-      room = sp &- guard_top
+      limit = lo &+ runtime_page_size
+      {% if flag?(:win32) %}
+        committed = committed_stack_limit
+        limit = committed if committed > limit
+      {% end %}
+      limit
+    end
+
+    {% if flag?(:win32) %}
+      # `NT_TIB.StackLimit` of the running thread: the lowest committed
+      # address of the stack it runs on (see `wipe_limit`).
+      @[AlwaysInline]
+      def self.committed_stack_limit : UInt64
+        v = uninitialized UInt64
+        {% if flag?(:x86_64) %}
+          asm("movq %gs:0x10, $0" : "=r"(v) :: "volatile")
+        {% else %}
+          asm("ldr $0, [x18, #16]" : "=r"(v) :: "volatile")
+        {% end %}
+        v
+      end
+    {% end %}
+
+    # The lowest address `wipe_below_sp(wipe_limit(sp))` stores to for a
+    # stack pointer *sp*, or 0 for no wipe: the floor the asm computes.
+    # For regression 86.
+    def self.wipe_floor(sp : UInt64) : UInt64
+      limit = wipe_limit(sp)
+      return 0_u64 if limit == 0 || sp <= limit
+      room = sp &- limit
       room = WIPE_BELOW_SP_BYTES if room > WIPE_BELOW_SP_BYTES
       room &= ~15_u64
       return 0_u64 if room == 0
