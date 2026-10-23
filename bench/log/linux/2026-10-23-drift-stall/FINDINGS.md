@@ -217,7 +217,7 @@ the same in every run:
 | `ubuntu-latest`, 4 vCPU (probe run 40006528739, `probe-drift-arm.yml`) | 20 | **20** | clean, race made 40 of 40, 0 missed | hung after the race, every run |
 | `ubuntu-24.04-arm` (same run) | 10 | **10** | clean, 40 of 40, 0 missed | hung, every run |
 | this host, `make chunk-list-drift` | 10 | **10** | clean, 40 of 40, 0 missed | hung, every run |
-| this host, the children alone | 30 + 13 | — | 30 of 30 clean, 40 of 40 each | 13 of 13 hung after one race |
+| this host, the children alone | — | — | 33 of 33 clean, 40 of 40 each | 16 of 16 hung after one race (3 under gdb, a cycle each) |
 
 Each probe run is a whole `make chunk-list-drift` under `bench/run_bounded.sh`.
 The one missed round seen before the retry existed (1 in 120) has not
