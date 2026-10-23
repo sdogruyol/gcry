@@ -176,5 +176,14 @@ done
 for a in ${PROBE_PRELOAD_ARMS:-}; do
   ab+=(--arm "$a-pre=$root/bin/main-$a" --arm-env "$a-pre" "$preload=$lib")
 done
+# PROBE_ENV_ARMS: "name:arm:K=V,K=V ...", *arm*'s binary under extra
+# environment.
+for spec in ${PROBE_ENV_ARMS:-}; do
+  name=${spec%%:*}
+  rest=${spec#*:}
+  ab+=(--arm "$name=$root/bin/main-${rest%%:*}")
+  IFS=, read -ra kvs <<< "${rest#*:}"
+  for kv in "${kvs[@]}"; do ab+=(--arm-env "$name" "$kv"); done
+done
 # shellcheck disable=SC2086 # AB_BENCHES is a space-separated list
 python3 bench/runner_ab/ab.py --out "$out" --reps "$reps" "${ab[@]}" ${AB_BENCHES:-Binarytrees}
