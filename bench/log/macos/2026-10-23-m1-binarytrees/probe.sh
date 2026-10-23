@@ -7,7 +7,8 @@
 # PROBE_ARMS: "name:flag,flag name2:flag ...", each a crystal-metric build of
 # this checkout (`boehm` is stock Crystal: no flags); `probe.patch`, if
 # present, is applied first (compile flags, all off by default, so `tip` is
-# the checkout's gcry). Per arm:
+# the checkout's gcry). PROBE_REFS: "name=ref ...", arms whose `src/` is
+# taken from that commit instead of the checkout. Per arm:
 #   - pcprof (pcprof.c, preloaded): PROBE_PROF_RUNS runs of Binarytrees,
 #     sampled every 100 us; `prof-<arm>.txt` is pcprof.py's report, the hot
 #     functions annotated per instruction;
@@ -29,6 +30,15 @@ root=$(pwd)
 os=$(uname -s)
 cpu=$(uname -m)
 arm_specs="${PROBE_ARMS:-boehm: tip:-Dgc_none}"
+ref_of() {
+  local spec
+  for spec in ${PROBE_REFS:-}; do
+    if [ "${spec%%=*}" = "$1" ]; then
+      echo "${spec#*=}"
+      return
+    fi
+  done
+}
 build() { # name flags...
   local name=$1
   shift
@@ -36,7 +46,14 @@ build() { # name flags...
   if [ ! -d "$d" ]; then
     mkdir -p "$d"
     cp -r bench/crystal_metric/. "$d/"
-    rm -rf "$d/lib" && mkdir -p "$d/lib/gcry" && cp -r src "$d/lib/gcry/src"
+    rm -rf "$d/lib" && mkdir -p "$d/lib/gcry"
+    local ref
+    ref=$(ref_of "$name")
+    if [ -n "$ref" ]; then
+      git archive "$ref" src | tar -x -C "$d/lib/gcry"
+    else
+      cp -r src "$d/lib/gcry/src"
+    fi
   fi
   (cd "$d" && crystal build "$@" --release main.cr -o "$root/bin/main-$name")
 }
@@ -79,7 +96,23 @@ case "$os" in
 esac
 for a in "${arms[@]}"; do
   nm -n "bin/main-$a" | gzip > "$out/nm-$a.txt.gz"
+  [ "$a" = boehm ] && continue
+  # The allocation entry points, whole, hot or not.
+  : > "$out/disasm-$a.txt"
+  for sym in '__crystal_malloc64' '*GC::malloc<UInt64>:Pointer(Void)' '*GC::malloc_atomic<UInt64>:Pointer(Void)' \
+    '*Gcry::Heap#malloc<UInt64>:Pointer(Void)' '*Gcry::Heap#malloc_atomic<UInt64>:Pointer(Void)'; do
+    if [ "$os" = Darwin ]; then
+      objdump --no-show-raw-insn --disassemble-symbols="_$sym" "bin/main-$a" >> "$out/disasm-$a.txt" 2>&1 || true
+    else
+      objdump --no-show-raw-insn --disassemble="$sym" "bin/main-$a" >> "$out/disasm-$a.txt" 2>&1 || true
+    fi
+  done
 done
+
+if [ "${PROBE_MRS:-0}" = 1 ] && { [ "$cpu" = arm64 ] || [ "$cpu" = aarch64 ]; }; then
+  echo "== mrs.c: the thread-pointer read behind K stores"
+  cc -O2 -o bin/mrs "$here/mrs.c" -lpthread && bin/mrs | tee "$out/mrs.txt"
+fi
 
 echo "== pcprof, $prof_runs runs per arm"
 mkdir -p "$out/pcprof"
