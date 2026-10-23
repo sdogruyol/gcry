@@ -147,3 +147,17 @@ rewrite. **Run 39944941478**, all five runners against `v0.38.0`, nine benches,
 
 Every row but Knuckeotide stays within 1.1× Boehm's peak; Knuckeotide reads
 1.14–1.56× (0.38.0: 1.28–1.80× in the same run).
+
+## Host load during local sessions (found 2026-10-23)
+
+Three `bash -c 'while :; do :; done'` loops, left behind under the agent
+harness on 2026-10-20 at about 07:10 UTC, kept three of the host's 12 vCPUs
+busy until they were found and killed on 2026-10-23 at 19:30 UTC. Every local
+session in that window ran beside them: the 0.38.0 Linux crystal-metric and
+Kemal sessions the README quotes (`../2026-10-21-0.38-crystal-metric/`,
+`../2026-10-21-0.38-kemal/`), the round-1 to round-3 local stress nights and
+the agents' local A/B sessions. Interleaved arms shared the load equally, so
+their paired differences stand; absolute times and the % of Boehm read on this
+host carry it. The runner results in this file are unaffected. One header and
+freelist `process_spec` run on 2026-10-23 failed four load-sensitive examples
+(regressions 33, 51, 80) and passed four times in a row after.
