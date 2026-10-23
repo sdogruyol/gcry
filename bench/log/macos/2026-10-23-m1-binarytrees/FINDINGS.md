@@ -152,3 +152,5 @@ the M1, plus `_platform_memset` 9.5%.
   that still holds when `GC.init` runs is unverified. `pcprof.c` now records
   the executable's index and image 0's name at both points
   (`<out>.<pid>.images`); no run has collected that yet.
+
+The experiment commits (`bf34abb1`, `a99a0408`, back-out `3a5c964a`) are kept under the tag `archive/m1-binarytrees-039`; only this directory and the ROADMAP note came into `release-0.39.0`.
