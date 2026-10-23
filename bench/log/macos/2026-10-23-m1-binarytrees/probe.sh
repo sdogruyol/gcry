@@ -162,5 +162,19 @@ fi
 echo "== timed A/B, $reps reps"
 ab=()
 for a in "${arms[@]}"; do ab+=(--arm "$a=$root/bin/main-$a"); done
+# PROBE_ENVPAD: "n n ...", byte counts; each arm in PROBE_ENVPAD_ARMS (default
+# all) runs again with an environment variable of n bytes, which moves the
+# initial stack pointer (the strings sit above it) and nothing else. Arm
+# `<arm>-e<n>`. PROBE_PRELOAD_ARMS: those arms again with pcprof preloaded
+# but not sampling (no PCPROF_OUT: no thread, no mapping), arm `<arm>-pre`,
+# for what loading a library alone moves.
+for n in ${PROBE_ENVPAD:-}; do
+  for a in ${PROBE_ENVPAD_ARMS:-${arms[*]}}; do
+    ab+=(--arm "$a-e$n=$root/bin/main-$a" --arm-env "$a-e$n" "ENVPAD=$(head -c "$n" /dev/zero | tr '\0' x)")
+  done
+done
+for a in ${PROBE_PRELOAD_ARMS:-}; do
+  ab+=(--arm "$a-pre=$root/bin/main-$a" --arm-env "$a-pre" "$preload=$lib")
+done
 # shellcheck disable=SC2086 # AB_BENCHES is a space-separated list
 python3 bench/runner_ab/ab.py --out "$out" --reps "$reps" "${ab[@]}" ${AB_BENCHES:-Binarytrees}
