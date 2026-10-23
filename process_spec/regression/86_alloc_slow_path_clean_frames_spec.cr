@@ -273,6 +273,8 @@ describe "Regression: the slow path's wipe stays inside the fiber's stack" do
         status = Process.run(Process.executable_path.not_nil!, ["-e", "wipe-guard child #{arm}"],
           env: {"GCRY_WIPE_GUARD86_CHILD" => arm}, output: captured, error: captured)
         text = captured.to_s
+        # The child's bound and floor, for the log.
+        text.each_line { |l| STDERR.puts l if l.starts_with?("guard86: #{arm}:") }
         if arm == "fixed"
           fail "fixed child #{status.inspect}:\n#{text}" unless status.success? && text.includes?(GUARD86_FIXED_OK)
         else

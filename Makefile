@@ -1833,9 +1833,12 @@ counter-loss: $(BIN)
 # because only inlining puts `check_fork_poison!`'s message buffer there: 73
 # stale words with it inline, 13 without, on x86-64 Linux. A debug build
 # reads 21 either way. Regression 86 then asks for none at all: the slow path
-# leaves the entry by a tail call and zeroes the stack below it
-# (`Heap#allocate_entry`), so the frames the collection runs on hold only
-# what they write (13 before, 2 with the wipe off, 0).
+# leaves the entry by tail calls and zeroes the stack below the SP it was
+# entered with (`Heap#allocate_entry`/`allocate_wipe`), so the frames the
+# collection runs on hold only what they write (13 before, 2 with the wipe
+# off, 0), and the wipe must start within a frame record of that SP (56
+# bytes below it on x86-64 Linux when the bound was read in the wiping
+# frame, 0 now).
 .PHONY: alloc-entry-frame
 alloc-entry-frame: $(BIN)
 	$(CRYSTAL) spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr \
