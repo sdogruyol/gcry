@@ -2567,6 +2567,9 @@ jobs:
           # allocation in flight, and the arms it had were the same code.
           make stw-slot-precision heap-counters counter-loss claim-stress interior-only-buffer unaligned-only-buffer
           make stw-mt-sample idle-release
+          # The executable found by its header, not as dyld image 0, which an
+          # inserted library takes (bench/log/macos/2026-10-23-darwin-image0/).
+          make darwin-image0
           ci/sound-suite.sh
 
   # Darwin x86_64. No other job runs a Darwin x86_64 build: `make
