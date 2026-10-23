@@ -1,0 +1,81 @@
+total Ir 1,115,057,981
+    21,863,887 63560: push   %rbp
+    21,863,887 63561: push   %r15
+    21,863,887 63563: push   %r14
+    21,863,887 63565: push   %r13
+    21,863,887 63567: push   %r12
+    21,863,887 63569: push   %rbx
+    21,863,887 6356a: sub    $0x18,%rsp
+    21,863,887 6356e: mov    %rsi,%r8
+    21,863,887 63571: mov    %rsi,%rax
+    21,863,887 63574: shr    $0x38,%rax
+    21,863,887 63578: cmp    $0xff,%rax
+    21,863,887 6357e: je     63604 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0xa4>
+    21,863,887 63584: test   %eax,%eax
+    21,863,887 63586: jne    6364e <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0xee>
+            32 6358c: mov    %rdi,%r13
+            32 6358f: mov    %r8,%rsi
+            32 63592: mov    %r8,%rbx
+            32 63595: call   27080 <*Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) |
+            32 6359a: cmp    $0x169,%eax
+            32 6359f: setne  %cl
+            32 635a2: test   %rdx,%rdx
+            32 635a5: setne  %sil
+            32 635a9: test   %eax,%eax
+            32 635ab: je     6391a <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x3ba
+            32 635b1: or     %sil,%cl
+            32 635b4: je     6391a <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x3ba
+            32 635ba: mov    0x10(%rdx),%edi
+            32 635bd: cmp    $0xffffffff,%edi
+            32 635c0: je     6381f <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x2bf
+    21,863,855 6364e: movabs $0xffffffffffffff,%rcx
+    21,863,855 63658: lea    0x1(%rcx),%rsi
+    21,863,855 6365c: mov    $0x27,%edx
+    21,863,855 63661: cmp    %rsi,%r8
+    21,863,855 63664: jb     63673 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x113
+    21,863,855 63666: dec    %eax
+    21,863,855 63668: cmp    $0x27,%eax
+    21,863,855 6366b: mov    %eax,%edx
+    21,863,855 6366d: ja     6392e <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x3ce
+    21,863,855 63673: and    %rcx,%r8
+    21,863,855 63676: mov    %edx,%eax
+    21,863,855 63678: cmpb   $0x0,0x38a2(%rdi)
+    21,863,855 6367f: je     636f9 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x199
+    21,863,855 63681: xor    %ebp,%ebp
+    21,863,855 63683: mov    0x2118(%rdi,%rax,8),%r14
+    21,863,855 6368b: cmpb   $0x1,0x14ff4(%rdi)
+    21,863,855 63692: je     63720 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x1c0
+    21,863,855 63698: add    %r14,0x3780(%rdi)
+    21,863,855 6369f: jmp    63752 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x1f2
+    21,863,855 63752: mov    %r14,%r15
+    21,863,855 63755: shr    $0x3,%r15
+    21,863,855 63759: mov    0x3908(%rdi),%eax
+    21,863,855 6375f: test   %eax,%eax
+    21,863,855 63761: je     63787 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x227
+    21,863,855 63787: cmpb   $0x1,0x4240(%rdi)
+    21,863,855 6378e: jne    637ad <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil+0x24d
+    21,863,855 63790: movzbl %bpl,%ecx
+    21,863,855 63794: mov    %r8,%rsi
+    21,863,855 63797: mov    %r15,%rdx
+    21,863,855 6379a: add    $0x18,%rsp
+    21,863,855 6379e: pop    %rbx
+    21,863,855 6379f: pop    %r12
+    21,863,855 637a1: pop    %r13
+    21,863,855 637a3: pop    %r14
+    21,863,855 637a5: pop    %r15
+    21,863,855 637a7: pop    %rbp
+    21,863,855 637a8: jmp    63310 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+            32 6381f: mov    0x18(%rdx),%eax
+            32 63822: mov    %rdx,%rcx
+            32 63825: add    %rax,%rcx
+            32 63828: mov    %r13,%rdi
+            32 6382b: mov    %rdx,%rsi
+            32 6382e: mov    %rbx,%rdx
+            32 63831: add    $0x18,%rsp
+            32 63835: pop    %rbx
+            32 63836: pop    %r12
+            32 63838: pop    %r13
+            32 6383a: pop    %r14
+            32 6383c: pop    %r15
+            32 6383e: pop    %rbp
+            32 6383f: jmp    62fc0 <*Gcry::Heap#scan_large_from<Pointer(Gcry::ChunkHeader), Pointer(Gc

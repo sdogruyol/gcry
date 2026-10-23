@@ -1,0 +1,60 @@
+diff -r fused/src/gcry/collect_mark.cr span/src/gcry/collect_mark.cr
+--- fused/src/gcry/collect_mark.cr	2026-10-23 10:52:13.841721025 +0300
++++ span/src/gcry/collect_mark.cr	2026-10-23 11:00:19.478446125 +0300
+@@ -667,11 +667,18 @@
+     # chunk — goes to `mark_impl`, which stays the authority.
+     private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
+       hits = scan_edges_run(cursor, cursor + words, base_only, shard,
+-        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask)
++        @heap_min, heap_span, @radix_l1, @radix_granule_shift, @radix_l2_mask)
+       # `radix_note_fast_hit`, once per payload.
+       @radix_fast_hits &+= hits unless @mark_parallel
+     end
+ 
++    # Bytes in `[@heap_min, @heap_max)`, 0 while nothing is mapped: a word `w`
++    # is in the span when `w &- @heap_min < heap_span`.
++    @[AlwaysInline]
++    private def heap_span : UInt64
++      @heap_max > @heap_min ? @heap_max &- @heap_min : 0_u64
++    end
++
+     # `scan_edges_inline`'s loop over the words in `[p, finish)`, with the span
+     # and the radix fields passed in, so that a caller scanning many payloads
+     # in a row (`scan_batch_prefetched`) loads them once for all of them.
+@@ -679,13 +686,13 @@
+     # `@radix_fast_hits` (`radix_note_fast_hit`'s count) when serial.
+     @[AlwaysInline]
+     private def scan_edges_run(p : UInt64*, finish : UInt64*, base_only : Bool, shard : MarkShard?,
+-                               lo : UInt64, hi : UInt64, l1 : Pointer(Pointer(ChunkHeader*)),
++                               lo : UInt64, span : UInt64, l1 : Pointer(Pointer(ChunkHeader*)),
+                                shift : Int32, l2_mask : UInt64) : UInt64
+       hits = 0_u64
+       while p < finish
+         w = p.value
+         p += 1
+-        next if w < lo || w >= hi
++        next if w &- lo >= span
+         chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+         if chunk.null?
+           mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+diff -r fused/src/gcry/parallel_mark.cr span/src/gcry/parallel_mark.cr
+--- fused/src/gcry/parallel_mark.cr	2026-10-23 10:52:13.841832047 +0300
++++ span/src/gcry/parallel_mark.cr	2026-10-23 11:00:19.478559246 +0300
+@@ -574,7 +574,7 @@
+       fused = @mark_edges_inline && @mark_test_short_tid == 0
+       allow_interior = @allow_interior_pointers
+       lo = @heap_min
+-      hi = @heap_max
++      span = heap_span
+       l1 = @radix_l1
+       shift = @radix_granule_shift
+       l2_mask = @radix_l2_mask
+@@ -607,7 +607,7 @@
+         bytes &+= size
+         cursor = user.as(UInt64*)
+         hits &+= scan_edges_run(cursor, cursor + size // sizeof(Void*).to_u64, base_only, shard,
+-          lo, hi, l1, shift, l2_mask)
++          lo, span, l1, shift, l2_mask)
+       end
+       if @mark_parallel
+         count_parallel_scanned_bytes(bytes, shard)

@@ -1,0 +1,160 @@
+total Ir 5,323,285,034
+    21,863,887 63310: push   %rbp
+    21,863,887 63311: push   %r15
+    21,863,887 63313: push   %r14
+    21,863,887 63315: push   %r13
+    21,863,887 63317: push   %r12
+    21,863,887 63319: push   %rbx
+    21,863,887 6331a: sub    $0x38,%rsp
+    21,863,887 6331e: mov    %ecx,0x8(%rsp)
+    21,863,887 63322: test   %rdx,%rdx
+    21,863,887 63325: js     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    21,863,887 6332b: mov    %rdi,%rbx
+    21,863,887 6332e: je     6352f <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    21,863,887 63334: mov    %rsi,%r14
+    21,863,887 63337: mov    0x4040(%rbx),%rbp
+    21,863,887 6333e: mov    0x4048(%rbx),%r15
+    21,863,887 63345: mov    0x8(%rbx),%rax
+    21,863,887 63349: mov    %rax,0x30(%rsp)
+    21,863,887 6334e: mov    0x10(%rbx),%eax
+    21,863,887 63351: mov    %rax,0x28(%rsp)
+    21,863,887 63356: mov    0x18(%rbx),%rax
+    21,863,887 6335a: mov    %rax,0x20(%rsp)
+    21,863,887 6335f: lea    (%rsi,%rdx,8),%r12
+    21,863,887 63363: movq   $0x0,0x18(%rsp)
+    21,863,887 6336c: movzbl 0x8(%rsp),%eax
+    21,863,887 63371: mov    %eax,0xc(%rsp)
+    21,863,887 63375: jmp    633a1 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+             0 63377: nopw   0x0(%rax,%rax,1)
+           231 63380: mov    %rbx,%rdi
+           231 63383: xor    %edx,%edx
+           231 63385: mov    0xc(%rsp),%ecx
+           231 63389: mov    $0x3,%r8d
+           231 6338f: call   3dd20 <*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::He
+   276,159,808 63394: add    $0x8,%r14
+   276,159,808 63398: cmp    %r12,%r14
+   276,159,808 6339b: jae    63538 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+   276,159,808 633a1: mov    (%r14),%rsi
+   276,159,808 633a4: cmp    %rbp,%rsi
+   276,159,808 633a7: jb     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    88,470,342 633a9: cmp    %r15,%rsi
+    88,470,342 633ac: jae    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,419 633ae: mov    %rsi,%rax
+    33,202,419 633b1: shr    $0x20,%rax
+    33,202,419 633b5: movzwl %ax,%eax
+    33,202,419 633b8: mov    0x30(%rsp),%rcx
+    33,202,419 633bd: mov    (%rcx,%rax,8),%rax
+    33,202,419 633c1: test   %rax,%rax
+    33,202,419 633c4: je     63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,419 633c6: mov    %rsi,%rdx
+    33,202,419 633c9: mov    0x28(%rsp),%rcx
+    33,202,419 633ce: shr    %cl,%rdx
+    33,202,419 633d1: and    0x20(%rsp),%rdx
+    33,202,419 633d6: js     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,419 633dc: mov    (%rax,%rdx,8),%r8
+    33,202,419 633e0: test   %r8,%r8
+    33,202,419 633e3: je     63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,240 633e5: mov    0x10(%r8),%edi
+    33,202,240 633e9: cmp    $0x28,%rdi
+    33,202,240 633ed: setae  %al
+    33,202,240 633f0: mov    0x1c(%r8),%r10d
+    33,202,240 633f4: test   %r10d,%r10d
+    33,202,240 633f7: sete   %cl
+    33,202,240 633fa: or     %al,%cl
+    33,202,240 633fc: cmp    $0x1,%cl
+    33,202,240 633ff: je     63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,199 63405: mov    0x18(%r8),%r11d
+    33,202,199 63409: add    %r8,%r11
+    33,202,199 6340c: mov    0x8(%r8),%r9
+    33,202,199 63410: add    %r8,%r9
+    33,202,199 63413: mov    0x14(%r8),%r13d
+    33,202,199 63417: mov    %rsi,%rax
+    33,202,199 6341a: sub    %r11,%rax
+    33,202,199 6341d: setb   %cl
+    33,202,199 63420: cmp    %r9,%rsi
+    33,202,199 63423: setae  %dl
+    33,202,199 63426: mov    %r13d,0x10(%rsp)
+    33,202,199 6342b: or     %r13b,%dl
+    33,202,199 6342e: or     %cl,%dl
+    33,202,199 63430: test   $0x1,%dl
+    33,202,199 63433: jne    63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,188 63439: mulq   0x2258(%rbx,%rdi,8)
+    33,202,188 63441: jo     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,188 63447: incq   0x18(%rsp)
+    33,202,188 6344c: mov    %rax,%rcx
+    33,202,188 6344f: shr    $0x28,%rcx
+    33,202,188 63453: mov    0x2118(%rbx,%rdi,8),%rdx
+    33,202,188 6345b: mov    %rdx,%r13
+    33,202,188 6345e: imul   %rcx,%r13
+    33,202,188 63462: add    %r11,%r13
+    33,202,188 63465: add    %r13,%rdx
+    33,202,188 63468: cmp    %r9,%rdx
+    33,202,188 6346b: ja     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    33,202,188 63471: mov    %r10d,%edx
+    33,202,188 63474: shr    $0x2e,%rax
+    33,202,188 63478: lea    (%r8,%rax,8),%r10
+    33,202,188 6347c: mov    $0x1,%r9d
+    33,202,188 63482: shl    %cl,%r9
+    33,202,188 63485: mov    0x20(%r10,%rdx,8),%r10
+    33,202,188 6348a: bt     %rcx,%r10
+    33,202,188 6348e: jb     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    32,794,932 63494: lea    0x20(%r8,%rax,8),%rax
+    32,794,932 63499: cmp    %r13,%rsi
+    32,794,932 6349c: setne  %cl
+    32,794,932 6349f: test   %r9,(%rax)
+    32,794,932 634a2: je     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    32,794,932 634a8: and    0x8(%rsp),%cl
+    32,794,932 634ac: jne    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    32,794,932 634b2: lock or %r9,(%rax,%rdx,8)
+    32,794,932 634b7: testb  $0x10,0x10(%rsp)
+    32,794,932 634bc: jne    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    21,863,181 634c2: inc    %edi
+    21,863,181 634c4: shl    $0x38,%rdi
+    21,863,181 634c8: or     %rdi,%r13
+    21,863,181 634cb: cmpb   $0x0,0x14ff4(%rbx)
+    21,863,181 634d2: je     634e4 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+             0 634d4: mov    %rbx,%rdi
+             0 634d7: mov    %r13,%rsi
+             0 634da: call   3e950 <*Gcry::Heap#push_to_own_shard<Pointer(Gcry::BlockHeader)>:Nil>
+             0 634df: jmp    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    21,863,181 634e4: mov    0x15198(%rbx),%rdx
+    21,863,181 634eb: mov    0x14(%rdx),%eax
+    21,863,181 634ee: cmp    0x10(%rdx),%eax
+    21,863,181 634f1: jl     63516 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+             6 634f3: mov    0x18(%rdx),%rsi
+             6 634f7: test   %rsi,%rsi
+             6 634fa: js     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+             6 634fc: add    %rsi,%rsi
+             6 634ff: mov    %rdx,0x10(%rsp)
+             6 63504: mov    0x10(%rsp),%rdi
+             6 63509: call   1fa70 <*Gcry::MarkStack#grow<UInt64>:Nil>
+             6 6350e: mov    0x10(%rsp),%rdx
+             6 63513: mov    0x14(%rdx),%eax
+    21,863,181 63516: mov    0x8(%rdx),%rcx
+    21,863,181 6351a: cltq
+    21,863,181 6351c: mov    %r13,(%rcx,%rax,8)
+    21,863,181 63520: mov    0x14(%rdx),%eax
+    21,863,181 63523: inc    %eax
+    21,863,181 63525: jo     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    21,863,181 63527: mov    %eax,0x14(%rdx)
+    21,863,181 6352a: jmp    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+             0 6352f: movq   $0x0,0x18(%rsp)
+    21,863,887 63538: cmpb   $0x0,0x14ff4(%rbx)
+    21,863,887 6353f: jne    6354a <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:
+    21,863,887 63541: mov    0x18(%rsp),%rax
+    21,863,887 63546: add    %rax,0x28(%rbx)
+    21,863,887 6354a: add    $0x38,%rsp
+    21,863,887 6354e: pop    %rbx
+    21,863,887 6354f: pop    %r12
+    21,863,887 63551: pop    %r13
+    21,863,887 63553: pop    %r14
+    21,863,887 63555: pop    %r15
+    21,863,887 63557: pop    %rbp
+    21,863,887 63558: ret
+             0 63559: call   1a950 <__crystal_raise_overflow>
+             0 6355e: xchg   %ax,%ax
+             0 63560: push   %rbp
+             0 63561: push   %r15
+             0 63563: push   %r14
+             0 63565: push   %r13
+             0 63567: rex.B

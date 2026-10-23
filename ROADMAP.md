@@ -4413,36 +4413,44 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `malloc_atomic` placement-insensitive would need function or loop
       alignment control Crystal doesn't expose
       (`bench/log/windows/2026-10-16-revcomp-attribution/`).
-- [ ] **Per-collection mark cost on a large pointer heap (2026-10-03,
-      refreshed 2026-10-16).** With one marker gcry's Σ mark is now 0.37×
-      Boehm's single marker on Primes, 0.47× on JsonParsePure, 0.62× on
-      JsonGenerate and 0.23× on Binarytrees, but gcry collects about half as
-      often on the first three: per collection it is 0.70×, 0.91× and 1.17×
-      (`bench/log/linux/2026-10-15-mark-cost/`; Boehm's figure includes its
-      root scan, and no per-byte comparison was taken). 0.37.0 drains the
-      serial mark stack in batches of 1 024 instead of a 16-entry ring: ns
-      per marked object −11% to −23% with one marker. Its parallel markers
-      pop 1 024 entries at a time into mapped buffers instead of 256 on
-      their stacks. ns per marked object, Primes / JsonParsePure /
-      JsonGenerate: four workers −20% / −12% / −20% on 4 CPUs and
-      −3% / −14% / −20% on 12 (where four is the default); two (the default
-      on 3–7 CPUs) −1% / −3% / −14%, only JsonGenerate beyond noise
-      (`bench/log/linux/2026-10-16-parallel-mark-batch/`). Parallel mark is
+- [ ] **Per-object mark cost on a large pointer heap (2026-10-03,
+      refreshed 2026-10-23).** Per collection at the same (full) live set,
+      gcry's one marker took 0.39× / 0.43× / 0.67× of Boehm's one marker on
+      Primes / JsonParsePure / JsonGenerate on 2026-10-23 (0.46× / 0.49× /
+      0.72× before that day's change). The "per collection 0.70×, 0.91×,
+      1.17×" this item used to carry divided Σ mark by the collection count,
+      and Boehm's count includes many small early collections (JsonGenerate
+      24–26 against 13–14, its first twelve under 2 ms each), so it compared
+      heaps of different sizes, not mark costs
+      (`bench/log/linux/2026-10-23-mark-cost/`; Boehm's figure includes its
+      root scan). Since 2026-10-23 every marker's batch scan handles a small
+      object's words itself, with the span and radix fields loaded once per
+      batch, instead of a `scan_object` → `scan_edges_inline` call pair per
+      object (about 90 instructions, a quarter of JsonGenerate's mark): ns
+      per marked object with one marker −14% to −16% Primes, −11% to −12%
+      JsonParsePure, −7% to −14% JsonGenerate, −18% to −20% Binarytrees.
+      The pacing spends part of it on collections (`threshold_pace_pct`
+      scales the threshold by the last cycle's cost): JsonGenerate with one
+      marker took 14 collections where it took 13. 0.37.0 drains the serial
+      mark stack in batches of 1 024 instead of a 16-entry ring, and its
+      parallel markers pop 1 024 entries at a time into mapped buffers
+      (`bench/log/linux/2026-10-15-mark-cost/`,
+      `bench/log/linux/2026-10-16-parallel-mark-batch/`). Parallel mark is
       on by default (`docs/DEFAULT-GC-READINESS.md` M1): `min(2, CPUs − 1)`
       workers up to 7 CPUs, then `CPUs / 4 + 1`, at most 8, serial under a
-      32 MiB live floor; per marked object two workers are now 1.54–1.59×
-      faster than the serial drain on these heaps, four 2.1–2.5×. What is
-      left, from the 2026-10-15 profile of the inline candidate path: the
-      wait for the mark and `occ` words (13–29% of it, two lines per fresh
-      mark where Boehm reads one mark byte), the chunk header (8–16%), the
-      ordinal arithmetic (13–16%) and branch recovery (11–15%). Measured,
-      not taken: the size class in each radix entry to skip the header
-      (inside the spread), and the `occ` and mark words interleaved so the
-      test reads one line (−2% to −7% per object with one marker, mixed
-      with workers, never beyond the spread; every bitmap walker and the
-      four ISAs' sweep kernels would change). History:
-      Primes' largest mark was 470 ms against 178 ms for Boehm's one marker
-      on 2026-10-03; inline candidate resolution and whole-payload prefetch
+      32 MiB live floor. What is left is the candidate chain — radix slot,
+      chunk header, reciprocal, then the mark and `occ` words (29% of
+      `scan_edges_inline`'s samples on JsonGenerate wait after the `lock or`
+      for those two lines, where Boehm reads one mark byte) — and the word
+      filter (six instructions a word on 276 M words). Measured, not taken:
+      the size class in each radix entry to skip the header, and the `occ`
+      and mark words interleaved (both inside the spread, 2026-10-15/16); a
+      plain mark store when serial (three times, last on 2026-10-23: within
+      the spread), one unsigned span test instead of two compares (slower on
+      all eight cells), and a one-entry chunk cache in the scan (−4% to +7%,
+      within the spread). History: Primes' largest mark was 470 ms against
+      178 ms for Boehm's one marker on 2026-10-03; inline candidate
+      resolution and whole-payload prefetch
       (`bench/log/linux/2026-10-06-mark-cost/`), the parallel-mark
       shared-write fixes (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`)
       and the 0.36 pacing came between.

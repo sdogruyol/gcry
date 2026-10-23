@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The mark scans small objects in its batch loop.** Each marker's batch
+  scan used to call `scan_object` and `scan_edges_inline` per object, about
+  90 instructions of register saves, spills and flag reloads around a scan
+  of a few words (a quarter of JsonGenerate's mark instructions). It now
+  scans a small object's words itself, with the heap span and radix fields
+  loaded once per batch. ns per marked object with one marker, three
+  sessions on Linux x86_64: Primes −14% to −16%, JsonParsePure −11% to
+  −12%, JsonGenerate −7% to −14%, Binarytrees −18% to −20%. Σ mark on
+  JsonGenerate fell 10–15% on all five CI runners; on other rows the pacing
+  sometimes spends the cheaper mark on one more collection. No row is
+  slower beyond what code placement moves on the same runner (Perf A/B
+  39922915306, with placement probes 39925823114, 39930906562 and
+  39936139933; `bench/log/linux/2026-10-23-mark-cost/`). `make mark-audit`'s
+  planted miss applies on the new path too.
+
 - **An allocation's slow path no longer collects on frames the hit path
   left stale.** `Heap#malloc`/`malloc_atomic` reach the slow path by a tail
   call, and `Heap#allocate_entry` zeroes 1 KiB below the stack pointer first
