@@ -6,10 +6,11 @@ Prints the share of samples per function (all of them above 0.5%), then the
 disassembly of the TOP hottest functions in the binary with each
 instruction's sample count. A sample's count falls on the instruction the
 thread was about to execute, so a stall shows up on the instruction after the
-one that caused it more often than on it. Addresses outside the binary
-(libc, libdyld, the kernel boundary) are pooled as `[other image]`.
+one that caused it more often than on it. Samples in other images (libc,
+libsystem, dyld) come from each SAMPLE_FILE's `.other` twin, named by image
+and nearest exported symbol (`dladdr`), as `[image] symbol`.
 """
-import bisect, collections, struct, subprocess, sys
+import bisect, collections, os, struct, subprocess, sys
 
 
 def symbols(binary):
@@ -29,23 +30,25 @@ def symbols(binary):
 
 def main():
     binary, top = sys.argv[1], int(sys.argv[2])
+    files = [p for p in sys.argv[3:] if not p.endswith(".other")]
     pcs = []
-    for path in sys.argv[3:]:
+    for path in files:
         data = open(path, "rb").read()
         pcs.extend(struct.unpack("<%dQ" % (len(data) // 8), data))
     addrs, names = symbols(binary)
-    lo, hi = addrs[0], addrs[-1] + 0x10000
     by_fn = collections.Counter()
     by_pc = collections.Counter()
     for pc in pcs:
-        if not lo <= pc < hi:
-            by_fn["[other image]"] += 1
-            continue
         i = bisect.bisect_right(addrs, pc) - 1
-        by_fn[i] += 1
+        by_fn[i if i >= 0 else "[executable] ?"] += 1
         by_pc[pc] += 1
-    total = len(pcs)
-    print(f"{total} samples, {len(sys.argv) - 3} runs")
+    for path in files:
+        if os.path.exists(path + ".other"):
+            for line in open(path + ".other", errors="replace"):
+                img, _, sym = line.rstrip("\n").partition("\t")
+                by_fn[f"[{os.path.basename(img)}] {sym}"] += 1
+    total = sum(by_fn.values())
+    print(f"{total} samples, {len(files)} runs")
     for k, n in by_fn.most_common():
         if n * 200 < total:
             break

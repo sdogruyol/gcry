@@ -2,9 +2,11 @@
 // (`DYLD_INSERT_LIBRARIES` on macOS, `LD_PRELOAD` on Linux). It samples the
 // thread that runs the constructors -- the main thread, which is
 // Binarytrees' mutator and, with one marker, its collector -- every
-// PCPROF_US microseconds (default 100) and writes the samples' program
-// counters, less the main image's load bias so that they match `objdump`'s
-// addresses, as raw little-endian u64 to $PCPROF_OUT.<pid> at exit.
+// PCPROF_US microseconds (default 100). At exit it writes the samples that
+// fell in the executable, less its load bias so that they match `objdump`'s
+// addresses, as raw little-endian u64 to $PCPROF_OUT.<pid>, and every other
+// sample as an `image<TAB>nearest symbol` line (`dladdr`) to
+// $PCPROF_OUT.<pid>.other.
 //
 // macOS: a sampler thread `thread_suspend`s the main thread, reads its PC
 // with `thread_get_state` and resumes it, as `sample(1)` does, at ~10 kHz
@@ -12,12 +14,17 @@
 // signals the main thread (SIGEV_THREAD_ID) and the handler reads the PC
 // from its ucontext.
 //
-// The sampler writes only into a preallocated array: no allocation, no lock,
-// so suspending the main thread anywhere (in the collector, in libc) is safe.
+// The sampler writes only into a preallocated buffer: no allocation, no
+// lock, so suspending the main thread anywhere (in the collector, in libc) is
+// safe. The buffer is an anonymous mapping, not a static array: both
+// collectors scan every loaded image's data and bss as roots, and run 1 and
+// 2's 32 MiB `.bss` array put 13-21% of gcry's samples in its static-root
+// scan (`scan_static_ranges`), the profiler measuring itself.
 // gcry's own stop-the-world suspends registered Crystal threads only, so it
 // leaves the sampler alone; the sampler suspending the main thread while it
 // collects is one more suspend count, which Mach adds.
 #define _GNU_SOURCE
+#include <dlfcn.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -25,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #ifdef __APPLE__
@@ -33,12 +41,12 @@
 #else
 #include <link.h>
 #include <sys/syscall.h>
-#include <ucontext.h>
+#include <sys/auxv.h>
 #endif
 
 #define MAX_SAMPLES (1 << 22)
 
-static uint64_t samples[MAX_SAMPLES];
+static uint64_t *samples;
 static volatile long nsamples;
 static uint64_t bias;
 static volatile int stop;
@@ -57,9 +65,27 @@ static uint64_t executable_slide(void) {
 }
 #endif
 
+// Raw PCs; the destructor sorts them into the executable's (written less its
+// load bias) and every other image's (named with `dladdr`).
 static void record(uint64_t pc) {
   long i = __atomic_fetch_add(&nsamples, 1, __ATOMIC_RELAXED);
-  if (i < MAX_SAMPLES) samples[i] = pc - bias;
+  if (i < MAX_SAMPLES) samples[i] = pc;
+}
+
+// The executable's base as `dladdr` reports it (`dli_fbase`).
+static const void *executable_base(void) {
+#ifdef __APPLE__
+  uint32_t n = _dyld_image_count();
+  for (uint32_t i = 0; i < n; i++) {
+    const struct mach_header *h = _dyld_get_image_header(i);
+    if (h && h->filetype == MH_EXECUTE) return h;
+  }
+  return NULL;
+#else
+  Dl_info info;
+  if (!dladdr((void *)getauxval(AT_PHDR), &info)) return NULL;
+  return info.dli_fbase;
+#endif
 }
 
 static long interval_us(void) {
@@ -115,6 +141,9 @@ static int first_object(struct dl_phdr_info *info, size_t size, void *data) {
 
 __attribute__((constructor)) static void pcprof_start(void) {
   if (!getenv("PCPROF_OUT")) return;
+  void *buf = mmap(NULL, MAX_SAMPLES * sizeof(uint64_t), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  if (buf == MAP_FAILED) return;
+  samples = buf;
 #ifdef __APPLE__
   bias = executable_slide();
   target = mach_thread_self();
@@ -154,7 +183,22 @@ __attribute__((destructor)) static void pcprof_stop(void) {
   snprintf(path, sizeof path, "%s.%d", out, (int)getpid());
   FILE *f = fopen(path, "wb");
   if (!f) return;
+  snprintf(path, sizeof path, "%s.%d.other", out, (int)getpid());
+  FILE *o = fopen(path, "w");
+  const void *base = executable_base();
   long n = nsamples < MAX_SAMPLES ? nsamples : MAX_SAMPLES;
-  fwrite(samples, sizeof samples[0], (size_t)n, f);
+  for (long i = 0; i < n; i++) {
+    Dl_info info;
+    int found = dladdr((void *)samples[i], &info);
+    if (found && info.dli_fbase == base) {
+      uint64_t pc = samples[i] - bias;
+      fwrite(&pc, sizeof pc, 1, f);
+    } else if (o) {
+      const char *img = found && info.dli_fname ? info.dli_fname : "?";
+      const char *sym = found && info.dli_sname ? info.dli_sname : "?";
+      fprintf(o, "%s\t%s\n", img, sym);
+    }
+  }
   fclose(f);
+  if (o) fclose(o);
 }
