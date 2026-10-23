@@ -548,7 +548,18 @@ module Gcry
     # (`bench/log/linux/2026-09-23-parallel-mark-scaling/`). `GCRY_PREFETCH=0`
     # turns this off too, so the A/B is one knob. The serial drain scans its
     # batches here as well, with no shard (`serial_mark_drain`).
-    @[AlwaysInline]
+    #
+    # A tagged entry (a small, non-atomic block of a known class) is scanned
+    # in this loop, by `scan_edges_run` with the span and radix fields loaded
+    # once per batch, when `scan_payload` would have taken `scan_edges_inline`
+    # for it; everything else goes through `scan_object`. Per object, that
+    # call pair had saved and restored six registers twice, spilled the radix
+    # fields, re-read four `self` flags and stored the scanned-byte count,
+    # about 90 instructions around a scan of a few words: on JsonGenerate
+    # with one marker, 1.6 G of the mark's 7.5 G instructions
+    # (`bench/log/linux/2026-10-23-mark-cost/`). Out of line, so the
+    # collector's own frame (`run_collection_body`) does not carry the loop.
+    @[NoInline]
     private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
       unless @mark_prefetch
         i = 0
@@ -558,6 +569,18 @@ module Gcry
         end
         return
       end
+      # `scan_payload`'s condition for `scan_edges_inline`, fixed for one
+      # `mark_loop`.
+      fused = @mark_edges_inline
+      short = @mark_test_short_tid
+      allow_interior = @allow_interior_pointers
+      lo = @heap_min
+      hi = @heap_max
+      l1 = @radix_l1
+      shift = @radix_granule_shift
+      l2_mask = @radix_l2_mask
+      bytes = 0_u64
+      hits = 0_u64
       ahead = m < MARK_PREFETCH_DEPTH ? m : MARK_PREFETCH_DEPTH
       j = 0
       while j < ahead
@@ -570,8 +593,33 @@ module Gcry
         if k < m
           prefetch_mark_entry(batch[k].as(BlockHeader*))
         end
-        scan_object(batch[i].as(BlockHeader*), shard)
+        entry = batch[i].as(BlockHeader*)
         i += 1
+        tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+        unless fused && tag != 0 && tag <= SIZE_CLASS_COUNT
+          scan_object(entry, shard)
+          next
+        end
+        # `scan_object`'s tagged path and `scan_payload`, with the scanned
+        # bytes and the fast hits summed over the batch.
+        user = BlockHeader.user_from(mark_entry_header(entry)).as(UInt8*)
+        size = @block_bytes.unsafe_fetch(tag.to_i32 &- 1) &- BlockHeader::SIZE
+        base_only = !allow_interior && !type_id_word_plausible?(user)
+        bytes &+= size
+        words = size // sizeof(Void*).to_u64
+        # The planted miss of `make mark-audit`, as `scan_payload` applies it,
+        # so that gate's red arm drops an edge on this path too.
+        if short != 0 && words > 0 && user.as(Int32*).value == short
+          words -= 1
+        end
+        cursor = user.as(UInt64*)
+        hits &+= scan_edges_run(cursor, cursor + words, base_only, shard, lo, hi, l1, shift, l2_mask)
+      end
+      if @mark_parallel
+        count_parallel_scanned_bytes(bytes, shard)
+      else
+        @mark_scanned_bytes &+= bytes
+        @radix_fast_hits &+= hits
       end
     end
 
