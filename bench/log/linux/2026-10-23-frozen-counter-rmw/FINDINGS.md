@@ -102,7 +102,31 @@ type (`@heap_size : Atomic(UInt64) = ...`), in the slots of the `getter`s
 they replace. Every offset above, and `instance_sizeof(Heap)` (86 784),
 is then the base's (`3193e198`).
 
-KEEP_PLACEHOLDER
+Perf A/B [39928923987](https://github.com/sdogruyol/gcry/actions/runs/39928923987)
+on `3193e198` against `90620b0e` (`release-0.39.0`; its `src/` is
+`6fc6665c`'s), ten rows, 15 reps, Boehm arm, pads `p16 p64 bp16 bp64`, all
+five runners green. Speed % of Boehm, base → var, and every row whose
+median fell below base's interquartile range:
+
+| runner | Binarytrees | slower beyond base's IQR | what the pads arms read |
+|---|---|---|---|
+| ubuntu-latest | 99% → 102% | JsonParsePure 89 → 87, JsonGenerate 90 → 87, JsonParseSerializable 91 → 89, JsonParsePull 94 → 89, Brainfuck 102 → 96 | placement: var padded by 16/64 reads base's timed section (JsonParsePull 0.377/0.372 s, base 0.372, var 0.414; JsonParseSerializable 0.386/0.402, base 0.411), and base padded by 64 reads var's (Brainfuck 3.394 s, var 3.392; JsonGenerate 0.855, var 0.862). Brainfuck allocates nothing |
+| ubuntu-24.04-arm | 102% → 103% | none (Binarytrees timed −3.1%) | — |
+| macos-latest | 98% → 94% [88, 98] (base [93, 104]) | none | — (a slow, wide run: Boehm 2.50 s on JsonGenerate against 2.21 s in the first) |
+| macos-15-intel | 149% → 144% [136, 152] (base [141, 156]) | Knuckeotide 100 → 95 [92, 109] | timed −0.8% [−11.8, +7.8]; pads 100 / 101 against 99 / 97 |
+| windows-latest | 120% → 118% | Primes 108 → 103 | placement: pads 100 / 103 against 102 / 102; timed +4.0% [−0.3, +7.6] |
+
+Peak within 1.1× Boehm on every row but Knuckeotide (the exception, and
+no higher: −12% on arm64). JsonGenerate's peak on macos-latest read 0.64× →
+0.74× in this run, with the base pad arm `bp16` reaching 0.74× too, and
+0.64× → 0.64× in the first run: a bimodal peak on the noisy run.
+
+**Verdict:** no row is slower beyond its spread except where the same-session
+pad arms move it as far, both ways round; nothing in the change runs on the
+allocation hit path, and the heap's layout is the base's. Binarytrees, the
+row the first version cost, is level on all five. After the final push the
+branch was rebased onto `release-0.39.0` at `d60fce19`; the offsets were
+re-read against that base and are again equal (`@fast_path` 86 124 both).
 
 ## Regression 88
 
@@ -142,7 +166,10 @@ control child run on its own for its marker.
   takes as its linker); rerun as
   [39925208158](https://github.com/sdogruyol/gcry/actions/runs/39925208158):
   18 of 18 green, 18 of 18 control markers.
-- PROBE_FINAL_PLACEHOLDER
+- Run [39933051731](https://github.com/sdogruyol/gcry/actions/runs/39933051731)
+  on `3193e198` (the final source), all five: `macos-latest`,
+  `macos-15-intel`, `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`
+  90 of 90 runs green, 90 of 90 control markers.
 
 ## Other counters the stop writes, checked
 
