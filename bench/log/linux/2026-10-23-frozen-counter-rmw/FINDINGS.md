@@ -212,8 +212,9 @@ bounded to RSS (more or less large cache kept for one cycle).
 
 ## Checks
 
-On `3193e198`, each under the shared lock, one at a time, bounded by
-`bench/run_bounded.sh` (the same set passed on `8988fdbe`):
+On the branch rebased onto `release-0.39.0` at `d60fce19` (`cc087149`),
+each under the shared lock, one at a time, bounded by `bench/run_bounded.sh`
+(the same set passed on `8988fdbe` and on `3193e198`, with the same counts):
 
 | check | result |
 |---|---|
