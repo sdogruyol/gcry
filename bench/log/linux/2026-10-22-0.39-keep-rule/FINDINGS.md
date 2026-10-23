@@ -120,3 +120,30 @@ pad arms, 15 reps:
 In one session the Binarytrees rise is gone, and every row that still differs
 moves as far with a pad or with code that never runs. That replaces the
 [INFERENCE] above: `ubuntu-latest`'s slower rows against 0.38.0 are placement.
+
+## Round 3, on `b888ac96` (2026-10-24)
+
+Round 3 added the mark batch loop's inline small-object scan, the slow-path
+wipe on every target (Windows included, three tail-call hops), atomic shared
+byte counters, Darwin's executable found by its header, and regression 81's
+rewrite. **Run 39944941478**, all five runners against `v0.38.0`, nine benches,
+15 reps, Boehm, Kemal 15 trials, a 16-byte pad arm on each side:
+
+- **macOS (both), arm64 and Windows:** no wall time slower beyond its spread.
+  Faster beyond it: Binarytrees on M1 −5.4%, Intel −2.1%, arm64 −4.3%;
+  JsonParseSerializable −5.1% on Intel; JsonParsePure −1.9% and JsonGenerate
+  −2.0% on arm64; JsonParsePure −3.5%, JsonParsePull −2.3%, Revcomp −5.0% and
+  RegexDna −2.3% on Windows. Knuckeotide's peak −13% Intel, −16% M1, −22%
+  arm64. arm64's JsonParseSerializable and JsonParsePull peaks +1.4% and +1.6%
+  beyond spread, at 0.86× Boehm.
+- **`ubuntu-latest`:** six rows slower in wall time beyond their spread
+  (Binarytrees +3.8%, JsonParseSerializable +2.3%, RegexDna +2.5%,
+  JsonParsePull +2.2%, Revcomp +1.5%, JsonParsePure +1.0%). In the same
+  session, 0.38.0 padded by 16 bytes reads what unpadded 0.39 reads on every
+  one of them (−2.1% to +0.0% against it), and 0.39 padded by 16 moves
+  −8.3% to +1.8%: placement, as in the same-session runs above.
+  JsonParseSerializable's peak +5.0% [+1.2, +9.8], at 0.81× Boehm.
+- **Kemal `/json`** level on all four runners it runs on.
+
+Every row but Knuckeotide stays within 1.1× Boehm's peak; Knuckeotide reads
+1.14–1.56× (0.38.0: 1.28–1.80× in the same run).
