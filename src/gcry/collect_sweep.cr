@@ -56,6 +56,24 @@ module Gcry
     # hangs, that the stop reached this branch while another thread held
     # `@index_lock`, rather than inferring it after the fact.
     property stop_sweep_bounds_hook : Proc(Bool, Nil)? = nil
+    # Research only: called on the collector by an after-world sweep, in its
+    # walk of `@chunks`, for each empty chunk it has just queued for release
+    # (its `next` now points into the release queue). The arguments are the
+    # chunk's address and whether it is the chunk the walk started from (the
+    # list's head as the walk read it). No lock is held and the world is
+    # running, so the hook may allocate and start threads, as a mutator
+    # would. It is the latch-off race made deterministic: a thread born here
+    # is born between this chunk's drop decision and the walk's relink
+    # decisions, which `sweep_mutator_latch = false` reads live. Then the
+    # rebuild is not stored, the list still reaches the queued chunk, and the
+    # flush that refuses to release the chunk links it back in front, which
+    # closes a cycle. Latched, the walk relinks without it whatever is born
+    # here. The refused-releases arm of `make chunk-list-drift`.
+    #
+    # The class's, as `Heap.shared_counter_hook` is: one instance variable
+    # more can move the allocation hit path's fields
+    # (`bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`).
+    class_property sweep_drop_hook : Proc(UInt64, Bool, Nil)? = nil
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -487,6 +505,13 @@ module Gcry
               end
             end
           end
+        end
+
+        # Research only (`Heap.sweep_drop_hook`): a chunk this after-world walk
+        # just queued for release, with the class lock let go. `drop` is false
+        # on almost every chunk, so unset it costs nothing the walk notices.
+        if drop && after_world && (hook = @@sweep_drop_hook)
+          hook.call(chunk.address, chunk == walk_head)
         end
 
         unless drop

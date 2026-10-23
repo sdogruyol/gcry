@@ -102,10 +102,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tree before round 3 hangs the same way. A hung fast child now counts as a
   crash; a hung shipped child fails the gate with its threads' stacks, since
   the children now consent to ptrace. A new arm refuses every empty-chunk
-  release (`GCRY_REFUSE_EMPTY_RELEASE`): the shipped child must exit cleanly
-  and the fast child must hang and be killed within ten tries (a try escapes
-  57 times in 230). Nothing in `src/` changed.
-  `bench/log/linux/2026-10-23-drift-stall/FINDINGS.md`.
+  release (`GCRY_REFUSE_EMPTY_RELEASE`) and makes the latch-off race on
+  demand: the child puts an empty chunk at the head of the list, and a new
+  research hook, `Heap.sweep_drop_hook`, births two threads when the sweep
+  drops that chunk. The shipped child must exit cleanly after 40 such
+  collections, and the fast child must hang. Left to chance, the race closed
+  the cycle in 79% of tries on a 12-vCPU host and never in ten on CI's
+  4-vCPU runner. `bench/log/linux/2026-10-23-drift-stall/FINDINGS.md`.
 
 ### Fixed
 

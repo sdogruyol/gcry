@@ -1806,9 +1806,11 @@ mark-clear-index: $(BIN)
 # closes when the flush refuses an occupied release and links the chunk back in
 # front, and one such child stalled this gate for 600 s (0.39.0's night). The
 # refused-releases arm forces that: with every empty-chunk release refused
-# (`GCRY_REFUSE_EMPTY_RELEASE`) the shipped child must exit cleanly and the
-# fast child must hang, and is killed at 20 s (up to ten tries: a try escapes
-# about one time in four, so ten all escape about 1e-6 of runs). ~50 s.
+# (`GCRY_REFUSE_EMPTY_RELEASE`) and the latch-off race made on demand — an
+# empty chunk at the head of the list, and two threads born when the sweep
+# drops it (`Heap.sweep_drop_hook`) — the shipped child must exit cleanly
+# after 40 such collections and the fast child must hang, and is killed at
+# 10 s. ~40 s.
 chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift

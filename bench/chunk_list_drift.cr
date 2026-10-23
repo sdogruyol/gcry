@@ -30,8 +30,10 @@
 #   window-free       a large block `GC.free`d in that window instead: its
 #                     chunk must not leave the list under the rebuild
 #   refused releases  shipped and fast with every empty-chunk release refused
-#                     (`GCRY_REFUSE_EMPTY_RELEASE`): the shipped list must not
-#                     close into a cycle, the fast one must, and hangs
+#                     (`GCRY_REFUSE_EMPTY_RELEASE`) and the latch-off race made
+#                     at an empty head chunk (`Heap.sweep_drop_hook`): the
+#                     shipped list must not close into a cycle, the fast one
+#                     must, and hangs
 #
 # The fast arm restores half of the pre-fix shape, which is why it runs in a
 # child process: that shape faulted 2 of 12 times on the churn reproducer, and a
@@ -148,33 +150,35 @@ CHILD_TIMEOUT = (ENV["BENCH_CHILD_TIMEOUT_S"]?.try(&.to_i?) || Math.max(120, ROU
 # The refused-releases arm. Every release the empty-chunk flush would make is
 # refused (a budget no run spends), so every chunk the sweep queued for
 # release is linked back in front of `@chunks`: on the shipped tree, where the
-# sweep took it off the list before queueing it, that is one more chunk on the
-# list; on the fast arm's, which still runs on into the queue, it is the
-# cycle. Short children: a shipped one finishes in about 3 s. The fast one
-# needs the latch-off race itself — a thread born between the sweep's drop
-# decision and its relink decision for the same chunk — so it closes the
-# cycle by chance, not on demand: run alone and serially, as here, 118 of 150
-# children of 240 rounds hung and 32 finished cleanly, none crashed
-# (`bench/log/linux/2026-10-23-drift-stall/pertry-r240.txt`).
-REFUSE_ENV    = {"GCRY_REFUSE_EMPTY_RELEASE" => "1000000000"}
-REFUSE_ROUNDS = 240
-# The fast child there is expected to hang, so the gate waits this out on
-# every run. One that does not hang finished 240 rounds in 1.0-3.7 s, so a
-# child still running at this is hung and not slow.
-REFUSE_FAST_TIMEOUT = 20.seconds
-# Tries for that child to hang before the arm calls the construction lost.
-# A try escapes 57 times in 230 (150 alone, 80 inside 55 gate runs: 0.25,
-# 0.35 at the 99.9% upper bound), and tries are independent processes, so all
-# of them escaping — a red with no defect behind it — is 0.35^10 = 2.4e-5 a
-# gate run at that bound and 9e-7 at the measured rate. Three tries were 1 red
-# in 50 gate runs. An escaped try costs its 1-4 s; 55 gate runs needed 1.45
-# tries on average and 4 at most.
-REFUSE_FAST_ATTEMPTS = 10
-# Releases the shipped child must have refused for its clean exit to say the
-# relinked chunks closed no cycle, rather than that there were none. It
-# refused 6063 in its 240 rounds: a kept chunk that is still empty is queued
-# again by the next major and refused again.
-REFUSE_MIN = 1000_u64
+# rebuild took it off the list, that is one more chunk on the list; where the
+# list still reaches it through the queue, it is a cycle.
+#
+# Which of the two happens used to be left to the latch-off race, a thread
+# born between the sweep's drop decision and its relink decision, and the
+# fast child closed the cycle by chance: 118 of 150 tries on a 12-vCPU host,
+# and on CI's 4-vCPU runner not once in ten (run 39997435553). Now the child
+# makes the race happen (`--refuse-race`, `RefuseRace`). Before each
+# collection it maps a fresh chunk and frees the one block in it, so the
+# after-world walk starts at an empty chunk and drops it first; the sweep
+# hook (`Heap.sweep_drop_hook`) then births two threads at that very drop,
+# and waits until both are on Crystal's thread list. Latched, the walk
+# relinks without the dropped chunk whatever is born; with the latch off it
+# reads the new count, stores nothing, and leaves `@chunks` at the dropped
+# chunk, whose `next` is the release queue. The refusal relinks it in front
+# of itself, and the next walk of the list never ends.
+REFUSE_ENV = {"GCRY_REFUSE_EMPTY_RELEASE" => "1000000000"}
+# Collections the shipped child makes the race in, each one checked for the
+# hook having fired on the dropped head.
+RACE_ROUNDS = 40
+# A block size that is a size class (so the block lands in a size-class
+# chunk), about 40 to a 128 KiB chunk, and one the runtime allocates little.
+RACE_BYTES = 3000
+# Collections a round may take to make the race once (see the child).
+RACE_TRIES = 5
+# The fast child must hang; the gate waits this out on every run. The
+# shipped child's 40 rounds take about 0.1 s, and the fast child makes the
+# race in its first, so one still running at this is hung and not slow.
+REFUSE_FAST_TIMEOUT = 10.seconds
 
 record Bucket, round : Int32, chunks : UInt64, bytes : UInt64, heap_bytes : UInt64, mapped : UInt64
 
@@ -324,15 +328,104 @@ def run_free_child(self_path : String) : {BoundedChild::Result, FreeReport?}
   {result, report}
 end
 
-# The last `refused` line of a child: the empty-chunk releases its flushes
-# refused so far (`Heap#release_refused_forced`).
-def refused_count(result : BoundedChild::Result) : UInt64
-  n = 0_u64
-  result.output.each_line do |line|
-    f = line.split
-    n = f[1].to_u64 if f.size == 2 && f[0] == "refused"
+# The refused-releases arm's race, made on purpose (`--refuse-race`). Class
+# state, procs that capture nothing, and a preallocated array, as
+# `WindowPrepend`'s: the hook runs on the collector in the middle of the
+# sweep's walk.
+module RefuseRace
+  @@target = 0_u64
+  @@born = [] of Thread
+  @@release = false
+  @@fired = 0
+
+  def self.reserve : Nil
+    @@born = Array(Thread).new(4)
   end
-  n
+
+  # A fresh chunk at the head of `@chunks`, with nothing in it: blocks of
+  # `RACE_BYTES` until one maps a chunk, which `map_chunk` prepends, and that
+  # block freed. The blocks before it are garbage the collection sweeps. 0
+  # when nothing mapped in a chunk's worth of tries.
+  def self.empty_head(heap : Gcry::Heap) : UInt64
+    4096.times do
+      before = heap.chunks_mapped
+      p = GC.malloc_atomic(RACE_BYTES)
+      next if heap.chunks_mapped == before
+      chunk = heap.chunk_address_of(p)
+      GC.free(p)
+      return chunk
+    end
+    0_u64
+  end
+
+  def self.arm(chunk : UInt64) : Nil
+    @@target = chunk
+    @@release = false
+  end
+
+  # `Heap.sweep_drop_hook`: when the walk has just dropped the armed chunk,
+  # and it is the chunk the walk started from, two threads are born and this
+  # waits until both are on Crystal's thread list. Two, so the count is past
+  # `multi_mutator_threads?`'s two whether or not the Monitor runs. They wait
+  # for `finish` rather than exit, so they stay on the list for the rest of
+  # the walk. A raw `write` says the race was made, which a fast child that
+  # then hangs cannot print any other way.
+  def self.call(chunk : UInt64, first : Bool) : Nil
+    return unless first && chunk == @@target && chunk != 0
+    @@target = 0_u64
+    before = listed
+    2.times do
+      @@born << Thread.new do
+        until @@release
+          Thread.sleep(1.millisecond)
+        end
+      end
+    end
+    deadline = Time.instant + 5.seconds
+    until listed >= before + 2 || Time.instant > deadline
+      Intrinsics.pause
+    end
+    @@fired += 1
+    msg = "race-fired\n"
+    LibC.write(1, msg.to_unsafe, msg.bytesize)
+  end
+
+  def self.fired : Int32
+    @@fired
+  end
+
+  def self.listed : Int32
+    n = 0
+    Thread.unsafe_each { n += 1 }
+    n
+  end
+
+  def self.finish : Nil
+    @@release = true
+    @@born.each(&.join)
+    @@born.clear
+  end
+end
+
+# A race child under the deadline: how it ended, the races its hook made
+# (`race-fired` lines), the releases it refused by its last round, and the
+# collections in which the armed chunk was not the walk's first and dropped
+# (`missed`: the round collected again).
+def run_race_child(self_path : String, fast : Bool, timeout : Time::Span) : {BoundedChild::Result, Int32, UInt64, Int32}
+  args = ["--child", "--refuse-race"]
+  args << "--fast" if fast
+  result = BoundedChild.run(self_path, args, REFUSE_ENV, timeout)
+  fired = 0
+  refused = 0_u64
+  missed = 0
+  result.output.each_line do |line|
+    fired += 1 if line.strip == "race-fired"
+    f = line.split
+    next unless f.size == 4 && f[0] == "race"
+    refused = f[2].to_u64
+    missed += f[3].to_i
+  end
+  {result, fired, refused, missed}
 end
 
 def report(label : String, buckets : Array(Bucket), result : BoundedChild::Result) : {Float64, UInt64}
@@ -477,31 +570,26 @@ unless ARGV.includes?("--child")
   puts ""
   hang_finding("window-free", free_run, failures)
 
-  # The fast arm's hang, forced, and the shipped tree's answer to the same
-  # construction. With every empty-chunk release refused, every chunk the
-  # sweep queued goes back in front of `@chunks`
-  # (`flush_pending_empty_chunks_locked`). The shipped sweep took each off the
-  # list before queueing it, so that is one chunk more on the list and the
-  # child finishes. The fast arm's list still runs on into the queue, so the
-  # relink closes it into a cycle and the child hangs in its next walk of it:
-  # the stall of 2026-10-23, in every child instead of one gate run in six.
-  # It must hang, or the shipped child's clean exit says nothing about
+  # The fast arm's hang, made on demand, and the shipped tree's answer to the
+  # same construction. With every empty-chunk release refused, every chunk
+  # the sweep queued goes back in front of `@chunks`
+  # (`flush_pending_empty_chunks_locked`). In each collection the child drops
+  # an empty head chunk and births two threads at that drop
+  # (`Heap.sweep_drop_hook`, `RefuseRace`). The shipped walk relinks
+  # without the chunk, so the refusal puts it back on the list once and the
+  # child finishes. The fast walk reads the new thread count, stores nothing,
+  # and the list still starts at the chunk, so the refusal links it in front
+  # of itself and the next walk never ends: the stall of 2026-10-23, in every
+  # child. It must hang, or the shipped child's clean exit says nothing about
   # cycles; and the gate must come back from it, which is the deadline every
   # child runs under — without one, this arm hangs the gate.
-  puts "=== refused releases — every empty-chunk release refused, #{REFUSE_ROUNDS} collections ==="
-  refuse_env = REFUSE_ENV.merge({"CHUNK_DRIFT_ROUNDS" => REFUSE_ROUNDS.to_s})
-  _, refuse_shipped = run_child(self_path, false, env: refuse_env)
-  refused = refused_count(refuse_shipped)
-  puts "  shipped: #{refuse_shipped.ok ? "exited cleanly" : death(refuse_shipped)}, #{refused} release(s) refused"
-  refuse_tries = 0
-  refuse_fast_hung = false
-  while !refuse_fast_hung && refuse_tries < REFUSE_FAST_ATTEMPTS
-    _, run = run_child(self_path, true, env: refuse_env, timeout: REFUSE_FAST_TIMEOUT)
-    refuse_tries += 1
-    refuse_fast_hung = run.timed_out
-    ended = run.timed_out ? "hung, killed after #{REFUSE_FAST_TIMEOUT.total_seconds.to_i} s" : run.ok ? "exited cleanly" : "crashed"
-    puts "  fast:    #{ended}, #{refused_count(run)} release(s) refused by its last bucket"
-  end
+  puts "=== refused releases — the latch-off race made at an empty head chunk, #{RACE_ROUNDS} rounds ==="
+  refuse_shipped, shipped_fired, refused, shipped_missed = run_race_child(self_path, false, CHILD_TIMEOUT)
+  puts "  shipped: #{refuse_shipped.ok ? "exited cleanly" : death(refuse_shipped)}, race made #{shipped_fired} time(s) " \
+       "(#{shipped_missed} collection(s) missed it and were made again), #{refused} release(s) refused"
+  refuse_fast, fast_fired, _, _ = run_race_child(self_path, true, REFUSE_FAST_TIMEOUT)
+  ended = refuse_fast.timed_out ? "hung, killed after #{REFUSE_FAST_TIMEOUT.total_seconds.to_i} s" : refuse_fast.ok ? "exited cleanly" : "crashed"
+  puts "  fast:    #{ended}, race made #{fast_fired} time(s)"
   puts ""
   hang_finding("refused-releases shipped", refuse_shipped, failures)
 
@@ -575,13 +663,16 @@ unless ARGV.includes?("--child")
     # As the window arm's: a cycle on the shipped list, most likely.
   elsif !refuse_shipped.ok
     failures << "the refused-releases shipped child crashed: a refused chunk linked back in front of `@chunks` broke the list"
-  elsif refused < REFUSE_MIN
-    failures << "the refused-releases shipped child refused #{refused} release(s) (want at least #{REFUSE_MIN}): " +
-                "it queued too little for its clean exit to say anything"
+  elsif shipped_fired < RACE_ROUNDS
+    failures << "the refused-releases shipped child made the race #{shipped_fired} time(s) in #{RACE_ROUNDS} collections: " +
+                "the walk no longer drops the empty head chunk, so its clean exit says nothing"
   end
-  unless refuse_fast_hung
-    failures << "the refused-releases fast child did not hang in #{REFUSE_FAST_ATTEMPTS} tries: the construction " +
-                "no longer closes the pre-fix shape's list into a cycle, so the shipped child's clean exit means nothing"
+  if !refuse_fast.timed_out
+    failures << "the refused-releases fast child #{refuse_fast.ok ? "exited cleanly" : "crashed"} " +
+                "(race made #{fast_fired} time(s)): the construction no longer closes the pre-fix shape's list " +
+                "into a cycle, so the shipped child's clean exit means nothing"
+  elsif fast_fired == 0
+    failures << "the refused-releases fast child hung before its hook made the race: it hung on something else"
   end
   unless failures.empty?
     failures.each { |f| puts "FAIL #{f}" }
@@ -591,7 +682,8 @@ unless ARGV.includes?("--child")
   puts "     window: 0 of #{window_prepends} prepends in the window stranded and no back-link left wrong, " \
        "#{control_lost} of #{control_prepends} stranded without the splice;"
   puts "     window-free: #{free_report.try(&.freed)} large frees in the window, none released while still listed;"
-  puts "     refused releases: #{refused} chunk(s) back on the shipped list and no cycle; the pre-fix shape's hung, and was killed;"
+  puts "     refused releases: the race made #{shipped_fired} times and no cycle on the shipped list; " \
+       "the pre-fix shape's hung, and was killed;"
   puts "     the pre-fix shape #{fast_rate.round(1)} per 1000 and #{(fast.last.bytes * 100.0 / fast.last.heap_bytes).round(1)}% of its heap stranded."
   exit 0
 end
@@ -660,6 +752,36 @@ if ARGV.includes?("--window-free")
   exit 0
 end
 
+# `--refuse-race`: one thread, every release refused (the parent's
+# `REFUSE_ENV`), no retain budget, so the `GC.collect` that releases warm
+# chunks drops every empty one, and the latch-off race made at the first:
+# an empty chunk at the head of the list, and two threads born when the walk
+# drops it (`RefuseRace`, `Heap.sweep_drop_hook`). With `--fast` the walk then
+# stores nothing and the child hangs; latched, it runs `RACE_ROUNDS`
+# collections and exits.
+if ARGV.includes?("--refuse-race")
+  heap.empty_chunk_retain = 0_u64
+  RefuseRace.reserve
+  Gcry::Heap.sweep_drop_hook = ->(chunk : UInt64, first : Bool) { RefuseRace.call(chunk, first) }
+  RACE_ROUNDS.times do |i|
+    # Now and then the walk does not start at the armed chunk (1 round in
+    # 120 on a developer host; another chunk was mapped in front of it, or
+    # the chunk was not empty), so the hook does not fire; such a collection
+    # is counted and the round made again.
+    missed = 0
+    fired = RefuseRace.fired
+    while RefuseRace.fired == fired && missed < RACE_TRIES
+      RefuseRace.arm(RefuseRace.empty_head(heap))
+      GC.collect
+      RefuseRace.finish
+      missed += 1 if RefuseRace.fired == fired
+    end
+    puts "race #{i + 1} #{heap.release_refused_forced} #{missed}"
+    STDOUT.flush
+  end
+  exit 0
+end
+
 # The denominator has to be driven. A first version churned threads and nothing
 # else, and the shipped arm mapped 32 chunks in 1200 collections — so "nothing
 # stranded in 90 000 collections" was really "nothing stranded in ~40 mappings",
@@ -694,14 +816,11 @@ while round < ROUNDS
   live.clear if round % SAWTOOTH == 0
   if heap.heap_size > HEAP_CAP
     puts "bucket #{round} #{heap.chunk_index_only_now} #{heap.chunk_index_only_now_bytes} #{heap.heap_size} #{heap.chunks_mapped}"
-    puts "refused #{heap.release_refused_forced}"
     STDOUT.flush
     break
   end
   if round % every == 0
     puts "bucket #{round} #{heap.chunk_index_only_now} #{heap.chunk_index_only_now_bytes} #{heap.heap_size} #{heap.chunks_mapped}"
-    # The refused-releases arm's count (`GCRY_REFUSE_EMPTY_RELEASE`), 0 elsewhere.
-    puts "refused #{heap.release_refused_forced}"
     STDOUT.flush
   end
 end
