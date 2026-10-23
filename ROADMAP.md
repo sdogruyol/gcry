@@ -61,6 +61,15 @@ v0.25.0 and still does: the main-thread TLS roots and the Darwin `__mcontext`
 reader closed here on 2026-09-15, and the Darwin CI asymmetry below is what
 kept finding the rest.
 
+- [x] **Darwin took dyld's image 0 for the executable — fixed 2026-10-23
+      (0.39.0 branch).** Under `DYLD_INSERT_LIBRARIES` the inserted library
+      is image 0 at `GC.init` and stays so; the static roots, the main
+      thread's TLS size, `exe_bias`/`exe_text?` and the stack maps were read
+      from it. Found by `_NSGetMachExecuteHeader` now and memoised for
+      refreshes in a stopped world. `make darwin-image0` (red run
+      39939811092, green run 39940435237);
+      `bench/log/macos/2026-10-23-darwin-image0/FINDINGS.md`.
+
 - [x] **The Monitor's frames below its birth were not roots on Linux — fixed
       2026-10-17 (0.37.0).** Never signalled, the Monitor had no SP, and the
       single-mutator scan started at its never-switched main fiber's

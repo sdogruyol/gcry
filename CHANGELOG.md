@@ -95,6 +95,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **On macOS, a program run with `DYLD_INSERT_LIBRARIES` has its own
+  globals and main-thread thread-locals as roots.** `GC.init` took dyld's
+  image 0 for the executable, and an inserted library is image 0 for the
+  life of the process. The library's data was scanned as the executable's
+  and its thread-local size (none) taken for the main thread's, so
+  main-thread `@[ThreadLocal]` values were not roots; the executable's data
+  was a root only through the library-roots path. With library roots off,
+  the first collection crashed in `Thread`'s list mutex. The executable is
+  now found by `_NSGetMachExecuteHeader`, for the stack maps too
+  (`make darwin-image0`, red in run 39939811092, green in run 39940435237,
+  macos-latest and macos-15-intel;
+  `bench/log/macos/2026-10-23-darwin-image0/FINDINGS.md`).
+
 - **The unmap guard and the release ledger record whether a released large
   block was still allocated.** They used to read its FREE flag with
   `BlockHeader.free?`, which is always `false` on the headerless layout, the

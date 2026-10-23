@@ -27,4 +27,4 @@ jobs:
         run: bench/log/macos/2026-10-23-darwin-image0/probe.sh
       - name: process_spec
         if: always()
-        run: crystal spec -Dgc_none spec/process_spec.cr
+        run: crystal spec -Dgc_none process_spec
