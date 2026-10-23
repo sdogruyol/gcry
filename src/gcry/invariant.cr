@@ -90,6 +90,29 @@ module Gcry
       actual.to_i64 &- reported.to_i64
     end
 
+    # `heap_size` against the mapped bytes of the chunks on the list, and
+    # `dormant_chunk_bytes` against those of the DORMANT ones: walk minus
+    # counter, nil when the counter moved across the walk, as above. Research
+    # only (process_spec/regression/88). Both are exact on a quiescent heap:
+    # every chunk on the list is mapped and counted, and nothing is counted
+    # that is not on the list once the post-stop flush has released what the
+    # sweep took off it.
+    def self.heap_size_drift(heap : Heap) : Int64?
+      reported = heap.heap_size
+      actual = 0_u64
+      heap.each_chunk { |chunk| actual &+= chunk.value.mapped_bytes }
+      return nil unless heap.heap_size == reported
+      actual.to_i64 &- reported.to_i64
+    end
+
+    def self.dormant_bytes_drift(heap : Heap) : Int64?
+      reported = heap.dormant_chunk_bytes
+      actual = 0_u64
+      heap.each_chunk { |chunk| actual &+= chunk.value.mapped_bytes if ChunkHeader.dormant?(chunk) }
+      return nil unless heap.dormant_chunk_bytes == reported
+      actual.to_i64 &- reported.to_i64
+    end
+
     private def self.count_free_bytes(heap : Heap) : UInt64
       total = 0_u64
       heap.each_chunk do |chunk|

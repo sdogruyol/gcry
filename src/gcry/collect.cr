@@ -235,7 +235,15 @@ module Gcry
     getter bytes_before_gc : UInt64 = 0_u64
     getter bytes_reclaimed_since_gc : UInt64 = 0_u64
     getter reclaimed_bytes_before_gc : UInt64 = 0_u64
-    getter expl_freed_bytes_since_gc : UInt64 = 0_u64
+    # Payload `GC.free` gave back since the last major (`GC_get_prof_stats`).
+    # Atomic: every freeing thread adds with no lock, and the stop zeroes it
+    # (`def_shared_counter`).
+    @expl_freed_bytes_since_gc = Atomic(UInt64).new(0_u64)
+
+    def expl_freed_bytes_since_gc : UInt64
+      @expl_freed_bytes_since_gc.get
+    end
+
     getter? enabled : Bool = true
     property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
     # Library tests free manually — auto minor is opt-in (process GC enables it).
@@ -283,7 +291,21 @@ module Gcry
     getter tight_grow_collects : UInt64 = 0_u64
     getter tight_grow_prefer_allocs : UInt64 = 0_u64
     getter tight_grow_maps : UInt64 = 0_u64
-    getter dormant_chunk_bytes : UInt64 = 0_u64
+    # Mapped bytes of the chunks that are DORMANT now. Kept by the transitions
+    # alone — the sweep adds a chunk as it makes it dormant, a revival or
+    # `reuse_dormant` takes it out as it clears the flag — and atomic, since
+    # revivers under different class locks, the lazy sweep and the stop all
+    # write it (`def_shared_counter`). The major sweep used to zero it and
+    # recount the dormant chunks it walked; a revival frozen between its flag
+    # store and its subtraction (or between its load and its store) then took
+    # its chunk out of a count that no longer held it, or put back the count
+    # from before the stop.
+    @dormant_chunk_bytes = Atomic(UInt64).new(0_u64)
+
+    def dormant_chunk_bytes : UInt64
+      @dormant_chunk_bytes.get
+    end
+
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64
     getter dontneed_bytes : UInt64 = 0_u64
@@ -2182,7 +2204,7 @@ module Gcry
             adapt_after_sweep
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
-            @expl_freed_bytes_since_gc = 0_u64
+            @expl_freed_bytes_since_gc.set(0_u64)
             @collections += 1
             @major_collections += 1
             if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
@@ -2268,7 +2290,7 @@ module Gcry
     end
 
     def note_explicit_free(payload : UInt64) : Nil
-      @expl_freed_bytes_since_gc += payload
+      expl_freed_add(payload)
     end
 
     # `GC.free` calls that freed nothing. `GC.free` is the free hook zlib and
@@ -2521,7 +2543,8 @@ module Gcry
       @bytes_before_gc = 0_u64
       @bytes_reclaimed_since_gc = 0_u64
       @reclaimed_bytes_before_gc = 0_u64
-      @expl_freed_bytes_since_gc = 0_u64
+      @expl_freed_bytes_since_gc.set(0_u64)
+      @dormant_chunk_bytes.set(0_u64)
       @size_class_chunk_count = 0_u64
       @fully_free_chunk_bytes = 0_u64
       @released_chunk_bytes = 0_u64
@@ -3118,7 +3141,7 @@ module Gcry
           if major
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
-            @expl_freed_bytes_since_gc = 0_u64
+            @expl_freed_bytes_since_gc.set(0_u64)
             @major_collections += 1
             if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
               Platform.invalidate_static_root_cache

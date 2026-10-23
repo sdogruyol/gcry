@@ -89,7 +89,9 @@ module Gcry
         @chunk_fill_lt50 = 0_u64
         @chunk_fill_lt75 = 0_u64
         @chunk_fill_ge75 = 0_u64
-        @dormant_chunk_bytes = 0_u64
+        # The control arm's recount (`shared_counters_atomic = false`): the
+        # counter is otherwise kept by the dormancy transitions themselves.
+        @dormant_chunk_bytes.set(0_u64) unless @shared_counters_atomic
         @last_sweep_after_world = after_world
         @last_sweep_multi = sweep_multi_mutator?
         @last_sweep_release = release_empty_chunks_this_collect?
@@ -183,7 +185,7 @@ module Gcry
           if major
             mapped = chunk.value.mapped_bytes
             @fully_free_chunk_bytes += mapped
-            @dormant_chunk_bytes += mapped
+            dormant_bytes_add(mapped) unless @shared_counters_atomic
             dormant_budget_used += mapped
             @sweep_dormant_skips += 1
             @size_class_chunk_count += 1
@@ -364,9 +366,12 @@ module Gcry
                       end
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                       # Parallel — munmap was the soft-realloc amplifier).
+                      # The bytes before the flag: a revival that finds the
+                      # chunk dormant then always finds them counted, and its
+                      # saturating subtraction cannot run ahead of the add.
+                      dormant_bytes_add(mapped)
                       ChunkHeader.set_dormant(chunk, true)
                       dormant_budget_used += mapped
-                      @dormant_chunk_bytes += mapped
                       if ChunkHeader.nursery?(chunk)
                         rebuild_nursery_mask |= bit
                       else
@@ -379,7 +384,7 @@ module Gcry
                       # Drop FREE bytes that leave the heap (reclaim_small /
                       # freelist_reserve already adjust; skip full recalc).
                       free_bytes_sub(free_payload) if free_payload > 0
-                      @heap_size = sat_sub(@heap_size, mapped)
+                      heap_size_sub(mapped)
                       @bytes_reclaimed_since_gc += mapped
                       @released_chunk_bytes += mapped
                       @last_empty_unmap_bytes &+= mapped
@@ -969,7 +974,7 @@ module Gcry
     # sum comes out at what the chunk holds now.
     private def unqueue_kept_chunk_accounting(chunk : ChunkHeader*) : Nil
       mapped = chunk.value.mapped_bytes
-      @heap_size &+= mapped
+      heap_size_add(mapped)
       @released_chunk_bytes = sat_sub(@released_chunk_bytes, mapped)
       @last_empty_unmap_bytes = sat_sub(@last_empty_unmap_bytes, mapped)
       class_index = chunk.value.size_class.to_i32
@@ -1080,7 +1085,7 @@ module Gcry
     # physical pages are released outside STW (kernel VM lock avoided).
     # Coalesces contiguous dormant ranges into a single madvise.
     private def flush_pending_dormant_chunks : Nil
-      return if @dormant_chunk_bytes == 0
+      return if @dormant_chunk_bytes.get == 0
 
       # Dormancy was decided by the sweep, inside the stopped world. This pass
       # runs after `start_world`, holds no lock, and `MADV_DONTNEED` over a
@@ -1869,7 +1874,7 @@ module Gcry
     private def filter_freelist_outside(head : Void*, lo : UInt64, hi : UInt64) : Void*
       new_head = Pointer(Void).null
       user = head
-      max_steps = (@heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
+      max_steps = (heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
       max_steps = 1024_u64 if max_steps < 1024_u64
       steps = 0_u64
       while user

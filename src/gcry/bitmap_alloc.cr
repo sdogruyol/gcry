@@ -1490,7 +1490,9 @@ module Gcry
       lo, hi = dormant_release_range(chunk)
       Platform.reuse_released_pages(lo, hi - lo) if hi > lo
       mapped = chunk.value.mapped_bytes
-      @dormant_chunk_bytes = sat_sub(@dormant_chunk_bytes, mapped)
+      # After the flag, under no lock the sweep takes: kept exact by the
+      # transitions (`@dormant_chunk_bytes`), not by the sweep's recount.
+      dormant_bytes_sub(mapped)
       words = chunk.value.bitmap_words.to_i32
       occ = ChunkHeader.occ_bitmap(chunk)
       mark = ChunkHeader.mark_bitmap(chunk)

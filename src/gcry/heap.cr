@@ -45,7 +45,20 @@ module Gcry
 
     getter chunk_index_count : Int32 = 0
 
-    getter heap_size : UInt64 = 0_u64
+    # Mapped bytes of every chunk on the heap. Atomic, and every write a
+    # read-modify-write through `heap_size_add`/`heap_size_sub`: it is written
+    # from four lock domains — `map_chunk` with none at all, the large paths
+    # under `@alloc_lock`, the empty-chunk flush under `@alloc_lock` and
+    # `@chunk_list_lock`, and the in-stop sweep with nothing held. A plain
+    # `+=` frozen by a stop between its load and its store put back what it
+    # had read when it resumed, and the stop's unmap was lost
+    # (process_spec/regression/88).
+    @heap_size = Atomic(UInt64).new(0_u64)
+
+    def heap_size : UInt64
+      @heap_size.get
+    end
+
     # Alloc accounting is Atomic so TLAB hits / Parallel mutators need not take
     # @alloc_lock just to bump counters (see note_alloc_bytes). Freelist heads
     # still serialise on SpinLock.
@@ -510,7 +523,7 @@ module Gcry
       @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
-      @heap_size = 0_u64
+      @heap_size.set(0_u64)
       @free_bytes.set(0_u64)
       @total_bytes.set(0_u64)
       @bytes_since_gc.set(0_u64)
@@ -1132,16 +1145,16 @@ module Gcry
           grown = need &- old_mapped
           return false unless Gcry.os_commit(Pointer(Void).new(chunk.address &+ old_mapped), grown)
           publish_large_growth(chunk, old_mapped, need)
-          @heap_size &+= grown
+          heap_size_add(grown)
           @large_mapped_bytes &+= grown
           @large_reserved_bytes = sat_sub(@large_reserved_bytes, grown)
           # Fresh pages, as a fresh mapping's: they spend the recycling
           # budget (`map_chunk`) and count toward what a major may keep.
           @large_recycle_budget = sat_sub(@large_recycle_budget, grown)
           @large_alloc_since_major &+= grown
-          CrystalTrace.heap_resize(self, @heap_size)
+          CrystalTrace.heap_resize(self, heap_size)
           if hook = @heap_resize_hook
-            hook.call(@heap_size)
+            hook.call(heap_size)
           end
         end
         BlockHeader.grow_large_size(header, new_size)
@@ -2840,7 +2853,7 @@ module Gcry
         @freelist_clean[index] = false
       end
       mapped = chunk.value.mapped_bytes
-      @dormant_chunk_bytes = sat_sub(@dormant_chunk_bytes, mapped)
+      dormant_bytes_sub(mapped)
       # Last: from here the sweep walks this chunk's blocks again.
       ChunkHeader.set_dormant(chunk, false)
       true
@@ -2853,10 +2866,13 @@ module Gcry
     end
 
     # Clear DORMANT outside a revival, taking the released pages back first.
+    # The bytes leave `@dormant_chunk_bytes` with the flag: the counter is
+    # kept by the transitions alone (`dormant_bytes_sub`).
     private def reuse_dormant(chunk : ChunkHeader*) : Nil
       lo, hi = dormant_release_range(chunk)
       Platform.reuse_released_pages(lo, hi - lo) if hi > lo
       ChunkHeader.set_dormant(chunk, false)
+      dormant_bytes_sub(chunk.value.mapped_bytes) if @shared_counters_atomic
     end
 
     # `a - b`, or 0 where that would wrap, reading `a` once and never raising.
@@ -2880,6 +2896,68 @@ module Gcry
       s = a &+ b
       s < a ? UInt64::MAX : s
     end
+
+    # Research only: called by every read-modify-write of a shared counter
+    # (`def_shared_counter`) between its load and its store, with the
+    # counter's name, so a test can park a thread exactly where a stop used to
+    # find one (process_spec/regression/88). Nil in production: one load and
+    # a branch, on paths that map, unmap, revive or `GC.free`.
+    property shared_counter_hook : Proc(Symbol, Nil)? = nil
+    # Research only: false makes the shared counters' read-modify-writes
+    # plain loads and stores again, and has the major sweep zero and recount
+    # `@dormant_chunk_bytes` — the code before 2026-10-23, and the control
+    # arm of process_spec/regression/88.
+    property shared_counters_atomic : Bool = true
+
+    # Read-modify-writes of a byte counter that more than one lock domain
+    # writes and that the stop writes too: `@heap_size`, `@dormant_chunk_bytes`,
+    # `@expl_freed_bytes_since_gc`. Each was a plain `+=` or `= sat_sub(...)`,
+    # and a stop suspends by signal, so it can freeze a thread between the
+    # load and the store. The stop then writes the counter — the in-stop
+    # sweep's unmap takes a chunk out of `@heap_size`, makes a chunk dormant,
+    # zeroes `@expl_freed_bytes_since_gc` — and the thread, resumed, stores
+    # what it had computed from the value before the stop: the stop's write
+    # is lost for good. An atomic add cannot be frozen half done, and a
+    # compare-and-set frozen after its load fails against the stop's value
+    # and is recomputed from it. The collector's writes go through the same
+    # calls: the after-world sweep and the flushes run beside the mutators,
+    # and in the stop they cost a locked instruction per chunk.
+    #
+    # `_add` returns the new value. `_sub` saturates at zero, as `sat_sub`
+    # did, and for the reason it gives.
+    macro def_shared_counter(name, ivar)
+      private def {{name.id}}_add(n : UInt64) : UInt64
+        if (hook = @shared_counter_hook) || !@shared_counters_atomic
+          cur = {{ivar}}.get
+          hook.try &.call({{name.id.symbolize}})
+          unless @shared_counters_atomic
+            {{ivar}}.set(cur &+ n)
+            return cur &+ n
+          end
+        end
+        {{ivar}}.add(n) &+ n
+      end
+
+      private def {{name.id}}_sub(n : UInt64) : Nil
+        cur = {{ivar}}.get
+        if hook = @shared_counter_hook
+          hook.call({{name.id.symbolize}})
+        end
+        unless @shared_counters_atomic
+          {{ivar}}.set(cur > n ? cur &- n : 0_u64)
+          return
+        end
+        loop do
+          seen, swapped = {{ivar}}.compare_and_set(cur, cur > n ? cur &- n : 0_u64)
+          break if swapped
+          cur = seen
+        end
+      end
+    end
+
+    def_shared_counter heap_size, @heap_size
+    def_shared_counter dormant_bytes, @dormant_chunk_bytes
+    def_shared_counter expl_freed, @expl_freed_bytes_since_gc
 
     # The pages a dormant chunk's release covers, and so the pages a revival
     # takes back: whole host pages from the first at or above `data_start`
@@ -3108,7 +3186,7 @@ module Gcry
         return Pointer(Void).null unless user
         old = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
         old_mapped = old.value.mapped_bytes
-        @heap_size = sat_sub(@heap_size, old_mapped)
+        heap_size_sub(old_mapped)
         @large_mapped_bytes = sat_sub(@large_mapped_bytes, old_mapped)
         unlink_chunk(old)
         kept = old_mapped < mapped ? old_mapped : mapped
@@ -3544,7 +3622,7 @@ module Gcry
             @large_freelists[b] = nxt
             mapped = chunk.value.mapped_bytes
             unlink_chunk(chunk)
-            @heap_size = sat_sub(@heap_size, mapped)
+            heap_size_sub(mapped)
             free_bytes_sub(mapped)
             @large_free_bytes = sat_sub(@large_free_bytes, mapped)
             @large_mapped_bytes = sat_sub(@large_mapped_bytes, mapped)
@@ -3672,7 +3750,7 @@ module Gcry
           nxt = header.value.next_free
           @large_freelists[b] = nxt
           mapped = chunk.value.mapped_bytes
-          @heap_size = sat_sub(@heap_size, mapped)
+          heap_size_sub(mapped)
           free_bytes_sub(mapped)
           @large_free_bytes = sat_sub(@large_free_bytes, mapped)
           @large_mapped_bytes = sat_sub(@large_mapped_bytes, mapped)
@@ -3716,7 +3794,7 @@ module Gcry
                 ph.value = pv
               end
               mapped = chunk.value.mapped_bytes
-              @heap_size = sat_sub(@heap_size, mapped)
+              heap_size_sub(mapped)
               free_bytes_sub(mapped)
               @large_free_bytes = sat_sub(@large_free_bytes, mapped)
               @large_mapped_bytes = sat_sub(@large_mapped_bytes, mapped)
@@ -3742,7 +3820,8 @@ module Gcry
 
     # Size-class mapped bytes (heap_size minus large VMAs).
     def small_mapped_bytes : UInt64
-      @heap_size >= @large_mapped_bytes ? @heap_size - @large_mapped_bytes : 0_u64
+      size = heap_size
+      size >= @large_mapped_bytes ? size - @large_mapped_bytes : 0_u64
     end
 
     # Freelist bytes in size-class chunks (excludes large freelist).
@@ -3801,7 +3880,7 @@ module Gcry
         # is a large object, whose tail an `IO::Memory` or `Array` may never
         # write (JsonParseSerializable +15% RSS, JsonGenerate +11%)
         # (`bench/log/linux/2026-10-05-alloc-storm-mark/`).
-        if at.null? && size_class != UInt32::MAX && @heap_size >= POPULATE_MIN_HEAP
+        if at.null? && size_class != UInt32::MAX && heap_size >= POPULATE_MIN_HEAP
           LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_POPULATE_WRITE)
         end
       {% end %}
@@ -3923,12 +4002,12 @@ module Gcry
         Gcry.os_unmap(ptr, bytes) if at.null?
         return Pointer(ChunkHeader).null
       end
-      @heap_size += bytes
+      size = heap_size_add(bytes)
       @large_recycle_budget = sat_sub(@large_recycle_budget, bytes) if at.null?
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
-      CrystalTrace.heap_resize(self, @heap_size)
+      CrystalTrace.heap_resize(self, size)
       if hook = @heap_resize_hook
-        hook.call(@heap_size)
+        hook.call(size)
       end
       # Inline insert into sorted chunk index. Under TLAB MT this is called
       # from refill_size_class which already holds the size-class freelist
