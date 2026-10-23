@@ -96,3 +96,27 @@ when measured alone, and `ubuntu-latest`'s slower rows against 0.38.0 move with
 padding and with code that never runs. [INFERENCE] Placement; Binarytrees on
 `ubuntu-latest` is the row whose padded ranges overlap least and the first to
 re-measure if it persists.
+
+## Same-session check on `ubuntu-latest` (2026-10-24)
+
+The verdict above compared runs from different days. Two runs now put each
+tree beside `a04ce52a` (round 1 before the mprotect fix) in one session, with
+pad arms, 15 reps:
+
+- **Run 39918728529, `a47188df` against `a04ce52a`**, the pair with no change
+  on the mutator's path. Binarytrees wall +1.2% [+0.0, +2.6], RegexDna +1.7%
+  [+1.4, +1.8], Revcomp +3.2% [+3.1, +3.5] (timed section +9.3%). Code that
+  never runs moves Revcomp by 9% here. Pads: 0.39 padded by 16 reads what
+  `a04ce52a` reads on Binarytrees (1.172 against 1.181 s) and RegexDna (2.517
+  against 2.518 s); on Revcomp `a04ce52a` padded by 16 reads 1.595 s, above the
+  unpadded var's 1.562 s.
+- **Run 39918732098, `6fc6665c` (the round-2 tree) against `a04ce52a`**.
+  Binarytrees +0.5% [−0.9, +1.4], level. RegexDna +2.6% wall, with 0.39 padded
+  by 16 at 2.518 s against `a04ce52a`'s 2.523 s. Revcomp +3.0% wall, the same
+  as the no-change pair above, and `a04ce52a` padded by 16 reads 1.595 s
+  against the unpadded var's 1.546 s. JsonParseSerializable, JsonParsePull and
+  JsonParsePure are 1.2–1.5% faster.
+
+In one session the Binarytrees rise is gone, and every row that still differs
+moves as far with a pad or with code that never runs. That replaces the
+[INFERENCE] above: `ubuntu-latest`'s slower rows against 0.38.0 are placement.
