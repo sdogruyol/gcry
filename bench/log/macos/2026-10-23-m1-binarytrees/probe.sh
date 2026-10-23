@@ -149,6 +149,27 @@ for rep in 1 2 3 4 5; do
   done
 done
 
+if [ "${PROBE_TRACE:-0}" = 1 ]; then
+  echo "== collector phases (GCRY_TRACE), 3 runs per gcry arm"
+  : > "$out/phases.txt"
+  for a in "${arms[@]}"; do
+    [ "$a" = boehm ] && continue
+    for i in 1 2 3; do
+      rm -f "$out/trace.ndjson"
+      GCRY_TRACE=1 GCRY_TRACE_ALLOC_SAMPLE=0 GCRY_TRACE_FILE="$out/trace.ndjson" "bin/main-$a" Binarytrees > /dev/null 2>&1 || true
+      python3 - "$out/trace.ndjson" "$a" >> "$out/phases.txt" <<'EOF'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.startswith("{")]
+c = [r for r in rows if "pause_ns" in r]
+keys = ["pause_ns", "stw_stop_ns", "roots_ns", "stacks_ns", "static_ns", "mark_ns", "sweep_ns", "flush_ns", "clear_ns", "scrub_ns", "stw_start_ns"]
+print(sys.argv[2], "collections", len(c), " ".join(f"{k[:-3]}={sum(r.get(k, 0) for r in c) / 1e6:.1f}ms" for k in keys))
+EOF
+    done
+  done
+  rm -f "$out/trace.ndjson"
+  cat "$out/phases.txt"
+fi
+
 echo "== optimised IR of the allocation entry points (tip)"
 if [ -d ../pb-tip ]; then
   # shellcheck disable=SC2046
