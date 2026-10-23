@@ -42,6 +42,20 @@ module Gcry
     # `process_spec/regression/81_stop_sweep_frozen_index_holder_spec.cr`.
     # The bounds are recomputed by `flush_pending_empty_chunks` either way.
     property stop_sweep_index_lock : Bool = true
+    # In-stop sweeps that queued empty chunks for release and left the heap
+    # bounds to the flush rather than take `@index_lock` in the stop
+    # (`Heap#sweep`, `stop_sweep_index_lock`).
+    getter stop_sweep_bounds_deferred : UInt64 = 0_u64
+    # Research only: called on the collector, in the stop, by an in-stop sweep
+    # that queued empty chunks for release, at the branch that used to
+    # recompute the heap bounds — before it takes `@index_lock` (argument
+    # true, `stop_sweep_index_lock = false`) or defers the recompute to the
+    # flush (false). Every mutator is frozen: it must not allocate, lock, or
+    # write through anything but a raw fd. It is how the control arm of
+    # `process_spec/regression/81` reports, from inside the stop that then
+    # hangs, that the stop reached this branch while another thread held
+    # `@index_lock`, rather than inferring it after the fact.
+    property stop_sweep_bounds_hook : Proc(Bool, Nil)? = nil
 
     private def sweep(major : Bool, after_world : Bool = false) : Nil
       # Rebuild the chunk list in one pass. Reclaiming large objects used to
@@ -594,8 +608,15 @@ module Gcry
       # up with the chunks earlier flushes had removed, which the flush now
       # does itself. The lazy arm's call, under `@alloc_lock`, was the same.
       # `bench/log/linux/2026-10-22-in-stop-sweep-audit/FINDINGS.md`.
-      if any_drop && !after_world && !@stop_sweep_index_lock
-        update_heap_bounds_after_unmap
+      if any_drop && !after_world
+        if hook = @stop_sweep_bounds_hook
+          hook.call(!@stop_sweep_index_lock)
+        end
+        if @stop_sweep_index_lock
+          @stop_sweep_bounds_deferred &+= 1
+        else
+          update_heap_bounds_after_unmap
+        end
       end
     ensure
       # A raise between the try-lock and the store must not leave the list
