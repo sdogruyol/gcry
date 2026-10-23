@@ -4296,9 +4296,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       call and zeroes 1 KiB below it (`Heap#allocate_entry`, regression 86:
       13 stale words before, 0 after). Knuckeotide 1.44–1.78× → 1.28–1.63×
       Boehm's peak on the five runners, no row slower beyond its spread
-      (Perf A/B 39738092074); JsonGenerate's M1 peak 0.64× → 0.71× is not
-      attributed. What remains over the budget is the crystal-metric pin,
-      which both collectors pay, plus the schedule.
+      (Perf A/B 39738092074). JsonGenerate's M1 peak 0.64× → 0.71× is not a
+      cost of that change: the row's peak is multimodal on all five runners
+      and in every arm, Boehm's included (one more dead `IO::Memory` buffer
+      kept by a false root, 32 or 128 MiB), and 0.71× was 8 of 15 reps
+      landing high (`bench/log/macos/2026-10-23-jsongen-m1/`). Of its
+      holders the collector's own frame is one (a half-overwritten word left
+      below the SP by `monotonic_ns` and read in `scan_mutator_stack`'s
+      frame); wiping below the SP before that scan removed it and moved
+      nothing measurable (M1 high reps 7 of 40 with the wipe, 7 of 40
+      without, same binary), so it was not kept. What remains over the
+      budget is the crystal-metric pin, which both collectors pay, plus the
+      schedule.
       **On every target since 2026-10-23
       (`bench/log/linux/2026-10-23-wipe-platforms/`).** The wipe starts at
       the SP the slow path was entered with: its bound is read one frame

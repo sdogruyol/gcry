@@ -1,0 +1,97 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 57682f8b..2f26e01b 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -64,6 +64,14 @@ module Gcry
+           end
+         end
+       {% end %}
++      {% if flag?(:gcry_hold_probe) %}
++        a = pointer.address
++        if source == RootSource::Stack && (a & 0xFFFF_FFFF_u64) == 1_u64 && a > 0xFFFF_FFFF_u64
++          slot = Roots.hl_slot
++          LibC.printf("FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n", @collections, pointer,
++            Pointer(Void).new(slot), slot.to_i64 - @collect_entry_sp.to_i64, Roots.hardware_stack_pointer)
++        end
++      {% end %}
+       mark_impl(pointer, gate_type_id: gate, base_only: !@allow_interior_pointers, source: source)
+     end
+ 
+@@ -74,6 +82,12 @@ module Gcry
+         @hl_stack_seed_dump = 0
+       end
+     {% end %}
++    {% if flag?(:gcry_hold_probe) %}
++      @[NoInline]
++      def self.hold_probe_stop(slot : UInt64) : Nil
++        asm("" :: "r"(slot) : "memory")
++      end
++    {% end %}
+ 
+     # add_root / collect(roots:) / realloc pin — never type_id_gate (raw Hash
+     # @entries / Array @buffer have no Crystal type_id). Interior policy matches
+@@ -232,6 +246,15 @@ module Gcry
+       end
+ 
+       set_block_mark_in(chunk, header)
++      {% if flag?(:gcry_hold_probe) %}
++        if ChunkHeader.large?(chunk) && block_payload(chunk, header) >= 32_u64 * 1024 * 1024
++          slot = Roots.hl_slot
++          LibC.printf("HOLDPROBE coll=%llu src=%d cand=%p user=%p size=%llu slot=%p slot-entry=%lld bottom-slot=%lld\n",
++            @collections, source.value, pointer, user_of(chunk, header), block_payload(chunk, header),
++            Pointer(Void).new(slot), slot.to_i64 - @collect_entry_sp.to_i64, @stack_bottom.address.to_i64 - slot.to_i64)
++          Heap.hold_probe_stop(slot) unless source == RootSource::Heap
++        end
++      {% end %}
+       note_first_mark(chunk, header, source) if @live_attr_roots
+       # Atomic payloads have no edges. The chunk is already resolved here;
+       # preserve its mark and attribution without a queue round trip.
+diff --git a/src/gcry/roots.cr b/src/gcry/roots.cr
+index 92376a8d..3de07acf 100644
+--- a/src/gcry/roots.cr
++++ b/src/gcry/roots.cr
+@@ -426,7 +426,7 @@ module Gcry
+     class_getter last_mutator_low : UInt64 = 0_u64
+     class_getter last_mutator_high : UInt64 = 0_u64
+ 
+-    {% if flag?(:gcry_hl_assert) %}
++    {% if flag?(:gcry_hl_assert) || flag?(:gcry_hold_probe) %}
+       # Address of the word most recently yielded by a scan loop (diagnostics).
+       class_property hl_slot : UInt64 = 0_u64
+     {% end %}
+@@ -455,7 +455,7 @@ module Gcry
+         cursor = Pointer(UInt64).new(lo)
+         end_ptr = Pointer(UInt64).new(hi)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          {% if flag?(:gcry_hl_assert) || flag?(:gcry_hold_probe) %} @@hl_slot = cursor.address {% end %}
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end
+@@ -542,7 +542,7 @@ module Gcry
+           cursor = Pointer(UInt64).new(start)
+           end_ptr = Pointer(UInt64).new(finish)
+           while cursor < end_ptr
+-            {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++            {% if flag?(:gcry_hl_assert) || flag?(:gcry_hold_probe) %} @@hl_slot = cursor.address {% end %}
+             yield Pointer(Void).new(cursor.value)
+             cursor += 1
+           end
+@@ -566,7 +566,7 @@ module Gcry
+         cursor = Pointer(UInt64).new(start)
+         end_ptr = Pointer(UInt64).new(finish)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          {% if flag?(:gcry_hl_assert) || flag?(:gcry_hold_probe) %} @@hl_slot = cursor.address {% end %}
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end
+@@ -595,7 +595,7 @@ module Gcry
+         cursor = Pointer(UInt64).new(start)
+         end_ptr = Pointer(UInt64).new(finish)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          {% if flag?(:gcry_hl_assert) || flag?(:gcry_hold_probe) %} @@hl_slot = cursor.address {% end %}
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end
