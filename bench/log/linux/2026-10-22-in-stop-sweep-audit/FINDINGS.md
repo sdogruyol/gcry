@@ -375,6 +375,12 @@ None of these feeds collection triggering or pacing. Those follow
 that a thread frozen between its load and its store overwrites with a stale
 value after the stop:
 
+(Since fixed, the first three: atomic writes, and `@dormant_chunk_bytes` kept by
+the dormancy transitions rather than recounted. Regression 88,
+`../2026-10-23-frozen-counter-rmw/FINDINGS.md`. `@heap_size` turned out to
+feed a collection trigger after all: the tight-grow collect-before-grow,
+through `small_mapped_bytes`.)
+
 - `@heap_size`: the in-stop munmap branch `sat_sub` against `map_chunk`'s
   unlocked `+=`. It is also racy between mutators, since `map_chunk`'s `+=`
   sits outside the list lock. `GC.stats.heap_size` reads high after such a

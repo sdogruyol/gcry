@@ -206,6 +206,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   held, marks with no occupancy behind them. Bitmap allocator with
   `GCRY_INCREMENTAL=1`. `process_spec/regression/85`.
 
+- **`heap_size`, `dormant_chunk_bytes` and `expl_freed_bytes_since_gc` no
+  longer lose the stop's writes.** Each was a plain read-modify-write from
+  more than one lock domain, and a thread a stop froze between its load and
+  its store put back the value from before the stop: `GC.stats.heap_size`
+  (and `GC_get_heap_usage_safe`, `/gc-stats`) stayed high by every chunk
+  the stop unmapped, `dormant_chunk_bytes` lost every chunk the stop made
+  dormant (at zero the next flush skipped their pages), and
+  `GC.prof_stats.expl_freed_bytes_since_gc` kept the bytes of the cycle
+  before. `heap_size` also lost updates between two threads mapping chunks.
+  The writes are atomic now, and `dormant_chunk_bytes` follows each chunk
+  going dormant and coming back instead of a recount at every major.
+  `heap_size` feeds the tight-grow collect-before-grow trigger
+  (`GCRY_TIGHT_GROW=1`) too. `process_spec/regression/88`,
+  `bench/log/linux/2026-10-23-frozen-counter-rmw/`.
+
 ## [0.38.0] - 2026-10-21
 
 ### Added

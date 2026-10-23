@@ -2972,14 +2972,34 @@ kept finding the rest.
       signals, by try-lock and decline, by CURSOR/PINNED, or by store order;
       the table says which.
 
-- [ ] **Reporting counters a frozen thread overwrites after the stop.**
-      From the same audit, left open because none of them drives a
-      collection: `@heap_size` (the in-stop unmap's `sat_sub` against
-      `map_chunk`'s unlocked `+=`, racy between mutators too),
-      `@dormant_chunk_bytes` (a stale revive store can zero it, and the
-      dormant flush then skips a cycle) and `@expl_freed_bytes_since_gc`.
+- [x] **Counters a frozen thread overwrote after the stop — closed
+      2026-10-23.** From the same audit: `@heap_size` (the in-stop unmap's
+      `sat_sub` against `map_chunk`'s unlocked `+=`, racy between mutators
+      too), `@dormant_chunk_bytes` (a revival's stale store zeroed it, and
+      the dormant flush then skipped a cycle) and
+      `@expl_freed_bytes_since_gc` (`GC.free` against the stop's zero).
+      Left open as reporting counters, but `@heap_size` also feeds the
+      tight-grow collect-before-grow trigger (`small_mapped_bytes`) and
+      `map_chunk`'s populate decision, and `@dormant_chunk_bytes` the
+      dormant pages' release. All three are atomic now (an add, or a
+      saturating compare-and-set), and `@dormant_chunk_bytes` is kept by
+      the dormancy transitions instead of a recount at every major: the
+      bitmap revival clears the flag before it subtracts, so the recount
+      lost its chunk whatever the subtraction was made of (drift one chunk,
+      3 of 3, atomic with the recount kept). Forced by regression 88, six
+      arms, each control losing the stop's write.
+      `bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`.
       (The fourth, a bitmap `free` frozen between its `occ` and `mark`
       clears across the incremental finishing slice, is fixed: see below.)
+
+- [ ] **Large-cache counters written after the flushes with no lock.**
+      `@large_recycle_budget`, `@large_alloc_since_major` and
+      `@large_cache_hits`/`_misses` are reset by the collector after the
+      flushes without `@alloc_lock`, which the mutators' read-modify-writes
+      hold, and `map_chunk` spends the budget for size-class chunks under the
+      class lock only. Running threads, not a frozen one; they feed the
+      large-cache trim and the adaptive retain (RSS for a cycle). Not
+      reproduced. `bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`.
 
 - [x] **Stop-time freelist writes the per-class probe did not cover —
       closed 2026-10-22.** With `GCRY_TLAB=1`, `flush_all_tlabs` and

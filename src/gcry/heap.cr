@@ -53,9 +53,9 @@ module Gcry
     # `+=` frozen by a stop between its load and its store put back what it
     # had read when it resumed, and the stop's unmap was lost
     # (process_spec/regression/88).
-    # Declared with its type, as the `getter` it replaces was: an inferred
-    # instance variable is laid out with the inferred ones, which moved the
-    # hit path's fields.
+    # Declared with its type, as the `getter` it replaces was: declared by
+    # initializer instead, it moved out of that slot and the hit path's
+    # fields moved with it (`offsetof`, `bench/log/linux/2026-10-23-frozen-counter-rmw/`).
     @heap_size : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
     def heap_size : UInt64
@@ -2906,11 +2906,12 @@ module Gcry
     # find one (process_spec/regression/88). Nil in production: one load and
     # a branch, on paths that map, unmap, revive or `GC.free`.
     #
-    # Both knobs are the class's, not each heap's: two instance variables
-    # more moved the hit path's fields (`@fast_path`, `@gc_threshold`,
-    # `@fit_index`, ...) by 8 to 24 bytes, and Binarytrees ran 1–2% slower on
-    # three runners with code padding alone unable to bring it back
-    # (`bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`).
+    # Both knobs are the class's, not each heap's: as two instance variables
+    # more (with the counters declared by initializer) they moved the hit
+    # path's fields (`@fast_path`, `@gc_threshold`,
+    # `@fit_index`, ...) by 8 to 24 bytes, and Binarytrees ran 1-2% slower on
+    # three runners and 7% on macos-15-intel, which code padding did not
+    # bring back (`bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`).
     class_property shared_counter_hook : Proc(Symbol, Nil)? = nil
     # Research only: false makes the shared counters' read-modify-writes
     # plain loads and stores again, and has the major sweep zero and recount
