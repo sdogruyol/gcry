@@ -74,3 +74,7 @@ uses it too.
 Green on 2cd3ef14, run 39940435237: all five arms OK on macos-latest
 (arm64) and macos-15-intel, and `crystal spec -Dgc_none process_spec`
 230 examples, 0 failures on both.
+
+Rebased onto release-0.39.0 (1d7f5d84), run 39942327761: the same, all ten
+arm runs OK and process_spec 230/0 on both runners. The probe branch
+`probe/darwin-image0` was deleted after these runs.
