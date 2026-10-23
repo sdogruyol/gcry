@@ -99,7 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chunks. Needs the sweep in the stop (`GCRY_DISABLE_LAZY_SWEEP=1`,
   `GCRY_PAGE_DONTNEED=1`, `lazy_sweep = false`) and empty-chunk unmapping with
   another mutator (`parallel_empty_chunk_munmap`, or a single-mutator latch).
-  `process_spec/regression/81`,
+  `Heap#stop_sweep_bounds_deferred` counts the in-stop sweeps that left the
+  recompute to the flush. `process_spec/regression/81`,
   `bench/log/linux/2026-10-22-in-stop-sweep-audit/`.
 
 - **A refill retiring its exhausted chunk can no longer have the chunk

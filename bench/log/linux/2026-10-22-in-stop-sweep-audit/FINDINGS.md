@@ -115,20 +115,73 @@ recomputes after the release, with the world running, so the bounds now
 shrink by the released chunks as well. Knob `stop_sweep_index_lock = false`
 is the control arm.
 
-**Reproduction (`process_spec/regression/81`):**
+**Reproduction (`process_spec/regression/81`, rewritten 2026-10-23):**
 
-- Setup: a thread spins inside `@index_lock`. The main thread allocates
-  nothing after that point, because a first allocation of a class maps a
-  chunk and would wait on the lock. It then collects with
-  `lazy_sweep = false`, `parallel_empty_chunk_munmap = true` and one empty
-  chunk.
-- Fixed arm: the stop ends while the holder still holds the lock. The empty
-  chunk leaves the index after the holder lets go.
-- Control arm: hangs. The parent kills the child at 20 s, and the watchdog
-  reports `STOP-THE-WORLD STALLED 1000 ms in phase=sweep` while the holder
-  sits in `sigsuspend` (`red/81-control-index-holder-stall.log`).
-- Locally the fixed arm passed and the control arm hung in the spec run, and
-  the control child hung again run on its own (the log above).
+- Setup: a holder thread is started first, then the main thread lays out an
+  empty chunk (three 24 576 B blocks, a collection, three frees). The holder
+  then takes `@index_lock` and holds it until the collection's
+  `post_stw_hook :after_start_world` lets it go. There is no timed hold. The
+  main thread allocates nothing from then on (a first allocation of a class
+  maps a chunk and would wait on the lock), and collects with
+  `lazy_sweep = false`, `release_empty_chunks`,
+  `parallel_empty_chunk_munmap` and zero retain/warm budgets. Both children
+  run with `GCRY_IDLE_RELEASE_MS=0`.
+- The evidence comes from inside the stop. `stop_sweep_bounds_hook` (research
+  only) runs on the collector at the branch that used to recompute the
+  bounds, and reads the lock word there. The fixed arm counts the deferral in
+  `stop_sweep_bounds_deferred`.
+- Fixed arm: the hook ran with the lock held (`held=1`, `taking it=0`),
+  `deferred=+1`, the stop restarted the world with the holder still inside,
+  and the flush released the chunk after the holder let go.
+- Control arm: the hook writes (raw fd 2) `the stop's sweep is taking
+  @index_lock while another thread holds it`, and the stop never returns.
+  The parent kills the child at 20 s and requires that line, `STOP-THE-WORLD
+  STALLED` and `phase=sweep`. A control child that comes back fails the arm.
+  So does a hang without the line.
+- The parent prints each child's `holder81:` and watchdog lines on success
+  too. A green log therefore shows which branch each arm took.
+
+**Why a control child can come back without testing anything.** Its stop
+never reaches the recompute when another thread is waiting for
+`@index_lock` inside `@chunk_list_lock`. Two paths do that: a cursor's pool
+take (`bitmap_take_pool_chunk` looks the chunk up in the index under the
+list lock) and `map_chunk`. The stop then finds the list lock held, relinks
+nothing and releases nothing (`stop_sweep_relinks_declined`, finding 75).
+Nothing is queued, so the bounds branch never runs. Locally that thread was
+the idle-release thread (`gc-idle`, named by a `pool_take_hook` probe). It
+took a pool chunk right after the layout's collection in 5 of 6 fixed
+children of the first rewrite. With it on, the current spec's window 1
+missed 12 of 12 times (`relinks declined=+1`) and window 2 reached the
+branch. Each child now says why a window missed and tries again, three
+windows at most.
+
+[INFERENCE] The CI control child that came back (run 39825990272, macOS
+header layout, `Finished in 2.0 seconds`) was this miss, or the old 2 s
+timed hold running out before a slow debug build's stop. Both fit a child
+that waited out the hold in `thread.join`. Its output did not say which:
+the old `REACHED` mark was read off the index after `GC.collect`, and child
+output was printed only on failure, so green runs said nothing.
+
+**Proof on the runners (probe run 39922360865, branch
+`probe/spec81-r81`, deleted; debug builds as `ci.yml` and
+`ci/windows.ps1` run `process_spec`).** Regression 81 ran 10 times per
+runner and layout (default; `-Dgcry_block_headers`;
+`-Dgcry_block_headers` with `GCRY_BITMAP_ALLOC=0`). Every run counted below
+passed. In every control child, the collector's in-stop line and the
+`phase=sweep` stall both appeared. In every fixed child, the hook saw the
+lock held, the counter rose, and the chunk was released. No window missed.
+
+| runner | default | headers | freelist |
+|---|---|---|---|
+| ubuntu-latest | 10/10 | 10/10 | 10/10 |
+| ubuntu-24.04-arm | 10/10 | 10/10 | 10/10 |
+| macos-latest | 10/10 | 10/10 | 10/10 |
+| macos-15-intel | 10/10 | 10/10 | 10/10 |
+| windows-latest | 10/10 | 10/10 | 10/10 |
+
+Locally (x86_64 Linux): fixed child 20 of 20 on window 1, and the full spec
+3 of 3 (the control hangs at 20 s). The original red log is
+`red/81-control-index-holder-stall.log`.
 
 **Reach.** It needs a sweep inside the stop that unmaps empties while another
 mutator exists. `munmap_empty_chunks_this_collect?` is true for a

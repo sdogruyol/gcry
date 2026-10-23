@@ -2902,7 +2902,16 @@ kept finding the rest.
       bounds after the release, with the world running, and the collector
       takes `@index_lock` nowhere in the stop. Reached with the sweep in the
       stop and empties unmapped beside another mutator
-      (`parallel_empty_chunk_munmap`, or a single-mutator latch).
+      (`parallel_empty_chunk_munmap`, or a single-mutator latch). The
+      regression was rewritten on 2026-10-23 after a macOS control child
+      came back in CI (run 39825990272). The holder now holds the lock until
+      the restart, with no timer. The collector reports the branch from
+      inside the stop (`stop_sweep_bounds_hook`; the fixed arm's
+      `stop_sweep_bounds_deferred`). A window whose stop found
+      `@chunk_list_lock` held by a thread waiting on the index lock is named
+      and retried. The idle thread, which caused that locally, stays unborn.
+      Probe run 39922360865 ran it 10 times on all five runners in all three
+      layouts.
       **As written 2026-09-13 — the precondition does not occur on this
       tree:**
       `index_insert` and `index_remove` now count their sections and whether the
