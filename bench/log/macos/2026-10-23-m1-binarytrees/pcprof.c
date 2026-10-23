@@ -63,6 +63,27 @@ static uint64_t executable_slide(void) {
   }
   return 0;
 }
+
+// Which dyld image index is the executable, and what image 0 is, at the
+// constructor and again at exit: gcry's static-root walk takes image 0 as
+// the executable (`darwin_roots.cr`), and run 1 found it is not one here.
+static char images_note[2048];
+
+static void note_images(const char *when) {
+  uint32_t n = _dyld_image_count();
+  int exe = -1;
+  for (uint32_t i = 0; i < n; i++) {
+    const struct mach_header *h = _dyld_get_image_header(i);
+    if (h && h->filetype == MH_EXECUTE) {
+      exe = (int)i;
+      break;
+    }
+  }
+  const char *name0 = n ? _dyld_get_image_name(0) : "?";
+  size_t len = strlen(images_note);
+  snprintf(images_note + len, sizeof images_note - len, "%s: %u images, executable at %d, image 0 %s\n", when, n,
+           exe, name0 ? name0 : "?");
+}
 #endif
 
 // Raw PCs; the destructor sorts them into the executable's (written less its
@@ -146,6 +167,7 @@ __attribute__((constructor)) static void pcprof_start(void) {
   samples = buf;
 #ifdef __APPLE__
   bias = executable_slide();
+  note_images("constructor");
   target = mach_thread_self();
   pthread_create(&sampler, NULL, sample_loop, NULL);
 #else
@@ -201,4 +223,13 @@ __attribute__((destructor)) static void pcprof_stop(void) {
   }
   fclose(f);
   if (o) fclose(o);
+#ifdef __APPLE__
+  note_images("exit");
+  snprintf(path, sizeof path, "%s.%d.images", out, (int)getpid());
+  FILE *im = fopen(path, "w");
+  if (im) {
+    fputs(images_note, im);
+    fclose(im);
+  }
+#endif
 }

@@ -30,7 +30,7 @@ def symbols(binary):
 
 def main():
     binary, top = sys.argv[1], int(sys.argv[2])
-    files = [p for p in sys.argv[3:] if not p.endswith(".other")]
+    files = [p for p in sys.argv[3:] if not p.endswith((".other", ".images"))]
     pcs = []
     for path in files:
         data = open(path, "rb").read()
