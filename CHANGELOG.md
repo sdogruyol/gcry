@@ -22,10 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **An allocation's slow path no longer collects on frames the hit path
   left stale.** `Heap#malloc`/`malloc_atomic` reach the slow path by a tail
-  call, and `Heap#allocate_entry` zeroes 1 KiB below the stack pointer first
-  (not on Windows), so the conservative scan no longer reads dead objects
-  out of slots only the hit path writes. RegexDna's peak was 19% higher
-  before 0.38.0 because of one such slot: `Heap#malloc_atomic`'s
+  call, and `Heap#allocate_wipe` zeroes up to 1 KiB below the stack pointer
+  the slow path was entered with, so the conservative scan no longer reads
+  dead objects out of slots only the hit path writes. RegexDna's peak was
+  19% higher before 0.38.0 because of one such slot: `Heap#malloc_atomic`'s
   `0x58(%rsp)` held the dead Fasta generator and its 64 MiB buffer, and the
   occupancy claim's inlining happened to move it. On 0.39.0 the entry's
   slots hold Knuckeotide's dead hash buffers. Knuckeotide's peak, × Boehm's:
@@ -36,15 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | arm64 Linux | 1.44× | 1.28× |
   | M1 | 1.58× | 1.32× |
   | Intel Mac | 1.78× | 1.56× |
+  | Windows x86 | 1.81× | 1.59× |
 
-  No row is slower beyond its spread (Perf A/B 39738092074;
-  `bench/log/linux/2026-10-22-regexdna-peak/`, regression 86).
+  No row is slower beyond its spread (Perf A/B 39738092074 and, for Windows,
+  39923071007; `bench/log/linux/2026-10-22-regexdna-peak/`,
+  `bench/log/linux/2026-10-23-wipe-platforms/`, regression 86).
   `GCRY_SLOW_ENTRY_WIPE=0` turns the wipe off. The wipe stops at the running
   fiber's guard page, and is skipped on a thread with no current fiber, so a
-  fiber with less than 1 KiB of stack left does not fault in it.
-  Windows keeps the slow path as it was: it has no wipe, and the tail calls
-  alone added unwritten slots in a debug build (regression 79 read 75 stale
-  words on x86-64, over its 64).
+  fiber with less than 1 KiB of stack left does not fault in it. On Windows
+  it also never stores below the running stack's committed part
+  (`NT_TIB.StackLimit`), so it touches no guard page.
 
 - **`bench/run_bounded.sh` captures and kills the stalled command's whole
   process tree.** A command that is a wrapper (`make <gate>`, `env`,

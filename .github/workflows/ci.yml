@@ -2382,6 +2382,16 @@ jobs:
             RUNNER_LABEL=macos-latest PERF_GATE_BASELINE=1 \
             ./bench/perf_smoke.sh
 
+      # Regressions 79 and 86 on Darwin, `--release` as on Linux: this is the
+      # one macOS job, and on aarch64 Darwin the wipe once started below a
+      # frame with an unwritten slot (96 bytes below the entry SP; Intel: 72,
+      # and one stale word), which only 86's wipe-start check sees
+      # (`bench/log/linux/2026-10-23-wipe-platforms/`). After the perf gate,
+      # so it does not run beside it.
+      - name: No unwritten slot in the allocation entry frames (darwin)
+        run: |
+          make alloc-entry-frame
+
       - name: Upload perf report
         if: always()
         uses: actions/upload-artifact@v7

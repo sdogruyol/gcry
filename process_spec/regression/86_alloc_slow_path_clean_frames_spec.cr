@@ -39,16 +39,17 @@ require "spec"
 #   layout's, so only x86-64 Linux, where it was measured, requires it to be
 #   non-zero.
 # - Where the wipe starts: the SP `allocate_wipe` ran at
-#   (`Heap#slow_wipe_sp`, recorded while `slow_wipe_record` is set) must be
-#   within 16 bytes (a frame record) of the SP the allocation entry was
-#   called with, so the wipe covers every frame the slow path built above
-#   it. The first bounded version read the bound in the frame that wiped,
-#   and on aarch64 Darwin that frame (`sub sp, #0x60`) left `[sp]` unwritten
-#   and unwiped: whether a stale word survived there depended on whether
-#   `allocate_traced`'s frame happened to write the same slot, which the
-#   stale-word count cannot see. Red on that tree on every target (the wipe
-#   started 64-96 bytes below the entry SP: `bench/log/linux/
-#   2026-10-23-wipe-platforms/`).
+#   (`Heap#slow_wipe_sp`, recorded while `slow_wipe_watch` holds an SP
+#   above it) must be within 16 bytes (a frame record) of the SP the
+#   allocation entry was called with, so the wipe covers every frame the
+#   slow path built above it. The first bounded version read the bound in
+#   the frame that wiped, and on aarch64 Darwin that frame (`sub sp, #0x60`)
+#   left `[sp]` unwritten and unwiped: whether a stale word survived there
+#   depended on whether `allocate_traced`'s frame happened to write the same
+#   slot, which the stale-word count cannot see (on the M1 it did; on Intel
+#   macOS one stale word survived). Red on that tree: the wipe started 56
+#   bytes below the entry SP on x86-64 Linux, 96 on the M1, 72 on Intel
+#   macOS (`bench/log/linux/2026-10-23-wipe-platforms/`).
 # - Debug builds say they skipped (`stale86: … skipped`).
 private STALE86_PATTERN   = 0x5a5a_c3c3_5a5a_c386_u64
 private STALE86_WORDS     =                      1024

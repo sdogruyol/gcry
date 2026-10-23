@@ -4281,6 +4281,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       (Perf A/B 39738092074); JsonGenerate's M1 peak 0.64× → 0.71× is not
       attributed. What remains over the budget is the crystal-metric pin,
       which both collectors pay, plus the schedule.
+      **On every target since 2026-10-23
+      (`bench/log/linux/2026-10-23-wipe-platforms/`).** The wipe starts at
+      the SP the slow path was entered with: its bound is read one frame
+      above it (`allocate_entry` → `allocate_wipe`), because on aarch64
+      Darwin the frame that read it left `[sp]` unwritten and unwiped (Intel
+      macOS: one stale word); regression 86 now checks where the wipe
+      starts (red 56/96/72 bytes below on x86 Linux/M1/Intel, green
+      0/16/8). Windows has the wipe, never below `NT_TIB.StackLimit`, and
+      the tail calls again: Knuckeotide 1.81× → 1.59× Boehm's peak on
+      windows-latest, regression 79 at 12–17 in debug there; no row slower
+      beyond its spread on the five runners once placement is accounted
+      for (Perf A/B 39923071007, pads 39928996474 and 39930588292).
 - [x] **Large `realloc` growth maps, faults and copies every step
       (2026-10-04) — fixed in 0.36.0.** Revcomp's buffers double from 64 KiB to 126 MiB three
       times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%

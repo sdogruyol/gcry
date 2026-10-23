@@ -239,6 +239,18 @@ try {
             Assert-NativeBinary $binary
             Invoke-Checked $binary $sample.Arguments
         }
+
+        # Regressions 79 and 86 the way `make alloc-entry-frame` runs them,
+        # `--release`: the debug process specs above say regression 86's
+        # stale-word check skipped, and it is the release build whose slow
+        # path is tail calls and an inlined wipe. Windows has the wipe since
+        # 2026-10-23 (`bench/log/linux/2026-10-23-wipe-platforms/`).
+        foreach ($regression in @('79_alloc_entry_frame_uninitialized', '86_alloc_slow_path_clean_frames')) {
+            $binary = Join-Path $PWD "bin/regression_$($regression.Substring(0, 2))_windows_$Variant.exe"
+            Write-Host "Windows release regression: $regression ($Variant)"
+            Invoke-Checked $crystal (@('build', '--release', '-Dgc_none') + $flags + @("process_spec/regression/$($regression)_spec.cr", '-o', $binary, '--error-trace'))
+            Invoke-Checked $binary @()
+        }
     }
 }
 finally {
