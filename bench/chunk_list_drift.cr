@@ -150,17 +150,25 @@ CHILD_TIMEOUT = (ENV["BENCH_CHILD_TIMEOUT_S"]?.try(&.to_i?) || Math.max(120, ROU
 # release is linked back in front of `@chunks`: on the shipped tree, where the
 # sweep took it off the list before queueing it, that is one more chunk on the
 # list; on the fast arm's, which still runs on into the queue, it is the
-# cycle. Short children: a shipped one finishes in about 3 s, and the fast one
-# closed the cycle in 8 of 8 children of 240 rounds outside the gate (6 of 6 of
-# 1200), the latest between rounds 160 and 200.
+# cycle. Short children: a shipped one finishes in about 3 s. The fast one
+# needs the latch-off race itself — a thread born between the sweep's drop
+# decision and its relink decision for the same chunk — so it closes the
+# cycle by chance, not on demand: run alone and serially, as here, 118 of 150
+# children of 240 rounds hung and 32 finished cleanly, none crashed
+# (`bench/log/linux/2026-10-23-drift-stall/pertry-r240.txt`).
 REFUSE_ENV    = {"GCRY_REFUSE_EMPTY_RELEASE" => "1000000000"}
 REFUSE_ROUNDS = 240
 # The fast child there is expected to hang, so the gate waits this out on
-# every run. One that does not hang finishes 240 rounds in 2-3 s, so a child
-# still running at this is hung and not slow.
+# every run. One that does not hang finished 240 rounds in 1.0-3.7 s, so a
+# child still running at this is hung and not slow.
 REFUSE_FAST_TIMEOUT = 20.seconds
 # Tries for that child to hang before the arm calls the construction lost.
-REFUSE_FAST_ATTEMPTS = 3
+# A try escapes 32 times in 150 (0.21; 0.33 at the 99.9% upper bound), and
+# tries are independent processes, so all of them escaping — a red with no
+# defect behind it — is 0.33^10 = 1.6e-5 a gate run at that bound and 2e-7 at
+# the measured rate. Three tries were 1 red in 50 gate runs (0.21^3 = 1%).
+# An escaped try costs its 1-4 s, and the first try hangs four times in five.
+REFUSE_FAST_ATTEMPTS = 10
 # Releases the shipped child must have refused for its clean exit to say the
 # relinked chunks closed no cycle, rather than that there were none. It
 # refused 6063 in its 240 rounds: a kept chunk that is still empty is queued
