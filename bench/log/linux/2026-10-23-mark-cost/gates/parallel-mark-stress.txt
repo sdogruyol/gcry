@@ -1,0 +1,3 @@
+crystal build -Dgc_none bench/thread_storm.cr -o bin/thread_storm --error-trace
+ok — 10 of 10 thread_storm runs with four mark workers
+exit 0

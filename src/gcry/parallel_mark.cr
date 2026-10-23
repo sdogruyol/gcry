@@ -554,10 +554,14 @@ module Gcry
     # once per batch, when `scan_payload` would have taken `scan_edges_inline`
     # for it; everything else goes through `scan_object`. Per object, that
     # call pair had saved and restored six registers twice, spilled the radix
-    # fields, re-read four `self` flags and stored the scanned-byte count,
-    # about 90 instructions around a scan of a few words: on JsonGenerate
-    # with one marker, 1.6 G of the mark's 7.5 G instructions
-    # (`bench/log/linux/2026-10-23-mark-cost/`). Out of line, so the
+    # fields, re-read four `self` flags and stored the scanned-byte count:
+    # about 90 instructions (51 in `scan_object`, 38 in `scan_edges_inline`'s
+    # entry and exit) around a scan of a few words, 1.9 G of the 7.5 G
+    # instructions of JsonGenerate's collections with one marker (callgrind).
+    # Without them, ns per marked object with one marker: Primes −14% to
+    # −16%, JsonParsePure −11% to −12%, JsonGenerate −7% to −14%,
+    # Binarytrees −18% to −20% (three sessions,
+    # `bench/log/linux/2026-10-23-mark-cost/`). Out of line, so the
     # collector's own frame (`run_collection_body`) does not carry the loop.
     @[NoInline]
     private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil

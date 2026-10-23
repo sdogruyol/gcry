@@ -1,0 +1,9 @@
+crystal build -Dgc_none bench/parallel_mark_termination.cr -o bin/parallel_mark_termination --error-trace
+bin/parallel_mark_termination
+=== parallel mark termination ===
+64 chains x 400 nodes, 4 workers, 60 collections per arm
+fixed: exit=0 child runs=60 stolen=459288 ok
+unlocked: exit=1 child runs=5 stolen=128 damage=chain 14 node 312: tag "chain-14-25" FAIL
+
+ok — the mark cycle does not end while a worker holds a batch
+exit 0
