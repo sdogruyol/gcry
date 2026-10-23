@@ -238,7 +238,7 @@ module Gcry
     # Payload `GC.free` gave back since the last major (`GC_get_prof_stats`).
     # Atomic: every freeing thread adds with no lock, and the stop zeroes it
     # (`def_shared_counter`).
-    @expl_freed_bytes_since_gc = Atomic(UInt64).new(0_u64)
+    @expl_freed_bytes_since_gc : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
     def expl_freed_bytes_since_gc : UInt64
       @expl_freed_bytes_since_gc.get
@@ -300,7 +300,7 @@ module Gcry
     # store and its subtraction (or between its load and its store) then took
     # its chunk out of a count that no longer held it, or put back the count
     # from before the stop.
-    @dormant_chunk_bytes = Atomic(UInt64).new(0_u64)
+    @dormant_chunk_bytes : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
     def dormant_chunk_bytes : UInt64
       @dormant_chunk_bytes.get

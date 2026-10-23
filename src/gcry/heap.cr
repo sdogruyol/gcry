@@ -53,7 +53,10 @@ module Gcry
     # `+=` frozen by a stop between its load and its store put back what it
     # had read when it resumed, and the stop's unmap was lost
     # (process_spec/regression/88).
-    @heap_size = Atomic(UInt64).new(0_u64)
+    # Declared with its type, as the `getter` it replaces was: an inferred
+    # instance variable is laid out with the inferred ones, which moved the
+    # hit path's fields.
+    @heap_size : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
 
     def heap_size : UInt64
       @heap_size.get
@@ -2872,7 +2875,7 @@ module Gcry
       lo, hi = dormant_release_range(chunk)
       Platform.reuse_released_pages(lo, hi - lo) if hi > lo
       ChunkHeader.set_dormant(chunk, false)
-      dormant_bytes_sub(chunk.value.mapped_bytes) if @shared_counters_atomic
+      dormant_bytes_sub(chunk.value.mapped_bytes) if @@shared_counters_atomic
     end
 
     # `a - b`, or 0 where that would wrap, reading `a` once and never raising.
@@ -2902,12 +2905,18 @@ module Gcry
     # counter's name, so a test can park a thread exactly where a stop used to
     # find one (process_spec/regression/88). Nil in production: one load and
     # a branch, on paths that map, unmap, revive or `GC.free`.
-    property shared_counter_hook : Proc(Symbol, Nil)? = nil
+    #
+    # Both knobs are the class's, not each heap's: two instance variables
+    # more moved the hit path's fields (`@fast_path`, `@gc_threshold`,
+    # `@fit_index`, ...) by 8 to 24 bytes, and Binarytrees ran 1–2% slower on
+    # three runners with code padding alone unable to bring it back
+    # (`bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`).
+    class_property shared_counter_hook : Proc(Symbol, Nil)? = nil
     # Research only: false makes the shared counters' read-modify-writes
     # plain loads and stores again, and has the major sweep zero and recount
     # `@dormant_chunk_bytes` — the code before 2026-10-23, and the control
     # arm of process_spec/regression/88.
-    property shared_counters_atomic : Bool = true
+    class_property shared_counters_atomic : Bool = true
 
     # Read-modify-writes of a byte counter that more than one lock domain
     # writes and that the stop writes too: `@heap_size`, `@dormant_chunk_bytes`,
@@ -2927,10 +2936,10 @@ module Gcry
     # did, and for the reason it gives.
     macro def_shared_counter(name, ivar)
       private def {{name.id}}_add(n : UInt64) : UInt64
-        if (hook = @shared_counter_hook) || !@shared_counters_atomic
+        if (hook = @@shared_counter_hook) || !@@shared_counters_atomic
           cur = {{ivar}}.get
           hook.try &.call({{name.id.symbolize}})
-          unless @shared_counters_atomic
+          unless @@shared_counters_atomic
             {{ivar}}.set(cur &+ n)
             return cur &+ n
           end
@@ -2940,10 +2949,10 @@ module Gcry
 
       private def {{name.id}}_sub(n : UInt64) : Nil
         cur = {{ivar}}.get
-        if hook = @shared_counter_hook
+        if hook = @@shared_counter_hook
           hook.call({{name.id.symbolize}})
         end
-        unless @shared_counters_atomic
+        unless @@shared_counters_atomic
           {{ivar}}.set(cur > n ? cur &- n : 0_u64)
           return
         end

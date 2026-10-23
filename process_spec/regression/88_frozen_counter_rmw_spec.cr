@@ -19,16 +19,16 @@ require "spec"
 # frozen between its flag store and its subtraction, atomic or not
 # (`Heap#def_shared_counter`).
 #
-# The interleaving is forced. `shared_counter_hook` runs between the load and
-# the store of each of those writes; on the thread under test it parks there
-# until the main thread has collected and the world has restarted. The
-# collection writes the counter: it unmaps an empty chunk, makes one dormant,
-# or zeroes the explicit-free bytes. Then the counter is read against a walk
-# of the chunks (`Invariant.heap_size_drift`, `Invariant.dormant_bytes_drift`)
-# or against the one free made after the reset. The control arm
-# (`shared_counters_atomic = false`, the code before) must lose the stop's
-# write on the same construction, or the fixed arm passes on nothing. Each
-# arm runs in a process of its own.
+# The interleaving is forced. `Heap.shared_counter_hook` runs between the
+# load and the store of each of those writes; on the thread under test it
+# parks there until the main thread has collected and the world has
+# restarted. The collection writes the counter: it unmaps an empty chunk,
+# makes one dormant, or zeroes the explicit-free bytes. Then the counter is
+# read against a walk of the chunks (`Invariant.heap_size_drift`,
+# `Invariant.dormant_bytes_drift`) or against the one free made after the
+# reset. The control arm (`Heap.shared_counters_atomic = false`, the code
+# before) must lose the stop's write on the same construction, or the fixed
+# arm passes on nothing. Each arm runs in a process of its own.
 # `bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`.
 
 # Five blocks to a chunk, in a class nothing in the spec runner allocates.
@@ -47,7 +47,7 @@ private def c88_heap(arm : String) : Gcry::Heap
   heap.lazy_sweep = false
   heap.release_empty_chunks = true
   heap.empty_chunk_warm_retain = 0_u64
-  heap.shared_counters_atomic = arm == "fixed"
+  Gcry::Heap.shared_counters_atomic = arm == "fixed"
   heap
 end
 
@@ -107,7 +107,7 @@ private def c88_window(heap : Gcry::Heap, name : Symbol, &action : Atomic(Int32)
   # Called with whatever lock the write holds, by every thread including
   # the collector's sweep: parks only the armed thread, and allocates
   # nothing.
-  heap.shared_counter_hook = ->(which : Symbol) do
+  Gcry::Heap.shared_counter_hook = ->(which : Symbol) do
     id = armed.get
     if which == name && parked.get == 0 && id != 0 && Thread.current.object_id == id
       entered = starts.get
@@ -133,7 +133,7 @@ private def c88_window(heap : Gcry::Heap, name : Symbol, &action : Atomic(Int32)
   fail "the thread never reached the #{name} write" unless parked.get == 1
   GC.collect
   thread.join
-  heap.shared_counter_hook = nil
+  Gcry::Heap.shared_counter_hook = nil
   heap.post_stw_hook = nil
   stopped_while_parked.get == 1
 end

@@ -89,9 +89,9 @@ module Gcry
         @chunk_fill_lt50 = 0_u64
         @chunk_fill_lt75 = 0_u64
         @chunk_fill_ge75 = 0_u64
-        # The control arm's recount (`shared_counters_atomic = false`): the
-        # counter is otherwise kept by the dormancy transitions themselves.
-        @dormant_chunk_bytes.set(0_u64) unless @shared_counters_atomic
+        # The control arm's recount (`Heap.shared_counters_atomic = false`):
+        # the counter is otherwise kept by the dormancy transitions themselves.
+        @dormant_chunk_bytes.set(0_u64) unless @@shared_counters_atomic
         @last_sweep_after_world = after_world
         @last_sweep_multi = sweep_multi_mutator?
         @last_sweep_release = release_empty_chunks_this_collect?
@@ -185,7 +185,7 @@ module Gcry
           if major
             mapped = chunk.value.mapped_bytes
             @fully_free_chunk_bytes += mapped
-            dormant_bytes_add(mapped) unless @shared_counters_atomic
+            dormant_bytes_add(mapped) unless @@shared_counters_atomic
             dormant_budget_used += mapped
             @sweep_dormant_skips += 1
             @size_class_chunk_count += 1
