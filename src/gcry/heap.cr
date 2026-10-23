@@ -689,7 +689,7 @@ module Gcry
     # collector's are then built over zeros and hold only what they write
     # (`Roots.wipe_below_sp`). The bound is read a frame above the wipe and
     # not in it because that frame has a slot nothing writes on aarch64
-    # Darwin (`sub sp, #0x60`, five register pairs at `0x10`-`0x5f`, the
+    # Darwin (`sub sp, #0x50`, four register pairs at `0x10`-`0x4f`, the
     # accessor's word at `0x8`, `[sp]` unwritten): wiped from below that
     # frame, as the first bounded version did, the word was left as it was
     # (regression 86's entry arm). Where the entry is inlined into its caller
