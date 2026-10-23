@@ -40,11 +40,11 @@ slot's offset from `collect_entry_sp`; stack/static sources stop at
 `Heap.hold_probe_stop` for gdb/lldb. `reps.py` runs interleaved arms and
 lists the root-sourced hits per run.
 
-**x86-64 Linux, tip** (`raw/tlp.txt`, 60 runs, ASLR on): 6 high, every one
+**x86-64 Linux, tip** (`runs/tlp.txt`, 60 runs, ASLR on): 6 high, every one
 held by a *stack* word in the collector's own frames, `slot-entry = -1424`,
 value `0xHHHH00000001` (`HHHH` = the heap's high 32 bits): 4 runs the dead
 128 MiB buffer (892 MB), 2 the 32 MiB one (796 MB). gdb (`ww3.py`,
-`ww4.py`, `raw/ww3.out`, `raw/ww4.out`): the slot is `scan_mutator_stack`'s
+`ww4.py`, `runs/ww3.out`, `runs/ww4-writers.out`): the slot is `scan_mutator_stack`'s
 `sp+0x430`, a slot that function never writes. Its writer is the vDSO's
 `clock_gettime`, called by `t0 = monotonic_ns` right before
 `scan_mutator_stack` in `run_collection_body`: `mov %edi, 0x10(%rsp)`
@@ -54,9 +54,9 @@ there. The word is the heap's 4 GiB-aligned address plus one; it recurs every
 collection, so whichever large block straddles that boundary is kept. That
 is an ASLR lottery, hence the modes. (First suspect, the `setjmp` buffer's
 unwritten bytes, `__mask_was_saved`'s padding included: ruled out — clearing
-it changed nothing, `raw/pf1.txt`.)
+it changed nothing, `runs/pf1.txt`.)
 
-**M1, tip** (probe 39928559354, `raw/m1-39928559354-reps.txt`, 20 runs per
+**M1, tip** (probe 39928559354, `runs/m1-39928559354-reps.txt`, 20 runs per
 arm): var 7/20 high, 0.38-shaped base (`32ce703a`) 14/20, var with
 `GCRY_SLOW_ENTRY_WIPE=0` 2/20. In 6 of var's 7 the holder is a collector
 stack word at `slot-entry = -2352` holding `0x143000000` (base:
@@ -69,12 +69,12 @@ runs; and stale pointers in crystal-metric's own `__crystal_main`/`run` frame
 (`slot-entry ≈ +15 000`) in 2. The tail calls and the wipe move where the
 collector word lands; that is the 0.64 / 0.71 / 0.77 of 39738092074.
 
-A second M1 session (probe 39932595208, `raw/m1-39932595208-reps.txt`, 25
+A second M1 session (probe 39932595208, `runs/m1-39932595208-reps.txt`, 25
 runs per arm, other binaries of the same sources) read the collector word in
 **no** high run: var 6/25, base 5/25, every high run held by the system
 library's `0x12a05f200` or by crystal-metric's own frames
 (`slot-entry` +14960 to +17424). lldb found the collector word once in four
-var runs (`raw/m1-39932595208-lldb-var-3.txt`): `scan_mutator_stack`'s
+var runs (`runs/m1-39932595208-lldb-var-3.txt`): `scan_mutator_stack`'s
 `sp+0x450` holding `0x133000000`, the same class as Linux's.
 
 ## 3. The fix tried: a wipe before the scan (`scan-wipe.patch`)
@@ -95,7 +95,7 @@ JsonGenerate reps above 785 MiB, wipe on / same binary with
 
 | source | wipe | wipe off | base |
 |---|---:|---:|---:|
-| Linux x86-64, local, 70 reps (`raw/ab2.txt`) | 5/70 | — | 1/70 |
+| Linux x86-64, local, 70 reps (`runs/ab2.txt`) | 5/70 | — | 1/70 |
 | M1 probe 39932595208 (probe builds) | 2/25 | 1/25 | 6/25 (var) |
 | Perf A/B 39933615426, macos-latest | 5/15 | 6/15 | 12/15 |
 | macos-15-intel | 8/15 | 9/15 | 8/15 |
@@ -111,7 +111,7 @@ JsonGenerate × Boehm's peak: base 0.66× [0.65, 0.74], wipe 0.64× [0.64,
 binary M1 reads 7 high of 40 either way; base's 12/15 against var_env's
 6/15 is the layout of the added code, not the wipe. On Linux the
 collector's word is gone with the wipe (none in 70 probe runs,
-`raw/pw1.txt`) and the rate is unchanged: a half-overwritten word
+`runs/pw1.txt`) and the rate is unchanged: a half-overwritten word
 `0xHHHH00000000` in crystal-metric's own `run` frame (`slot-entry =
 +13576`) holds the same buffers instead. No collector can drop a word of
 the program's live frame. So the `src` change and regression 92 were

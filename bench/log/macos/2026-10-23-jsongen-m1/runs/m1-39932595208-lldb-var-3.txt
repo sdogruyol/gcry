@@ -1,0 +1,100 @@
+(lldb) command script import /Users/runner/work/gcry/gcry/bench/log/macos/2026-10-23-jsongen-m1/ll.py
+breakpoint locations 1
+STOP 1 slot=0x16ddbe270 words[-2..2]=0x0 0x0 0x133000000 0x107704220 0x3fe350235677da2f
+   #0 sp=0x16ddbdd70 cfa=0x16ddbdd80 pc=0x102061664 hold_probe_stop
+   #1 sp=0x16ddbdd80 cfa=0x16ddbde20 pc=0x102061414 mark_impl_unlocked
+   #2 sp=0x16ddbde20 cfa=0x16ddbe2f0 pc=0x10207a1bc mark_impl  <== slot at sp+0x450 (cfa-0x80)
+   #3 sp=0x16ddbde20 cfa=0x16ddbe2f0 pc=0x10207a1b4 mark_root_candidate  <== slot at sp+0x450 (cfa-0x80)
+   #4 sp=0x16ddbde20 cfa=0x16ddbe2f0 pc=0x10207a1a0 scan_mutator_stack  <== slot at sp+0x450 (cfa-0x80)
+   #5 sp=0x16ddbe2f0 cfa=0x16ddbeba0 pc=0x102058934 run_collection_body
+   #6 sp=0x16ddbeba0 cfa=0x16ddbebe0 pc=0x102054ffc run_collection
+   #7 sp=0x16ddbeba0 cfa=0x16ddbebe0 pc=0x102054fa0 collect:coalesce
+   #8 sp=0x16ddbebe0 cfa=0x16ddbec50 pc=0x1020541fc allocate:atomic:clear
+   #9 sp=0x16ddbebe0 cfa=0x16ddbec50 pc=0x102054124 allocate_traced
+   #10 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x1021493fc new
+   #11 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x1021493e4 sample
+   #12 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x1021493e4 sample
+   #13 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f410 initialize
+   #14 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f240 new
+   #15 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f200 run
+   #16 sp=0x16ddc2b80 cfa=0x16ddc3440 pc=0x1020416a8 __crystal_main
+   #17 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x10216241c main_user_code
+   #18 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x102162410 main
+   #19 sp=0x16ddc3680 cfa=0x16ddc3690 pc=0x1020c0a58 main
+   #20 sp=0x16ddc3690 cfa=0x16ddc3cf0 pc=0x18d7b84e4 start
+OWNER (4, 'scan_mutator_stack', 1104, 128)
+STOP 2 slot=0x16ddbe2e0 words[-2..2]=0x0 0x0 0x133000000 0x107704220 0x3fc81b3a76ddfdae
+   #0 sp=0x16ddbdde0 cfa=0x16ddbddf0 pc=0x102061664 hold_probe_stop
+   #1 sp=0x16ddbddf0 cfa=0x16ddbde90 pc=0x102061414 mark_impl_unlocked
+   #2 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1bc mark_impl  <== slot at sp+0x450 (cfa-0x80)
+   #3 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1b4 mark_root_candidate  <== slot at sp+0x450 (cfa-0x80)
+   #4 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1a0 scan_mutator_stack  <== slot at sp+0x450 (cfa-0x80)
+   #5 sp=0x16ddbe360 cfa=0x16ddbec10 pc=0x102058934 run_collection_body
+   #6 sp=0x16ddbec10 cfa=0x16ddbec50 pc=0x102055408 run_collection
+   #7 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x10211602c collect:release_warm
+   #8 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x102115f54 collect
+   #9 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f4f0 _run
+   #10 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f4ec run
+   #11 sp=0x16ddc2b80 cfa=0x16ddc3440 pc=0x1020416a8 __crystal_main
+   #12 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x10216241c main_user_code
+   #13 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x102162410 main
+   #14 sp=0x16ddc3680 cfa=0x16ddc3690 pc=0x1020c0a58 main
+   #15 sp=0x16ddc3690 cfa=0x16ddc3cf0 pc=0x18d7b84e4 start
+OWNER (4, 'scan_mutator_stack', 1104, 128)
+STOP 3 slot=0x16ddbe2e0 words[-2..2]=0x0 0x0 0x133000000 0x107704220 0x3fc81b3a76ddfdae
+   #0 sp=0x16ddbdde0 cfa=0x16ddbddf0 pc=0x102061664 hold_probe_stop
+   #1 sp=0x16ddbddf0 cfa=0x16ddbde90 pc=0x102061414 mark_impl_unlocked
+   #2 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1bc mark_impl  <== slot at sp+0x450 (cfa-0x80)
+   #3 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1b4 mark_root_candidate  <== slot at sp+0x450 (cfa-0x80)
+   #4 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1a0 scan_mutator_stack  <== slot at sp+0x450 (cfa-0x80)
+   #5 sp=0x16ddbe360 cfa=0x16ddbec10 pc=0x102058934 run_collection_body
+   #6 sp=0x16ddbec10 cfa=0x16ddbec50 pc=0x102055408 run_collection
+   #7 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x10211602c collect:release_warm
+   #8 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x102115f54 collect
+   #9 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f590 _run
+   #10 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f4ec run
+   #11 sp=0x16ddc2b80 cfa=0x16ddc3440 pc=0x1020416a8 __crystal_main
+   #12 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x10216241c main_user_code
+   #13 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x102162410 main
+   #14 sp=0x16ddc3680 cfa=0x16ddc3690 pc=0x1020c0a58 main
+   #15 sp=0x16ddc3690 cfa=0x16ddc3cf0 pc=0x18d7b84e4 start
+OWNER (4, 'scan_mutator_stack', 1104, 128)
+STOP 4 slot=0x16ddbe2e0 words[-2..2]=0x0 0x0 0x133000000 0x107704220 0x3fc81b3a76ddfdae
+   #0 sp=0x16ddbdde0 cfa=0x16ddbddf0 pc=0x102061664 hold_probe_stop
+   #1 sp=0x16ddbddf0 cfa=0x16ddbde90 pc=0x102061414 mark_impl_unlocked
+   #2 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1bc mark_impl  <== slot at sp+0x450 (cfa-0x80)
+   #3 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1b4 mark_root_candidate  <== slot at sp+0x450 (cfa-0x80)
+   #4 sp=0x16ddbde90 cfa=0x16ddbe360 pc=0x10207a1a0 scan_mutator_stack  <== slot at sp+0x450 (cfa-0x80)
+   #5 sp=0x16ddbe360 cfa=0x16ddbec10 pc=0x102058934 run_collection_body
+   #6 sp=0x16ddbec10 cfa=0x16ddbec50 pc=0x102055408 run_collection
+   #7 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x10211602c collect:release_warm
+   #8 sp=0x16ddbec50 cfa=0x16ddbec90 pc=0x102115f54 collect
+   #9 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f5a0 _run
+   #10 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x10210f4ec run
+   #11 sp=0x16ddc2b80 cfa=0x16ddc3440 pc=0x1020416a8 __crystal_main
+   #12 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x10216241c main_user_code
+   #13 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x102162410 main
+   #14 sp=0x16ddc3680 cfa=0x16ddc3690 pc=0x1020c0a58 main
+   #15 sp=0x16ddc3690 cfa=0x16ddc3cf0 pc=0x18d7b84e4 start
+OWNER (4, 'scan_mutator_stack', 1104, 128)
+STOP 5 slot=0x16ddbe2b0 words[-2..2]=0x0 0x0 0x133000000 0x107704220 0x3fc81b3a76ddfdae
+   #0 sp=0x16ddbddb0 cfa=0x16ddbddc0 pc=0x102061664 hold_probe_stop
+   #1 sp=0x16ddbddc0 cfa=0x16ddbde60 pc=0x102061414 mark_impl_unlocked
+   #2 sp=0x16ddbde60 cfa=0x16ddbe330 pc=0x10207a1bc mark_impl  <== slot at sp+0x450 (cfa-0x80)
+   #3 sp=0x16ddbde60 cfa=0x16ddbe330 pc=0x10207a1b4 mark_root_candidate  <== slot at sp+0x450 (cfa-0x80)
+   #4 sp=0x16ddbde60 cfa=0x16ddbe330 pc=0x10207a1a0 scan_mutator_stack  <== slot at sp+0x450 (cfa-0x80)
+   #5 sp=0x16ddbe330 cfa=0x16ddbebe0 pc=0x102058934 run_collection_body
+   #6 sp=0x16ddbebe0 cfa=0x16ddbec20 pc=0x102054ffc run_collection
+   #7 sp=0x16ddbebe0 cfa=0x16ddbec20 pc=0x102054fa0 collect:coalesce
+   #8 sp=0x16ddbec20 cfa=0x16ddbec90 pc=0x1020541fc allocate:atomic:clear
+   #9 sp=0x16ddbec20 cfa=0x16ddbec90 pc=0x102054124 allocate_traced
+   #10 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x102114e7c new
+   #11 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x102114e78 sprintf
+   #12 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x102114e78 %
+   #13 sp=0x16ddbec90 cfa=0x16ddc2b80 pc=0x102114e78 run
+   #14 sp=0x16ddc2b80 cfa=0x16ddc3440 pc=0x1020416a8 __crystal_main
+   #15 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x10216241c main_user_code
+   #16 sp=0x16ddc3440 cfa=0x16ddc3680 pc=0x102162410 main
+   #17 sp=0x16ddc3680 cfa=0x16ddc3690 pc=0x1020c0a58 main
+   #18 sp=0x16ddc3690 cfa=0x16ddc3cf0 pc=0x18d7b84e4 start
+OWNER (4, 'scan_mutator_stack', 1104, 128)
