@@ -151,7 +151,8 @@ CHILD_TIMEOUT = (ENV["BENCH_CHILD_TIMEOUT_S"]?.try(&.to_i?) || Math.max(120, ROU
 # sweep took it off the list before queueing it, that is one more chunk on the
 # list; on the fast arm's, which still runs on into the queue, it is the
 # cycle. Short children: a shipped one finishes in about 3 s, and the fast one
-# closed the cycle in 16 of 16 children of 240 rounds, the latest at round 160.
+# closed the cycle in 8 of 8 children of 240 rounds outside the gate (6 of 6 of
+# 1200), the latest between rounds 160 and 200.
 REFUSE_ENV    = {"GCRY_REFUSE_EMPTY_RELEASE" => "1000000000"}
 REFUSE_ROUNDS = 240
 # The fast child there is expected to hang, so the gate waits this out on
