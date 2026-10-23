@@ -4392,7 +4392,21 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       Accepted as they are: JSON-row peak rises of +0.2–1.1% on arm64 and
       macos-15-intel,
       every row at or under 0.90× Boehm's peak, not attributed. Left on the
-      M1: Binarytrees at 93%.
+      M1: Binarytrees at 93%. **Narrowed 2026-10-23, no fix**
+      (`bench/log/macos/2026-10-23-m1-binarytrees/`, runs 39919145181 to
+      39937695085): 0.39 runs at 91–95% of Boehm across 9 layouts. Of the
+      gap, ~3 points are Boehm's parallel markers taking work off the main
+      thread (its user + kernel time exceeds wall by 27 ms), ~2 points are
+      kernel time (33% more page faults), and ~3 points are mutator user CPU,
+      where gcry is 3% *under* Boehm on Neoverse N2. `Heap#malloc`'s body
+      holds no Darwin cost: its `mrs tpidrro_el0` hot spot is priced at a
+      plain load (`mrs.c`). A frameless hit path and allocation entry
+      (~25 instructions and 12 stack stores fewer per allocation) did not
+      move the M1 and read 1–7% slower on Linux, so they were backed out. A
+      `dc zva` of claimed words did not move it either. Open: prefetch-for-write off
+      on aarch64 (−3% on arm64 Binarytrees in 4 of 4 shards; the M1 too noisy
+      to read), the M1's extra faults, and the image-0 assumption in
+      `darwin_roots.cr` under `DYLD_INSERT_LIBRARIES`.
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
       0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
       output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,
