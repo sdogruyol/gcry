@@ -1,0 +1,10 @@
+ 16:20:12 up 7 days, 20:46,  1 user,  load average: 1.26, 2.68, 3.56
+ 16:39:17 up 7 days, 21:05,  1 user,  load average: 3.23, 3.00, 2.85
+ 16:27:07 up 7 days, 20:53,  1 user,  load average: 1.24, 1.71, 2.78
+ 16:46:18 up 7 days, 21:12,  1 user,  load average: 1.77, 1.93, 2.36
+ 17:01:40  up 7 days 21:27,  0 users,  load average: 5.71, 4.53, 3.82
+ %CPU COMMAND
+140.3 crystal-run-spe
+ 66.7 gh
+ 52.6 gnome-shell
+ 38.9 ptyxis

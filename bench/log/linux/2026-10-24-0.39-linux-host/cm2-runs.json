@@ -1,0 +1,2972 @@
+[
+{
+"rep": 0,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.5844597129616886,
+"rss_kb": 633688,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6263731269864365,
+"rss_kb": 674784,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.6150230499915779,
+"rss_kb": 634876,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7816578999627382,
+"rss_kb": 563192,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8355250979075208,
+"rss_kb": 699872,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8215515159536153,
+"rss_kb": 575724,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5106226180214435,
+"rss_kb": 51976,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.48464403103571385,
+"rss_kb": 38532,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.47618239105213434,
+"rss_kb": 38348,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.5263909300556406,
+"rss_kb": 1380144,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4573461150284857,
+"rss_kb": 789652,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4560076970374212,
+"rss_kb": 949532,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8572524590417743,
+"rss_kb": 549028,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8550012800842524,
+"rss_kb": 418308,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8226559089962393,
+"rss_kb": 418284,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8342829500325024,
+"rss_kb": 417900,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.7948354500113055,
+"rss_kb": 418328,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8547874280484393,
+"rss_kb": 552628,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3898560190573335,
+"rss_kb": 432932,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.4072707740124315,
+"rss_kb": 224752,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.406892908969894,
+"rss_kb": 223976,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.955904606031254,
+"rss_kb": 906456,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 1.992650342057459,
+"rss_kb": 540956,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9716367999790236,
+"rss_kb": 538952,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6897655390202999,
+"rss_kb": 57132,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6754213239764795,
+"rss_kb": 57004,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6780958670424297,
+"rss_kb": 40688,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.792143041966483,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.624284607009031,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.458218213985674,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6386256950208917,
+"rss_kb": 674432,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.6072961699683219,
+"rss_kb": 633760,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.6093487560283393,
+"rss_kb": 636676,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8303816800471395,
+"rss_kb": 702272,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.8124845889396966,
+"rss_kb": 579640,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8210900999838486,
+"rss_kb": 555032,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5078145619481802,
+"rss_kb": 51844,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.4877864409936592,
+"rss_kb": 38468,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.4738361199852079,
+"rss_kb": 38340,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.434330267016776,
+"rss_kb": 789316,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.5105055529857054,
+"rss_kb": 1335944,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4247722539585084,
+"rss_kb": 789676,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8628912520362064,
+"rss_kb": 417984,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.805865383008495,
+"rss_kb": 418504,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8482015599729493,
+"rss_kb": 569264,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.7963212600443512,
+"rss_kb": 418400,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.831723248003982,
+"rss_kb": 417944,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8517356580123305,
+"rss_kb": 504000,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.3615976530127227,
+"rss_kb": 224700,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3896048959577456,
+"rss_kb": 461188,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.3469577429350466,
+"rss_kb": 223820,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.966788645950146,
+"rss_kb": 538960,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.0050581130199134,
+"rss_kb": 540992,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.893161713029258,
+"rss_kb": 714912,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6493863549549133,
+"rss_kb": 40660,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6601986240129918,
+"rss_kb": 56772,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6638576219556853,
+"rss_kb": 71712,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.429334060056135,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.519673671107739,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.5633398060454056,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6300857450114563,
+"rss_kb": 674432,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.5866427220171317,
+"rss_kb": 634872,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.6026800980325788,
+"rss_kb": 633716,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7924558980157599,
+"rss_kb": 576428,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8137236350448802,
+"rss_kb": 574396,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8479732089908794,
+"rss_kb": 702200,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.5026032930472866,
+"rss_kb": 38476,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.49132822605315596,
+"rss_kb": 38480,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5120803260942921,
+"rss_kb": 51712,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4600326309446245,
+"rss_kb": 789256,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.5148829610552639,
+"rss_kb": 1193736,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.432557333027944,
+"rss_kb": 789664,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8346643149852753,
+"rss_kb": 419444,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.848881270037964,
+"rss_kb": 590976,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8172273508971557,
+"rss_kb": 418292,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.8089062120998278,
+"rss_kb": 418160,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.82720653899014,
+"rss_kb": 417916,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8438214949565008,
+"rss_kb": 503916,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.374620271031745,
+"rss_kb": 224092,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.406966569949873,
+"rss_kb": 223860,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3708225219743326,
+"rss_kb": 464720,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9817228799220175,
+"rss_kb": 538896,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.924454177962616,
+"rss_kb": 799420,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.006733715068549,
+"rss_kb": 538916,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6726175670046359,
+"rss_kb": 57368,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.663157942937687,
+"rss_kb": 56556,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6509870750596747,
+"rss_kb": 58572,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.5039118659915403,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.565379993058741,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.4940253680106252,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6347570460056886,
+"rss_kb": 674216,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.5947119359625503,
+"rss_kb": 633644,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.6142254590522498,
+"rss_kb": 627536,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7954750179778785,
+"rss_kb": 565364,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8154990070033818,
+"rss_kb": 699880,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.7979305690387264,
+"rss_kb": 558036,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.4746271719923243,
+"rss_kb": 38388,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.51560962095391,
+"rss_kb": 52016,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.50940584205091,
+"rss_kb": 38492,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4557907540583983,
+"rss_kb": 789548,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.518299932940863,
+"rss_kb": 1181800,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4694119800115004,
+"rss_kb": 789652,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8464783689705655,
+"rss_kb": 418200,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8196788220666349,
+"rss_kb": 418336,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8535236010793597,
+"rss_kb": 540100,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.8009541189530864,
+"rss_kb": 418212,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8743893310893327,
+"rss_kb": 522816,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8459407519549131,
+"rss_kb": 417964,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.362564984941855,
+"rss_kb": 223832,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.370188033906743,
+"rss_kb": 224232,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.324459290946834,
+"rss_kb": 307252,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9772913430351764,
+"rss_kb": 538920,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.9801052890252322,
+"rss_kb": 982752,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.006886856048368,
+"rss_kb": 538924,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6816127529600635,
+"rss_kb": 55600,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6840305239893496,
+"rss_kb": 55852,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6798647689865902,
+"rss_kb": 40784,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.585506225004792,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.716028916067444,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.6225950139341876,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6349785979837179,
+"rss_kb": 679336,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.6143302010605112,
+"rss_kb": 635020,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.5896518200170249,
+"rss_kb": 636080,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.8142281511100009,
+"rss_kb": 564720,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8237154630478472,
+"rss_kb": 576248,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8471000470453873,
+"rss_kb": 711592,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.48765389900654554,
+"rss_kb": 38316,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.4941187839722261,
+"rss_kb": 38436,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5110134310089052,
+"rss_kb": 51812,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4433191339485347,
+"rss_kb": 789596,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.5365663919365034,
+"rss_kb": 1393064,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4341924149775878,
+"rss_kb": 912880,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8269353659125045,
+"rss_kb": 418412,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8449012479977682,
+"rss_kb": 418100,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8594855270348489,
+"rss_kb": 586376,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.7884132660692558,
+"rss_kb": 418172,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8704885100014508,
+"rss_kb": 552840,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8225084689911455,
+"rss_kb": 417816,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.342853009002283,
+"rss_kb": 538296,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.3606862109154463,
+"rss_kb": 223904,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.3500296630663797,
+"rss_kb": 223960,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9639490180416033,
+"rss_kb": 538760,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.9595108319772407,
+"rss_kb": 1007820,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 1.989218026981689,
+"rss_kb": 540864,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6566678889794275,
+"rss_kb": 74992,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6639411429641768,
+"rss_kb": 61856,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6949496560264379,
+"rss_kb": 56348,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.5491158140357584,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.4931157359387726,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.431921353098005,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.5962979479227215,
+"rss_kb": 634324,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.615006388979964,
+"rss_kb": 633720,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6274829900357872,
+"rss_kb": 674472,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8302857889793813,
+"rss_kb": 699604,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7890054839663208,
+"rss_kb": 562876,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.810802978114225,
+"rss_kb": 575796,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5264288630569354,
+"rss_kb": 51776,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.49202015600167215,
+"rss_kb": 38296,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.4652278689900413,
+"rss_kb": 38452,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4359859169926494,
+"rss_kb": 789760,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.4955850900150836,
+"rss_kb": 1278420,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4288567260373384,
+"rss_kb": 789492,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.887680763960816,
+"rss_kb": 590840,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8494200559798628,
+"rss_kb": 418356,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8091092950198799,
+"rss_kb": 418844,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8723248729947954,
+"rss_kb": 535764,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8488996309461072,
+"rss_kb": 417828,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.8032414590707049,
+"rss_kb": 418272,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.351932877092622,
+"rss_kb": 224660,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.396629857015796,
+"rss_kb": 223900,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3503858470357955,
+"rss_kb": 525004,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 1.9862532689003274,
+"rss_kb": 541032,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9770652289735153,
+"rss_kb": 538896,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.9265130140120164,
+"rss_kb": 834528,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6857241760008037,
+"rss_kb": 40584,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6731253028847277,
+"rss_kb": 56360,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6801131229149178,
+"rss_kb": 70208,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.527765554958023,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.486744673922658,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.56420830800198,
+"rss_kb": 14128,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6405509000178427,
+"rss_kb": 674444,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.6151181911118329,
+"rss_kb": 634656,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.6194660769542679,
+"rss_kb": 635936,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8216572469100356,
+"rss_kb": 711656,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8136659540468827,
+"rss_kb": 554812,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7872786510270089,
+"rss_kb": 579104,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5160968579584733,
+"rss_kb": 51908,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.47626988193951547,
+"rss_kb": 38468,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.4558226059889421,
+"rss_kb": 38420,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4208597319666296,
+"rss_kb": 789316,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.5067500640871003,
+"rss_kb": 1335412,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4390354569768533,
+"rss_kb": 789696,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8623805860988796,
+"rss_kb": 531288,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8401043670019135,
+"rss_kb": 418004,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8076325949514285,
+"rss_kb": 418352,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8576378349680454,
+"rss_kb": 503664,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8295414700405672,
+"rss_kb": 417928,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.8025655499659479,
+"rss_kb": 418320,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.416372481966391,
+"rss_kb": 224268,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.318619456025772,
+"rss_kb": 397072,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.3599682219792157,
+"rss_kb": 223920,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.001858160016127,
+"rss_kb": 540988,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9593580699292943,
+"rss_kb": 668076,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.9869423160562292,
+"rss_kb": 878384,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6851706990273669,
+"rss_kb": 60216,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.7015339400386438,
+"rss_kb": 48340,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6781068670097739,
+"rss_kb": 60256,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.5076993560651317,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.743296059896238,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.7508692470146343,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.6489223090466112,
+"rss_kb": 633796,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.6026354290079325,
+"rss_kb": 636500,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6627920980099589,
+"rss_kb": 674396,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8692509150132537,
+"rss_kb": 705456,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8156704090069979,
+"rss_kb": 573000,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7845231660176069,
+"rss_kb": 571084,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5236673459876329,
+"rss_kb": 51784,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.4798450580565259,
+"rss_kb": 38524,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.45651180704589933,
+"rss_kb": 38452,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.7846307259751484,
+"rss_kb": 789348,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.465189805952832,
+"rss_kb": 789660,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.5052419460844249,
+"rss_kb": 1251296,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8493278960231692,
+"rss_kb": 418092,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8605541519355029,
+"rss_kb": 559244,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8210123699391261,
+"rss_kb": 421356,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8544067229377106,
+"rss_kb": 428984,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.9387312449980527,
+"rss_kb": 552864,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.8754448560066521,
+"rss_kb": 466204,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.4264287730911747,
+"rss_kb": 224728,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3613865110091865,
+"rss_kb": 406692,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.3749108349438757,
+"rss_kb": 224052,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9779859419213608,
+"rss_kb": 538968,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.0429001830052584,
+"rss_kb": 538972,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.9524170099757612,
+"rss_kb": 710320,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6808838030556217,
+"rss_kb": 56500,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6598417299101129,
+"rss_kb": 55752,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6555195249384269,
+"rss_kb": 58432,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.5502458380069584,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.51606403500773,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.7244969349121675,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.6050772099988535,
+"rss_kb": 633892,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6465324979508296,
+"rss_kb": 674952,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.5960642440477386,
+"rss_kb": 633940,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8348447070457041,
+"rss_kb": 707240,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7731606099987403,
+"rss_kb": 577996,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8205294640501961,
+"rss_kb": 563716,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.48382875008974224,
+"rss_kb": 38280,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5325654409825802,
+"rss_kb": 51952,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.48293442802969366,
+"rss_kb": 38452,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4687997030559927,
+"rss_kb": 846160,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.5600625360384583,
+"rss_kb": 1331280,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4682231158949435,
+"rss_kb": 789504,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.872653238940984,
+"rss_kb": 585972,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8504516900284216,
+"rss_kb": 418052,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8224746789783239,
+"rss_kb": 418504,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.8159042740007862,
+"rss_kb": 418252,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8298163729486987,
+"rss_kb": 417900,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8901662460993975,
+"rss_kb": 581504,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.421467177919112,
+"rss_kb": 224000,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3837282189633697,
+"rss_kb": 403084,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.372118160012178,
+"rss_kb": 224468,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.008467394975014,
+"rss_kb": 538920,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.920737809035927,
+"rss_kb": 843180,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9748098099371418,
+"rss_kb": 571728,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.670182064990513,
+"rss_kb": 56344,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6638343329541385,
+"rss_kb": 40688,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6708728629164398,
+"rss_kb": 57348,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.733528441982344,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.6522875889204443,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.67387536005117,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Primes",
+"arm": "v039",
+"wall": 1.088429335039109,
+"rss_kb": 635032,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 1.2140377219766378,
+"rss_kb": 674848,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.6244397419504821,
+"rss_kb": 623660,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.7867986559867859,
+"rss_kb": 580692,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.9063345140311867,
+"rss_kb": 707224,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8438066540984437,
+"rss_kb": 559720,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5499511560192332,
+"rss_kb": 51852,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.5213078039232641,
+"rss_kb": 38416,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.4960003469604999,
+"rss_kb": 36976,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 2.126418704050593,
+"rss_kb": 1193752,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.4446993719320744,
+"rss_kb": 789604,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.4298635399900377,
+"rss_kb": 789184,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8317563380114734,
+"rss_kb": 417952,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.7976746769854799,
+"rss_kb": 418460,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8747597050387412,
+"rss_kb": 597672,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8333618500037119,
+"rss_kb": 450732,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.955625363974832,
+"rss_kb": 418192,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.9491487590130419,
+"rss_kb": 535812,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.3623732429696247,
+"rss_kb": 224512,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.3538853640202433,
+"rss_kb": 223912,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3420887290267274,
+"rss_kb": 461436,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.9513614770257846,
+"rss_kb": 538988,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 1.9921114650787786,
+"rss_kb": 541088,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.9221832880284637,
+"rss_kb": 844144,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6730907330056652,
+"rss_kb": 56864,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6711954970378429,
+"rss_kb": 75268,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6661806009942666,
+"rss_kb": 40200,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.420278002973646,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.5432109360117465,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.543926056008786,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Primes",
+"arm": "boehm",
+"wall": 0.6298989419592544,
+"rss_kb": 674952,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Primes",
+"arm": "v039",
+"wall": 0.595654639066197,
+"rss_kb": 634108,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Primes",
+"arm": "v038",
+"wall": 0.5985629970673472,
+"rss_kb": 633912,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "JsonParsePure",
+"arm": "v038",
+"wall": 0.8083182639675215,
+"rss_kb": 564880,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParsePure",
+"arm": "v039",
+"wall": 0.8092768759233877,
+"rss_kb": 579552,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParsePure",
+"arm": "boehm",
+"wall": 0.8419124009087682,
+"rss_kb": 705832,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Binarytrees",
+"arm": "v038",
+"wall": 0.48065681906882674,
+"rss_kb": 38480,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Binarytrees",
+"arm": "boehm",
+"wall": 0.5211549339583144,
+"rss_kb": 51752,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Binarytrees",
+"arm": "v039",
+"wall": 0.48264450498390943,
+"rss_kb": 38308,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "JsonGenerate",
+"arm": "boehm",
+"wall": 1.6057561859488487,
+"rss_kb": 1171920,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonGenerate",
+"arm": "v038",
+"wall": 1.462132366024889,
+"rss_kb": 789580,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonGenerate",
+"arm": "v039",
+"wall": 1.460643186001107,
+"rss_kb": 789264,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParseSerializable",
+"arm": "v038",
+"wall": 0.8206862459192052,
+"rss_kb": 418428,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParseSerializable",
+"arm": "v039",
+"wall": 0.8524359959410504,
+"rss_kb": 418216,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParseSerializable",
+"arm": "boehm",
+"wall": 0.8584780750097707,
+"rss_kb": 591048,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParsePull",
+"arm": "boehm",
+"wall": 0.8544758319621906,
+"rss_kb": 536116,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParsePull",
+"arm": "v039",
+"wall": 0.8364469499792904,
+"rss_kb": 428612,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "JsonParsePull",
+"arm": "v038",
+"wall": 0.7990044340258464,
+"rss_kb": 418204,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "RegexDna",
+"arm": "v039",
+"wall": 2.377712951041758,
+"rss_kb": 223928,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "RegexDna",
+"arm": "boehm",
+"wall": 2.3687627949984744,
+"rss_kb": 527056,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "RegexDna",
+"arm": "v038",
+"wall": 2.649578524986282,
+"rss_kb": 223848,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.2521964750485495,
+"rss_kb": 540936,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 1.981474604923278,
+"rss_kb": 538960,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "boehm",
+"wall": 1.9032011919189245,
+"rss_kb": 834312,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Knuckeotide",
+"arm": "v039",
+"wall": 0.6596407990437001,
+"rss_kb": 56736,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Knuckeotide",
+"arm": "v038",
+"wall": 0.6626659270841628,
+"rss_kb": 57012,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Knuckeotide",
+"arm": "boehm",
+"wall": 0.6559808310121298,
+"rss_kb": 58544,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.4866155630443245,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "boehm",
+"wall": 2.5243458719924092,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.711585029028356,
+"rss_kb": 14256,
+"ok": true,
+"exit": 0
+}
+]
