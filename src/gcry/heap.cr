@@ -1064,7 +1064,7 @@ module Gcry
     # usable (`Gcry.os_reserve`). Null when the system refuses; the caller
     # maps without room instead.
     private def reserve_large_mapping(extent : UInt64, mapped : UInt64) : Void*
-      at = Gcry.os_reserve(extent, mapped)
+      at = @four_gib_fence ? Gcry.os_reserve_placed(extent, mapped) : Gcry.os_reserve(extent, mapped)
       if Gcry.mmap_failed?(at)
         @large_reserve_failures &+= 1
         return Pointer(Void).null
@@ -3203,7 +3203,7 @@ module Gcry
         dst = extent > mapped ? reserve_large_mapping(extent, mapped) : Pointer(Void).null
         if dst.null?
           extent = 0_u64
-          dst = Gcry.os_map(mapped)
+          dst = mmap_anonymous(mapped)
         end
         @recycled_extent = extent
         moved, dst_kept = Gcry.mmap_failed?(dst) ? {false, false} : Gcry.os_move(old.as(Void*), kept, dst, mapped)
@@ -4042,8 +4042,15 @@ module Gcry
       chunk
     end
 
+    # Every heap mapping is kept off the 4 GiB boundaries (`Gcry.os_map_placed`):
+    # a half-overwritten stack word names the boundary, and a block covering
+    # it would be kept by that word. Size-class chunks too, not only large
+    # ones: a dead small object there (an `IO::Memory`) keeps its buffer.
+    # `GCRY_FOUR_GIB_FENCE=0` maps where the kernel first answers.
+    property four_gib_fence : Bool = true
+
     private def mmap_anonymous(bytes : UInt64) : Void*
-      Gcry.os_map(bytes)
+      @four_gib_fence ? Gcry.os_map_placed(bytes) : Gcry.os_map(bytes)
     end
 
     # Calls of `unlink_chunk`, and the steps their predecessor searches

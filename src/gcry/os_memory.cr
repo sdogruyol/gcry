@@ -35,10 +35,29 @@ module Gcry
     Atomic::Ops.load(pointerof(@@os_mapped_bytes), LLVM::AtomicOrdering::Monotonic, false)
   end
 
+  # Research and specs only: an address `os_map` and `os_reserve` pass the
+  # kernel as their hint, 0 for none (every mapping outside a spec). A hint
+  # is taken only where that much is free (Linux, macOS), so a spec can put
+  # a heap mapping where it wants one, across a 4 GiB boundary say, without
+  # `MAP_FIXED`. Not honoured on Windows, where an address is a demand.
+  @@map_hint = 0_u64
+
+  def self.map_hint=(at : UInt64) : UInt64
+    @@map_hint = at
+  end
+
+  private def self.hint : Void*
+    {% if flag?(:win32) %}
+      Pointer(Void).null
+    {% else %}
+      Pointer(Void).new(@@map_hint)
+    {% end %}
+  end
+
   # Anonymous private read/write mapping of *bytes*; null or `MAP_FAILED` on
   # failure, exactly as `mmap` answers (check with `mmap_failed?`).
   def self.os_map(bytes : UInt64) : Void*
-    ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
+    ptr = Gcry::OS.mmap(hint, LibC::SizeT.new(bytes),
       Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
       Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
     unless mmap_failed?(ptr)
@@ -82,7 +101,7 @@ module Gcry
       LibC.VirtualFree(ptr, LibC::SizeT.new(0), LibC::MEM_RELEASE)
       Pointer(Void).null
     {% else %}
-      ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(extent), Gcry::OS::PROT_NONE,
+      ptr = Gcry::OS.mmap(hint, LibC::SizeT.new(extent), Gcry::OS::PROT_NONE,
         Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
       return Pointer(Void).null if mmap_failed?(ptr)
       return ptr if Gcry::OS.mprotect(ptr, LibC::SizeT.new(commit), Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE) == 0
@@ -194,5 +213,147 @@ module Gcry
     return unless Gcry::OS.munmap(ptr, LibC::SizeT.new(bytes)) == 0
     Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), bytes,
       LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  # Heap mappings are kept off the address space around every 4 GiB boundary
+  # (`os_map_placed`, `os_reserve_placed`), by this much on each side.
+  #
+  # Why. A 32-bit store over a stack slot that held a heap pointer leaves
+  # the pointer's upper half under a small number: `0xHHHH00000001`, the
+  # 4 GiB boundary at or below the heap plus one. On Linux x86-64 the vDSO's
+  # `clock_gettime` spills its clock id that way into a slot of the
+  # collector's own frame at every collection, and crystal-metric's frames
+  # hold `0xHHHH00000000` beside it; a negative 32-bit store leaves
+  # `0xHHHHFFFFFFFF`, just below the next boundary. The scan takes any such
+  # word for a pointer, so whichever block covers the boundary is kept, its
+  # references with it: a dead `IO::Memory` buffer of 32 to 128 MiB, at
+  # random with address randomization, which is why JsonGenerate's peak has
+  # fixed high levels at random reps on every runner, Boehm's included
+  # (`bench/log/macos/2026-10-23-jsongen-m1/`). No collector can clear a
+  # word in the program's live frame; a heap with nothing there leaves the
+  # word pointing at nothing.
+  #
+  # A megabyte each side covers a 32-bit store of any value from -2^20 to
+  # 2^20. The fences cost no memory and one kernel mapping per boundary the
+  # heap reaches, 2 MiB of address space in every 4 GiB.
+  FOUR_GIB          = 4294967296_u64
+  FOUR_GIB_FENCE    =    1048576_u64
+  FOUR_GIB_ATTEMPTS =             16
+
+  @@four_gib_fences = 0_u64
+  @@four_gib_fenced_bytes = 0_u64
+  @@four_gib_remaps = 0_u64
+
+  # Fences placed, the address space they hold, and the heap mappings given
+  # back because they entered a window (each one mapped again).
+  def self.four_gib_fences : UInt64
+    Atomic::Ops.load(pointerof(@@four_gib_fences), LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  def self.four_gib_fenced_bytes : UInt64
+    Atomic::Ops.load(pointerof(@@four_gib_fenced_bytes), LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  def self.four_gib_remaps : UInt64
+    Atomic::Ops.load(pointerof(@@four_gib_remaps), LLVM::AtomicOrdering::Monotonic, false)
+  end
+
+  # The window `[B - FOUR_GIB_FENCE, B + FOUR_GIB_FENCE)` around the lowest
+  # 4 GiB boundary `B` whose window `[at, at + len)` enters, as `{lo, hi}`;
+  # `{0, 0}` when it enters none, or when it is too long to fit between two
+  # windows, where nothing can be done and nothing is tried.
+  def self.four_gib_window(at : UInt64, len : UInt64) : {UInt64, UInt64}
+    return {0_u64, 0_u64} if len == 0 || len > FOUR_GIB &- 2_u64 &* FOUR_GIB_FENCE
+    # The lowest boundary whose window ends past `at`: above `at - FENCE`.
+    from = at > FOUR_GIB_FENCE ? at &- FOUR_GIB_FENCE &+ 1 : 0_u64
+    b = (from &+ (FOUR_GIB &- 1)) & ~(FOUR_GIB &- 1)
+    lo = b > FOUR_GIB_FENCE ? b &- FOUR_GIB_FENCE : 0_u64
+    return {0_u64, 0_u64} unless lo < at &+ len
+    {lo, b &+ FOUR_GIB_FENCE}
+  end
+
+  # `os_map`, at an address outside every 4 GiB window (`FOUR_GIB_FENCE`).
+  # A mapping the kernel puts in a window goes back, the window is fenced
+  # off with an inaccessible reservation nothing will ever be placed in
+  # (`fence_four_gib`), and the mapping is asked for again. Rare: only a
+  # mapping that reaches a boundary pays, once per boundary. After
+  # `FOUR_GIB_ATTEMPTS` the last mapping is kept wherever it is, as `os_map`
+  # would have kept it; the placement never fails an allocation.
+  def self.os_map_placed(bytes : UInt64) : Void*
+    tries = 0
+    loop do
+      ptr = os_map(bytes)
+      return ptr if mmap_failed?(ptr)
+      lo, hi = four_gib_window(ptr.address, bytes)
+      return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
+      os_unmap(ptr, bytes)
+      fence_four_gib(ptr.address, bytes, lo, hi)
+      tries += 1
+    end
+  end
+
+  # `os_reserve`, its whole *extent* outside every 4 GiB window: a large
+  # block grows into its reservation (`Heap#grow_large`), so the room is
+  # placed as the block is.
+  def self.os_reserve_placed(extent : UInt64, commit : UInt64) : Void*
+    tries = 0
+    loop do
+      ptr = os_reserve(extent, commit)
+      return ptr if ptr.null?
+      lo, hi = four_gib_window(ptr.address, extent)
+      return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
+      # The whole reservation: `munmap` of the extent on POSIX, the release
+      # of the reservation on Windows, which ignores the length.
+      return ptr unless Gcry::OS.munmap(ptr, LibC::SizeT.new(extent)) == 0
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), commit,
+        LLVM::AtomicOrdering::Monotonic, false)
+      fence_four_gib(ptr.address, extent, lo, hi)
+      tries += 1
+    end
+  end
+
+  # Fences the window `[lo, hi)`, which the heap mapping `[at, at + len)`
+  # just given back entered: the whole window when nothing else holds any of
+  # it, else the part that mapping held, so the same request cannot land
+  # there again. A part some other thread took meanwhile stays unfenced; the
+  # next heap mapping that enters it fences it.
+  private def self.fence_four_gib(at : UInt64, len : UInt64, lo : UInt64, hi : UInt64) : Nil
+    Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@four_gib_remaps), 1_u64,
+      LLVM::AtomicOrdering::Monotonic, false)
+    return if fence_at(lo, hi &- lo)
+    from = at > lo ? at : lo
+    to = at &+ len < hi ? at &+ len : hi
+    fence_at(from, to &- from) if to > from
+  end
+
+  # An inaccessible reservation of exactly `[at, at + len)`, never released;
+  # false, with nothing kept, when any of it is taken. No memory and no
+  # commit charge (Linux charges a private mapping only while it is
+  # writable; Windows reserves without committing). Linux asks with
+  # `MAP_FIXED_NOREPLACE` (an older kernel takes it for a hint), macOS with
+  # a hint; either way a mapping anywhere else goes straight back. Windows
+  # reserves at the address or refuses.
+  private def self.fence_at(at : UInt64, len : UInt64) : Bool
+    return false if at == 0_u64
+    {% if flag?(:win32) %}
+      # 0x01 is `PAGE_NOACCESS`.
+      return false if LibC.VirtualAlloc(Pointer(Void).new(at), LibC::SizeT.new(len), LibC::MEM_RESERVE, 0x01_u32).null?
+    {% else %}
+      flags = Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS
+      {% if flag?(:linux) %}
+        flags |= Platform::MAP_FIXED_NOREPLACE
+      {% end %}
+      got = Gcry::OS.mmap(Pointer(Void).new(at), LibC::SizeT.new(len), Gcry::OS::PROT_NONE, flags, -1, 0)
+      return false if mmap_failed?(got)
+      unless got.address == at
+        Gcry::OS.munmap(got, LibC::SizeT.new(len))
+        return false
+      end
+    {% end %}
+    Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@four_gib_fences), 1_u64,
+      LLVM::AtomicOrdering::Monotonic, false)
+    Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@four_gib_fenced_bytes), len,
+      LLVM::AtomicOrdering::Monotonic, false)
+    true
   end
 end
