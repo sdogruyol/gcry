@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **README, COMPARISON, WINDOWS and the RFC carry 0.39.0's numbers on every
+  platform.** Linux x86_64 on the 12-vCPU host, against v0.38.0 and Boehm in
+  one clean session with 16- and 64-byte pad arms
+  (`bench/log/linux/2026-10-24-0.39-linux-host/`): every crystal-metric row
+  level except Revcomp, 1–2% slower (98% → 96% of Boehm) and not
+  attributed; Knuckeotide's peak 1.75× → 1.37×; Kemal `/json` 104.0% at
+  1.24×, level with 0.38.0. The other four from `perf-ab.yml` on the GitHub
+  runners at `b888ac96` (run 39944941478;
+  `bench/log/{linux,macos,windows}/2026-10-24-0.39-runners/`): Knuckeotide's
+  peak falls on every runner, 1.28–1.80× → 1.14–1.56× Boehm's; Binarytrees
+  is faster on M1 (91% → 100%), Intel (150% → 157%) and arm64 Linux (92% →
+  97%); macOS, arm64 and Windows have no row slower than 0.38.0 beyond the
+  spread, and `ubuntu-latest`'s six slower rows are inside a 16-byte pad of
+  0.38.0. Windows: 99–130% of Boehm. Kemal `/json` level on all four runners
+  it runs on; Kemal `/` on M1 is 7.0% slower [−25.6, −0.5] paired (82.1% of
+  Boehm), on a runner whose `/` trials are bimodal for every arm, not
+  attributed.
+
 - **`bench/stress_overnight.sh` is the release overnight stress, in the
   tree.** The set 0.37.0 and 0.38.0 ran from their logs, with the claim
   arms and `make claim-stress`, and every run through `bench/run_bounded.sh`
