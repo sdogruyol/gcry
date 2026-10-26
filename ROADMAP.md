@@ -4446,13 +4446,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       to read), the M1's extra faults. The image-0 assumption in
       `darwin_roots.cr` it raised was a real root-set hole, fixed in 0.39.0
       (`bench/log/macos/2026-10-23-darwin-image0/`).
-- [ ] **Prefetch-for-write in the allocation hit path on aarch64
-      (2026-10-23).** `GCRY_ALLOC_PFW=0` read −3.2% and −3.6% on
+- [x] **Prefetch-for-write in the allocation hit path on aarch64
+      (2026-10-23) — not taken, 2026-10-24.** `GCRY_ALLOC_PFW=0` read −3.2% and −3.6% on
       `ubuntu-24.04-arm` Binarytrees (Perf A/B 39937695085, 20 reps, two
       shards); x86 is neutral, and the M1's ±10% spread could not read it
       (`bench/log/macos/2026-10-23-m1-binarytrees/`). A default change on
       aarch64 needs the keep rule on all five runners and an M1 run of at least
       30 reps in one job.
+      Five runners (Perf A/B 40346166781, 20 reps): arm64 Linux Binarytrees
+      −2.6%, the M1's +2.0%, nothing else beyond spread except Windows Primes
+      +2.6%. One row on one runner against the other aarch64 target's loss;
+      the knob stays (`bench/log/linux/2026-10-24-alloc-pfw/`).
 - [ ] **A large mapping across a 4 GiB boundary is a false root's target
       (2026-10-23).** A 32-bit store over a stale heap pointer leaves the
       heap's 4 GiB-aligned address plus a small number in a stack slot: on
