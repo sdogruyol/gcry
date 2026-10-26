@@ -1,0 +1,13 @@
+== r37397
+ubuntu-24.04-arm: floor 769 MiB
+  base      1/40 high  median 769  high: 824
+  var       0/40 high  median 769  high: 
+  var_env   1/40 high  median 769  high: 824
+ubuntu-latest: floor 770 MiB
+  base      3/40 high  median 771  high: 891 891 927
+  var       0/40 high  median 771  high: 
+  var_env   1/40 high  median 771  high: 927
+windows-latest: floor 773 MiB
+  base      2/40 high  median 773  high: 799 895
+  var       3/40 high  median 773  high: 895 895 931
+  var_env   4/40 high  median 773  high: 895 895 895 950

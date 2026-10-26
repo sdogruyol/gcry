@@ -4457,18 +4457,32 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       −2.6%, the M1's +2.0%, nothing else beyond spread except Windows Primes
       +2.6%. One row on one runner against the other aarch64 target's loss;
       the knob stays (`bench/log/linux/2026-10-24-alloc-pfw/`).
-- [ ] **A large mapping across a 4 GiB boundary is a false root's target
-      (2026-10-23).** A 32-bit store over a stale heap pointer leaves the
-      heap's 4 GiB-aligned address plus a small number in a stack slot: on
-      Linux the vDSO's `clock_gettime` writes its clock id into a slot of the
-      collector's own frame, and crystal-metric's frames hold such words too.
-      Whichever large block covers that boundary is kept, at random with
-      address randomization; it is why JsonGenerate's peak has fixed levels in
-      every arm, Boehm's included. Wiping the collector's frame removed its own
-      word and moved no peak, since the program's frames hold the same kind of
-      word (`bench/log/macos/2026-10-23-jsongen-m1/`, `scan-wipe.patch`).
-      Untried: keeping large mappings off 4 GiB boundaries, which would take
-      the whole class away for gcry.
+- [x] **A large mapping across a 4 GiB boundary is a false root's target
+      (2026-10-23) — no heap mapping covers one now (2026-10-26).** A 32-bit
+      store over a stale heap pointer leaves the heap's 4 GiB-aligned
+      address plus a small number in a stack slot: on Linux the vDSO's
+      `clock_gettime` writes its clock id into a slot of the collector's own
+      frame, and crystal-metric's frames hold such words too. Whichever block
+      covered that boundary was kept, at random with address randomization.
+      Every heap mapping now stays off the 1 MiB on either side of each
+      boundary (`Gcry.os_map_placed`; a mapping that lands there goes back,
+      the window is reserved inaccessible and the mapping asked for again;
+      `GCRY_FOUR_GIB_FENCE=0` off; `spec/four_gib_fence_spec.cr`).
+      JsonGenerate reps on a high peak level, fence against the same binary
+      without it and base: `ubuntu-latest` 0/115 against 13/230, arm64 0/115
+      against 12/230, Linux x86-64 locally 0/250 against 13/250, Windows
+      8/115 against 32/230; macOS unchanged (M1 61/75 against 115/150). No
+      row slower beyond what placement moves on the same runner
+      (`bench/log/linux/2026-10-26-four-gib/`).
+- [ ] **JsonGenerate's high peaks on macOS are not boundary words
+      (2026-10-26).** 35–80% of reps on both macOS runners land high, with
+      or without the 4 GiB fence. The M1 holders were full heap addresses in
+      the collector's and crystal-metric's frames and a `5 000 000 000`
+      constant in a system library's data, scanned as a static root
+      (`bench/log/macos/2026-10-23-jsongen-m1/`): the heap sits at 4–8 GiB,
+      right after the executable, where 33-bit integers land. Untried:
+      mapping the macOS heap far above that (a hint well past 2^40), so
+      integer-valued words miss it.
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
       0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
       output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,

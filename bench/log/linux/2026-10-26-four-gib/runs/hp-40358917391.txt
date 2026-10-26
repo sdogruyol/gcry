@@ -1,0 +1,26 @@
+== r17391
+macos-15-intel: floor 769 MiB
+  base      3/15 high  median 771  high: 825 826 826
+  boehm     4/15 high  median 1194  high: 1214 1337 1338 1377
+  var       1/15 high  median 770  high: 785
+  var_env   1/15 high  median 770  high: 784
+macos-latest: floor 770 MiB
+  base     10/15 high  median 892  high: 797 891 892 892 892 892 892 892 893 893
+  boehm     4/15 high  median 1198  high: 1312 1312 1363 1363
+  var      14/15 high  median 1056  high: 892 892 893 893 927 961 1056 1056 1056 1056 1056 1056 1056 1057
+  var_env  13/15 high  median 1056  high: 893 929 948 948 1056 1056 1056 1056 1056 1056 1056 1057 1111
+ubuntu-24.04-arm: floor 769 MiB
+  base      1/15 high  median 769  high: 890
+  boehm    11/15 high  median 1227  high: 1199 1199 1227 1227 1307 1315 1335 1336 1336 1359 1359
+  var       0/15 high  median 769  high: 
+  var_env   1/15 high  median 769  high: 794
+ubuntu-latest: floor 770 MiB
+  base      1/15 high  median 771  high: 891
+  boehm    12/15 high  median 1226  high: 1184 1207 1207 1210 1226 1235 1236 1238 1312 1354 1365 1376
+  var       0/15 high  median 771  high: 
+  var_env   0/15 high  median 771  high: 
+windows-latest: floor 773 MiB
+  base      3/15 high  median 774  high: 895 895 932
+  boehm     0/15 high  median 1335  high: 
+  var       1/15 high  median 774  high: 895
+  var_env   5/15 high  median 774  high: 895 895 896 896 932

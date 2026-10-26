@@ -130,6 +130,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No heap mapping covers a 4 GiB boundary, where half-overwritten stack
+  words point.** A 32-bit store over a stack slot that held a heap pointer
+  leaves the boundary's address plus a small number (`0xHHHH00000001`: on
+  Linux x86-64 the vDSO's `clock_gettime` leaves one in the collector's own
+  frame at every collection), and whichever block covered the boundary was
+  kept by it, at random with address randomization: JsonGenerate's peak
+  landed on a high level (one more dead 32–128 MiB buffer) in 5–14% of reps
+  on the Linux and Windows runners.
+  Every heap mapping now stays off the 1 MiB on either side of each
+  boundary; one that lands there goes back, the window is reserved
+  inaccessible for good (no memory, no commit charge) and the mapping is
+  asked for again (`Gcry.os_map_placed`; `GCRY_FOUR_GIB_FENCE=0` turns it
+  off). JsonGenerate reps on a high level: `ubuntu-latest` 0 of 115 against
+  13 of 230 for the same binary without it and base, `ubuntu-24.04-arm` 0
+  of 115 against 12 of 230, `windows-latest` 8 of 115 against 32 of 230;
+  macOS unchanged, its high reps are held by other words. No row slower
+  beyond what code placement moves on the same runner (Perf A/B
+  40358917391, probe 40366765606; `spec/four_gib_fence_spec.cr`,
+  `bench/log/linux/2026-10-26-four-gib/FINDINGS.md`).
+
 - **On macOS, a program run with `DYLD_INSERT_LIBRARIES` has its own
   globals and main-thread thread-locals as roots.** `GC.init` took dyld's
   image 0 for the executable, and an inserted library is image 0 for the

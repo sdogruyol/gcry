@@ -1,0 +1,55 @@
+== ubuntu-latest
+var JsonGenerate 1 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 2 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 3 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 4 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 5 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 6 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 7 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 8 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 9 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 10 four_gib_fences=0 four_gib_remaps=0
+== ubuntu-24.04-arm
+var JsonGenerate 1 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 2 four_gib_fences=2 four_gib_remaps=1
+var JsonGenerate 3 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 4 four_gib_fences=2 four_gib_remaps=1
+var JsonGenerate 5 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 6 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 7 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 8 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 9 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 10 four_gib_fences=1 four_gib_remaps=1
+== macos-latest
+var JsonGenerate 1 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 2 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 3 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 4 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 5 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 6 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 7 four_gib_fences=1 four_gib_remaps=1
+var JsonGenerate 8 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 9 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 10 four_gib_fences=0 four_gib_remaps=0
+== macos-15-intel
+var JsonGenerate 1 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 2 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 3 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 4 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 5 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 6 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 7 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 8 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 9 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 10 four_gib_fences=0 four_gib_remaps=0
+== windows-latest
+var JsonGenerate 1 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 2 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 3 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 4 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 5 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 6 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 7 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 8 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 9 four_gib_fences=0 four_gib_remaps=0
+var JsonGenerate 10 four_gib_fences=1 four_gib_remaps=1
