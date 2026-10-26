@@ -314,9 +314,13 @@ module Gcry
 
   # Fences the window `[lo, hi)`, which the heap mapping `[at, at + len)`
   # just given back entered: the whole window when nothing else holds any of
-  # it, else the part that mapping held, so the same request cannot land
-  # there again. A part some other thread took meanwhile stays unfenced; the
-  # next heap mapping that enters it fences it.
+  # it. Else something does (a mapping that is not the heap's, or a piece
+  # fenced before): the part the heap mapping held, so the same request cannot
+  # land there again, then each side of it that is free. Without the sides,
+  # chunks the kernel places next to each other walked through the window
+  # one remap each: 8 remaps in 11 of 150 local JsonGenerate runs. A part
+  # some other thread took meanwhile stays unfenced; the next heap mapping
+  # that enters it fences it.
   private def self.fence_four_gib(at : UInt64, len : UInt64, lo : UInt64, hi : UInt64) : Nil
     Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@four_gib_remaps), 1_u64,
       LLVM::AtomicOrdering::Monotonic, false)
@@ -324,6 +328,8 @@ module Gcry
     from = at > lo ? at : lo
     to = at &+ len < hi ? at &+ len : hi
     fence_at(from, to &- from) if to > from
+    fence_at(lo, from &- lo) if from > lo
+    fence_at(to, hi &- to) if hi > to
   end
 
   # An inaccessible reservation of exactly `[at, at + len)`, never released;
