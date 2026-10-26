@@ -72,9 +72,15 @@ inside a window, and for a growth reservation whose committed front ends below
 the window and whose room crosses it; a mapping beside a window stays where
 the kernel put it. Red with the placement disabled (`FOUR_GIB_ATTEMPTS = 0`:
 3 of 5 examples fail, each at its `in_window?` check), green with it, on both
-layouts, Linux x86-64. Pending on Windows, where an address is a demand, not
-a hint; the macOS examples ran in no session here (they rely on XNU taking a
-free hint, as Linux does, and run with the specs in CI).
+layouts, Linux x86-64. Probe run 40371805257 (`06a14b3e`, throwaway
+workflow, branch deleted): `macos-latest` and `macos-15-intel` pass all five
+examples on both layouts, so XNU takes a free hint as Linux does, and
+`crystal spec -Dgc_none spec/all_specs.cr` (296 and 295 examples), `crystal
+spec` (306, 308) and `crystal spec -Dgc_none process_spec` (242 each) pass;
+`windows-latest` runs the window example and leaves the four mapping
+examples pending (Windows takes an address as a demand, not a hint), and
+`ci/windows.ps1 -Variant default -Suite specs` passes (308 unit examples, 239
+process) with every heap mapping going through the placement.
 
 ## 3. The rate
 
