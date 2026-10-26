@@ -93,7 +93,7 @@ describe "4 GiB fence" do
       heap = Gcry::Heap.new
       begin
         heap.gc_threshold = UInt64::MAX
-        heap.four_gib_fence = fenced
+        Gcry.four_gib_fence = fenced
         # Everything the first allocation maps besides its chunk, mapped now.
         heap.malloc(payload).null?.should be_false
         fences = Gcry.four_gib_fences
@@ -118,6 +118,7 @@ describe "4 GiB fence" do
           below.should_not be_nil
         end
       ensure
+        Gcry.four_gib_fence = true
         heap.destroy
       end
     end

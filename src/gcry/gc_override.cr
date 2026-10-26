@@ -747,7 +747,7 @@ module GC
     # Heap mappings stay off the address space around every 4 GiB boundary,
     # where a half-overwritten stack word points (`Gcry.os_map_placed`).
     # `0` maps wherever the kernel answers, as before 0.39.0.
-    heap.four_gib_fence = false if env_flag_zero?("GCRY_FOUR_GIB_FENCE")
+    Gcry.four_gib_fence = false if env_flag_zero?("GCRY_FOUR_GIB_FENCE")
 
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block

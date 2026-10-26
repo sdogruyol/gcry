@@ -244,6 +244,20 @@ module Gcry
   @@four_gib_fenced_bytes = 0_u64
   @@four_gib_remaps = 0_u64
 
+  # Off (`GCRY_FOUR_GIB_FENCE=0`, set at `GC.init`, or a spec's control arm):
+  # the placed calls are `os_map` and `os_reserve`, wherever the kernel
+  # answers. Process-wide, as the fences are, and not a `Heap` field: a
+  # field there moved every later one and the hot paths' layout with it.
+  @@four_gib_fence = true
+
+  def self.four_gib_fence=(on : Bool) : Bool
+    @@four_gib_fence = on
+  end
+
+  def self.four_gib_fence? : Bool
+    @@four_gib_fence
+  end
+
   # Fences placed, the address space they hold, and the heap mappings given
   # back because they entered a window (each one mapped again).
   def self.four_gib_fences : UInt64
@@ -283,7 +297,7 @@ module Gcry
     tries = 0
     loop do
       ptr = os_map(bytes)
-      return ptr if mmap_failed?(ptr)
+      return ptr if mmap_failed?(ptr) || !@@four_gib_fence
       lo, hi = four_gib_window(ptr.address, bytes)
       return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
       os_unmap(ptr, bytes)
@@ -299,7 +313,7 @@ module Gcry
     tries = 0
     loop do
       ptr = os_reserve(extent, commit)
-      return ptr if ptr.null?
+      return ptr if ptr.null? || !@@four_gib_fence
       lo, hi = four_gib_window(ptr.address, extent)
       return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
       # The whole reservation: `munmap` of the extent on POSIX, the release
