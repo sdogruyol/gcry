@@ -39,11 +39,23 @@ reserved inaccessible for good (`PROT_NONE` with `MAP_FIXED_NOREPLACE` on
 Linux, a hint on macOS, `MEM_RESERVE` on Windows: no memory, no commit
 charge), and the mapping is asked for again. When something else holds part
 of the window (a mapping not the heap's, or an earlier piece), the part the
-heap mapping held and each free side of it are fenced instead. After 16 tries
-the mapping is kept where it is; a mapping longer than 4 GiB − 2 MiB is never
-moved. The split chunks of a recycled large chunk lie inside it, so nothing
-else needs a check. The chunk index and heap bounds are untouched: fences are
-not chunks.
+heap mapping held and each free side of it are fenced instead (on Windows the
+held part rounded up to the 64 KiB allocation granule, so the side above can
+be reserved). After 16 tries the mapping is kept where it is, and so is one
+`munmap` refuses to give back (ENOMEM at `vm.max_map_count`). A fence takes
+address space and a kernel mapping, so at `RLIMIT_AS` or `vm.max_map_count`
+the mapping asked for again can be refused where the first was not: the
+allocation then fails one mapping earlier than it would have. A mapping
+longer than 4 GiB − 2 MiB is never moved; a growth reservation that long (a
+block `realloc` grew past about 1 GiB) has only its committed front placed,
+so the block covers no window until it grows across one. The split chunks of
+a recycled large chunk lie inside it, so nothing else needs a check. The
+chunk index and heap bounds are untouched: fences are not chunks, and not in
+`Gcry.os_mapped_bytes` either.
+
+The refused-`munmap` path, the Windows granule, the long reservation's front
+and these comments came from review after the measurements below (which ran
+`7e001ffc`); none of them runs unless a mapping enters a window.
 
 Both sides of the boundary: `0xHHHHFFFFFFFF` is a negative 32-bit store over
 a pointer one region down. Size-class chunks too, not only large ones: a dead
@@ -69,18 +81,29 @@ a mapping across a boundary in address space it just gave back. Control arm
 `find_block(B − 1)` name it. Fence on: the block is outside the window and
 both words name nothing. The same for a 128 KiB chunk-sized mapping wholly
 inside a window, and for a growth reservation whose committed front ends below
-the window and whose room crosses it; a mapping beside a window stays where
-the kernel put it. Red with the placement disabled (`FOUR_GIB_ATTEMPTS = 0`:
-3 of 5 examples fail, each at its `in_window?` check), green with it, on both
-layouts, Linux x86-64. Probe run 40371805257 (`06a14b3e`, throwaway
-workflow, branch deleted): `macos-latest` and `macos-15-intel` pass all five
-examples on both layouts, so XNU takes a free hint as Linux does, and
-`crystal spec -Dgc_none spec/all_specs.cr` (296 and 295 examples), `crystal
-spec` (306, 308) and `crystal spec -Dgc_none process_spec` (242 each) pass;
-`windows-latest` runs the window example and leaves the four mapping
-examples pending (Windows takes an address as a demand, not a hint), and
-`ci/windows.ps1 -Variant default -Suite specs` passes (308 unit examples, 239
-process) with every heap mapping going through the placement.
+the window and whose room crosses it, and for a reservation too long to place
+whole (4 GiB + 64 KiB), whose 64 MiB front across `B` must come back outside
+the window; a mapping beside a window stays where the kernel put it. Red with
+the placement disabled (`FOUR_GIB_ATTEMPTS = 0`: 4 of 6 examples fail, each
+at its window check; with only the long reservation's front unplaced, that
+example alone), green with it, on both layouts, Linux x86-64.
+
+On the runners (throwaway workflows, branches deleted):
+
+- Probe run 40371805257 (`06a14b3e`, five examples then): `macos-latest` and
+  `macos-15-intel` pass all five on both layouts, and `crystal spec -Dgc_none
+  spec/all_specs.cr` (296 and 295 examples), `crystal spec` (306, 308) and
+  `crystal spec -Dgc_none process_spec` (242 each) pass; `windows-latest`
+  runs the window example and leaves the mapping examples pending (Windows
+  takes an address as a demand, not a hint), and `ci/windows.ps1 -Variant
+  default -Suite specs` passes (308 unit examples, 239 process) with every
+  heap mapping going through the placement.
+- Probe run 40374376611 (red arm, `FOUR_GIB_ATTEMPTS = 0`): `macos-latest`,
+  `macos-15-intel` and `ubuntu-latest` each fail the same 4 of 6 examples, so
+  on macOS too the hint puts the control mapping across the boundary and the
+  green is the placement's.
+- Probe run 40374634244 (green arm, the same tree with the placement on):
+  both macOS runners pass 6 of 6 on both layouts.
 
 ## 3. The rate
 
