@@ -23,9 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   97%); macOS, arm64 and Windows have no row slower than 0.38.0 beyond the
   spread, and `ubuntu-latest`'s six slower rows are inside a 16-byte pad of
   0.38.0. Windows: 99–130% of Boehm. Kemal `/json` level on all four runners
-  it runs on; Kemal `/` on M1 is 7.0% slower [−25.6, −0.5] paired (82.1% of
-  Boehm), on a runner whose `/` trials are bimodal for every arm, not
-  attributed.
+  it runs on; Kemal `/` on M1 read 7.0% slower in that run's 15 bimodal
+  trials and level in a 30-trial rerun (106.4% of Boehm against 0.38.0's
+  108.5%, Perf A/B 40353242336).
 
 - **`bench/stress_overnight.sh` is the release overnight stress, in the
   tree.** The set 0.37.0 and 0.38.0 ran from their logs, with the claim

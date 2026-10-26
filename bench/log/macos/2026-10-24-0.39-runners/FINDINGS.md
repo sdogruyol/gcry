@@ -36,8 +36,13 @@ computed from `arm64-kemal-runs.json`):
   [−25.6, −0.5], slower beyond the spread. The trials are bimodal for every
   arm (Boehm 56–116k req/s): 0.39 reached the upper mode (> 90k) in 1 of 15
   trials, 0.38.0 in 7, 0.39 padded by 16 bytes in 8, CPU per 1 000 requests
-  11.10 ms against 10.21 (Boehm 9.73). Not attributed; `/` on this runner was
-  100.0% in 0.38.0's run.
+  11.10 ms against 10.21 (Boehm 9.73). `/` on this runner was 100.0% in
+  0.38.0's run.
+- **Rerun, Kemal only, 30 trials** (Perf A/B 40353242336, `kemal-rerun.md`):
+  `/` 0.39 106.4% [90.0, 118.3], 0.38.0 108.5% [98.2, 116.7], 0.39 padded by
+  16 bytes 105.1%, 0.38.0 padded 103.9%; `/json` 103.6% against 101.5%. CPU,
+  collections and pause per 1 000 requests equal across the arms. The 15-trial
+  drop does not reproduce: level.
 
 ## macOS x86_64 `macos-15-intel`
 

@@ -244,7 +244,7 @@ The JSON rows' gain and RSS drop are in-place large `realloc` growth, new in 0.3
 |----------|------------------------------------:|
 | Kemal `/json` throughput | **107.9%** [100.2, 121.3] *(0.39.0, 2026-10-24; 0.38.0 in the same run: 102.4%, paired +2.0% [−3.2, +13.5])* |
 | Kemal `/json` peak RSS | **1.41×** *(20.4 vs 14.4 MiB `ru_maxrss`; 0.38.0: 1.40×. Peak footprint, a different measure, was 1.50× and post-GC resident 0.99× on the 2026-09-06 laptop cut)* |
-| Kemal `/` throughput | **82.1%** [77.5, 100.7] at 1.35× *(0.38.0: 96.0%, 1.36×; paired −7.0% [−25.6, −0.5], slower beyond the spread and not attributed; in 0.38.0's run 100.0%. Every arm's trials are bimodal on this runner, Boehm's included, and 0.39.0 reached the upper mode in 1 of 15 against 0.38.0's 7 and 8 for 0.39.0 padded by 16 bytes)* |
+| Kemal `/` throughput | **106.4%** [90.0, 118.3] at 1.34× *(Kemal-only rerun, 30 trials, Perf A/B 40353242336; 0.38.0 108.5%, padded arms of both 103.9–105.1%, the same CPU and collections per request. The five-runner run's 15 trials read 82.1% against 0.38.0's 96.0%: every arm's `/` trials are bimodal on this runner, Boehm's included, and 0.39.0 reached the upper mode in 1 of 15)* |
 | Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
 | Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
