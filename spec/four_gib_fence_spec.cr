@@ -20,10 +20,10 @@ require "./spec_helper"
 
 private FENCE = Gcry::FOUR_GIB_FENCE
 
-# A 4 GiB boundary with at least 128 MiB free on each side: inside an
-# address range the kernel handed out and has taken back.
-private def free_boundary : UInt64
-  span = Gcry::FOUR_GIB &* 2
+# A 4 GiB boundary with at least 128 MiB free below it and `span - 4 GiB -
+# 128 MiB` above: inside an address range the kernel handed out and has taken
+# back.
+private def free_boundary(span : UInt64 = Gcry::FOUR_GIB &* 2) : UInt64
   at = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(span), Gcry::OS::PROT_NONE,
     Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
   Gcry.mmap_failed?(at).should be_false
@@ -157,6 +157,26 @@ describe "4 GiB fence" do
     ptr = with_hint(b &- FENCE &- commit) { Gcry.os_reserve_placed(extent, commit) }
     ptr.null?.should be_false
     in_window?(ptr.address, extent, b).should be_false
+    release_reservation(ptr, extent, commit)
+  end
+
+  it "places the committed front of a reservation too long to place whole" do
+    pending! "Windows takes an address as a demand, not a hint" if {{ flag?(:win32) }}
+    commit = 64_u64 << 20
+    # What `realloc` reserves past a block of just over 1 GiB: its data
+    # rounded up to 2 GiB and doubled, one page more.
+    extent = Gcry::FOUR_GIB &+ 65536
+    span = Gcry::FOUR_GIB &* 3
+    # The front across the boundary.
+    b = free_boundary(span)
+    ptr = with_hint(b &- (commit >> 1)) { Gcry.os_reserve(extent, commit) }
+    ptr.address.should eq(b &- (commit >> 1))
+    release_reservation(ptr, extent, commit)
+
+    b = free_boundary(span)
+    ptr = with_hint(b &- (commit >> 1)) { Gcry.os_reserve_placed(extent, commit) }
+    ptr.null?.should be_false
+    Gcry.four_gib_window(ptr.address, commit).should eq({0_u64, 0_u64})
     release_reservation(ptr, extent, commit)
   end
 

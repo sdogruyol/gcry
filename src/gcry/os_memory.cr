@@ -13,7 +13,10 @@
 #
 # Not counted, deliberately: collector side tables taken from libc `malloc`
 # (finalizer entries, chunk index, layout tables). Those are libc's mappings,
-# not gcry's, and libc decides when they go back.
+# not gcry's, and libc decides when they go back. And the 4 GiB fences
+# (`fence_at`), which map and unmap past `os_map` and `os_unmap` on purpose:
+# an inaccessible reservation holds no memory, is never released, and
+# counted it would be a mapped byte nothing can use.
 #
 # Process-wide rather than per heap: the field is a process statistic in Boehm
 # (`GC_our_mem_bytes`), and a library heap's mappings are the process's too.
@@ -292,7 +295,11 @@ module Gcry
   # (`fence_four_gib`), and the mapping is asked for again. Rare: only a
   # mapping that reaches a boundary pays, once per boundary. After
   # `FOUR_GIB_ATTEMPTS` the last mapping is kept wherever it is, as `os_map`
-  # would have kept it; the placement never fails an allocation.
+  # would have kept it, and so is one the system will not take back. Not
+  # free of failures, strictly: a fence takes address space (`RLIMIT_AS`)
+  # and a kernel mapping (`vm.max_map_count`), so at either limit the
+  # mapping asked for again can be refused where the first was not, and the
+  # allocation fails as it would have one mapping later.
   def self.os_map_placed(bytes : UInt64) : Void*
     tries = 0
     loop do
@@ -300,7 +307,12 @@ module Gcry
       return ptr if mmap_failed?(ptr) || !@@four_gib_fence
       lo, hi = four_gib_window(ptr.address, bytes)
       return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
-      os_unmap(ptr, bytes)
+      # Kept, still counted, where it is when it cannot go back: `munmap`
+      # can answer ENOMEM at `vm.max_map_count`, and `os_unmap` would leave
+      # it mapped and counted with nothing holding it.
+      return ptr unless Gcry::OS.munmap(ptr, LibC::SizeT.new(bytes)) == 0
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), bytes,
+        LLVM::AtomicOrdering::Monotonic, false)
       fence_four_gib(ptr.address, bytes, lo, hi)
       tries += 1
     end
@@ -308,20 +320,25 @@ module Gcry
 
   # `os_reserve`, its whole *extent* outside every 4 GiB window: a large
   # block grows into its reservation (`Heap#grow_large`), so the room is
-  # placed as the block is.
+  # placed as the block is. An extent too long to fit between two windows
+  # (a block `realloc` grew past about 1 GiB doubles its room past
+  # 4 GiB − 2 MiB, `Heap#large_reserve_extent`) cannot be; its committed
+  # front is placed instead, so the block covers no window until it grows
+  # across one.
   def self.os_reserve_placed(extent : UInt64, commit : UInt64) : Void*
+    span = extent > FOUR_GIB &- 2_u64 &* FOUR_GIB_FENCE ? commit : extent
     tries = 0
     loop do
       ptr = os_reserve(extent, commit)
       return ptr if ptr.null? || !@@four_gib_fence
-      lo, hi = four_gib_window(ptr.address, extent)
+      lo, hi = four_gib_window(ptr.address, span)
       return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
       # The whole reservation: `munmap` of the extent on POSIX, the release
       # of the reservation on Windows, which ignores the length.
       return ptr unless Gcry::OS.munmap(ptr, LibC::SizeT.new(extent)) == 0
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), commit,
         LLVM::AtomicOrdering::Monotonic, false)
-      fence_four_gib(ptr.address, extent, lo, hi)
+      fence_four_gib(ptr.address, span, lo, hi)
       tries += 1
     end
   end
@@ -341,6 +358,13 @@ module Gcry
     return if fence_at(lo, hi &- lo)
     from = at > lo ? at : lo
     to = at &+ len < hi ? at &+ len : hi
+    {% if flag?(:win32) %}
+      # A reservation starts on a 64 KiB allocation granule, rounded down:
+      # the side above, at a `to` inside the granule this piece takes, would
+      # be refused. `lo`, `hi` and a mapping's base are on granules already.
+      to = (to &+ 65535_u64) & ~65535_u64
+      to = hi if to > hi
+    {% end %}
     fence_at(from, to &- from) if to > from
     fence_at(lo, from &- lo) if from > lo
     fence_at(to, hi &- to) if hi > to
