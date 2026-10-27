@@ -1,0 +1,21 @@
+15:13:01
+ 18:13:01 up 8 days, 22:39,  1 user,  load average: 3.59, 3.08, 2.69
+%CPU COMMAND
+51.0 gnome-shell
+38.2 ptyxis
+ 2.8 omp
+ 1.7 resources-proce
+15:29:54
+ 18:29:54 up 8 days, 22:56,  1 user,  load average: 1.58, 1.88, 2.48
+%CPU COMMAND
+51.0 gnome-shell
+38.2 ptyxis
+ 2.8 omp
+ 1.7 resources-proce
+15:42:03
+ 18:42:03 up 8 days, 23:08,  1 user,  load average: 2.23, 2.11, 2.25
+%CPU COMMAND
+50.9 gnome-shell
+38.1 ptyxis
+ 2.8 omp
+ 1.7 resources-proce

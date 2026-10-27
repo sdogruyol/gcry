@@ -744,6 +744,11 @@ module GC
     # fresh unless a cached chunk has its exact size.
     heap.large_recycle = false if env_flag_zero?("GCRY_LARGE_RECYCLE")
 
+    # Heap mappings stay off the address space around every 4 GiB boundary,
+    # where a half-overwritten stack word points (`Gcry.os_map_placed`).
+    # `0` maps wherever the kernel answers, as before 0.39.0.
+    Gcry.four_gib_fence = false if env_flag_zero?("GCRY_FOUR_GIB_FENCE")
+
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
     # ordinal's magic reciprocal is exact to — past that a block address would
@@ -936,6 +941,10 @@ module GC
     # Research only: the collector scrub's bounds from libc, which is a
     # `/proc/self/maps` parse per call on the initial thread.
     heap.scrub_libc_bounds = true if env_flag_one?("GCRY_SCRUB_LIBC_BOUNDS")
+    # Research only: skip the allocation slow path's wipe below the entry's
+    # SP (`Heap#allocate_entry`/`allocate_wipe`), the control arm of its
+    # measurement.
+    heap.slow_entry_wipe = false if env_flag_zero?("GCRY_SLOW_ENTRY_WIPE")
     if cse = env_u64("GCRY_CLEAR_STACK_EVERY")
       heap.clear_stack_every = cse.to_i32 if cse >= 1 && cse <= Int32::MAX
     end

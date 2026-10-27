@@ -25,5 +25,12 @@ at_exit do
     {% end %}
   {% end %}
   STDERR.print " os_mapped_bytes=", Gcry.os_mapped_bytes if Gcry.responds_to?(:os_mapped_bytes)
+  # A revision without them leaves them out at compile time: `responds_to?`
+  # on a module is no guard, the call is typed either way.
+  {% for name in %w(four_gib_fences four_gib_remaps) %}
+    {% if Gcry.class.has_method?(name) %}
+      STDERR.print " {{name.id}}=", Gcry.{{name.id}}
+    {% end %}
+  {% end %}
   STDERR.print "\n"
 end

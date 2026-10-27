@@ -95,12 +95,11 @@ jobs:
           # GitHub's releases-list endpoint for crystal-lang/crystal began
           # returning an empty array — `releases/latest` and the tags stayed
           # correct — so install-crystal, which resolves `latest` off that list,
-          # asked for version `null` and took ten of the twelve jobs down. Every
-          # `latest` in this file is pinned for that reason. 1.21.0 was `latest`
-          # on the day of the pin, so the two arms became the same job and one
-          # was dropped. When the endpoint recovers, a `latest` arm is worth
-          # bringing back: it is the only thing that tells us a compiler release
-          # broke the collector.
+          # asked for version `null` and took ten of the twelve jobs down. 1.21.0
+          # was `latest` on the day of the pin, so the two arms became the same
+          # job and one was dropped. The `latest` arm lives on in `std-spec`,
+          # which resolves it through `releases/latest` itself (2026-10-23): it is
+          # the only thing that tells us a compiler release broke the collector.
           - os: ubuntu-latest
             crystal: "1.21.0"
             arch_label: x86_64
@@ -841,8 +840,10 @@ jobs:
 
       # The allocation entry's frame is live across every collection an
       # allocation triggers; a buffer in it that nothing writes is read as
-      # roots (process_spec regression/79, release build).
-      - name: No unwritten buffer in the allocation entry frame
+      # roots (process_spec regression/79), and since the slow path leaves it
+      # by a tail call and zeroes below, no stale word may remain at all
+      # (regression/86). Release build.
+      - name: No unwritten slot in the allocation entry frames
         run: |
           make alloc-entry-frame
 
@@ -1188,9 +1189,27 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         uses: ./.github/actions/apt-update
+      # install-crystal resolves `latest` off GitHub's releases list, which has
+      # come back empty more than once (2026-08-16, and run 39810925349 on
+      # 2026-10-22: "no releases matching null.*"), failing the job before any
+      # spec ran. `releases/latest` stayed correct both times, so `latest` is
+      # resolved here and the action gets a version number.
+      - name: Resolve the Crystal version
+        id: crystal-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v='${{ matrix.crystal }}'
+          if [ "$v" = latest ]; then
+            v=$(gh api repos/crystal-lang/crystal/releases/latest --jq .tag_name)
+            v=${v#v}
+            [ -n "$v" ] || { echo "releases/latest returned nothing"; exit 1; }
+          fi
+          echo "resolved: $v"
+          echo "crystal=$v" >> "$GITHUB_OUTPUT"
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: ${{ matrix.crystal }}
+          crystal: ${{ steps.crystal-version.outputs.crystal }}
 
       - name: Stdlib spec dependencies
         run: sudo apt-get install -y -qq libxml2-dev libyaml-dev libgmp-dev libssl-dev zlib1g-dev libpcre2-dev
@@ -1295,7 +1314,11 @@ jobs:
       # some must without it. Restoring the pre-fix mutator-count reads must
       # still strand over 5 per 1000, which is also how this measured that the
       # latch fix closed a near-total leak (97-99% of the heap) and not only
-      # the rare use-after-free it was landed for.
+      # the rare use-after-free it was landed for. Every child has a deadline:
+      # that pre-fix shape also hangs, on a cycle in the chunk list. With
+      # every empty-chunk release refused and the latch-off race made on
+      # demand (`Heap.sweep_drop_hook`), the shipped list must stay acyclic
+      # while the pre-fix one must close.
       - name: No chunk leaves the chunk list
         run: |
           make chunk-list-drift
@@ -2380,6 +2403,16 @@ jobs:
             RUNNER_LABEL=macos-latest PERF_GATE_BASELINE=1 \
             ./bench/perf_smoke.sh
 
+      # Regressions 79 and 86 on Darwin, `--release` as on Linux: this is the
+      # one macOS job, and on aarch64 Darwin the wipe once started below a
+      # frame with an unwritten slot (96 bytes below the entry SP; Intel: 72,
+      # and one stale word), which only 86's wipe-start check sees
+      # (`bench/log/linux/2026-10-23-wipe-platforms/`). After the perf gate,
+      # so it does not run beside it.
+      - name: No unwritten slot in the allocation entry frames (darwin)
+        run: |
+          make alloc-entry-frame
+
       - name: Upload perf report
         if: always()
         uses: actions/upload-artifact@v7
@@ -2538,6 +2571,9 @@ jobs:
           # allocation in flight, and the arms it had were the same code.
           make stw-slot-precision heap-counters counter-loss claim-stress interior-only-buffer unaligned-only-buffer
           make stw-mt-sample idle-release
+          # The executable found by its header, not as dyld image 0, which an
+          # inserted library takes (bench/log/macos/2026-10-23-darwin-image0/).
+          make darwin-image0
           ci/sound-suite.sh
 
   # Darwin x86_64. No other job runs a Darwin x86_64 build: `make

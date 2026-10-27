@@ -1,0 +1,48 @@
+crystal build -Dgc_none bench/chunk_list_drift.cr -o bin/chunk_list_drift --error-trace
+CHUNK_DRIFT_ROUNDS=1200 bin/chunk_list_drift
+=== does the chunk-list divergence accumulate with uptime? ===
+1200 collections per arm, 8 threads born per collection — the churn
+reproducer's workload. A chunk off `@chunks` is never swept and cannot rejoin the
+list, so `off-list chunks` is monotone and its slope is the leak rate.
+
+=== shipped — mutator count latched in the stop ===
+  collections   off-list   retained B   heap B   chunks mapped
+          200          0            0   18812928            6183
+          400          0            0   18587648           12340
+          600          0            0   18456576           18231
+          800          0            0   18849792           24381
+         1000          0            0   18849792           30430
+         1200          0            0   18718720           36291
+  nothing left the list in 1200 collections and 36291 mappings:
+  the rate is below 1 per 36291 mappings on this arm
+
+=== fast — `sweep_mutator_latch = false`, the pre-fix reads ===
+  collections   off-list   retained B   heap B   chunks mapped
+          200       2264    296685568   302714880            7280
+          400       3459    453222400   461217792           14417
+          600       4940    647340032   656384000           21801
+          800       6106    800169984   814456832           28979
+         1000       7442    975282176   984588288           36332
+         1094       8128   1065197568   1077387264           39700
+  rate: 8128 stranded of 39700 chunks mapped = 204.74 per 1000 mappings,
+        1040232.0 KiB retained, 98.9% of the heap at the end
+  last bucket: 3368 mapping(s), 686 stranded — still losing while it maps
+
+=== shipped, startup regime — 24 processes x 240 collections, thread churn only ===
+  processes that stranded a chunk: 0 of 24
+  stranded: 0 chunk(s) of 675 mapped
+  nothing stranded: below 1 per 675 mappings in this regime too
+
+=== window — a chunk mapped between the after-world sweep's walk and its store, 300 collections ===
+  splice:    hook ran 300 time(s), mapped 300 chunk(s) in the window, stranded 0, back-links wrong 0
+  no splice: hook ran 300 time(s), mapped 300 chunk(s) in the window, stranded 299
+
+=== window-free — a large block freed between the after-world sweep's walk and its store, 300 collections ===
+  freed 300 in the window, 300 trim(s) declined; listed and not indexed 0, indexed and not listed 0; large cache 0 B at the end
+  excused: 0 listed chunk(s) whose mapper the stop caught between the list and the index
+
+ok — shipped: 0 stranded over 36291 mappings and 0 over 675 in short processes (cap 0);
+     window: 0 of 300 prepends in the window stranded and no back-link left wrong, 299 of 300 stranded without the splice;
+     window-free: 300 large frees in the window, none released while still listed;
+     the pre-fix shape 204.7 per 1000 and 98.9% of its heap stranded.
+exit 0

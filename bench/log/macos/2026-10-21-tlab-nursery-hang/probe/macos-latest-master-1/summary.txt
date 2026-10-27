@@ -1,0 +1,3 @@
+macos-latest/master/1: runs=1000 pass=998 failed=0 stalled=0 upstream=2 unengaged=0 watchdog_lines=0
+  tlab-nursery: n=749 p50=3.29s p99=8.79s max=9.65s
+  tlab-only: n=249 p50=6.68s p99=18.38s max=21.27s

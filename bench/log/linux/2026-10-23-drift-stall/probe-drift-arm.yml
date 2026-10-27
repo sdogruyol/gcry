@@ -1,0 +1,45 @@
+name: probe drift arm
+
+# Probe only, on `probe/drift-arm`: `make chunk-list-drift` repeated on the
+# runners whose 4 vCPUs the refused-releases arm's chance construction failed
+# on (run 39997435553), now that the arm makes the latch-off race on demand.
+# Every run bounded and captured by `bench/run_bounded.sh`.
+on:
+  push:
+    branches: [probe/drift-arm]
+
+jobs:
+  drift:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            runs: 20
+          - os: ubuntu-24.04-arm
+            runs: 10
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build once
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none bench/chunk_list_drift.cr -o bin/chunk_list_drift --error-trace
+      - name: make chunk-list-drift, repeated
+        env:
+          RUNS: ${{ matrix.runs }}
+        run: |
+          pass=0; fail=0; stall=0
+          for i in $(seq 1 "$RUNS"); do
+            bench/run_bounded.sh 900 "run-$i.log" -- make chunk-list-drift
+            rc=$?
+            echo "run $i rc=$rc"
+            grep -E "^=== refused|^  (shipped|fast):|^FAIL|^ok" "run-$i.log" | tail -5
+            case $rc in 0) pass=$((pass + 1));; 2|3) stall=$((stall + 1)); cat "run-$i.log";; *) fail=$((fail + 1)); cat "run-$i.log";; esac
+          done
+          echo "summary: ${{ matrix.os }} runs=$RUNS pass=$pass fail=$fail stall=$stall"
+          [ "$pass" = "$RUNS" ]

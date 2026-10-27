@@ -1,0 +1,25 @@
+=== does the chunk-list divergence accumulate with uptime? ===
+1200 collections per arm, 8 threads born per collection — the churn
+reproducer's workload. A chunk off `@chunks` is never swept and cannot rejoin the
+list, so `off-list chunks` is monotone and its slope is the leak rate.
+
+STALLED: still running after 300 s
+--- descendant 1384248: /home/naruto/playground/.scratch/DriftStall/bins/drift-orig --child --fast
+--- stall capture: pid 1384248, 6 thread(s)
+task 1384248 drift-orig state=R wchan=0
+task 1384249 SYSMON state=S wchan=hrtimer_nanosleep
+task 1384258 gcry-mark state=R wchan=futex_do_wait
+task 1384259 gcry-mark state=S wchan=futex_do_wait
+task 1384260 gcry-mark state=S wchan=futex_do_wait
+task 1384261 gc-idle state=S wchan=futex_do_wait
+--- gdb, attached through task 1384248
+Could not attach to process.  If your uid matches the uid of the target
+process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try
+again as the root user.  For more details, see /etc/sysctl.d/10-ptrace.conf
+ptrace: Inappropriate ioctl for device.
+No threads.
+--- innermost frames with arguments and locals
+Could not attach to process.  If your uid matches the uid of the target
+process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try
+again as the root user.  For more details, see /etc/sysctl.d/10-ptrace.conf
+ptrace: Inappropriate ioctl for device.

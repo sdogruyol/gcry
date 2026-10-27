@@ -235,7 +235,15 @@ module Gcry
     getter bytes_before_gc : UInt64 = 0_u64
     getter bytes_reclaimed_since_gc : UInt64 = 0_u64
     getter reclaimed_bytes_before_gc : UInt64 = 0_u64
-    getter expl_freed_bytes_since_gc : UInt64 = 0_u64
+    # Payload `GC.free` gave back since the last major (`GC_get_prof_stats`).
+    # Atomic: every freeing thread adds with no lock, and the stop zeroes it
+    # (`def_shared_counter`).
+    @expl_freed_bytes_since_gc : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+
+    def expl_freed_bytes_since_gc : UInt64
+      @expl_freed_bytes_since_gc.get
+    end
+
     getter? enabled : Bool = true
     property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
     # Library tests free manually — auto minor is opt-in (process GC enables it).
@@ -283,7 +291,21 @@ module Gcry
     getter tight_grow_collects : UInt64 = 0_u64
     getter tight_grow_prefer_allocs : UInt64 = 0_u64
     getter tight_grow_maps : UInt64 = 0_u64
-    getter dormant_chunk_bytes : UInt64 = 0_u64
+    # Mapped bytes of the chunks that are DORMANT now. Kept by the transitions
+    # alone — the sweep adds a chunk as it makes it dormant, a revival or
+    # `reuse_dormant` takes it out as it clears the flag — and atomic, since
+    # revivers under different class locks, the lazy sweep and the stop all
+    # write it (`def_shared_counter`). The major sweep used to zero it and
+    # recount the dormant chunks it walked; a revival frozen between its flag
+    # store and its subtraction (or between its load and its store) then took
+    # its chunk out of a count that no longer held it, or put back the count
+    # from before the stop.
+    @dormant_chunk_bytes : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+
+    def dormant_chunk_bytes : UInt64
+      @dormant_chunk_bytes.get
+    end
+
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64
     getter dontneed_bytes : UInt64 = 0_u64
@@ -891,6 +913,12 @@ module Gcry
     property collect_skip_when_busy : Bool = false
     @incremental_marking = false
     @inc_active = false
+    # Research only: false leaves TLABs and allocation-batch stashes
+    # unflushed in the incremental finishing slice (`collect_a_little`), the
+    # code before 2026-10-22 — the control arm of
+    # `process_spec/regression/85_frozen_class_gaps_spec.cr`'s *slice-stash*
+    # and *slice-tlab* windows.
+    property inc_finish_flush : Bool = true
     @world_stopped = false
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
@@ -1474,12 +1502,21 @@ module Gcry
     # `-1` means the count is not available rather than zero: a chunk with no
     # occupancy bitmap, i.e. the freelist allocator. A large chunk has exactly
     # one block, so its answer is that block's own FREE flag — 0 or 1.
+    #
+    # Read with `free_large?`, never `free?`. A large block keeps its 16-byte
+    # header in both layouts, but `free?` answers a *small* block's question
+    # and is constant `false` under headerless, the default. Asked that way,
+    # every large release on the default layout recorded "1 block still
+    # allocated", the cached FREE chunks the trim gives back included. That is
+    # how the 2026-09-28 `dormant_flush` sighting came to read as a chunk
+    # released with its block allocated, when the header it recorded was
+    # `FREE | LARGE` (`bench/log/linux/2026-10-21-dormant-flush-sighting/`).
     private def guard_occupied(base : UInt64, len : UInt64, kind : UInt8) : Int32
       if kind == GUARD_KIND_LARGE
         off = ChunkHeader.large_header_offset.to_u64
-        return -1 if len <= off &+ BlockHeader::SIZE.to_u64
+        return -1 if len <= off &+ BlockHeader::LARGE_HEADER_BYTES.to_u64
         header = Pointer(BlockHeader).new(base &+ off)
-        return BlockHeader.free?(header) ? 0 : 1
+        return BlockHeader.free_large?(header) ? 0 : 1
       end
       chunk = Pointer(ChunkHeader).new(base)
       words = chunk.value.bitmap_words
@@ -2134,12 +2171,40 @@ module Gcry
             collection_event(CollectionEvent::MarkEnd)
             enqueue_unreachable_finalizers
             collection_event(CollectionEvent::ReclaimStart)
+            # Before the flushes and the sweep write a freelist: which
+            # classes a frozen thread is inside (`note_frozen_freelists`).
+            note_frozen_freelists
+            # The same flushes as a stop-the-world collection's
+            # (`run_collection_body`), here because this is the stop that
+            # sweeps. Until 2026-10-22 no stop of an incremental cycle made
+            # them. An allocation-batch stash claimed before the cycle began
+            # is USED, unmarked (allocate-black marks only what is claimed or
+            # popped while marking) and linked only through its headers, so
+            # this sweep reclaimed it onto the class list while the slot still
+            # linked it, and the next pop from the slot handed out a block the
+            # list hands out as well. A TLAB's chain is FREE and on no list,
+            # so a rebuild of the class list (one the sweep makes after
+            # releasing an empty chunk of the class) linked the chain onto it
+            # while the TLAB still held it, with the same result; and a chunk
+            # holding nothing but chain blocks could be found empty and made
+            # dormant under it. A frozen class's stash and chains stay put,
+            # as in that stop, and so do its chunks.
+            # `process_spec/regression/85_frozen_class_gaps_spec.cr`.
+            if @inc_finish_flush
+              flush_all_tlabs
+              flush_all_alloc_batches
+              scrub_freelists
+            end
+            # A bitmap `free` frozen between its two clears must not come
+            # back occupied from the sweep (`clear_frozen_bitmap_stray_marks`).
+            clear_frozen_bitmap_stray_marks
             sweep(major: true)
+            clear_frozen_freelists
             collection_event(CollectionEvent::ReclaimEnd)
             adapt_after_sweep
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
-            @expl_freed_bytes_since_gc = 0_u64
+            @expl_freed_bytes_since_gc.set(0_u64)
             @collections += 1
             @major_collections += 1
             if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
@@ -2225,7 +2290,7 @@ module Gcry
     end
 
     def note_explicit_free(payload : UInt64) : Nil
-      @expl_freed_bytes_since_gc += payload
+      expl_freed_add(payload)
     end
 
     # `GC.free` calls that freed nothing. `GC.free` is the free hook zlib and
@@ -2478,7 +2543,8 @@ module Gcry
       @bytes_before_gc = 0_u64
       @bytes_reclaimed_since_gc = 0_u64
       @reclaimed_bytes_before_gc = 0_u64
-      @expl_freed_bytes_since_gc = 0_u64
+      @expl_freed_bytes_since_gc.set(0_u64)
+      @dormant_chunk_bytes.set(0_u64)
       @size_class_chunk_count = 0_u64
       @fully_free_chunk_bytes = 0_u64
       @released_chunk_bytes = 0_u64
@@ -2897,6 +2963,9 @@ module Gcry
           collection_event(CollectionEvent::PostStopWorld)
           @last_phase_stw_stop_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_FLUSH)
+          # Before the flushes below and the sweep write any freelist: which
+          # classes a frozen thread is inside (`note_frozen_freelists`).
+          note_frozen_freelists
           flush_all_tlabs
           # TLAB-off USED stash → freelist before mark (unscanned thread locals).
           flush_all_alloc_batches
@@ -3057,7 +3126,7 @@ module Gcry
           # the time the after-world sweep runs a churning program has created
           # threads that change the answer. See `latch_sweep_mutator_count`.
           latch_sweep_mutator_count
-          @lazy_sweep_pending = sweep_after_world?
+          @lazy_sweep_pending = sweep_after_world? && !sweep_frozen_classes_in_stop?
           StwWatchdog.enter(StwWatchdog::PHASE_SWEEP)
           unless @lazy_sweep_pending
             collection_event(CollectionEvent::ReclaimStart)
@@ -3072,7 +3141,7 @@ module Gcry
           if major
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
-            @expl_freed_bytes_since_gc = 0_u64
+            @expl_freed_bytes_since_gc.set(0_u64)
             @major_collections += 1
             if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
               Platform.invalidate_static_root_cache
@@ -3095,6 +3164,7 @@ module Gcry
         ensure
           t0 = monotonic_ns
           StwWatchdog.enter(StwWatchdog::PHASE_RESUME)
+          clear_frozen_freelists
           collection_event(CollectionEvent::PreStartWorld) if stw_reported
           start_world
           collection_event(CollectionEvent::PostStartWorld) if stw_reported
@@ -3137,6 +3207,8 @@ module Gcry
               CrystalTrace.finish("collect:sweep", trace_sweep)
               collection_event(CollectionEvent::ReclaimEnd)
               @lazy_sweep_pending = false
+              # The re-arm runs with the world running, against fault
+              # handlers on other threads: see `disarm_mprotect_barrier`.
               if major
                 arm_page_barrier_after_major
               else

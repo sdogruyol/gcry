@@ -1,0 +1,33 @@
+### child 1: bin/df_old --child (2a46123), GCRY_TRIM_IMMEDIATE=1 GCRY_UNMAP_GUARD=1 GCRY_MOSTLY_EMPTY=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=5000
+gcry: SIGSEGV at 0x7b1f9d5af000 — in a chunk gcry RELEASED — base 0x7b1f9d5af000, 45056 bytes, large-object release, at collection 17; the write is 0 bytes into it. Collections since: 0. First user word at release: 0x90000a000 (type_id 40960). Blocks still allocated at release: 1
+gcry: writer — the faulting instruction is at 0x597930e1fcec = exe+0x15ccec. sp 0x7b1f9effbe30 fp 0x7b1f9effcef0 cr2 0x7b1f9d5af000
+gcry: writer — addr2line -f -C -e <binary> 0x15ccec
+gcry: writer — return addresses above sp: addr2line -f -C -e <binary> 0x256345 0x18f508 0x256938 0x2565ab 0x19390b 0x207fd3 0x18f2da 0x208033 0x207f2f 0x1938db 0x18aebe 0x11b4a4 0xc5c60 0xc5c60 0x21be1e 0xbb270 0xe04f8 0x11762d 0x20be86 0xc5c60 0x116ddf 0x116da2 0x1894ba 0x18b3ef
+addr2line 0x15ccec and the first two return addresses:
+sweep	src/gcry/collect_sweep.cr:70
+gregs_at	src/gcry/stw_slots.cr:497
+clear	src/pointer.cr:625
+clear	src/gcry/stw_slots.cr:173
+
+### child 2: bin/df_old --child (2a46123), GCRY_TRIM_IMMEDIATE=1 GCRY_UNMAP_GUARD=1 GCRY_MOSTLY_EMPTY=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=5000
+gcry: SIGSEGV at 0x76fe84450024 — in a chunk gcry RELEASED — base 0x76fe84450000, 45056 bytes, large-object release, at collection 2; the write is 36 bytes into it. Collections since: 0. First user word at release: 0x90000a000 (type_id 40960). Blocks still allocated at release: 1
+gcry: writer — the faulting instruction is at 0x597a534b2fe0 = exe+0x18ffe0. sp 0x76fe7e7fadd8 fp 0x76fe7e7fbef0 cr2 0x76fe84450024
+gcry: writer — addr2line -f -C -e <binary> 0x18ffe0
+gcry: writer — return addresses above sp: addr2line -f -C -e <binary> 0x15f103 0x18adda 0x15d0d5 0x256345 0x256938 0x19390b 0x207fd3 0x18f2da 0x208033 0x193801 0x11b4a4 0xc5c60 0xc5c60 0x21be1e 0xbb270 0xe04f8 0x11762d 0x20be86 0xc5c60 0x116ddf 0x116da2 0x1894ba 0xc3a00 0x18b3ef
+addr2line 0x18ffe0 and the first two return addresses:
+free_large?	src/gcry/block.cr:358
+sweep_large_one	src/gcry/collect_sweep.cr:428
+lock	src/crystal/spin_lock.cr:11
+sweep	src/gcry/collect_sweep.cr:97
+
+### child 3: bin/df_old --child (2a46123), GCRY_TRIM_IMMEDIATE=1 GCRY_UNMAP_GUARD=1 GCRY_MOSTLY_EMPTY=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=5000
+gcry: SIGSEGV at 0x745162055024 — in a chunk gcry RELEASED — base 0x745162055000, 45056 bytes, large-object release, at collection 43; the write is 36 bytes into it. Collections since: 0. First user word at release: 0x90000a000 (type_id 40960). Blocks still allocated at release: 1
+gcry: writer — the faulting instruction is at 0x5bf3fa4a6fe0 = exe+0x18ffe0. sp 0x74517dff9dd8 fp 0x74517dffaef0 cr2 0x745162055024
+gcry: writer — addr2line -f -C -e <binary> 0x18ffe0
+gcry: writer — return addresses above sp: addr2line -f -C -e <binary> 0x15f103 0x18adda 0x15d0d5 0x256345 0x18f508 0x256938 0x2565ab 0x19390b 0x207fd3 0x18f2da 0x208033 0x207f2f 0x1938db 0x18aebe 0x11b4a4 0xc5c60 0xc5c60 0x21be1e 0xbb270 0xe04f8 0x11762d 0x20be86 0xc5c60 0x116ddf
+addr2line 0x18ffe0 and the first two return addresses:
+free_large?	src/gcry/block.cr:358
+sweep_large_one	src/gcry/collect_sweep.cr:428
+lock	src/crystal/spin_lock.cr:11
+sweep	src/gcry/collect_sweep.cr:97
+

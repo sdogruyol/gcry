@@ -1,0 +1,185 @@
+# diag v1: instrumented copy at 52c0c3f5 (parker thread vs worker, parked block size, worker's collections count after its allocations)
+1 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+2 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+3 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+4 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+5 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+6 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+7 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+8 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+9 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+10 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+11 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+12 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+13 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+14 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+15 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+16 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+17 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+18 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+19 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+20 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+21 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+22 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+23 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+24 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+25 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+26 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+27 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+28 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+29 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+30 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+31 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+32 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+33 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+34 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+35 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+36 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+37 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+38 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+39 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+40 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+41 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+42 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+43 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+44 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+45 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+46 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+47 rc=1 pass=0 DBG84 parker_is_worker=false parked_size=192 worker_c=0 stops=1 held=5 listed=[0, 1, 2]
+48 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+49 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+50 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+51 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+52 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+53 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+54 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+55 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+56 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+57 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+58 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+59 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+60 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+61 rc=1 pass=0 DBG84 parker_is_worker=false parked_size=192 worker_c=0 stops=1 held=5 listed=[0, 1, 2]
+62 rc=1 pass=0 DBG84 parker_is_worker=false parked_size=192 worker_c=0 stops=1 held=5 listed=[0, 1, 2]
+63 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+64 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+65 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+66 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+67 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+68 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+69 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+70 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+71 rc=1 pass=0 DBG84 parker_is_worker=false parked_size=192 worker_c=0 stops=1 held=5 listed=[0, 1, 2]
+72 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+73 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+74 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+75 rc=1 pass=0 DBG84 parker_is_worker=false parked_size=192 worker_c=0 stops=1 held=5 listed=[0, 1, 2]
+76 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+77 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+78 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+79 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+80 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+81 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+82 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+83 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+84 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+85 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+86 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+87 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+88 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+89 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+90 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+91 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+92 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+93 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+94 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+95 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+96 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+97 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+98 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+99 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+100 rc=0 pass=1 DBG84 parker_is_worker=true parked_size=24576 worker_c=1 stops=1 held=5 listed=[]
+pass 95 of 100
+
+# diag v2: + which thread parked, held blocks FREE, worker stash after the stop
+1 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+2 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+3 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+4 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+5 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+6 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+7 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+8 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+9 rc=1 pass=0 DBG84 parker=idler parked_size=192 worker_c=0 stops=1 held=5 listed=[0, 1, 2] free_held=3 worker_stash_after_stop=0
+10 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+11 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+12 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+13 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+14 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+15 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+16 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+17 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+18 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+19 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+20 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+21 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+22 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+23 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+24 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+25 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+26 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+27 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+28 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+29 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+30 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+31 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+32 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+33 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+34 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+35 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+36 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+37 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+38 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+39 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+40 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+41 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+42 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+43 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+44 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+45 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+46 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+47 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+48 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+49 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+50 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+51 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+52 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+53 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+54 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+55 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+56 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+57 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+58 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+59 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+60 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+61 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+62 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+63 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+64 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+65 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+66 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+67 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+68 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+69 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+70 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+71 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+72 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+73 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+74 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+75 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+76 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+77 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+78 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+79 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+80 rc=0 pass=1 DBG84 parker=worker parked_size=24576 worker_c=1 stops=1 held=5 listed=[] free_held=0 worker_stash_after_stop=3
+pass 79 of 80

@@ -1,0 +1,30 @@
+# Copied to .github/workflows/ on a `probe/darwin-image0` branch only
+# (push-triggered there), never on a real branch. PROBE_SHA is the probed
+# commit, a full SHA.
+name: Probe darwin-image0
+on:
+  push:
+    branches: ["probe/darwin-image0"]
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["macos-latest", "macos-15-intel"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: PROBE_SHA
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: image 0 arms
+        run: bench/log/macos/2026-10-23-darwin-image0/probe.sh
+      - name: process_spec
+        if: always()
+        run: crystal spec -Dgc_none process_spec

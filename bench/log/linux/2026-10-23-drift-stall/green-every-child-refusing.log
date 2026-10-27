@@ -1,0 +1,40 @@
+=== does the chunk-list divergence accumulate with uptime? ===
+1200 collections per arm, 8 threads born per collection — the churn
+reproducer's workload. A chunk off `@chunks` is never swept and cannot rejoin the
+list, so `off-list chunks` is monotone and its slope is the leak rate.
+
+=== shipped — mutator count latched in the stop ===
+  collections   off-list   retained B   heap B   chunks mapped
+          200          0            0   44896256             343
+          400          0            0   68001792             520
+          600          0            0   92774400             709
+          800          0            0   118202368             903
+         1000          0            0   163160064            1246
+         1200          0            0   200515584            1531
+  nothing left the list in 1200 collections and 1531 mappings:
+  the rate is below 1 per 1531 mappings on this arm
+
+fast arm: 2 child(ren) crashed or hung before the first bucket and were run again
+fast arm: 3 child(ren) hung and were killed after 30 s — the pre-fix shape hangs as it crashes, on a cycle in `@chunks` (the refused-releases arm forces it)
+=== fast — `sweep_mutator_latch = false`, the pre-fix reads ===
+  no buckets — the child hung before the first one
+
+=== shipped, startup regime — 24 processes x 240 collections, thread churn only ===
+  processes that stranded a chunk: 0 of 24
+  stranded: 0 chunk(s) of 801 mapped
+  nothing stranded: below 1 per 801 mappings in this regime too
+
+=== window — a chunk mapped between the after-world sweep's walk and its store, 300 collections ===
+  splice:    hook ran 300 time(s), mapped 300 chunk(s) in the window, stranded 0, back-links wrong 0
+  no splice: hook ran 300 time(s), mapped 300 chunk(s) in the window, stranded 299
+
+=== window-free — a large block freed between the after-world sweep's walk and its store, 300 collections ===
+  freed 300 in the window, 300 trim(s) declined; listed and not indexed 0, indexed and not listed 0; large cache 0 B at the end
+  excused: 0 listed chunk(s) whose mapper the stop caught between the list and the index
+
+=== refused releases — every empty-chunk release refused, 240 collections ===
+  shipped: exited cleanly, 8749 release(s) refused
+  fast:    hung, killed after 20 s, 2493 release(s) refused by its last bucket
+
+FAIL the shipped arm mapped only 1531 chunks (want 5000): it measured nothing
+FAIL the fast arm crashed or hung before its first bucket 3 times in a row: it no longer lives long enough to measure anything

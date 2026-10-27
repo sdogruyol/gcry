@@ -666,14 +666,27 @@ module Gcry
     # full — not in the table, outside the chunk's blocks, a large or nursery
     # chunk — goes to `mark_impl`, which stays the authority.
     private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
-      lo = @heap_min
-      hi = @heap_max
-      l1 = @radix_l1
-      shift = @radix_granule_shift
-      l2_mask = @radix_l2_mask
+      hits = scan_edges_run(cursor, cursor + words, base_only, shard,
+        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask)
+      # `radix_note_fast_hit`, once per payload.
+      @radix_fast_hits &+= hits unless @mark_parallel
+    end
+
+    # `scan_edges_inline`'s loop over the words in `[p, finish)`, with the span
+    # and the radix fields passed in, so that a caller scanning many payloads
+    # in a row (`scan_batch_prefetched`) loads them once for all of them.
+    # Returns the candidates it resolved in place, which the caller adds to
+    # `@radix_fast_hits` (`radix_note_fast_hit`'s count) when serial.
+    #
+    # The span stays two tests: one unsigned `w &- lo >= hi &- lo` was slower
+    # on all four heaps measured, with one marker JsonParsePure 9.44 → 9.93 and
+    # JsonGenerate 7.25 → 7.92 ns per marked object
+    # (`bench/log/linux/2026-10-23-mark-cost/`).
+    @[AlwaysInline]
+    private def scan_edges_run(p : UInt64*, finish : UInt64*, base_only : Bool, shard : MarkShard?,
+                               lo : UInt64, hi : UInt64, l1 : Pointer(Pointer(ChunkHeader*)),
+                               shift : Int32, l2_mask : UInt64) : UInt64
       hits = 0_u64
-      p = cursor
-      finish = cursor + words
       while p < finish
         w = p.value
         p += 1
@@ -712,8 +725,7 @@ module Gcry
         next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
         mark_stack_push(mark_entry(chunk, header), shard)
       end
-      # `radix_note_fast_hit`, once per payload.
-      @radix_fast_hits &+= hits unless @mark_parallel
+      hits
     end
 
     # Scan length for one object, derived from its **chunk** (Phase 7.6).

@@ -1,0 +1,26 @@
+retire82: control released the chunk its slot names
+gcry: SIGSEGV at 0x7913e683f010 — inside the heap span but in no live chunk — the chunk was unmapped, or the address is in a hole between chunks
+gcry: writer — the faulting instruction is at 0x5fccdcd25502 = exe+0x1bd502. sp 0x7913e5ffe6b0 fp 0x7913e5ffeef0 cr2 0x7913e683f010
+gcry: writer — addr2line -f -C -e <binary> 0x1bd502
+gcry: writer — return addresses above sp: addr2line -f -C -e <binary> 0x13a7b0 0x13a7b0 0x20fcbc 0x20dead 0x20d36e 0x237fc4 0x22409b 0x21b2fe 0x20ce2b 0x21b21a 0x209567 0x20613b 0x239b7c 0x239e1b 0x1a6a9f 0x1a7d7b 0x197e70 0x21b2fe 0x252c00 0x1a5f7b 0x16f060 0x22a82a 0x21b82f 0x16effe
+Invalid memory access (signal 11) at address 0x7913e683f010
+[0x5fccdccd2aba] *Exception::CallStack::print_backtrace:Nil +122 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcc9ca76] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +278 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x7913e8a45cb0] ?? +133126414425264 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x5fccdcd25502] *Gcry::Heap#retire_cursor_slot_cursor_first<Pointer(Gcry::CursorSlot), Bool>:Nil +322 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcd77cbc] *Gcry::Heap#retire_cursor_slot<Pointer(Gcry::CursorSlot), Bool>:Nil +60 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcd75ead] *Gcry::Heap#bitmap_refill_pool<Pointer(Gcry::CursorSlot), Int32, UInt32, Bool, Bool>:Bool +477 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcd7536e] *Gcry::Heap#bitmap_alloc_locked<Int32, UInt32, UInt32>:Pointer(Void) +430 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcd74e2b] *Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void) +59 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcd71567] *Gcry::Heap#alloc_old_small<UInt32, UInt32, Int32, UInt64>:Tuple(Pointer(Void), Bool) +1543 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcd0fd7b] *Gcry::Heap#allocate:atomic:clear<UInt64, Bool, Bool>:Pointer(Void) +1723 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcd0df7b] *Gcry::Heap#malloc<UInt64>:Pointer(Void) +123 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdccd7060] *GC::malloc<UInt64>:Pointer(Void) +96 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdccd6ffe] *GC::malloc<Int32>:Pointer(Void) +14 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcca2b49] ~procProc(Thread, Nil) +185 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcda57a2] *Thread#start:(Exception+ | Nil) +210 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcda92a7] *Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void) +55 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x5fccdcc66c86] ~procProc(Pointer(Void), Pointer(Void)) +6 in /home/naruto/playground/.scratch/InStopSweepAudit/bin/exp82
+[0x7913e8aa3dfa] ?? +133126414810618 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7913e8b375cc] ?? +133126415414732 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x0] ???

@@ -1,0 +1,182 @@
+samples 4807, outside binary 629
+ 13.4% *Array(Char)@Indexable(T)#sample<Int32, Random::PCG32>:Array(Char)
+ 12.8% *Benchmark::run<(String | Nil)>:Nil
+ 12.8% *Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil
+  6.4% *Float64#to_s<IO+>:Nil
+  4.9% *JSON::Builder#start_scalar<Bool>:Nil
+  3.8% *IO+@IO#<<<Char>:IO+
+  3.3% *IO::Memory#write_byte<UInt8>:Nil
+  3.1% *JSON::Builder#end_scalar<Bool>:(JSON::Builder::ArrayState | JSON::Builder::DocumentEndState | JSON::Builder::ObjectState)
+  2.7% *Float::Printer::Dragonbox::to_decimal<Float64>:Tuple(UInt64, Int32)
+  2.0% *Gcry::Heap#malloc<UInt64>:Pointer(Void)
+  2.0% *Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil
+  1.9% *Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>:Nil
+  1.7% *JSON::Builder::Escape#write<Slice(UInt8)>:Nil
+  1.5% *GC::malloc_atomic<UInt64>:Pointer(Void)
+  1.3% *IO::Memory#increase_capacity_by<Int32>:(Pointer(UInt8) | Nil)
+  1.2% *IO+@IO#write_string<Slice(UInt8)>:Nil
+  1.2% *Slice(UInt8)@Slice(T)#[]<Range(Int64, Nil)>:Slice(UInt8)
+  0.9% *Char#to_s<String::Builder>:Nil
+  0.9% *JSON::Builder#end_object:Nil
+  0.7% *JSON::Builder#string<String>:Nil
+  0.7% *Array(Char)@Array(T)#<<<Char>:Array(Char)
+  0.7% *IO::Memory#write<Slice(UInt8)>:Nil
+  0.7% *JsonGenerate#run:Bool
+  0.7% *Array(JsonGenerate::Coordinate)@Array(T)#<<<JsonGenerate::Coordinate>:Array(JsonGenerate::Coordinate)
+  0.7% *Gcry::Heap#owns_user_pointer_in?<Pointer(Void), Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)>:Bool
+
+=== *Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil (613 samples)
+     0 63310: push   rbp
+     0 63311: push   r15
+     5 63313: push   r14
+     1 63315: push   r13
+     0 63317: push   r12
+     5 63319: push   rbx
+     0 6331a: sub    rsp,0x38
+     0 6331e: mov    DWORD PTR [rsp+0x8],ecx
+     0 63322: test   rdx,rdx
+     7 63325: js     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x249>
+     0 6332b: mov    rbx,rdi
+     0 6332e: je     6352f <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x21f>
+     0 63334: mov    r14,rsi
+     5 63337: mov    rbp,QWORD PTR [rbx+0x4040]
+     1 6333e: mov    r15,QWORD PTR [rbx+0x4048]
+     0 63345: mov    rax,QWORD PTR [rbx+0x8]
+     0 63349: mov    QWORD PTR [rsp+0x30],rax
+     0 6334e: mov    eax,DWORD PTR [rbx+0x10]
+     5 63351: mov    QWORD PTR [rsp+0x28],rax
+     0 63356: mov    rax,QWORD PTR [rbx+0x18]
+     0 6335a: mov    QWORD PTR [rsp+0x20],rax
+    12 6335f: lea    r12,[rsi+rdx*8]
+     1 63363: mov    QWORD PTR [rsp+0x18],0x0
+     0 6336c: movzx  eax,BYTE PTR [rsp+0x8]
+    10 63371: mov    DWORD PTR [rsp+0xc],eax
+     0 63375: jmp    633a1 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x91>
+     0 63377: nop    WORD PTR [rax+rax*1+0x0]
+     0 63380: mov    rdi,rbx
+     0 63383: xor    edx,edx
+     0 63385: mov    ecx,DWORD PTR [rsp+0xc]
+     0 63389: mov    r8d,0x3
+     0 6338f: call   3dd20 <*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSo
+     0 63394: add    r14,0x8
+    53 63398: cmp    r14,r12
+     0 6339b: jae    63538 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x228>
+     8 633a1: mov    rsi,QWORD PTR [r14]
+    16 633a4: cmp    rsi,rbp
+    27 633a7: jb     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 633a9: cmp    rsi,r15
+     0 633ac: jae    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 633ae: mov    rax,rsi
+     7 633b1: shr    rax,0x20
+     0 633b5: movzx  eax,ax
+     1 633b8: mov    rcx,QWORD PTR [rsp+0x30]
+     2 633bd: mov    rax,QWORD PTR [rcx+rax*8]
+     7 633c1: test   rax,rax
+     0 633c4: je     63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x70>
+     0 633c6: mov    rdx,rsi
+     0 633c9: mov    rcx,QWORD PTR [rsp+0x28]
+     0 633ce: shr    rdx,cl
+     0 633d1: and    rdx,QWORD PTR [rsp+0x20]
+     5 633d6: js     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x249>
+     0 633dc: mov    r8,QWORD PTR [rax+rdx*8]
+     8 633e0: test   r8,r8
+     0 633e3: je     63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x70>
+     0 633e5: mov    edi,DWORD PTR [r8+0x10]
+    16 633e9: cmp    rdi,0x28
+     0 633ed: setae  al
+     0 633f0: mov    r10d,DWORD PTR [r8+0x1c]
+     0 633f4: test   r10d,r10d
+     0 633f7: sete   cl
+    10 633fa: or     cl,al
+     5 633fc: cmp    cl,0x1
+     0 633ff: je     63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x70>
+     0 63405: mov    r11d,DWORD PTR [r8+0x18]
+     7 63409: add    r11,r8
+     0 6340c: mov    r9,QWORD PTR [r8+0x8]
+     0 63410: add    r9,r8
+     0 63413: mov    r13d,DWORD PTR [r8+0x14]
+     0 63417: mov    rax,rsi
+     8 6341a: sub    rax,r11
+     0 6341d: setb   cl
+     9 63420: cmp    rsi,r9
+     0 63423: setae  dl
+     7 63426: mov    DWORD PTR [rsp+0x10],r13d
+     0 6342b: or     dl,r13b
+     1 6342e: or     dl,cl
+     0 63430: test   dl,0x1
+     3 63433: jne    63380 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x70>
+     0 63439: mul    QWORD PTR [rbx+rdi*8+0x2258]
+    17 63441: jo     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x249>
+     1 63447: inc    QWORD PTR [rsp+0x18]
+     5 6344c: mov    rcx,rax
+     0 6344f: shr    rcx,0x28
+     0 63453: mov    rdx,QWORD PTR [rbx+rdi*8+0x2118]
+     0 6345b: mov    r13,rdx
+     0 6345e: imul   r13,rcx
+    20 63462: add    r13,r11
+     5 63465: add    rdx,r13
+     4 63468: cmp    rdx,r9
+     0 6346b: ja     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 63471: mov    edx,r10d
+     9 63474: shr    rax,0x2e
+     0 63478: lea    r10,[r8+rax*8]
+     0 6347c: mov    r9d,0x1
+     0 63482: shl    r9,cl
+    16 63485: mov    r10,QWORD PTR [r10+rdx*8+0x20]
+    11 6348a: bt     r10,rcx
+     1 6348e: jb     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 63494: lea    rax,[r8+rax*8+0x20]
+    18 63499: cmp    rsi,r13
+     0 6349c: setne  cl
+     0 6349f: test   QWORD PTR [rax],r9
+     8 634a2: je     63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 634a8: and    cl,BYTE PTR [rsp+0x8]
+     9 634ac: jne    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 634b2: lock or QWORD PTR [rax+rdx*8],r9
+   176 634b7: test   BYTE PTR [rsp+0x10],0x10
+    18 634bc: jne    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 634c2: inc    edi
+     0 634c4: shl    rdi,0x38
+     0 634c8: or     r13,rdi
+     0 634cb: cmp    BYTE PTR [rbx+0x14ff4],0x0
+     0 634d2: je     634e4 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x1d4>
+     0 634d4: mov    rdi,rbx
+     0 634d7: mov    rsi,r13
+     0 634da: call   3e950 <*Gcry::Heap#push_to_own_shard<Pointer(Gcry::BlockHeader)>:Nil>
+     0 634df: jmp    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 634e4: mov    rdx,QWORD PTR [rbx+0x15198]
+     0 634eb: mov    eax,DWORD PTR [rdx+0x14]
+     1 634ee: cmp    eax,DWORD PTR [rdx+0x10]
+     5 634f1: jl     63516 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x206>
+     0 634f3: mov    rsi,QWORD PTR [rdx+0x18]
+     0 634f7: test   rsi,rsi
+     0 634fa: js     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x249>
+     0 634fc: add    rsi,rsi
+     0 634ff: mov    QWORD PTR [rsp+0x10],rdx
+     0 63504: mov    rdi,QWORD PTR [rsp+0x10]
+     0 63509: call   1fa70 <*Gcry::MarkStack#grow<UInt64>:Nil>
+     0 6350e: mov    rdx,QWORD PTR [rsp+0x10]
+     0 63513: mov    eax,DWORD PTR [rdx+0x14]
+     0 63516: mov    rcx,QWORD PTR [rdx+0x8]
+    13 6351a: cdqe
+     6 6351c: mov    QWORD PTR [rcx+rax*8],r13
+     0 63520: mov    eax,DWORD PTR [rdx+0x14]
+     0 63523: inc    eax
+     0 63525: jo     63559 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x249>
+     0 63527: mov    DWORD PTR [rdx+0x14],eax
+     0 6352a: jmp    63394 <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x84>
+     0 6352f: mov    QWORD PTR [rsp+0x18],0x0
+     0 63538: cmp    BYTE PTR [rbx+0x14ff4],0x0
+     0 6353f: jne    6354a <*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil+0x23a>
+     0 63541: mov    rax,QWORD PTR [rsp+0x18]
+     0 63546: add    QWORD PTR [rbx+0x28],rax
+     2 6354a: add    rsp,0x38
+     0 6354e: pop    rbx
+     4 6354f: pop    r12
+     5 63551: pop    r13
+     1 63553: pop    r14
+     0 63555: pop    r15
+     0 63557: pop    rbp
+     6 63558: ret
+     0 63559: call   1a950 <__crystal_raise_overflow>
+     0 6355e: xchg   ax,ax

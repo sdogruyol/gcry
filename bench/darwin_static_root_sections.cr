@@ -155,9 +155,10 @@ require "../src/gcry"
 
     def self.sections : Array(Sect)
       list = [] of Sect
-      mh = LibProbe._dyld_get_image_header(0_u32)
-      return list if mh.null? || mh.value.magic != MH_MAGIC_64
-      slide = LibProbe._dyld_get_image_vmaddr_slide(0_u32).to_u64!
+      exe = Gcry::Platform.executable_image
+      return list unless exe
+      mh, slide = exe
+      return list if mh.value.magic != MH_MAGIC_64
       p = Pointer(UInt8).new(mh.address + sizeof(LibProbe::MachHeader64))
       cmd_i = 0_u32
       while cmd_i < mh.value.ncmds

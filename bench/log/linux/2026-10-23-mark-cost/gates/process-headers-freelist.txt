@@ -1,0 +1,31 @@
+........................................................gcry: GC.free ignored 0x73ea4fe5aa20: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+.gcry: GC.free ignored 0x73ea4fe5aa28: not a live gcry allocation (interior pointer, or its chunk was released); counted in double_frees / stale_frees, reported once per kind
+..........................................................................................................GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+..GC Warning: Out of Memory! Heap size: 198 MiB. Returning NULL!
+..................gcry: finalization cycle involving 0x73ea4562c5f0 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 1
+gcry: finalization cycle involving 0x73ea4562c5f0 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 2
+gcry: finalization cycle involving 0x73ea4562c5f0 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 4
+..........................................gcry: static roots collapsed to 18208 bytes from 67232712 — globals are not roots this collection. collection 288
+..........gcry: finalization cycle involving 0x73ea04ff1e20 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 8
+gcry: finalization cycle involving 0x73ea04f1c980 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 16
+....stale86: needs a --release build on x86-64 or arm64 outside Windows, skipped
+................................................
+
+Finished in 3:22 minutes
+287 examples, 0 failures, 0 errors, 0 pending
+exit 0

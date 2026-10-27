@@ -1,0 +1,16 @@
+crystal build -Dgc_none bench/mark_audit.cr -o bin/mark_audit --error-trace
+bin/mark_audit
+=== mark completeness audit ===
+mode: hold (audit on)
+hold: 1021 edges walked, 199 missed
+clean: 1418 edges walked, 0 missed
+
+ok — the audit names a planted edge the mark does not follow, and reports none on the same workload without it
+bin/mark_audit --control
+=== mark completeness audit ===
+mode: control (GCRY_MARK_AUDIT unset; nothing may be walked)
+hold: 0 edges walked, 0 missed
+clean: 0 edges walked, 0 missed
+
+ok — with the knob off nothing is walked, so the other run's edge counts are attributable to the audit
+exit 0

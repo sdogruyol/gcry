@@ -113,6 +113,12 @@ module Gcry
       {% end %}
     end
 
+    # Also called with the world running — the re-arm after a lazy sweep,
+    # `abort_incremental` — while fault handlers may be running on other
+    # threads against the cards and protection it replaces. The handler
+    # side copes with that (`platform/linux_mprotect.cr`, above
+    # `@@mp_state`): the cards are freed once no handler is inside, and a
+    # handler that straddles the swap leaves its page recorded or protected.
     protected def disarm_mprotect_barrier : Nil
       {% if flag?(:linux) %}
         each_chunk do |chunk|

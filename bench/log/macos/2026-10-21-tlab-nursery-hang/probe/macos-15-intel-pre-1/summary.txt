@@ -1,0 +1,3 @@
+macos-15-intel/pre/1: runs=1000 pass=1000 failed=0 stalled=0 upstream=0 unengaged=0 watchdog_lines=0
+  tlab-nursery: n=750 p50=3.35s p99=7.42s max=9.57s
+  tlab-only: n=250 p50=7.82s p99=16.11s max=18.39s

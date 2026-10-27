@@ -85,6 +85,30 @@ module Gcry
         fun _dyld_get_image_vmaddr_slide(image_index : UInt32) : Int64
         fun _dyld_register_func_for_add_image(func : MachHeader64*, Int64 -> Void)
         fun _dyld_register_func_for_remove_image(func : MachHeader64*, Int64 -> Void)
+        fun _NSGetMachExecuteHeader : MachHeader64*
+      end
+
+      # The executable's header and slide. Not image 0: dyld numbers images
+      # in load order and an inserted library (`DYLD_INSERT_LIBRARIES`) is
+      # image 0 for the life of the process, at `GC.init` and after
+      # (bench/log/macos/2026-10-23-darwin-image0/, run 39939811092). Reading
+      # image 0 took the dylib's data as the executable's, its TLS size (zero)
+      # for the main thread's and its slide as `exe_bias`. The header is
+      # `_NSGetMachExecuteHeader`, matched to an index only for the slide.
+      # Call outside a stopped world: in dyld4 the index walk takes the
+      # loaders lock.
+      def self.executable_image : {LibDyld::MachHeader64*, UInt64}?
+        exe = LibDyld._NSGetMachExecuteHeader
+        return nil if exe.null?
+        n = LibDyld._dyld_image_count
+        i = 0_u32
+        while i < n
+          if LibDyld._dyld_get_image_header(i) == exe
+            return {exe, LibDyld._dyld_get_image_vmaddr_slide(i).to_u64!}
+          end
+          i += 1
+        end
+        nil
       end
 
       # One-region query for the mapping that contains a thread-local. The full
@@ -332,13 +356,14 @@ module Gcry
       end
 
       private def self.scan_dyld_static_roots(& : Void*, Void* ->) : Nil
-        # Image 0 is the main executable — Crystal class/global vars live there.
-        mh = LibDyld._dyld_get_image_header(0_u32)
-        return if mh.null?
+        # The executable — Crystal class/global vars live there. Found once
+        # and remembered: a refresh may run in a stopped world.
+        exe = executable_image_cached || executable_image
+        return unless exe
+        mh, slide = exe
         return unless mh.value.magic == MH_MAGIC_64
         @@exe_mh = mh.address
-
-        slide = LibDyld._dyld_get_image_vmaddr_slide(0_u32).to_u64!
+        @@exe_slide = slide
         @@exe_bias = slide
         p = Pointer(UInt8).new(mh.address + sizeof(LibDyld::MachHeader64))
         cmd_i = 0_u32
@@ -405,6 +430,12 @@ module Gcry
 
       def self.exe_bias : UInt64
         @@exe_bias
+      end
+
+      # The executable as `GC.init` resolved it, `nil` before.
+      def self.executable_image_cached : {LibDyld::MachHeader64*, UInt64}?
+        return nil if @@exe_mh == 0
+        {Pointer(LibDyld::MachHeader64).new(@@exe_mh), @@exe_slide}
       end
 
       def self.exe_text?(addr : UInt64) : Bool
@@ -613,6 +644,7 @@ module Gcry
       # Literal initialisers only — see the once-guard note at the top. The
       # callbacks can also run on a thread Crystal does not know.
       @@exe_mh = 0_u64
+      @@exe_slide = 0_u64
       @@images_addr = 0_u64
       @@image_count = 0
       @@images_registered = false

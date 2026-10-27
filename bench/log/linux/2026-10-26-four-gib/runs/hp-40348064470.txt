@@ -1,0 +1,21 @@
+== /home/naruto/playground/.scratch/FourGiB/r64470
+macos-15-intel: floor 769 MiB
+  base     25/40 high  median 891  high: 785 825 826 852 852 891 892 892 892 892 892 892 892 892 892 892 893 893 893 893 893 947 947 947 948
+  var      21/40 high  median 785  high: 785 785 785 826 826 851 851 852 892 892 892 892 893 893 893 893 907 907 948 948 948
+  var_env  26/40 high  median 852  high: 825 826 826 826 826 826 852 891 891 891 892 892 892 892 892 892 892 892 892 893 893 893 947 948 948 948
+macos-latest: floor 770 MiB
+  base     33/40 high  median 892  high: 796 891 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 924 928 928 948 1055 1055 1056 1056 1056 1056
+  var      32/40 high  median 893  high: 796 796 892 892 892 892 892 892 892 892 892 892 893 928 928 960 1055 1055 1055 1055 1056 1056 1056 1056 1056 1056 1056 1056 1056 1056 1056 1056
+  var_env  31/40 high  median 892  high: 796 796 891 891 891 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 892 928 1056 1056 1056 1056
+ubuntu-24.04-arm: floor 769 MiB
+  base      1/40 high  median 769  high: 890
+  var       0/40 high  median 769  high: 
+  var_env   6/40 high  median 769  high: 824 890 890 890 890 926
+ubuntu-latest: floor 769 MiB
+  base      2/40 high  median 771  high: 826 891
+  var       0/40 high  median 771  high: 
+  var_env   5/40 high  median 771  high: 891 891 927 927 927
+windows-latest: floor 773 MiB
+  base      8/40 high  median 774  high: 830 830 895 896 896 896 932 932
+  var       1/40 high  median 774  high: 896
+  var_env   6/40 high  median 774  high: 799 829 895 895 895 896

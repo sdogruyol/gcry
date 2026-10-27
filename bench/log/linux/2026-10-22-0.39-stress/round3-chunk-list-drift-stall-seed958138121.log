@@ -1,0 +1,28 @@
+crystal build -Dgc_none bench/chunk_list_drift.cr -o bin/chunk_list_drift --error-trace
+CHUNK_DRIFT_ROUNDS=1200 bin/chunk_list_drift
+=== does the chunk-list divergence accumulate with uptime? ===
+1200 collections per arm, 8 threads born per collection — the churn
+reproducer's workload. A chunk off `@chunks` is never swept and cannot rejoin the
+list, so `off-list chunks` is monotone and its slope is the leak rate.
+
+STALLED: still running after 600 s
+--- descendant 3400282: /home/naruto/playground/.scratch/st039d-src/bin/chunk_list_drift --child --fast
+--- stall capture: pid 3400282, 7 thread(s)
+task 3400282 chunk_list_drif state=R wchan=0
+task 3400283 SYSMON state=S wchan=hrtimer_nanosleep
+task 3400292 gcry-mark state=S wchan=futex_do_wait
+task 3400293 gcry-mark state=S wchan=futex_do_wait
+task 3400294 gcry-mark state=S wchan=futex_do_wait
+task 3400295 gc-idle state=S wchan=futex_do_wait
+task 3400738 chunk_list_drif state=R wchan=0
+--- gdb, attached through task 3400282
+Could not attach to process.  If your uid matches the uid of the target
+process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try
+again as the root user.  For more details, see /etc/sysctl.d/10-ptrace.conf
+ptrace: Inappropriate ioctl for device.
+No threads.
+--- innermost frames with arguments and locals
+Could not attach to process.  If your uid matches the uid of the target
+process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try
+again as the root user.  For more details, see /etc/sysctl.d/10-ptrace.conf
+ptrace: Inappropriate ioctl for device.

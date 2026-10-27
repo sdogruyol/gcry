@@ -1778,7 +1778,7 @@ mark-clear-index: $(BIN)
 # and it is an RSS question rather than a soundness one. A chunk stranded off
 # `@chunks` by a prepend racing the sweep's walk is never swept and can never
 # rejoin the list, so the loss is permanent — but it rides *mappings*, not
-# uptime, and a heap that has reached its working size stops mapping. Six
+# uptime, and a heap that has reached its working size stops mapping. Seven
 # arms in one run. The shipped tree must strand **nothing**, in steady state and
 # across 24 short processes: the after-world sweep's store now splices back what
 # `map_chunk` prepended during its walk (`Heap#publish_relinked_chunks`), so the
@@ -1801,7 +1801,16 @@ mark-clear-index: $(BIN)
 # `map_chunk`'s list publish and its index insert is in flight, not divergent:
 # the audit excuses exactly that one and the arm prints how many (the idle
 # thread's birth chunk, 38 of 1000 children before it was excused); a mapper
-# the stop left running still counts. ~10-35 s.
+# the stop left running still counts. Every child runs under a deadline
+# (`BoundedChild`): the fast arm hangs as well as crashes, on a cycle its list
+# closes when the flush refuses an occupied release and links the chunk back in
+# front, and one such child stalled this gate for 600 s (0.39.0's night). The
+# refused-releases arm forces that: with every empty-chunk release refused
+# (`GCRY_REFUSE_EMPTY_RELEASE`) and the latch-off race made on demand — an
+# empty chunk at the head of the list, and two threads born when the sweep
+# drops it (`Heap.sweep_drop_hook`) — the shipped child must exit cleanly
+# after 40 such collections and the fast child must hang, and is killed at
+# 10 s. ~40 s.
 chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift
@@ -1832,10 +1841,17 @@ counter-loss: $(BIN)
 # triggers, so a block of it nothing writes is read as roots. `--release`,
 # because only inlining puts `check_fork_poison!`'s message buffer there: 73
 # stale words with it inline, 13 without, on x86-64 Linux. A debug build
-# reads 21 either way.
+# reads 21 either way. Regression 86 then asks for none at all: the slow path
+# leaves the entry by tail calls and zeroes the stack below the SP it was
+# entered with (`Heap#allocate_entry`/`allocate_wipe`), so the frames the
+# collection runs on hold only what they write (13 before, 2 with the wipe
+# off, 0), and the wipe must start within a frame record of that SP (56
+# bytes below it on x86-64 Linux when the bound was read in the wiping
+# frame, 0 now).
 .PHONY: alloc-entry-frame
 alloc-entry-frame: $(BIN)
-	$(CRYSTAL) spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr
+	$(CRYSTAL) spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr \
+	  process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr
 
 # The occupancy claim (`bitmap_alloc.cr`, "Occupancy is claimed a word at a
 # time") under four allocating threads, cross-thread `GC.free` and a
@@ -2130,6 +2146,13 @@ darwin-static-root-sections: $(BIN)
 	$(BIN)/darwin_static_root_sections
 	$(CRYSTAL) build -Dgc_none --link-flags=-Wl,-no_data_const bench/darwin_static_root_sections.cr -o $(BIN)/darwin_static_root_sections_ndc --error-trace
 	$(BIN)/darwin_static_root_sections_ndc
+
+# Is the image gcry reads as the executable the executable? An inserted
+# library is dyld's image 0 for the life of the process; `GC.init` took it for
+# the executable until 2026-10-23. Plain, under DYLD_INSERT_LIBRARIES, with
+# the dylib linked and both (bench/log/macos/2026-10-23-darwin-image0/).
+darwin-image0: $(BIN)
+	bench/log/macos/2026-10-23-darwin-image0/probe.sh
 
 # What is the Darwin free-page walk's bitmap stand-down standing down from?
 #

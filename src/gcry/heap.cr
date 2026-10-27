@@ -45,7 +45,23 @@ module Gcry
 
     getter chunk_index_count : Int32 = 0
 
-    getter heap_size : UInt64 = 0_u64
+    # Mapped bytes of every chunk on the heap. Atomic, and every write a
+    # read-modify-write through `heap_size_add`/`heap_size_sub`: it is written
+    # from four lock domains — `map_chunk` with none at all, the large paths
+    # under `@alloc_lock`, the empty-chunk flush under `@alloc_lock` and
+    # `@chunk_list_lock`, and the in-stop sweep with nothing held. A plain
+    # `+=` frozen by a stop between its load and its store put back what it
+    # had read when it resumed, and the stop's unmap was lost
+    # (process_spec/regression/88).
+    # Declared with its type, as the `getter` it replaces was: declared by
+    # initializer instead, it moved out of that slot and the hit path's
+    # fields moved with it (`offsetof`, `bench/log/linux/2026-10-23-frozen-counter-rmw/`).
+    @heap_size : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+
+    def heap_size : UInt64
+      @heap_size.get
+    end
+
     # Alloc accounting is Atomic so TLAB hits / Parallel mutators need not take
     # @alloc_lock just to bump counters (see note_alloc_bytes). Freelist heads
     # still serialise on SpinLock.
@@ -510,7 +526,7 @@ module Gcry
       @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
-      @heap_size = 0_u64
+      @heap_size.set(0_u64)
       @free_bytes.set(0_u64)
       @total_bytes.set(0_u64)
       @bytes_since_gc.set(0_u64)
@@ -634,10 +650,7 @@ module Gcry
         Trace.after_malloc(u, size.to_u64, atomic: false)
         return u
       end
-      ptr = allocate(size.to_u64, atomic: false, clear: true)
-      Invariant.after_malloc(self, ptr, size.to_u64)
-      Trace.after_malloc(ptr, size.to_u64, atomic: false)
-      ptr
+      allocate_entry(size.to_u64, false, true)
     end
 
     # Bytes added to every atomic request. Boehm adds one byte to every
@@ -663,11 +676,89 @@ module Gcry
         Trace.after_malloc(u, n, atomic: true)
         return u
       end
-      ptr = allocate(n, atomic: true, clear: false)
-      Invariant.after_malloc(self, ptr, n)
-      Trace.after_malloc(ptr, n, atomic: true)
+      allocate_entry(n, true, false)
+    end
+
+    # The slow path of `malloc` and `malloc_atomic`: three tail calls, so that
+    # no frame the hit path wrote is live across a collection the slow path
+    # triggers, and no frame built for it reads what the hit path left.
+    #
+    # The hit path is inlined into the allocation entry (`GC.malloc_atomic` is
+    # `Heap#malloc_atomic` with `fast_alloc` folded in), and it spills: block
+    # addresses, the cursor's word base, a block size. On the slow path those
+    # slots are not written, so when the entry called `allocate` itself they
+    # sat in a live frame above `collect_entry_sp` holding whatever the last
+    # frame at that depth had left there — and the conservative scan kept it.
+    # Measured on crystal-metric (`bench/log/linux/2026-10-22-regexdna-peak/`):
+    # RegexDna's 19% lower peak with the occupancy claim was one such slot
+    # going away (the pre-claim `Heap#malloc_atomic`'s `0x58(%rsp)`, holding
+    # the dead `Fasta` and so its 64 MiB buffer through three collections),
+    # and on 0.39.0 the entry's slots hold Knuckeotide's dead hash buffers.
+    #
+    # Called in tail position, this is reached by a jump once the entry has
+    # popped its frame. It reads how far down the wipe may go
+    # (`Roots.wipe_limit`: the running fiber's stack, a thread-local load that
+    # is a call, so this one has a frame) and jumps on to `allocate_wipe`.
+    # That one has no frame (a frame record on Darwin): it zeroes the stack
+    # below the SP it was entered with, which is where the entry's frame and
+    # this one's were, and jumps on to `allocate_traced`, whose frame and the
+    # collector's are then built over zeros and hold only what they write
+    # (`Roots.wipe_below_sp`). The bound is read a frame above the wipe and
+    # not in it because that frame has a slot nothing writes on aarch64
+    # Darwin (`sub sp, #0x50`, four register pairs at `0x10`-`0x4f`, the
+    # accessor's word at `0x8`, `[sp]` unwritten): wiped from below that
+    # frame, as the first bounded version did, the word was left as it was
+    # (regression 86's entry arm). Where the entry is inlined into its caller
+    # instead, the caller's own frame is the caller's affair, as it is under
+    # any conservative collector.
+    #
+    # `allocate_wipe` takes four arguments, `self` included, so that on
+    # Windows x64, which passes four in registers, the jump to it is still a
+    # sibling call: a fifth would go on the stack, in an area the entry's
+    # caller never reserved, and LLVM would make it a call.
+    #
+    # In a debug build nothing is a tail call: the three frames stay, the wipe
+    # (not inlined) clears below its own frame, and `allocate_traced` is built
+    # over that. Regression 79 bounds what is left there.
+    @[NoInline]
+    private def allocate_entry(size : UInt64, atomic : Bool, clear : Bool) : Void*
+      limit = @slow_entry_wipe ? Roots.wipe_limit(Roots.hardware_stack_pointer.address) : 0_u64
+      flags = (atomic ? 1_u8 : 0_u8) | (clear ? 2_u8 : 0_u8)
+      allocate_wipe(size, flags, limit)
+    end
+
+    @[NoInline]
+    private def allocate_wipe(size : UInt64, flags : UInt8, limit : UInt64) : Void*
+      if (watch = @slow_wipe_watch) != 0
+        sp = Roots.hardware_stack_pointer.address
+        @slow_wipe_sp = sp if @slow_wipe_sp == 0 && sp < watch && watch &- sp < 65536
+      end
+      Roots.wipe_below_sp(limit)
+      allocate_traced(size, flags & 1 != 0, flags & 2 != 0)
+    end
+
+    @[NoInline]
+    private def allocate_traced(size : UInt64, atomic : Bool, clear : Bool) : Void*
+      ptr = allocate(size, atomic: atomic, clear: clear)
+      Invariant.after_malloc(self, ptr, size)
+      Trace.after_malloc(ptr, size, atomic: atomic)
       ptr
     end
+
+    # Research knob, `GCRY_SLOW_ENTRY_WIPE=0`: skip `allocate_wipe`'s wipe,
+    # the control arm of the measurement and of its regression.
+    property slow_entry_wipe : Bool = true
+
+    # Regression 86's probe of where the wipe starts. While `slow_wipe_watch`
+    # is an SP (not 0), the first slow path to run within 64 KiB below it
+    # records the SP `allocate_wipe` ran at, the top of its wipe, in
+    # `slow_wipe_sp` (reset to 0 to record again). Scoped to that stack
+    # because gcry's own threads allocate too, and one load when off: a store
+    # into the heap on every thread's slow path would share a line among
+    # them. The regression checks it against the SP the allocation entry was
+    # called with: the wipe must start within a frame record of it.
+    property slow_wipe_watch : UInt64 = 0_u64
+    property slow_wipe_sp : UInt64 = 0_u64
 
     # Boehm's `GC_realloc`: null is `malloc(size)`, and size 0 frees
     # `pointer` and answers null (`mallocx.c`, as C's `realloc` does in glibc).
@@ -973,7 +1064,7 @@ module Gcry
     # usable (`Gcry.os_reserve`). Null when the system refuses; the caller
     # maps without room instead.
     private def reserve_large_mapping(extent : UInt64, mapped : UInt64) : Void*
-      at = Gcry.os_reserve(extent, mapped)
+      at = Gcry.os_reserve_placed(extent, mapped)
       if Gcry.mmap_failed?(at)
         @large_reserve_failures &+= 1
         return Pointer(Void).null
@@ -1057,16 +1148,16 @@ module Gcry
           grown = need &- old_mapped
           return false unless Gcry.os_commit(Pointer(Void).new(chunk.address &+ old_mapped), grown)
           publish_large_growth(chunk, old_mapped, need)
-          @heap_size &+= grown
+          heap_size_add(grown)
           @large_mapped_bytes &+= grown
           @large_reserved_bytes = sat_sub(@large_reserved_bytes, grown)
           # Fresh pages, as a fresh mapping's: they spend the recycling
           # budget (`map_chunk`) and count toward what a major may keep.
           @large_recycle_budget = sat_sub(@large_recycle_budget, grown)
           @large_alloc_since_major &+= grown
-          CrystalTrace.heap_resize(self, @heap_size)
+          CrystalTrace.heap_resize(self, heap_size)
           if hook = @heap_resize_hook
-            hook.call(@heap_size)
+            hook.call(heap_size)
           end
         end
         BlockHeader.grow_large_size(header, new_size)
@@ -2628,6 +2719,13 @@ module Gcry
         added += payload
       end
 
+      # Every block FREE and on no list until the store below: a stop that
+      # froze this thread here, with its class lock held, finds a chunk to
+      # call empty. It leaves the class alone (`note_frozen_freelists`).
+      if hook = @refill_publish_hook
+        hook.call(chunk)
+      end
+
       if nursery
         @nursery_freelists[index] = free_head
         @nursery_freelist_clean[index] = true
@@ -2758,7 +2856,7 @@ module Gcry
         @freelist_clean[index] = false
       end
       mapped = chunk.value.mapped_bytes
-      @dormant_chunk_bytes = sat_sub(@dormant_chunk_bytes, mapped)
+      dormant_bytes_sub(mapped)
       # Last: from here the sweep walks this chunk's blocks again.
       ChunkHeader.set_dormant(chunk, false)
       true
@@ -2771,10 +2869,13 @@ module Gcry
     end
 
     # Clear DORMANT outside a revival, taking the released pages back first.
+    # The bytes leave `@dormant_chunk_bytes` with the flag: the counter is
+    # kept by the transitions alone (`dormant_bytes_sub`).
     private def reuse_dormant(chunk : ChunkHeader*) : Nil
       lo, hi = dormant_release_range(chunk)
       Platform.reuse_released_pages(lo, hi - lo) if hi > lo
       ChunkHeader.set_dormant(chunk, false)
+      dormant_bytes_sub(chunk.value.mapped_bytes) if @@shared_counters_atomic
     end
 
     # `a - b`, or 0 where that would wrap, reading `a` once and never raising.
@@ -2798,6 +2899,75 @@ module Gcry
       s = a &+ b
       s < a ? UInt64::MAX : s
     end
+
+    # Research only: called by every read-modify-write of a shared counter
+    # (`def_shared_counter`) between its load and its store, with the
+    # counter's name, so a test can park a thread exactly where a stop used to
+    # find one (process_spec/regression/88). Nil in production: one load and
+    # a branch, on paths that map, unmap, revive or `GC.free`.
+    #
+    # Both knobs are the class's, not each heap's: as two instance variables
+    # more (with the counters declared by initializer) they moved the hit
+    # path's fields (`@fast_path`, `@gc_threshold`,
+    # `@fit_index`, ...) by 8 to 24 bytes, and Binarytrees ran 1-2% slower on
+    # three runners and 7% on macos-15-intel, which code padding did not
+    # bring back (`bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`).
+    class_property shared_counter_hook : Proc(Symbol, Nil)? = nil
+    # Research only: false makes the shared counters' read-modify-writes
+    # plain loads and stores again, and has the major sweep zero and recount
+    # `@dormant_chunk_bytes` — the code before 2026-10-23, and the control
+    # arm of process_spec/regression/88.
+    class_property shared_counters_atomic : Bool = true
+
+    # Read-modify-writes of a byte counter that more than one lock domain
+    # writes and that the stop writes too: `@heap_size`, `@dormant_chunk_bytes`,
+    # `@expl_freed_bytes_since_gc`. Each was a plain `+=` or `= sat_sub(...)`,
+    # and a stop suspends by signal, so it can freeze a thread between the
+    # load and the store. The stop then writes the counter — the in-stop
+    # sweep's unmap takes a chunk out of `@heap_size`, makes a chunk dormant,
+    # zeroes `@expl_freed_bytes_since_gc` — and the thread, resumed, stores
+    # what it had computed from the value before the stop: the stop's write
+    # is lost for good. An atomic add cannot be frozen half done, and a
+    # compare-and-set frozen after its load fails against the stop's value
+    # and is recomputed from it. The collector's writes go through the same
+    # calls: the after-world sweep and the flushes run beside the mutators,
+    # and in the stop they cost a locked instruction per chunk.
+    #
+    # `_add` returns the new value. `_sub` saturates at zero, as `sat_sub`
+    # did, and for the reason it gives.
+    macro def_shared_counter(name, ivar)
+      private def {{name.id}}_add(n : UInt64) : UInt64
+        if (hook = @@shared_counter_hook) || !@@shared_counters_atomic
+          cur = {{ivar}}.get
+          hook.try &.call({{name.id.symbolize}})
+          unless @@shared_counters_atomic
+            {{ivar}}.set(cur &+ n)
+            return cur &+ n
+          end
+        end
+        {{ivar}}.add(n) &+ n
+      end
+
+      private def {{name.id}}_sub(n : UInt64) : Nil
+        cur = {{ivar}}.get
+        if hook = @@shared_counter_hook
+          hook.call({{name.id.symbolize}})
+        end
+        unless @@shared_counters_atomic
+          {{ivar}}.set(cur > n ? cur &- n : 0_u64)
+          return
+        end
+        loop do
+          seen, swapped = {{ivar}}.compare_and_set(cur, cur > n ? cur &- n : 0_u64)
+          break if swapped
+          cur = seen
+        end
+      end
+    end
+
+    def_shared_counter heap_size, @heap_size
+    def_shared_counter dormant_bytes, @dormant_chunk_bytes
+    def_shared_counter expl_freed, @expl_freed_bytes_since_gc
 
     # The pages a dormant chunk's release covers, and so the pages a revival
     # takes back: whole host pages from the first at or above `data_start`
@@ -3026,14 +3196,14 @@ module Gcry
         return Pointer(Void).null unless user
         old = ChunkHeader.from_large_header(BlockHeader.large_header_from_user(user))
         old_mapped = old.value.mapped_bytes
-        @heap_size = sat_sub(@heap_size, old_mapped)
+        heap_size_sub(old_mapped)
         @large_mapped_bytes = sat_sub(@large_mapped_bytes, old_mapped)
         unlink_chunk(old)
         kept = old_mapped < mapped ? old_mapped : mapped
         dst = extent > mapped ? reserve_large_mapping(extent, mapped) : Pointer(Void).null
         if dst.null?
           extent = 0_u64
-          dst = Gcry.os_map(mapped)
+          dst = mmap_anonymous(mapped)
         end
         @recycled_extent = extent
         moved, dst_kept = Gcry.mmap_failed?(dst) ? {false, false} : Gcry.os_move(old.as(Void*), kept, dst, mapped)
@@ -3462,7 +3632,7 @@ module Gcry
             @large_freelists[b] = nxt
             mapped = chunk.value.mapped_bytes
             unlink_chunk(chunk)
-            @heap_size = sat_sub(@heap_size, mapped)
+            heap_size_sub(mapped)
             free_bytes_sub(mapped)
             @large_free_bytes = sat_sub(@large_free_bytes, mapped)
             @large_mapped_bytes = sat_sub(@large_mapped_bytes, mapped)
@@ -3590,7 +3760,7 @@ module Gcry
           nxt = header.value.next_free
           @large_freelists[b] = nxt
           mapped = chunk.value.mapped_bytes
-          @heap_size = sat_sub(@heap_size, mapped)
+          heap_size_sub(mapped)
           free_bytes_sub(mapped)
           @large_free_bytes = sat_sub(@large_free_bytes, mapped)
           @large_mapped_bytes = sat_sub(@large_mapped_bytes, mapped)
@@ -3634,7 +3804,7 @@ module Gcry
                 ph.value = pv
               end
               mapped = chunk.value.mapped_bytes
-              @heap_size = sat_sub(@heap_size, mapped)
+              heap_size_sub(mapped)
               free_bytes_sub(mapped)
               @large_free_bytes = sat_sub(@large_free_bytes, mapped)
               @large_mapped_bytes = sat_sub(@large_mapped_bytes, mapped)
@@ -3660,7 +3830,8 @@ module Gcry
 
     # Size-class mapped bytes (heap_size minus large VMAs).
     def small_mapped_bytes : UInt64
-      @heap_size >= @large_mapped_bytes ? @heap_size - @large_mapped_bytes : 0_u64
+      size = heap_size
+      size >= @large_mapped_bytes ? size - @large_mapped_bytes : 0_u64
     end
 
     # Freelist bytes in size-class chunks (excludes large freelist).
@@ -3719,7 +3890,7 @@ module Gcry
         # is a large object, whose tail an `IO::Memory` or `Array` may never
         # write (JsonParseSerializable +15% RSS, JsonGenerate +11%)
         # (`bench/log/linux/2026-10-05-alloc-storm-mark/`).
-        if at.null? && size_class != UInt32::MAX && @heap_size >= POPULATE_MIN_HEAP
+        if at.null? && size_class != UInt32::MAX && heap_size >= POPULATE_MIN_HEAP
           LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_POPULATE_WRITE)
         end
       {% end %}
@@ -3841,12 +4012,12 @@ module Gcry
         Gcry.os_unmap(ptr, bytes) if at.null?
         return Pointer(ChunkHeader).null
       end
-      @heap_size += bytes
+      size = heap_size_add(bytes)
       @large_recycle_budget = sat_sub(@large_recycle_budget, bytes) if at.null?
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
-      CrystalTrace.heap_resize(self, @heap_size)
+      CrystalTrace.heap_resize(self, size)
       if hook = @heap_resize_hook
-        hook.call(@heap_size)
+        hook.call(size)
       end
       # Inline insert into sorted chunk index. Under TLAB MT this is called
       # from refill_size_class which already holds the size-class freelist
@@ -3871,8 +4042,12 @@ module Gcry
       chunk
     end
 
+    # Every heap mapping is kept off the 4 GiB boundaries (`Gcry.os_map_placed`):
+    # a half-overwritten stack word names the boundary, and a block covering
+    # it would be kept by that word. Size-class chunks too, not only large
+    # ones: a dead small object there (an `IO::Memory`) keeps its buffer.
     private def mmap_anonymous(bytes : UInt64) : Void*
-      Gcry.os_map(bytes)
+      Gcry.os_map_placed(bytes)
     end
 
     # Calls of `unlink_chunk`, and the steps their predecessor searches
@@ -4153,20 +4328,25 @@ module Gcry
     # `@chunk_list_lock` if it is free, without waiting: true when this call
     # took it. For the in-stop sweep, which may not wait on a lock a frozen
     # thread can hold and must not relink the list under one (`Heap#sweep`).
+    private def try_lock_chunk_list : Bool
+      try_lock_spinlock(pointerof(@chunk_list_lock))
+    end
+
+    # *lock* if it is free, without waiting: true when this call took it.
     # `Crystal::SpinLock` has no try, so this is its `lock` without the spin,
     # on its one field; the macro check turns a stdlib change to that layout
     # into a compile error rather than a store into the wrong word. Under
     # `-Dwithout_mt` off Windows the lock compiles to nothing and no other
     # thread can hold it.
-    private def try_lock_chunk_list : Bool
+    protected def try_lock_spinlock(lock : Crystal::SpinLock*) : Bool
       {% if flag?(:without_mt) && !flag?(:win32) %}
         true
       {% else %}
         {% ivars = Crystal::SpinLock.instance_vars %}
         {% unless ivars.size == 1 && ivars[0].name.stringify == "m" && ivars[0].type.stringify == "Atomic(Int32)" %}
-          {% raise "Heap#try_lock_chunk_list: Crystal::SpinLock is no longer one `@m : Atomic(Int32)`" %}
+          {% raise "Heap#try_lock_spinlock: Crystal::SpinLock is no longer one `@m : Atomic(Int32)`" %}
         {% end %}
-        _, ok = Atomic::Ops.cmpxchg(pointerof(@chunk_list_lock).as(Int32*), 0, 1,
+        _, ok = Atomic::Ops.cmpxchg(lock.as(Int32*), 0, 1,
           LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::SequentiallyConsistent)
         ok
       {% end %}

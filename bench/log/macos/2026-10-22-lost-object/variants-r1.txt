@@ -1,0 +1,14 @@
+# Round 1: which shape of the tlab-only arm loses an object most often on
+# d1549e2f. name|parallel|bound_s|collects_per_run|harness args
+# seed6: the sighting exactly (tlab-only seed 6, workers 2 then 4).
+seed6|1|120|402|--tlab --iterations=200 --seed=6 --workers=2,4
+# base: the CI step's tlab-only arm, seeds 1..10.
+base|1|120|402|--tlab --iterations=200 --seed=SEED --workers=2,4
+# long4: one four-worker phase five times as long as the sighting's.
+long4|1|300|1001|--tlab --iterations=1000 --seed=SEED --workers=4
+# long4x3: three long4 processes at once on the three-core runner.
+long4x3|3|400|1001|--tlab --iterations=1000 --seed=SEED --workers=4
+# long8: eight workers.
+long8|1|300|1001|--tlab --iterations=1000 --seed=SEED --workers=8
+# births: ten four-worker contexts in one process, each starting its threads.
+births|1|180|410|--tlab --iterations=40 --seed=SEED --workers=4,4,4,4,4,4,4,4,4,4

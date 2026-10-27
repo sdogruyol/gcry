@@ -1,0 +1,140 @@
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.ubuntu.com>
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+
+Program stopped.
+0x00007ffff7fe3340 in _start () from /lib64/ld-linux-x86-64.so.2
+Breakpoint 1 at 0x555555569090
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+FW 1 cand=0x100000001 slot=0x7fffffff86d0 slot-entry=-2000 owner=scan_mutator_stack sp+0x1f0 pc=+0x5f613
+  #0 __printf sp=0x7fffffff84d8 pc=+0x2aaaa2510080
+  #1 mark_root_candidate sp=0x7fffffff84e0 pc=+0x5f613
+  #2 scan_mutator_stack sp=0x7fffffff84e0 pc=+0x5f613
+  #3 run_collection_body sp=0x7fffffff8950 pc=+0x35547
+  #4 run_collection sp=0x7fffffff8ea0 pc=+0x321f3
+  #5 collect:coalesce sp=0x7fffffff8ed0 pc=+0x3181b
+0x7fffffff8670:	0x0000000000000000	0x00007ffff7c5a000
+0x7fffffff8680:	0x00007ffff51c6000	0x0000000000014978
+0x7fffffff8690:	0x0000000000000000	0x0000000000000007
+0x7fffffff86a0:	0x0000000000000000	0x0000000000000000
+0x7fffffff86b0:	0x0000000000000160	0x0000000000000000
+0x7fffffff86c0:	0x00007ffff7fc0000	0x00007ffff7ffce60
+0x7fffffff86d0:	0x0000000100000001	0x00007ffff7ffd000
+0x7fffffff86e0:	0x00007ffff7ffe2e0	0x0000000000000000
+0x7fffffff86f0:	0x0000000000000000	0x0000000000000000
+0x7fffffff8700:	0x0000000000000000	0x0000000000000000
+0x7fffffff8710:	0x0000000000000000	0x0000000000000000
+0x7fffffff8720:	0x0000000000000000	0x0000000000000000
+
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 2 cand=0x7fff00000001 slot=0x7fffffff8910 slot-entry=-1424 owner=scan_mutator_stack sp+0x430 pc=+0x5f613
+  #0 __printf sp=0x7fffffff84d8 pc=+0x2aaaa2510080
+  #1 mark_root_candidate sp=0x7fffffff84e0 pc=+0x5f613
+  #2 scan_mutator_stack sp=0x7fffffff84e0 pc=+0x5f613
+  #3 run_collection_body sp=0x7fffffff8950 pc=+0x35547
+  #4 run_collection sp=0x7fffffff8ea0 pc=+0x321f3
+  #5 collect:coalesce sp=0x7fffffff8ed0 pc=+0x3181b
+0x7fffffff88b0:	0x00007ffff7948310	0x0000555555719b40
+0x7fffffff88c0:	0x0000800000000000	0x00007ffff6b6d248
+0x7fffffff88d0:	0x000055555571d648	0x0000000000000000
+0x7fffffff88e0:	0x00007ffff7c3a640	0x00005555555ad011
+0x7fffffff88f0:	0x00005555556c0b5c	0x00007ffff7fbec76
+0x7fffffff8900:	0x0000000000000003	0x0000000055590711
+0x7fffffff8910:	0x00007fff00000001	0x0000555555719b40
+0x7fffffff8920:	0x0000000000000002	0x0001be9e6675097e
+0x7fffffff8930:	0x0001be9e6675682e	0x0000000000000000
+0x7fffffff8940:	0x0000000000000003	0x0000555555589547
+0x7fffffff8950:	0x0000000000000000	0x0000000000000000
+0x7fffffff8960:	0x0000000100000000	0x0000000000000000
+
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 3 cand=0x200000001 slot=0x7fffffffc538 slot-entry=13976 owner=run sp+0x35c8 pc=+0xf4d47
+  #0 __printf sp=0x7fffffff84d8 pc=+0x2aaaa2510080
+  #1 mark_root_candidate sp=0x7fffffff84e0 pc=+0x5f613
+  #2 scan_mutator_stack sp=0x7fffffff84e0 pc=+0x5f613
+  #3 run_collection_body sp=0x7fffffff8950 pc=+0x35547
+  #4 run_collection sp=0x7fffffff8ea0 pc=+0x321f3
+  #5 collect:coalesce sp=0x7fffffff8ed0 pc=+0x3181b
+0x7fffffffc4d8:	0x0000000600000000	0x0000000000000000
+0x7fffffffc4e8:	0x0000000000000000	0x0000000000000000
+0x7fffffffc4f8:	0x0000000000000000	0x00007ffff7c0ed80
+0x7fffffffc508:	0x0000000000000000	0x0000000000000000
+0x7fffffffc518:	0x00007fffffffc760	0x0000000000000000
+0x7fffffffc528:	0x0000000000000000	0x00007fffffffcbf0
+0x7fffffffc538:	0x0000000200000001	0x00000000ffffffff
+0x7fffffffc548:	0x00007ffff7c13380	0x0000000000000010
+0x7fffffffc558:	0x0000000000000019	0x00007fffffffc770
+0x7fffffffc568:	0x00007fffffffc590	0x00007ffff7bdc7b1
+0x7fffffffc578:	0x00007ffffbad8001	0x00007fff00000010
+0x7fffffffc588:	0x00007fffffffc77c	0x00007ffff7a636d0
+
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 4 cand=0x80000000000001 slot=0x7fffffffcfb8 slot-entry=16664 owner=__crystal_main sp+0x18 pc=+0x1a0fa
+  #0 __printf sp=0x7fffffff84d8 pc=+0x2aaaa2510080
+  #1 mark_root_candidate sp=0x7fffffff84e0 pc=+0x5f613
+  #2 scan_mutator_stack sp=0x7fffffff84e0 pc=+0x5f613
+  #3 run_collection_body sp=0x7fffffff8950 pc=+0x35547
+  #4 run_collection sp=0x7fffffff8ea0 pc=+0x321f3
+  #5 collect:coalesce sp=0x7fffffff8ed0 pc=+0x3181b
+0x7fffffffcf58:	0x0000000000800000	0x00007ffff7d1a760
+0x7fffffffcf68:	0x00007ffff7c3a460	0x00007ffff6b8d120
+0x7fffffffcf78:	0x0000000000800000	0x00007ffff6b6d210
+0x7fffffffcf88:	0x00007fffed7ffff0	0x00007fffed000000
+0x7fffffffcf98:	0x000055555556e0fa	0x0000000000000000
+0x7fffffffcfa8:	0x01007ffff7968020	0x00007ffff7c3a601
+0x7fffffffcfb8:	0x0080000000000001	0x00007ffff7948190
+0x7fffffffcfc8:	0x00007ffff6bad460	0x00007ffff78c8860
+0x7fffffffcfd8:	0x0000555555731ee0	0x007fffffffffffff
+0x7fffffffcfe8:	0x0000000000000028	0x00007fffed000000
+0x7fffffffcff8:	0x00007fffed800000	0x0000000100800000
+0x7fffffffd008:	0x00007ffff6200000	0x00007ffff6a00000
+
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 5 cand=0x7fff00000001 slot=0x7fffffff8910 slot-entry=-1424 owner=scan_mutator_stack sp+0x430 pc=+0x5f613
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 6 cand=0x200000001 slot=0x7fffffffc538 slot-entry=13976 owner=run sp+0x35c8 pc=+0xf4d47
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 7 cand=0x80000000000001 slot=0x7fffffffcfb8 slot-entry=16664 owner=__crystal_main sp+0x18 pc=+0x1a0fa
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 8 cand=0x7fff00000001 slot=0x7fffffff8900 slot-entry=-1424 owner=scan_mutator_stack sp+0x430 pc=+0x5f613
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 9 cand=0x200000001 slot=0x7fffffffc538 slot-entry=13992 owner=run sp+0x35c8 pc=+0xf4d3f
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 10 cand=0x80000000000001 slot=0x7fffffffcfb8 slot-entry=16680 owner=__crystal_main sp+0x18 pc=+0x1a0fa
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 11 cand=0x7fff00000001 slot=0x7fffffff8900 slot-entry=-1424 owner=scan_mutator_stack sp+0x430 pc=+0x5f613
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 12 cand=0x200000001 slot=0x7fffffffc538 slot-entry=13992 owner=run sp+0x35c8 pc=+0xf4d3f
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 13 cand=0x80000000000001 slot=0x7fffffffcfb8 slot-entry=16680 owner=__crystal_main sp+0x18 pc=+0x1a0fa
+
+Thread 1 "cm-probefix" hit Breakpoint 1, __printf (format=0x5555556c1a7c "FALSEWORD coll=%llu cand=%p slot=%p slot-entry=%lld sp=%p\n") at ./stdio-common/printf.c:28
+28	in ./stdio-common/printf.c
+FW 14 cand=0x7fff00000001 slot=0x7fffffff8900 slot-entry=-1424 owner=scan_mutator_stack sp+0x430 pc=+0x5f613

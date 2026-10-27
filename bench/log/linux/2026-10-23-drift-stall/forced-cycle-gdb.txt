@@ -1,0 +1,110 @@
+== child 1 pid 1294745 running after 15 s: 0 buckets
+This GDB supports auto-downloading debuginfo from the following URLs:
+0x000076cf69932d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+warning: 117	../sysdeps/unix/syscall-template.S: No such file or directory
+heap=5efa741abb40
+chunks head=76cf54f3b000 index_count=543
+CYCLE: 38 chunks from the head, then a loop of 37 chunks entered at 76cf54119000
+  loop[0] 76cf54119000 mapped=131072 class=1 flags=0
+  loop[1] 76cf54f5b000 mapped=131072 class=2 flags=20
+  loop[2] 76cf54f7b000 mapped=131072 class=32 flags=30
+  loop[3] 76cf54f9b000 mapped=131072 class=9 flags=20
+  loop[4] 76cf5463a000 mapped=131072 class=32 flags=12
+  loop[5] 76cf55d7d000 mapped=131072 class=32 flags=10
+  loop[6] 76cf55dbd000 mapped=131072 class=32 flags=10
+  loop[7] 76cf5643d000 mapped=131072 class=9 flags=2
+  loop[8] 76cf3e4dd000 mapped=131072 class=5 flags=2
+  loop[9] 76cf563dd000 mapped=131072 class=5 flags=2
+  loop[10] 76cf5645d000 mapped=131072 class=5 flags=2
+  loop[11] 76cf546da000 mapped=131072 class=5 flags=2
+  loop[12] 76cf5471a000 mapped=131072 class=1 flags=2
+  loop[13] 76cf5479a000 mapped=131072 class=2 flags=2
+  loop[14] 76cf547fa000 mapped=131072 class=5 flags=2
+  loop[15] 76cf5475a000 mapped=131072 class=1 flags=2
+  loop[16] 76cf5481a000 mapped=131072 class=2 flags=2
+  loop[17] 76cf5507b000 mapped=131072 class=1 flags=2
+  loop[18] 76cf5505b000 mapped=131072 class=2 flags=2
+  loop[19] 76cf5509b000 mapped=131072 class=2 flags=2
+  loop[20] 76cf550fb000 mapped=131072 class=1 flags=2
+  loop[21] 76cf5511b000 mapped=131072 class=2 flags=2
+  loop[22] 76cf5515b000 mapped=131072 class=32 flags=10
+  loop[23] 76cf5517b000 mapped=131072 class=5 flags=2
+  loop[24] 76cf5519b000 mapped=131072 class=2 flags=2
+  loop[25] 76cf3db7c000 mapped=131072 class=2 flags=20
+  loop[26] 76cf3dc1c000 mapped=131072 class=1 flags=2
+  loop[27] 76cf3ecfe000 mapped=131072 class=5 flags=20
+  loop[28] 76cf3ed1e000 mapped=131072 class=5 flags=20
+  loop[29] 76cf3ed3e000 mapped=131072 class=2 flags=2
+  loop[30] 76cf3ed5e000 mapped=131072 class=5 flags=2
+  loop[31] 76cf3eede000 mapped=131072 class=1 flags=2
+  loop[32] 76cf3ef1e000 mapped=131072 class=1 flags=20
+  loop[33] 76cf3ef5e000 mapped=131072 class=5 flags=2
+  loop[34] 76cf3f79f000 mapped=131072 class=2 flags=2
+  loop[35] 76cf3f7df000 mapped=131072 class=2 flags=2
+  loop[36] 76cf54039000 mapped=131072 class=2 flags=2
+Thread 1 (Thread 0x76cf69a6d7c0 (LWP 1294745) "drift-f90a"):
+#0  0x000076cf69932d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+#1  0x00005efa73c15088 in release_physical_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:133
+#2  0x00005efa73c14fb6 in release_reusable_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:147
+#3  0x00005efa73bb7bfc in flush_pending_dormant_chunks () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect_sweep.cr:1115
+#4  0x00005efa73b67936 in run_collection_body () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect.cr:3234
+#5  0x00005efa73b65122 in run_collection () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect.cr:2872
+[Inferior 1 (process 1294745) detached]
+== child 2 pid 1295285 running after 15 s: 0 buckets
+This GDB supports auto-downloading debuginfo from the following URLs:
+0x000078b4a4332d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+warning: 117	../sysdeps/unix/syscall-template.S: No such file or directory
+heap=59791e910b40
+chunks head=78b49983c000 index_count=307
+CYCLE: 11 chunks from the head, then a loop of 43 chunks entered at 78b4a00de000
+  loop[0] 78b4a00de000 mapped=131072 class=5 flags=20
+  loop[1] 78b49987c000 mapped=131072 class=5 flags=20
+  loop[2] 78b49989c000 mapped=131072 class=5 flags=20
+  loop[3] 78b4998bc000 mapped=131072 class=2 flags=20
+  loop[4] 78b4998dc000 mapped=131072 class=2 flags=20
+  loop[5] 78b4998fc000 mapped=131072 class=2 flags=20
+  loop[6] 78b49991c000 mapped=131072 class=32 flags=30
+  loop[7] 78b49993c000 mapped=131072 class=32 flags=30
+  loop[8] 78b49995c000 mapped=131072 class=32 flags=30
+  loop[9] 78b499a1c000 mapped=131072 class=32 flags=30
+  loop[10] 78b49997c000 mapped=131072 class=1 flags=20
+  loop[11] 78b4999bc000 mapped=131072 class=9 flags=20
+  loop[12] 78b49999c000 mapped=131072 class=1 flags=20
+  loop[13] 78b4999fc000 mapped=131072 class=9 flags=20
+  loop[14] 78b4999dc000 mapped=131072 class=1 flags=20
+  loop[15] 78b499a3c000 mapped=131072 class=9 flags=20
+  loop[16] 78b499a5c000 mapped=131072 class=9 flags=20
+  loop[17] 78b499a7c000 mapped=131072 class=32 flags=30
+  loop[18] 78b4a009e000 mapped=131072 class=5 flags=2
+  loop[19] 78b49a05d000 mapped=131072 class=5 flags=2
+  loop[20] 78b49a0bd000 mapped=131072 class=2 flags=2
+  loop[21] 78b49a19d000 mapped=131072 class=1 flags=2
+  loop[22] 78b49a1dd000 mapped=131072 class=1 flags=2
+  loop[23] 78b49a21d000 mapped=131072 class=1 flags=2
+  loop[24] 78b49a23d000 mapped=131072 class=1 flags=20
+  loop[25] 78b49a25d000 mapped=131072 class=1 flags=2
+  loop[26] 78b49a29d000 mapped=131072 class=2 flags=2
+  loop[27] 78b498799000 mapped=131072 class=2 flags=20
+  loop[28] 78b498739000 mapped=131072 class=5 flags=2
+  loop[29] 78b4a077e000 mapped=131072 class=5 flags=2
+  loop[30] 78b4a06fe000 mapped=131072 class=2 flags=2
+  loop[31] 78b4a035e000 mapped=131072 class=2 flags=2
+  loop[32] 78b4a031e000 mapped=131072 class=2 flags=2
+  loop[33] 78b4a02fe000 mapped=131072 class=2 flags=2
+  loop[34] 78b4a02de000 mapped=131072 class=1 flags=2
+  loop[35] 78b4a02be000 mapped=131072 class=5 flags=2
+  loop[36] 78b4a029e000 mapped=131072 class=2 flags=2
+  loop[37] 78b4a027e000 mapped=131072 class=1 flags=2
+  loop[38] 78b4a025e000 mapped=131072 class=5 flags=2
+  loop[39] 78b4a021e000 mapped=131072 class=1 flags=2
+  loop[40] 78b4a023e000 mapped=131072 class=2 flags=2
+  loop[41] 78b4a01fe000 mapped=131072 class=2 flags=2
+  loop[42] 78b4a015e000 mapped=131072 class=2 flags=2
+Thread 1 (Thread 0x78b4a450f7c0 (LWP 1295285) "drift-f90a"):
+#0  0x000078b4a4332d5b in __GI_madvise () at ../sysdeps/unix/syscall-template.S:117
+#1  0x00005978fba8a088 in release_physical_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:133
+#2  0x00005978fba89fb6 in release_reusable_pages () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/platform/linux_softdirty.cr:147
+#3  0x00005978fba2cbfc in flush_pending_dormant_chunks () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect_sweep.cr:1115
+#4  0x00005978fb9dc936 in run_collection_body () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect.cr:3234
+#5  0x00005978fb9da122 in run_collection () at /home/naruto/playground/.scratch/DriftStall/wt/src/gcry/collect.cr:2872
+[Inferior 1 (process 1295285) detached]

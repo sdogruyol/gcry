@@ -1,0 +1,12 @@
+mprotect87 held: re-armed with the handler inside; freed under it 0, retired and kept 1
+Invalid memory access (signal 11) at address 0x7ff11020f000
+[0x5704ab055daa] *Exception::CallStack::print_backtrace:Nil +122 in ../tmp/r87
+[0x5704ab01fb66] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +278 in ../tmp/r87
+[0x7ff111245cb0] ?? +140673351441584 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x5704ab025171] ~procProc(Thread, Nil) +65 in ../tmp/r87
+[0x5704ab129ff2] *Thread#start:(Exception+ | Nil) +210 in ../tmp/r87
+[0x5704ab12daf7] *Crystal::System::Thread::thread_proc<Pointer(Void)>:Pointer(Void) +55 in ../tmp/r87
+[0x5704aafe9d46] ~procProc(Pointer(Void), Pointer(Void)) +6 in ../tmp/r87
+[0x7ff1112a3dfa] ?? +140673351826938 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x7ff1113375cc] ?? +140673352431052 in /usr/lib/x86_64-linux-gnu/libc.so.6
+[0x0] ???
