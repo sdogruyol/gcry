@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-27
+
+> **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On
+> macOS, a program run under `DYLD_INSERT_LIBRARIES` (profilers, sanitizers,
+> injected tooling) had its main thread's `@[ThreadLocal]` values left out of
+> the roots, because gcry took dyld's image 0 for the executable; with library
+> roots off it also lost the executable's class variables. With the opt-in
+> mprotect write barrier (`GCRY_INCREMENTAL=1` on Linux arm64, or
+> `GCRY_MPROTECT_BARRIER=1`), a re-arm with the world running could free card
+> state under a running fault handler and lose a recorded write. Both are
+> under Fixed below.
+
 ### Added
 
 - **README, COMPARISON, WINDOWS and the RFC carry 0.39.0's numbers on every
@@ -8207,7 +8219,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/sdogruyol/gcry/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/sdogruyol/gcry/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/sdogruyol/gcry/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/sdogruyol/gcry/compare/v0.35.0...v0.36.0

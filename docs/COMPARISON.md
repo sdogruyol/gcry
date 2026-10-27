@@ -6,7 +6,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-Snapshot of gcry **0.39.0** (`release-0.39.0`, 2026-10-24): sound defaults, parallel mark on by default, Boehm's `GC_*` C ABI, in-place large `realloc`, batched mark with small objects scanned in the batch loop, the occupancy claim, the slow-path stack wipe, and the fixes in `CHANGELOG.md`. Every number is quoted from the README, with its source.
+Snapshot of gcry **0.39.0** (`shard.yml`, 2026-10-27): sound defaults, parallel mark on by default, Boehm's `GC_*` C ABI, in-place large `realloc`, batched mark with small objects scanned in the batch loop, the occupancy claim, the slow-path stack wipe, and the fixes in `CHANGELOG.md`. Every number is quoted from the README, with its source.
 
 | | gcry (0.39.0) | Boehm (Crystal default) |
 |--|---------------|-------------------------|
