@@ -72,3 +72,14 @@ The shipped code (latch on) cannot form it; the pre-round-3 tree hangs the
 same way under load. The harness had no deadline for that child. It now runs
 every child under one, consents to ptrace, and has an arm that forces the
 cycle (`../2026-10-23-drift-stall/`).
+
+## The released tree, `26c25031` (2026-10-27)
+
+The same script on `26c25031`, the tree 0.39.0 releases (the 4 GiB fence and
+the round-3 work included; `summary-final-26c25031.txt`, host load at the start
+in `load-final-26c25031.txt`: the desktop only). Every gcry gate passed: 0
+failures, 0 stalls, `chunk-list-drift` 6 of 6 with its deterministic arms.
+stw-mt release: 292 of 300, 8 runs the Crystal scheduler deadlock
+(crystal-lang/crystal#17486; the captures show workers in `Scheduler#resume`
+and no collector, allocation-entry or mapping frame), 6–8 in 300 on every
+night since 0.37.0; stw-mt debug 200 of 200.
