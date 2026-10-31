@@ -36,7 +36,12 @@ limit="$1"; log="$2"; shift 2; [ "$1" = "--" ] && shift
 here="$(cd "$(dirname "$0")" && pwd)"
 case $(uname -s) in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows=0 ;; esac
 
-"$@" > "$log" 2>&1 &
+# Appended to, not truncated by the redirection: the stall lines and the
+# capture below go to the same file while the command still holds it, and a
+# wrapper that writes once its child is killed (Windows, where the kill takes
+# a while) wrote at its own offset over them.
+: > "$log"
+"$@" >> "$log" 2>&1 &
 pid=$!
 
 # macOS has no /proc: there `kill -0` is the test, and a zombie is reaped by
@@ -102,10 +107,12 @@ if running; then
     [ "$p" != "$root" ] && echo "--- descendant $p: $(command_of "$p")" >> "$log"
     "$here/stall_capture.sh" "$p" >> "$log" 2>&1
   done
-  # Leaves first, so no wrapper respawns or reports on a half-killed tree.
+  # Leaves first, so no wrapper respawns or reports on a half-killed tree. On
+  # Windows `taskkill /T` takes the whole tree in one call, and a process
+  # whose parent exited before the walk is not in it, so the leaves after.
   if [ "$windows" = 1 ]; then
-    for p in $leaves; do taskkill //F //PID "$p" > /dev/null 2>&1; done
     taskkill //F //T //PID "$root" > /dev/null 2>&1
+    for p in $leaves; do taskkill //F //PID "$p" > /dev/null 2>&1; done
   else
     for p in $leaves $tree; do kill -9 "$p" 2>/dev/null; done
   fi

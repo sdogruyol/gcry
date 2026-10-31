@@ -102,10 +102,26 @@ selected() {
 }
 
 # unsupported <name>: why this loop cannot run here; prints nothing when it can.
+# The OS rows are from the first run on the GitHub runners (stress probe
+# 41203206908, `bench/log/linux/2026-11-01-stress-ci/FINDINGS.md`): each is a
+# gate CI does not run on that OS either, and none was a gcry failure. A gate
+# whose control arm or sensitivity check does not fire on an OS fails there on
+# every run, which says the harness is calibrated for Linux, not that the
+# shipped arm is wrong — and weakening those checks is not the fix.
 unsupported() {
   case $os:$1 in
     *:process-spec-crystal-1.22)
       has_crystal "$C122" || echo "no Crystal 1.22 compiler in $C122 (set STRESS_CRYSTAL_1_22)" ;;
+    *:soft-soak-ec4-smoke)
+      command -v wrk > /dev/null 2>&1 || echo "no wrk (bench/soft_soak_ec4.sh drives the Kemal server with it)" ;;
+  esac
+  case $os:$1 in
+    windows:chunk-list-drift) echo "does not build on Windows (bench/chunk_list_drift.cr calls LibC.write)" ;;
+    windows:realloc-move-stress) echo "does not build on Windows (bench/realloc_move_stress.cr sleeps with LibC::Timespec)" ;;
+    windows:soak-smoke) echo "bench/soak.cr has no RSS reader on Windows and refuses to run (exit 64)" ;;
+    darwin:chunk-list-drift) echo "Linux-calibrated: on macOS its window-free arm's trims are never declined and the refused-release race is made in 32-33 of 40 collections, so its sensitivity checks fail every run" ;;
+    darwin:realloc-move-stress) echo "Linux-calibrated: on macOS no realloc moves (0 moves, 0 MiB), so the moving arms and the control fail every run" ;;
+    darwin:thread-churn-uaf) echo "Linux-calibrated: on macOS arm64 its control reproduced 0 of 32, so a clean shipped arm proves nothing; CI runs it on Linux and Windows only" ;;
   esac
 }
 
