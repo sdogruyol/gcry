@@ -26,8 +26,15 @@
 # zombie *leader* with live threads is not finished — it is a process whose
 # main thread exited while others ran on, the shape of the one stall this was
 # written for (2026-09-25).
+#
+# Windows (Git Bash): the harnesses are native processes, and Git Bash's `ps`
+# has no `-o` and does not list a native process's native children. There the
+# tree is read from Win32_Process by Windows process id, from the one the
+# command's pid stands for (/proc/<pid>/winpid); the capture is cdb's
+# (`stall_capture.sh`), and the kill is `taskkill /T` on that tree.
 limit="$1"; log="$2"; shift 2; [ "$1" = "--" ] && shift
 here="$(cd "$(dirname "$0")" && pwd)"
+case $(uname -s) in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows=0 ;; esac
 
 "$@" > "$log" 2>&1 &
 pid=$!
@@ -51,35 +58,62 @@ while running && [ "$t" -lt "$limit" ]; do
   sleep 1
   t=$((t + 1))
 done
-# Every descendant of `$1`, depth first, from one `ps` listing (Linux and
-# macOS both print `pid ppid` with these flags).
+# `pid ppid` for every process: from `ps` on Linux and macOS (both print it
+# with these flags), from Win32_Process on Windows.
+ptable() {
+  if [ "$windows" = 1 ]; then
+    powershell.exe -NoProfile -Command \
+      'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }' 2>/dev/null | tr -d '\r'
+  else
+    ps -A -o pid= -o ppid= 2>/dev/null
+  fi
+}
+# Every descendant of `$1`, depth first, from the one listing in `$table`.
 descendants() {
-  ps -A -o pid= -o ppid= 2>/dev/null | awk -v root="$1" '
+  printf '%s\n' "$table" | awk -v root="$1" '
     { kids[$2] = kids[$2] " " $1 }
     function walk(p,   n, a, i) { n = split(kids[p], a, " "); for (i = 1; i <= n; i++) { print a[i]; walk(a[i]) } }
     END { walk(root) }'
 }
+# A process's command line, for the log.
+command_of() {
+  if [ "$windows" = 1 ]; then
+    powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$1').CommandLine" 2>/dev/null | tr -d '\r' | cut -c1-200
+  else
+    ps -o command= -p "$1" 2>/dev/null | cut -c1-200
+  fi
+}
 
 if running; then
   echo "STALLED: still running after ${t} s" >> "$log"
-  tree=$(descendants "$pid")
+  # The root of the tree: on Windows the native process this pid stands for.
+  root=$pid
+  [ "$windows" = 1 ] && root=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
+  table=$(ptable)
+  tree=$(descendants "$root")
   # The leaves: the processes doing the work, not the wrappers waiting on
   # them. With no descendants the command itself is the leaf.
   leaves=""
   for p in $tree; do
     [ -z "$(descendants "$p")" ] && leaves="$leaves $p"
   done
-  [ -z "$leaves" ] && leaves=$pid
+  [ -z "$leaves" ] && leaves=$root
   for p in $leaves; do
-    [ "$p" != "$pid" ] && echo "--- descendant $p: $(ps -o command= -p "$p" 2>/dev/null | cut -c1-200)" >> "$log"
+    [ "$p" != "$root" ] && echo "--- descendant $p: $(command_of "$p")" >> "$log"
     "$here/stall_capture.sh" "$p" >> "$log" 2>&1
   done
   # Leaves first, so no wrapper respawns or reports on a half-killed tree.
-  for p in $leaves $tree; do kill -9 "$p" 2>/dev/null; done
+  if [ "$windows" = 1 ]; then
+    for p in $leaves; do taskkill //F //PID "$p" > /dev/null 2>&1; done
+    taskkill //F //T //PID "$root" > /dev/null 2>&1
+  else
+    for p in $leaves $tree; do kill -9 "$p" 2>/dev/null; done
+  fi
   kill -9 "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null
-  # gdb names the line; macOS `sample` names the method and not the line.
-  spinning=$(grep -c "parallel/scheduler.cr:97\|Parallel::Scheduler#resume" "$log")
+  # gdb names the line; macOS `sample` names the method and not the line; cdb
+  # names both, the line as `parallel\scheduler.cr @ 97`.
+  spinning=$(grep -c 'parallel/scheduler.cr:97\|parallel\\scheduler.cr @ 97\|Parallel::Scheduler#resume' "$log")
   if [ "$spinning" -ge 2 ] && ! grep -q "stop_world\|run_collection\|Gcry::Heap#collect" "$log"; then
     echo "STALL CLASSIFIED: Crystal Parallel-scheduler resume deadlock (upstream, not gcry)" >> "$log"
     exit 3

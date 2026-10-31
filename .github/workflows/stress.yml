@@ -1,0 +1,153 @@
+name: Weekly stress
+
+# The release overnight stress (`bench/stress_overnight.sh`) on the GitHub
+# runners, every week: Linux x86_64 and arm64, macOS arm64 and x86_64, and
+# Windows x86_64. Until 0.40.0 it ran once a release, on one 12-vCPU Linux
+# host, so a defect only another platform or a quieter week could reach waited
+# for the next release night.
+#
+# One runner cannot hold the set in GitHub's 6 h: 0.39.0's took about 3.5 h on
+# the host with 12 vCPUs, and a runner has 3 or 4. So each OS runs it in three
+# jobs, split by loop name with the script's --only/--skip, about evenly by the
+# per-loop times measured on these runners
+# (`bench/log/linux/2026-11-01-stress-ci/FINDINGS.md`). The last shard skips the
+# first two's loops rather than naming its own, so a loop added to the script
+# runs somewhere without an edit here.
+#
+# A job fails on any failed or stalled run, or a harness that did not build
+# (the script's exit status). A stall classified as Crystal's own
+# Parallel-scheduler deadlock (crystal-lang/crystal#17486) is counted in the
+# summary and is not a failure. Every log of a run that did not pass, with
+# its stall capture, is in the job's artifact, and the summary in the job's
+# page. A loop that cannot run on an OS says why in the summary
+# (`<name> skipped: <reason>`).
+
+on:
+  schedule:
+    - cron: "0 1 * * 6"  # weekly Saturday 01:00 UTC, apart from ci.yml's Monday
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: "Multiplies every loop's run count (1 = the release set; 0.05 for a smoke of the workflow, at least one run per loop)."
+        default: "1"
+      os:
+        description: "JSON list of runners."
+        default: '["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest", "macos-15-intel", "windows-latest"]'
+
+# A dispatch's run is its own; the weekly one never cancels another.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+
+env:
+  # The primary compiler, as ci.yml's, and the second leg's for the
+  # `process-spec-crystal-1.22` loop.
+  CRYSTAL_PRIMARY: "1.21.0"
+  CRYSTAL_SECOND: "1.22.2"
+  # Shards by loop name (extended regexes over the whole name). `gates` is
+  # what the other two leave.
+  SHARD_FUZZ: "fuzz-60s|property-test|mt-property-test|pattern-fuzz.*"
+  SHARD_MT: "stw-mt-property-test.*|claim-stress-lazy|claim-stress-in-stop|thread-storm-release"
+
+jobs:
+  stress:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event.inputs.os || '["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest", "macos-15-intel", "windows-latest"]') }}
+        shard: [fuzz, mt, gates]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 355
+    name: stress (${{ matrix.os }}, ${{ matrix.shard }})
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      # Refresh the stale runner apt index; why and the bounds: the action.
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: ./.github/actions/apt-update
+
+      # The second compiler first: each install-crystal puts its compiler in
+      # front on PATH, so the primary installed after it is the `crystal` every
+      # other loop runs, and this one is reached by its directory.
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_SECOND }}
+      - name: Second compiler's directory
+        run: |
+          crystal --version
+          echo "STRESS_CRYSTAL_1_22=$(dirname "$(command -v crystal)")" >> "$GITHUB_ENV"
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_PRIMARY }}
+
+      # gdb for a stall's backtraces, attached from outside the process tree,
+      # which Ubuntu's ptrace_scope=1 refuses; wrk for the EC4 soft soak. macOS
+      # captures with `sample`, which it has; Windows with cdb, which the image
+      # carries, and has no wrk (the soak loop says so and is skipped).
+      - name: Capture and load tools
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get install -y -qq gdb wrk
+              sudo sysctl -w kernel.yama.ptrace_scope=0 ;;
+            macOS)
+              brew install wrk ;;
+          esac
+
+      - name: Stress
+        env:
+          # Nothing to share a runner with.
+          HEAVY_LOCK: ""
+        run: |
+          crystal --version
+          case "${{ matrix.shard }}" in
+            fuzz) filter=(--only="$SHARD_FUZZ") ;;
+            mt) filter=(--only="$SHARD_MT") ;;
+            gates) filter=(--skip="$SHARD_FUZZ|$SHARD_MT") ;;
+          esac
+          bench/stress_overnight.sh "${filter[@]}" . stress-out "${{ github.event.inputs.scale || '1' }}"
+
+      # A capture that silently stopped working would turn the next real stall
+      # into a bare timeout. So the job also stalls a harness on purpose, behind
+      # a wrapper as `make` is, and requires run_bounded.sh to say STALLED, to
+      # capture the harness's own stack (`__crystal_main`) and to leave nothing
+      # of it running.
+      - name: Stall capture works on this runner
+        if: always()
+        run: |
+          mkdir -p bin stress-out
+          crystal build bench/fuzz.cr -o bin/stall_selftest
+          log=stress-out/stall-selftest.log
+          rc=0
+          bench/run_bounded.sh 10 "$log" -- bash -c 'bin/stall_selftest --seconds=600 --seed=1; echo wrapper went on' || rc=$?
+          sleep 2
+          if [ "$RUNNER_OS" = Windows ]; then
+            left=$(tasklist //FI "IMAGENAME eq stall_selftest.exe" | grep -c stall_selftest || true)
+          else
+            left=$( (pgrep -f bin/stall_selftest || true) | wc -l | tr -d ' ')
+          fi
+          echo "rc=$rc left=$left"
+          ok=1
+          [ "$rc" = 2 ] || { echo "FAIL: run_bounded.sh exited $rc on a stall, not 2"; ok=0; }
+          grep -q "STALLED" "$log" || { echo "FAIL: no STALLED line"; ok=0; }
+          grep -q "__crystal_main" "$log" || { echo "FAIL: the capture has no frame of the harness"; ok=0; }
+          [ "$left" = 0 ] || { echo "FAIL: $left harness process(es) left running"; ok=0; }
+          [ $ok = 1 ] || { cat "$log"; exit 1; }
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo "### stress (${{ matrix.os }}, ${{ matrix.shard }})"; echo '```'; cat stress-out/summary.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the summary and every log of a run that did not pass
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stress-${{ matrix.os }}-${{ matrix.shard }}
+          path: stress-out/
+          if-no-files-found: ignore
+          retention-days: 30

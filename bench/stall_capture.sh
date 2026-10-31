@@ -9,8 +9,29 @@
 # a zombie, and attaching to that pid fails. gdb needs ptrace permission —
 # `kernel.yama.ptrace_scope=0`, or a target that declared itself traceable
 # (`stw_mt_property_test` does, on Linux); without it the /proc half still
-# prints. Linux only.
+# prints. Linux; macOS and Windows below.
 pid="$1"
+# Windows (Git Bash): `<pid>` is a Windows process id (`run_bounded.sh` walks
+# the Win32 process tree), and Git Bash's /proc does not describe native
+# processes. cdb, from the SDK's Debugging Tools that the GitHub Windows
+# images carry, attaches noninvasively (`-pv`: the threads are suspended and
+# read, no debug port taken) and prints every thread's stack with the names and
+# lines of the PDB the compiler wrote next to the executable. CDB overrides
+# where it is looked for.
+case $(uname -s) in
+  MINGW* | MSYS* | CYGWIN*)
+    arch=x64
+    case ${PROCESSOR_ARCHITECTURE:-} in ARM64) arch=arm64 ;; esac
+    cdb=${CDB:-"/c/Program Files (x86)/Windows Kits/10/Debuggers/$arch/cdb.exe"}
+    if [ -x "$cdb" ]; then
+      echo "--- stall capture: windows pid $pid (cdb, noninvasive)"
+      timeout 120 "$cdb" -p "$pid" -pv -lines -c ".lines -e; ~*k 40; qd" 2>&1 | tail -n 3000
+    else
+      echo "--- no cdb backtrace (no $cdb)"
+    fi
+    exit 0
+    ;;
+esac
 # macOS: no /proc and no gdb, but `sample` reads every thread's stack of a
 # process the same user owns, without attaching a debugger.
 if [ ! -d /proc ]; then
