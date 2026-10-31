@@ -98,7 +98,10 @@ of marking per run.
 Each default-path change reverted on the tip, measured as the tip (`var`)
 against the probe (`base`), so `var` vs `base` is the change's cost. 15 reps,
 Primes, Binarytrees, JsonGenerate, JsonParsePull, Revcomp, pads `p16 bp16`,
-no Boehm arm.
+no Boehm arm. The probes are kept as tags `archive/probe/keep-040-unroll`,
+`-freeing`, `-counters`, `-idle` and `-reserve`. The Darwin high-heap commits
+do not revert cleanly over `b4a707f4` and were not probed; Intel's two rows
+are inside the pad band on the tip (§2) and within spread in §6.
 
 | run | reverted | probe (base) |
 |---|---|---|
