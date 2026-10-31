@@ -114,8 +114,11 @@ jobs:
       # A capture that silently stopped working would turn the next real stall
       # into a bare timeout. So the job also stalls a harness on purpose, behind
       # a wrapper as `make` is, and requires run_bounded.sh to say STALLED, to
-      # capture the harness's own stack (`__crystal_main`) and to leave nothing
-      # of it running.
+      # capture the harness's own stack with symbols — a frame in gcry's
+      # sources or the harness's main, whichever the debugger reaches (gdb's
+      # 40 frames can stop short of `__crystal_main`, as on arm64 in probe
+      # 41208072684; cdb without the PDB printed only `exe+0x…`) — and to
+      # leave nothing of it running.
       - name: Stall capture works on this runner
         if: always()
         run: |
@@ -134,7 +137,7 @@ jobs:
           ok=1
           [ "$rc" = 2 ] || { echo "FAIL: run_bounded.sh exited $rc on a stall, not 2"; ok=0; }
           grep -q "STALLED" "$log" || { echo "FAIL: no STALLED line"; ok=0; }
-          grep -q "__crystal_main" "$log" || { echo "FAIL: the capture has no frame of the harness"; ok=0; }
+          grep -Eq '__crystal_main|src[/\\]gcry[/\\]|Gcry::' "$log" || { echo "FAIL: the capture has no symbolized frame of the harness"; ok=0; }
           [ "$left" = 0 ] || { echo "FAIL: $left harness process(es) left running"; ok=0; }
           [ $ok = 1 ] || { cat "$log"; exit 1; }
 
