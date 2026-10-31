@@ -31,6 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler leg, the pinned `std_spec` arm and the compiler-with-gcry build
   move from 1.22.0 to 1.22.2.
 
+- **The mark scans a payload four words per loop turn, and tells a
+  small-object batch entry by one compare.** 7.2% fewer instructions in
+  JsonGenerate's batch scans (callgrind, one marker). Σ mark on arm64 Linux:
+  Primes −3.9%, JsonParsePure −7.0%, JsonGenerate −8.6%,
+  JsonParseSerializable −11.9%, JsonParsePull −11.5% at the same
+  collections; Windows −1% to −5% on the JSON rows; level on x86 Linux and
+  both Macs. No row slower than base beyond what a 16- or 64-byte code pad
+  moves it on the same runner (Perf A/B 41213949301, pads 41216031947,
+  41219560170, 41221127852; `bench/log/linux/2026-10-31-mark-cost/`). The
+  32 MiB parallel-mark live floor stays: it does not reach Binarytrees,
+  and Boehm's own parallel markers do not speed Binarytrees up on any runner
+  (`bench/log/linux/2026-10-31-parallel-mark-floor/`).
+
 - **0.39.0's Revcomp row on the Linux host, 1–2% slower than 0.38.0, is
   code placement (README, ROADMAP).** The allocation entry
   `GC::malloc_atomic` starts 16 bytes past a 64-byte line in the 0.39.0

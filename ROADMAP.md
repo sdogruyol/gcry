@@ -4642,6 +4642,19 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       (`bench/log/linux/2026-10-06-mark-cost/`), the parallel-mark
       shared-write fixes (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`)
       and the 0.36 pacing came between.
+      **Narrowed 2026-10-31** (`bench/log/linux/2026-10-31-mark-cost/`):
+      the batch scan is bound by the instructions it issues (~4 a cycle on
+      the x86 host; JsonGenerate: word filter 36%, per-object entry and
+      prefetch 37%, candidate chain 26%, whose loads hit L1 and whose
+      branches predict). Kept for 0.40: the payload loop unrolled by four
+      and one-compare tag tests, −7.2% instructions, Σ mark −4% to −12% on
+      arm64 Linux's pointer rows, −1% to −5% on Windows, level elsewhere
+      (Perf A/B 41213949301 with pads 41216031947, 41219560170,
+      41221127852). Measured, not taken: a one-copy loop skipping four words
+      below the span at a time (+6.6% instructions, Σ mark +3% to +15%,
+      41207501220), and gathering in-span words branch-free into a buffer
+      (+46% instructions, +28–31% ns per object). What is left needs fewer
+      instructions per word or per object, not a different branch shape.
 - [x] **Decide what to do with `Gcry::Layout` registration — removed in
       0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
       collided with registered maps
