@@ -4080,6 +4080,14 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `bench/log/linux/2026-11-01-dormant-flush-rate/FINDINGS.md`,
       `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`,
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
+- [ ] **The incremental finishing path never takes or resets the large-cache
+      counters (2026-11-01, by reading).** `collect_a_little`'s finish does
+      not do what a major's flush does with `@large_alloc_since_major`,
+      `@large_cache_hits` / `@large_cache_misses` and `@large_recycle_budget`
+      (0.40's atomic shared counters, regression 89), so under
+      `GCRY_INCREMENTAL=1` they would carry over from cycle to cycle and the
+      retain and recycle decisions read the sum. Not measured
+      (`bench/log/linux/2026-11-01-large-cache-counters/`).
 - [x] **Freeing a large object costs O(live large chunks), so freeing many is
       quadratic (diagnosed 2026-10-01) — closed 2026-10-14.** Measured with
       `bench/log/linux/2026-10-01-large-free-quadratic/largefree_scale.cr`:
