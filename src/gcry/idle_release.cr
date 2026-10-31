@@ -97,6 +97,14 @@ module Gcry
       @@birth_released.set(1)
     end
 
+    # Research only, the control arm of
+    # `process_spec/regression/93_idle_stretch_inside_collection_spec.cr`:
+    # take the activity baseline *after* each idle collection, as before
+    # 2026-11-01 (`loop_forever`). An allocation that lands while the
+    # collection is still finishing is then counted in the baseline, and the
+    # idle stretch it begins is never collected.
+    class_property? baseline_after_collect : Bool = false
+
     # Is *fiber* the idle collector's? It runs only its thread's main fiber.
     # For the research skip below only.
     def self.fiber?(fiber : Fiber) : Bool
@@ -261,8 +269,14 @@ module Gcry
         next if now - last_change < @@idle_ns
         heap.idle_collect
         collected = true
-        # The collection's own bookkeeping is not the mutator waking up.
-        last_total = heap.allocation_activity
+        # The baseline stays `total`, read before the collection: an
+        # allocation from the moment it was read on — the collection does
+        # none — is the mutator waking up, and the next poll re-arms. Read
+        # again here, the baseline took in an allocation that landed while
+        # the collection was finishing, and the idle stretch that allocation
+        # began never got its collection: the program kept its warm budget
+        # for good. `process_spec/regression/93_idle_stretch_inside_collection_spec.cr`.
+        last_total = heap.allocation_activity if @@baseline_after_collect
       end
     end
   end
