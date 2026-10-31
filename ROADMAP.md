@@ -2991,14 +2991,37 @@ kept finding the rest.
       (The fourth, a bitmap `free` frozen between its `occ` and `mark`
       clears across the incremental finishing slice, is fixed: see below.)
 
-- [ ] **Large-cache counters written after the flushes with no lock.**
-      `@large_recycle_budget`, `@large_alloc_since_major` and
-      `@large_cache_hits`/`_misses` are reset by the collector after the
-      flushes without `@alloc_lock`, which the mutators' read-modify-writes
-      hold, and `map_chunk` spends the budget for size-class chunks under the
-      class lock only. Running threads, not a frozen one; they feed the
-      large-cache trim and the adaptive retain (RSS for a cycle). Not
-      reproduced. `bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`.
+- [x] **Large-cache counters written after the flushes with no lock —
+      fixed 2026-11-01.** `@large_recycle_budget`, `@large_alloc_since_major`
+      and `@large_cache_hits`/`_misses` were reset by the collector after
+      the flushes without `@alloc_lock`, which the mutators'
+      read-modify-writes hold, and `map_chunk` spent the budget for
+      size-class chunks under the class lock only. A running allocation
+      that had loaded before a reset stored the cycle before's value back
+      over it. All four feed decisions (the mutators' large-cache trim and
+      `large_recycle_keep`, the recycling major's keep, the adaptive
+      retain): RSS and recycling hit rate, not memory safety. Forced by
+      regression 89, four counters, each control losing the reset (since
+      557 056 + 204 800 kept over the zero, hits 1 + 1, misses 4 + 1, budget
+      2^40 less the chunks mapped since over the collection's 0). Fixed: the
+      four are atomic and written through `def_shared_counter`, and the
+      collector takes the per-major counts with one swap each.
+      `bench/log/linux/2026-11-01-large-cache-counters/FINDINGS.md`.
+
+- [x] **`make idle-release` on macos-latest: the read came before the idle
+      collection — closed 2026-11-01.** CI run 41209225316 (one failure in
+      ~156 runs since 2026-10-10): "kept 4718592". The gate read 200 ms
+      after the last burst; on macos-latest a 12.5 ms `nanosleep` takes
+      35–55 ms (p50), so the idle thread's collection began after 200 ms in
+      86 of 1 014 runs, and when the burst had run an ordinary collection the
+      read found its warm budget. 14 of 4 041 probe runs (1 of 1 014 alone),
+      0.38.0 as 0.39.0 and with the dormant counter recounted — not 0.39's
+      transition-kept counter; every failure re-read 0 once the collection
+      came. The gate now waits for that collection; 0 of 4 043 after. Found
+      on the way, and fixed: an idle stretch begun while an idle collection
+      was finishing was never collected (the baseline was re-read after the
+      collection; regression 93).
+      `bench/log/macos/2026-11-01-idle-release-flake/FINDINGS.md`.
 
 - [x] **Stop-time freelist writes the per-class probe did not cover —
       closed 2026-10-22.** With `GCRY_TLAB=1`, `flush_all_tlabs` and
@@ -3074,16 +3097,26 @@ kept finding the rest.
       hook, 0 of 220 on the new). Nothing in `src/` changed.
       `bench/log/linux/2026-10-22-r84-double-handout/FINDINGS.md`.
 
-- [ ] **A bitmap `free`'s `mark` clear can wipe a concurrent claim's mark
-      ([INFERENCE], found 2026-10-22, not reproduced).** Between the free's
-      `occ` clear and its `mark` clear, the chunk's cursor owner can advance
-      lock-free into the word and claim the freed bit. While a sweep can run
-      before the next stop (lazy sweep pending, or incremental marking), the
-      claim marks it, and the free then clears that mark. The sweep's
-      `occ = mark` takes the block from under the claim. The window is two
-      adjacent atomics on one thread, widened only by preemption. Needs a
-      construction of its own (the frozen-class-gaps FINDINGS has the
-      reading).
+- [x] **A bitmap `free`'s `mark` clear can wipe a concurrent claim's mark
+      — reproduced and fixed 2026-10-31.** Between the free's `occ` clear
+      and its `mark` clear the chunk's cursor owner can claim the freed
+      block lock-free on the hit path and hand it out, and a stop (the
+      free's thread frozen between the clears) can mark it; the free's
+      clear then removes that mark. Only the incremental finishing slice
+      consumes it (it sweeps the cycle's marks with no settle, pinned
+      chunks included): the lazy-sweep case in the reading is unreachable,
+      because the hit path is closed while `@lazy_sweep_pending` and a
+      pinned set's chunks are skipped by the after-world sweep. Worse than
+      read: the block can already be handed out, so the slice frees it
+      under the program. Regression 91 forces it: on the control arm the
+      block is free in `occ` under its owner after the cycle and one of the
+      class's next 64 allocations returns it again, 30 of 30 runs; fixed,
+      30 of 30 clean. A `free` now holds `FREEING` on the chunk across both
+      clears and `cursor_advance_word` claims nothing from such a chunk
+      (the allocation takes the locked path and waits for the free). Keep
+      rule: every flagged row inside the band 16/64-byte code padding
+      makes on the same runner (Perf A/B 41203821072, pads 41210728957).
+      `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**
@@ -4035,7 +4068,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       and is red in every run before, in every layout
       (`bench/log/macos/2026-10-19-tlab-nursery-crash/FINDINGS.md`).
 - [ ] **A cached large chunk released while something still read its block
-      header (`dormant_flush`, 2026-09-28; narrowed 2026-10-21).** One run on
+      header (`dormant_flush`, 2026-09-28; narrowed 2026-10-21 and
+      2026-11-01).** One run on
       `2a46123` (seed 20012, 2 of 6 queued children) faulted. The old
       description was wrong in both halves. The header recorded at release
       was `FREE | LARGE` (`0x9_0000_a000`, where a live block in this harness
@@ -4059,8 +4093,26 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       trim after every free again (control 66 of 66), and the parent now
       prints the failing child's whole report, writer pc included: resolve
       it with `addr2line` on the campaign's binary at the next sighting.
+      **2026-11-01:** the release paths re-read against every reader of a
+      large header on 0.39.0 (two-hold trim, the walkers, the collector's
+      releases, the unlocked readers): still no path, so no hook to write.
+      The restored-trim gate's queued children on GitHub's runners, pinned
+      to 0.39.0: **0 of 3 600** (1 800 each on ubuntu-latest and
+      ubuntu-24.04-arm; runs 41202609665, 41205878106), with 36 600 direct
+      and 3 600 queued mutator releases and 560 live walks a child and
+      `lg_by_sweep` 0 throughout. The per-child rate is below 0.083% (95%);
+      the sighting's run read 2 of 6.
+      `bench/log/linux/2026-11-01-dormant-flush-rate/FINDINGS.md`,
       `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`,
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
+- [ ] **The incremental finishing path never takes or resets the large-cache
+      counters (2026-11-01, by reading).** `collect_a_little`'s finish does
+      not do what a major's flush does with `@large_alloc_since_major`,
+      `@large_cache_hits` / `@large_cache_misses` and `@large_recycle_budget`
+      (0.40's atomic shared counters, regression 89), so under
+      `GCRY_INCREMENTAL=1` they would carry over from cycle to cycle and the
+      retain and recycle decisions read the sum. Not measured
+      (`bench/log/linux/2026-11-01-large-cache-counters/`).
 - [x] **Freeing a large object costs O(live large chunks), so freeing many is
       quadratic (diagnosed 2026-10-01) — closed 2026-10-14.** Measured with
       `bench/log/linux/2026-10-01-large-free-quadratic/largefree_scale.cr`:
@@ -4373,6 +4425,22 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       The back-link's 64-byte object start costs nothing: rebuilt at 96 and
       112 it reads within 0.4%
       (`bench/log/linux/2026-10-15-revcomp-attribution/`).
+- [x] **Revcomp 1–2% slower in 0.39.0 than 0.38.0 on the Linux host
+      (2026-10-24) — code placement of the allocation entry, settled
+      2026-10-31.** `GC::malloc_atomic` (gcry's hit path inlined, 6.59 M
+      calls a run) starts ≡ 0 mod 64 in v0.38.0 and ≡ 16 in v0.39.0, and
+      Revcomp is slowest at ≡ 16 on x86-64 whichever tree is built there:
+      on `ubuntu-latest` the four ≡ 16 arms of five pads per tree are the
+      four slowest, two of them 0.38.0's (Perf A/B 41212029709). `9e89fddc`
+      moved it: five new mprotect class variables grew `__crystal_main`,
+      which is emitted just ahead of it, by 80 bytes. Pooled over every
+      placement, 0.39.0 is level locally (+0.05% [−0.38, +0.23], eight pads
+      per tree) and faster on `ubuntu-latest` (−0.92%) and arm64 (−0.45%,
+      41213664006). Collections, pauses, grows and faults are equal; the
+      one real cost found is `e508db25`'s tail call spilling the heap and
+      size around `tls_cursor_cache`, +5 instructions per allocation (+0.12%
+      Ir), too small to measure
+      (`bench/log/linux/2026-10-31-revcomp-host-placement/`).
 - [ ] **macOS: Binarytrees runs at 88% of Boehm on M1 since 0.37.0 (was
       ~80%; Intel 131%) (2026-10-03, narrowed 2026-10-05).** User CPU equals wall time and system time is the same as
       Boehm's, so nothing blocks; parallel mark does not help (four workers
@@ -4445,6 +4513,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       to read), the M1's extra faults. The image-0 assumption in
       `darwin_roots.cr` it raised was a real root-set hole, fixed in 0.39.0
       (`bench/log/macos/2026-10-23-darwin-image0/`).
+      **The "~3 points of Boehm's parallel markers" are not there to take
+      (2026-10-31).** With one marker (`GC_MARKERS=1`) Boehm runs Binarytrees
+      at 100% [90, 108] of its default on the M1, 102% [101, 104] on arm64
+      Linux and 101% [100, 102] on x86 Linux, with 37–62 ms less user CPU
+      (probe 41203148970, 30 reps): its CPU above wall is its markers' own
+      overhead. gcry's live floor does not reach Binarytrees either — 219 of its
+      ~231 collections end under 4 MiB live — and every floor from 0 to
+      32 MiB, or a serial mark, runs inside every other's range on all three
+      runners, where floor 0 costs 3–16% more user CPU. The 32 MiB default
+      stays (`bench/log/linux/2026-10-31-parallel-mark-floor/`). Left of the
+      M1 gap: the extra faults and the mutator's user time.
 - [x] **Prefetch-for-write in the allocation hit path on aarch64
       (2026-10-23) — not taken, 2026-10-24.** `GCRY_ALLOC_PFW=0` read −3.2% and −3.6% on
       `ubuntu-24.04-arm` Binarytrees (Perf A/B 39937695085, 20 reps, two
@@ -4473,15 +4552,39 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       8/115 against 32/230; macOS unchanged (M1 61/75 against 115/150). No
       row slower beyond what placement moves on the same runner
       (`bench/log/linux/2026-10-26-four-gib/`).
-- [ ] **JsonGenerate's high peaks on macOS are not boundary words
-      (2026-10-26).** 35–80% of reps on both macOS runners land high, with
-      or without the 4 GiB fence. The M1 holders were full heap addresses in
-      the collector's and crystal-metric's frames and a `5 000 000 000`
-      constant in a system library's data, scanned as a static root
-      (`bench/log/macos/2026-10-23-jsongen-m1/`): the heap sits at 4–8 GiB,
-      right after the executable, where 33-bit integers land. Untried:
-      mapping the macOS heap far above that (a hint well past 2^40), so
-      integer-valued words miss it.
+- [x] **JsonGenerate's high peaks on macOS are not boundary words
+      (2026-10-26) — the macOS heap maps at 16–32 TiB (2026-10-31).** 35–80%
+      of reps on both macOS runners landed high, with or without the 4 GiB
+      fence. The M1 holders were full heap addresses in the collector's and
+      crystal-metric's frames and a `5 000 000 000` constant in a system
+      library's data, scanned as a static root
+      (`bench/log/macos/2026-10-23-jsongen-m1/`): the heap sat at 4–8 GiB,
+      right after the executable, where 33-bit integers land. Every heap
+      mapping on macOS is now asked for at a random base 2^44 + 23 bits × 2 MiB
+      (a hint, never `MAP_FIXED`, mapped where the kernel answers if refused;
+      `GCRY_HIGH_HEAP=0` off; regression 92). JsonGenerate reps on a high
+      level, the placement against base and the same binary without it:
+      `macos-latest` 0/75 against 112/130, `macos-15-intel` 0/75 against
+      59/130 (Perf A/B 41203146054, 40 reps; 41207913078, 15; 41212311272,
+      20). M1's JsonGenerate peak 0.74–0.78× → 0.64× of Boehm's; Intel's
+      Revcomp and RegexDna peaks −21% and −25% against the same binary. Keep
+      rule on both Macs: no wall or peak row slower beyond its spread but M1
+      JsonParseSerializable's peak (+3.5%, the same binary without the
+      placement +3.6%, −0.8% in the next session); Intel JsonGenerate's
+      timed section +2.4–4.2% in three sessions is the binary's code
+      placement (the same binary without the placement alike; 16 bytes of
+      nops +3.6%, 64 bytes +0.1%). Linux and Windows build byte-identical code
+      (`bench/log/macos/2026-10-31-heap-high/`). [INFERENCE] the collector
+      frame words the M1 probe named (`0x141000000`, `0x143000000`,
+      16 MiB-aligned) were integers in the heap's old range rather than stale
+      pointers, since nothing holds the buffers once the heap moves.
+- [ ] **A macOS high-heap miss widens the heap bounds to ~[4 GiB, 2^44+)
+      (2026-10-31, review).** One heap mapping the kernel puts below
+      `Gcry.high_heap_base` (or maps without the hint) lowers `@heap_min` to
+      the old range while `@heap_max` stays past 2^44, so every low word
+      passes the bounds filter and costs a chunk-index lookup. Never hit
+      (`high_heap_misses` 0 in every run); measure if a counter line shows a
+      miss (`bench/log/macos/2026-10-31-heap-high/`, Open).
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
       0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
       output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,
@@ -4564,6 +4667,19 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       (`bench/log/linux/2026-10-06-mark-cost/`), the parallel-mark
       shared-write fixes (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`)
       and the 0.36 pacing came between.
+      **Narrowed 2026-10-31** (`bench/log/linux/2026-10-31-mark-cost/`):
+      the batch scan is bound by the instructions it issues (~4 a cycle on
+      the x86 host; JsonGenerate: word filter 36%, per-object entry and
+      prefetch 37%, candidate chain 26%, whose loads hit L1 and whose
+      branches predict). Kept for 0.40: the payload loop unrolled by four
+      and one-compare tag tests, −7.2% instructions, Σ mark −4% to −12% on
+      arm64 Linux's pointer rows, −1% to −5% on Windows, level elsewhere
+      (Perf A/B 41213949301 with pads 41216031947, 41219560170,
+      41221127852). Measured, not taken: a one-copy loop skipping four words
+      below the span at a time (+6.6% instructions, Σ mark +3% to +15%,
+      41207501220), and gathering in-span words branch-free into a buffer
+      (+46% instructions, +28–31% ns per object). What is left needs fewer
+      instructions per word or per object, not a different branch shape.
 - [x] **Decide what to do with `Gcry::Layout` registration — removed in
       0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
       collided with registered maps
@@ -4671,6 +4787,16 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       way. The gate now puts every child under a deadline and forces that
       cycle on every run, with the shipped tree as its control
       (`bench/log/linux/2026-10-23-drift-stall/`).
+      Since 2026-10-31 the overnight set also runs weekly on the five GitHub
+      runners (`.github/workflows/stress.yml`, Saturdays, three jobs a
+      runner). The full set on `ubuntu-latest` passed 1 652 runs (75–100 min
+      a job); the other runners passed at scale 0.05 and are estimated at
+      0.8–2.5 h a job. Not covered there: `chunk-list-drift`,
+      `realloc-move-stress` and `thread-churn-uaf` on macOS (Linux-calibrated
+      controls), and `chunk-list-drift`, `realloc-move-stress`, `soak-smoke`
+      and the EC4 soft soak on Windows (POSIX calls, no RSS reader, no `wrk`);
+      each prints why it is skipped
+      (`bench/log/linux/2026-11-01-stress-ci/`).
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 

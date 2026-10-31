@@ -749,6 +749,14 @@ module GC
     # `0` maps wherever the kernel answers, as before 0.39.0.
     Gcry.four_gib_fence = false if env_flag_zero?("GCRY_FOUR_GIB_FENCE")
 
+    # macOS maps the heap at a random base 16 to 32 TiB up, past the 33-bit
+    # integers that point into the 4–8 GiB the kernel would put it at
+    # (`Gcry.high_heap_base`). `0` maps wherever the kernel answers, as
+    # before 0.40.0.
+    {% if flag?(:darwin) %}
+      Gcry.high_heap = false if env_flag_zero?("GCRY_HIGH_HEAP")
+    {% end %}
+
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
     # ordinal's magic reciprocal is exact to — past that a block address would

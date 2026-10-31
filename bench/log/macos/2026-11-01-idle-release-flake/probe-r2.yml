@@ -1,0 +1,75 @@
+name: probe-idle-release
+
+# PROBE ONLY (never merged; lives on probe/idle-release). Round 2: the
+# shipped gate, fixed, on macos-latest. Arms, interleaved on each runner:
+#   fix       idle-release-040 8db51d3d: the idle loop keeps the activity
+#             baseline it decided on, and `make idle-release` waits for the
+#             last gap's idle collection before reading it
+#   gateonly  release-0.40.0 16d7112d with only the fixed gate copied in
+# Before the loop, a 12.5 ms nanosleep beside a Crystal `sleep` — the idle
+# thread's poll at GCRY_IDLE_RELEASE_MS=50 — timed alone and three at once.
+on:
+  push:
+    branches: [probe/idle-release]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: macos-latest
+    timeout-minutes: 120
+    name: probe (${{ matrix.shard }})
+    env:
+      ARMS: "fix gateonly"
+      MINUTES: "75"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build every arm's gate in its own tree
+        run: |
+          d="$PWD/bench/log/macos/idle-release-flake"
+          fixsha=8db51d3d29f24b2fed2f9c3d4915f8d0766162f0
+          spec=""
+          for arm in $ARMS; do
+            case "$arm" in
+              fix)      sha=$fixsha ;;
+              gateonly) sha=16d7112d961d8da47e31f7ed5f27b9cd912f0fb3 ;;
+              *) echo "unknown arm $arm"; exit 1 ;;
+            esac
+            t="$RUNNER_TEMP/arm-$arm"
+            git worktree add --detach "$t" "$sha"
+            [ "$arm" = gateonly ] && git -C "$t" checkout "$fixsha" -- bench/idle_release.cr
+            echo "== $arm: $(git -C "$t" log -1 --format='%H %s')"
+            git -C "$t" status --short
+            (cd "$t" && mkdir -p bin && crystal build -Dgc_none bench/idle_release.cr -o bin/idle_release --error-trace)
+            spec="$spec${spec:+,}$arm=$t/bin/idle_release"
+          done
+          echo "ARM_SPEC=$spec" >> "$GITHUB_ENV"
+          crystal build -Dgc_none "$d/nanosleep_probe.cr" -o "$RUNNER_TEMP/nanosleep_probe"
+          crystal --version; sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string
+      - name: Poll sleep latency
+        run: |
+          mkdir -p plog
+          { echo "alone:"; "$RUNNER_TEMP/nanosleep_probe"
+            echo "three at once:"
+            for i in 1 2 3; do "$RUNNER_TEMP/nanosleep_probe" > "plog/ns-$i.txt" & done; wait; cat plog/ns-*.txt; rm plog/ns-*.txt
+          } | tee plog/nanosleep.txt
+      - name: Loop
+        run: |
+          bench/log/macos/idle-release-flake/probe_loop2.sh "$ARM_SPEC" "$MINUTES" plog "${{ matrix.shard }}"
+          for f in plog/*.log; do
+            [ -e "$f" ] || continue
+            echo "--- $f"; head -c 20000 "$f"
+          done
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plog2-${{ matrix.shard }}
+          path: plog

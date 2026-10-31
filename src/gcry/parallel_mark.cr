@@ -574,8 +574,9 @@ module Gcry
         return
       end
       # `scan_payload`'s condition for `scan_edges_inline`, fixed for one
-      # `mark_loop`.
-      fused = @mark_edges_inline
+      # `mark_loop`: the tags this loop scans itself are `1..classes`, none
+      # when it is off, so one unsigned test per entry covers both.
+      classes = @mark_edges_inline ? SIZE_CLASS_COUNT.to_u64 : 0_u64
       short = @mark_test_short_tid
       allow_interior = @allow_interior_pointers
       lo = @heap_min
@@ -600,7 +601,7 @@ module Gcry
         entry = batch[i].as(BlockHeader*)
         i += 1
         tag = entry.address >> MARK_ENTRY_TAG_SHIFT
-        unless fused && tag != 0 && tag <= SIZE_CLASS_COUNT
+        unless tag &- 1 < classes
           scan_object(entry, shard)
           next
         end

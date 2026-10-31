@@ -1,0 +1,30 @@
+## Revcomp (linux, 15 reps)
+arm                  wall  timed            wall vs base  mod64
+prepad48            4.251  1.478   -1.1% [ -1.5,  -0.8]  32
+prepad2096          4.252  1.476   -1.1% [ -1.7,  -1.0]  32
+baseprepad32        4.284  1.496   -0.5% [ -0.7,  -0.1]  0
+base                4.299  1.515   +0.0% [ +0.0,  +0.0]  0
+prepad16            4.307  1.481   +0.1% [ -0.4,  +0.4]  0
+baseprepad16        4.318  1.540   +0.4% [ +0.0,  +0.7]  48
+var                 4.351  1.562   +1.2% [ +0.9,  +1.4]  16
+prepad32            4.357  1.565   +1.2% [ +0.6,  +1.5]  16
+baseprepad48        4.396  1.580   +2.2% [ +1.9,  +2.5]  16
+baseprepad2096      4.400  1.578   +2.3% [ +2.0,  +2.5]  16
+pooled wall  var vs base: -0.92% [-1.07, -0.72] (min -3.93, max -0.51); arm medians base 4.284-4.400 mean 4.3395, var 4.251-4.357 mean 4.3035
+pooled timed var vs base: -1.91% [-2.13, -1.68] (min -9.76, max -1.07); arm medians base 1.496-1.580 mean 1.5418, var 1.476-1.565 mean 1.5124
+
+## Brainfuck (linux, 15 reps)
+arm                  wall  timed            wall vs base  mod64
+baseprepad16        4.976  4.971   -3.0% [ -6.3,  -1.0]  48
+prepad48            5.027  5.022   -2.3% [ -4.8,  +5.4]  32
+var                 5.088  5.084   -1.5% [ -3.3,  -0.3]  16
+prepad32            5.112  5.108   -0.1% [ -3.5,  +5.0]  16
+baseprepad32        5.125  5.121   -0.2% [ -3.0,  +1.7]  0
+prepad2096          5.153  5.148   -1.1% [ -4.3,  +1.2]  32
+base                5.164  5.160   +0.0% [ +0.0,  +0.0]  0
+prepad16            5.166  5.162   +0.3% [ -1.0,  +8.3]  0
+baseprepad2096      5.167  5.163   -0.2% [ -1.0,  +1.0]  16
+baseprepad48        5.167  5.163   -0.2% [ -1.7,  +3.4]  16
+pooled wall  var vs base: -0.15% [-1.71, +2.31] (min -3.29, max +5.69); arm medians base 4.976-5.167 mean 5.1199, var 5.027-5.166 mean 5.1091
+pooled timed var vs base: -0.16% [-1.71, +2.30] (min -3.30, max +5.69); arm medians base 4.971-5.163 mean 5.1156, var 5.022-5.162 mean 5.1048
+

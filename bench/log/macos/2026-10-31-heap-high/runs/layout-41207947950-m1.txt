@@ -1,0 +1,96 @@
+=== env ''
+high_heap=true base=0x1d58a1800000 misses=0
+chunks 0x1d58a1c00000 .. 0x1d58b36b4000 fences=0 pid=1701
+Process:         lay [1701]
+Load Address:    0x10253c000
+Physical footprint:         258.8M
+Physical footprint (peak):  279.7M
+__OBJC_RO                   2083891b8-20d2b9a68    [ 79.2M  59.9M     0K     0K] r--/r-- SM=COW          /usr/lib/libobjc.A.dylib
+__LINKEDIT                  20d2c0000-230f18000    [572.3M  19.6M     0K     0K] r--/r-- SM=COW          dyld shared cache combined __LINKEDIT
+__TEXT                      291c71000-291c79000    [   32K    32K     0K     0K] r-x/r-x SM=COW          /usr/lib/libRosetta.dylib
+__TEXT                      293884000-293888000    [   16K    16K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__TEXT                      293888000-293893000    [   44K    44K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__TEXT                      293893000-29389b000    [   32K    32K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__TEXT                      29389b000-29389c000    [    4K     4K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_trial.dylib
+__DATA_CONST                29f9bceb0-29f9bcee8    [    56     56     0K     0K] r--/rw- SM=COW          /usr/lib/libRosetta.dylib
+__DATA_CONST                29fd7e168-29fd7e2f8    [   400    400     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__DATA_CONST                29fd7e2f8-29fd7eb20    [  2088   2088     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__DATA_CONST                29fd7eb20-29fd7ec00    [   224    224     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__DATA                      2a5d86620-2a5d87788    [    4K     4K     0K     0K] rw-/rw- SM=COW          /usr/lib/libRosetta.dylib
+__DATA                      2a5f35f90-2a5f364f8    [  1384   1384     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__DATA_DIRTY                2a71d9d58-2a71d9d68    [    16     16     0K     0K] rw-/rw- SM=COW          /usr/lib/libRosetta.dylib
+__DATA_DIRTY                2a71e6d20-2a71e6d60    [    64     64     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__DATA_DIRTY                2a71e6d60-2a71e6d70    [    16     16     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__AUTH                      2a7cfa458-2a7cfa488    [    48     48     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__AUTH_CONST                2acac0ec0-2acac1230    [   880     0K     0K     0K] r--/rw- SM=COW          /usr/lib/libRosetta.dylib
+__AUTH_CONST                2acbb3bb8-2acbb3f00    [   840     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__AUTH_CONST                2acbb3f00-2acbb40b8    [   440     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__AUTH_CONST                2acbb40b8-2acbb4268    [   432     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__AUTH_CONST                2acbb4268-2acbb42a0    [    56     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_trial.dylib
+MALLOC_SMALL                bccc00000-bcd000000    [ 4096K   160K   160K     0K] rw-/rwx SM=PRV          DefaultMallocZone_0x102d54000
+MALLOC_SMALL                bcd000000-bcd400000    [ 4096K    48K    48K     0K] rw-/rwx SM=PRV          DefaultMallocZone_0x102d54000
+VM_ALLOCATE (reserved)   1d58a1800000-1d58a1c00000 [ 4096K     0K     0K     0K] rw-/rwx SM=NUL          reserved VM address space (unallocated)
+VM_ALLOCATE              1d58a1c00000-1d58a1c40000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1c40000-1d58a1c80000 [  256K    32K    32K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1c80000-1d58a1cc0000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1cc0000-1d58a1d00000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1d00000-1d58a1d40000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1d40000-1d58a1d80000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1d80000-1d58a1dc0000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1dc0000-1d58a1dd4000 [   80K    80K    80K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1dd4000-1d58a1e14000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1e14000-1d58a1e54000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1e54000-1d58a1e94000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1e94000-1d58a1ed4000 [  256K   256K   256K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1ed4000-1d58a1f14000 [  256K   256K   256K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1f14000-1d58a1f54000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1f54000-1d58a1f94000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1f94000-1d58a1fd4000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a1fd4000-1d58a2014000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a2014000-1d58a4018000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a4018000-1d58a601c000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a601c000-1d58a605c000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a605c000-1d58a8060000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58a8060000-1d58aa064000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58aa064000-1d58ac068000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58ac068000-1d58ae06c000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58ae06c000-1d58b0070000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58b0070000-1d58b2074000 [ 32.0M  32.0M  32.0M     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58b2074000-1d58b20b4000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58b20b4000-1d58b20cc000 [   96K    32K    32K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58b34f4000-1d58b3534000 [  256K    16K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58b3674000-1d58b36b4000 [  256K   256K    16K     0K] rw-/rwx SM=PRV  
+VM_ALLOCATE              1d58b36b4000-1d58b36f4000 [  256K    64K    16K     0K] rw-/rwx SM=PRV  
+__LINKEDIT                  20d2c0000-230f18000    [572.3M  19.6M     0K     0K] r--/r-- SM=COW          dyld shared cache combined __LINKEDIT
+=== env 'GCRY_HIGH_HEAP=0'
+high_heap=false base=0x186a26000000 misses=0
+chunks 0x1055f0000 .. 0x11cb54000 fences=0 pid=1782
+Process:         lay [1782]
+Load Address:    0x104ecc000
+Physical footprint:         258.8M
+Physical footprint (peak):  279.8M
+__OBJC_RO                   2083891b8-20d2b9a68    [ 79.2M  60.0M     0K     0K] r--/r-- SM=COW          /usr/lib/libobjc.A.dylib
+__LINKEDIT                  20d2c0000-230f18000    [572.3M  19.6M     0K     0K] r--/r-- SM=COW          dyld shared cache combined __LINKEDIT
+__TEXT                      291c71000-291c79000    [   32K    32K     0K     0K] r-x/r-x SM=COW          /usr/lib/libRosetta.dylib
+__TEXT                      293884000-293888000    [   16K    16K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__TEXT                      293888000-293893000    [   44K    44K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__TEXT                      293893000-29389b000    [   32K    32K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__TEXT                      29389b000-29389c000    [    4K     4K     0K     0K] r-x/r-x SM=COW          /usr/lib/system/libsystem_trial.dylib
+__DATA_CONST                29f9bceb0-29f9bcee8    [    56     56     0K     0K] r--/rw- SM=COW          /usr/lib/libRosetta.dylib
+__DATA_CONST                29fd7e168-29fd7e2f8    [   400    400     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__DATA_CONST                29fd7e2f8-29fd7eb20    [  2088   2088     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__DATA_CONST                29fd7eb20-29fd7ec00    [   224    224     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__DATA                      2a5d86620-2a5d87788    [    4K     4K     0K     0K] rw-/rw- SM=COW          /usr/lib/libRosetta.dylib
+__DATA                      2a5f35f90-2a5f364f8    [  1384   1384     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__DATA_DIRTY                2a71d9d58-2a71d9d68    [    16     16     0K     0K] rw-/rw- SM=COW          /usr/lib/libRosetta.dylib
+__DATA_DIRTY                2a71e6d20-2a71e6d60    [    64     64     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__DATA_DIRTY                2a71e6d60-2a71e6d70    [    16     16     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__AUTH                      2a7cfa458-2a7cfa488    [    48     48     0K     0K] rw-/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__AUTH_CONST                2acac0ec0-2acac1230    [   880     0K     0K     0K] r--/rw- SM=COW          /usr/lib/libRosetta.dylib
+__AUTH_CONST                2acbb3bb8-2acbb3f00    [   840     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_darwindirectory.dyl
+__AUTH_CONST                2acbb3f00-2acbb40b8    [   440     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_eligibility.dylib
+__AUTH_CONST                2acbb40b8-2acbb4268    [   432     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_sanitizers.dylib
+__AUTH_CONST                2acbb4268-2acbb42a0    [    56     0K     0K     0K] r--/rw- SM=COW          /usr/lib/system/libsystem_trial.dylib
+MALLOC_SMALL                834c00000-835000000    [ 4096K   160K   160K     0K] rw-/rwx SM=PRV          DefaultMallocZone_0x10553c000
+MALLOC_SMALL                835000000-835400000    [ 4096K    48K    48K     0K] rw-/rwx SM=PRV          DefaultMallocZone_0x10553c000
+__LINKEDIT                  20d2c0000-230f18000    [572.3M  19.6M     0K     0K] r--/r-- SM=COW          dyld shared cache combined __LINKEDIT

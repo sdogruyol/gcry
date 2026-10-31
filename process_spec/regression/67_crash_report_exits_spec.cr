@@ -95,7 +95,7 @@ describe "Regression: a fatal exception ends the process" do
     bytes = LibC::SizeT.new(crash_report_frame_bytes)
     # Sized up front, so the loop's only allocations are the ones it makes.
     held = Array(Void*).new(200_000)
-    LibGC.set_on_heap_resize(->(size : LibGC::Word) {
+    LibGC.set_on_heap_resize(->(_size : LibGC::Word) {
       Pointer(Int32).new(0x10_u64).value = 1 if CrashInAllocator.armed?
     })
     CrashInAllocator.armed = true

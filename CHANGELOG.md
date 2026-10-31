@@ -7,6 +7,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The overnight stress runs every week on the five GitHub runners**
+  (`.github/workflows/stress.yml`): Linux x86_64 and arm64, macOS arm64 and
+  Intel, Windows x86_64, three jobs each. `bench/stress_overnight.sh` takes
+  `--only`/`--skip` loop filters, builds only what the selected loops run,
+  runs without the heavy lock where there is no `flock`, exits 1 on any
+  failed or stalled run (a classified Crystal scheduler deadlock is counted,
+  not failed), and prints `<loop> skipped: <reason>` for a loop that cannot
+  run on that OS or lacks its compiler or `wrk`. `bench/run_bounded.sh`
+  captures a Windows stall with cdb and the executable's PDB and kills the
+  whole native tree. The full set on `ubuntu-latest`: 1 652 runs in three
+  jobs of 75–100 minutes, all passing; every runner at scale 0.05 passing
+  (`bench/log/linux/2026-11-01-stress-ci/`).
+
+### Changed
+
+- **The `String::Builder` and `@[Raises]` reopens apply only below Crystal
+  1.22.1,** which fixed both upstream (crystal-lang/crystal#17650 for
+  #17645, #17656 for #17644; both on master too). Regressions 22 and 13 pass
+  on 1.21.0 with the reopens and on 1.22.2 without them. CI's second
+  compiler leg, the pinned `std_spec` arm and the compiler-with-gcry build
+  move from 1.22.0 to 1.22.2.
+
+- **The mark scans a payload four words per loop turn, and tells a
+  small-object batch entry by one compare.** 7.2% fewer instructions in
+  JsonGenerate's batch scans (callgrind, one marker). Σ mark on arm64 Linux:
+  Primes −3.9%, JsonParsePure −7.0%, JsonGenerate −8.6%,
+  JsonParseSerializable −11.9%, JsonParsePull −11.5% at the same
+  collections; Windows −1% to −5% on the JSON rows; level on x86 Linux and
+  both Macs. No row slower than base beyond what a 16- or 64-byte code pad
+  moves it on the same runner (Perf A/B 41213949301, pads 41216031947,
+  41219560170, 41221127852; `bench/log/linux/2026-10-31-mark-cost/`). The
+  32 MiB parallel-mark live floor stays: it does not reach Binarytrees,
+  and Boehm's own parallel markers do not speed Binarytrees up on any runner
+  (`bench/log/linux/2026-10-31-parallel-mark-floor/`).
+
+- **0.39.0's Revcomp row on the Linux host, 1–2% slower than 0.38.0, is
+  code placement (README, ROADMAP).** The allocation entry
+  `GC::malloc_atomic` starts 16 bytes past a 64-byte line in the 0.39.0
+  binary, moved there by 80 bytes of the mprotect fix's class-variable
+  initializers ahead of it, and Revcomp is slowest at that phase on x86-64
+  whichever release is built there. Over eight placements of each release
+  0.39.0 is level with 0.38.0 on the host (+0.05% [−0.38, +0.23]); over five
+  it is 0.9% faster on `ubuntu-latest` and 0.5% faster on arm64 (Perf A/B
+  41212029709 and 41213664006). Collections, pauses, grows and faults are
+  the same, and 0.39.0 runs 0.12% more instructions, five per allocation
+  from the slow path's tail call (`bench/log/linux/2026-10-31-revcomp-host-placement/`).
+
+### Fixed
+
+- **The large-cache counters' resets after a collection are no longer lost
+  to a running allocation.** The collector reset the recycling budget, the
+  large bytes allocated since the last major and the cache's hit and miss
+  counts with the world running and no lock, while allocating threads
+  updated them with plain read-modify-writes; one that had read before the
+  reset stored the old cycle's value back. The large cache then kept more or
+  less than intended for a cycle (RSS) and the adaptive retain read two
+  cycles' hits. The four are atomic now. Regression 89
+  (`bench/log/linux/2026-11-01-large-cache-counters/`).
+
+- **On macOS the heap no longer sits where 33-bit integers point.** The
+  kernel put it right after the executable, at 4–8 GiB, and any word holding
+  an integer from about 4.3 to 8.5 billion kept whatever block it named: a
+  `5 000 000 000` in a system library's data kept a dead 32–128 MiB buffer of
+  JsonGenerate's, whose peak landed on a high level in 35–90% of reps on
+  both macOS runners. Every heap mapping on macOS is now asked for at a
+  random base 16 to 32 TiB up (a hint, never `MAP_FIXED`; mapped where the
+  kernel answers if refused there; `GCRY_HIGH_HEAP=0` turns it off).
+  JsonGenerate reps on a high level over three sessions: `macos-latest` 0
+  of 75 against 112 of 130 for base and the same binary without it (peak
+  0.74–0.78× → 0.64× of Boehm's), `macos-15-intel` 0 of 75 against 59 of
+  130; Intel's Revcomp and RegexDna peaks drop 21% and 25% against the same
+  binary without it. No row slower beyond its spread that the same binary
+  without the placement or code placement alone does not move as much.
+  Linux and Windows build the same machine code as before (Perf A/B
+  41203146054, 41207913078, 41212311272;
+  `process_spec/regression/92_darwin_high_heap_spec.cr`,
+  `bench/log/macos/2026-10-31-heap-high/FINDINGS.md`).
+
+- **A growth reservation too long to place whole now has its front kept
+  off the 4 GiB windows, as 0.39.0 meant to.** Such a reservation (a block
+  `realloc` grew past about 1 GiB) has only its committed front placed;
+  when the front entered a window, 0.39.0 fenced the window and asked
+  again, and on Linux, which maps top-down and fits no extent that long
+  between two fences, every try went right under the last fence with its
+  front across the boundary 4 GiB lower, until the 17th try was kept in a
+  window, 16 fences spent. The reservation now goes back and is asked
+  for again with its front ending where the window starts, the room over
+  the window; the window is fenced only when that hint is not taken. The
+  spec example for it failed 6 of 60 local runs (a CI flake in 0.39.0);
+  a new example reproduces the walk
+  (`bench/log/linux/2026-10-26-four-gib/` §5).
+
+- **Under incremental collection (`GCRY_INCREMENTAL=1`, or a heap driven
+  by `collect_a_little`), a block `GC.free` released could be handed out
+  twice.** A bitmap `free` clears the block's occupancy bit, then its mark
+  bit. The chunk's own cursor, which claims words with no lock, could
+  claim and hand out the block between the two, and a stop could mark it
+  there; the free's mark clear then unmarked a block in use, and the
+  cycle's finishing slice swept it free under the program. A `free` now
+  marks the chunk `FREEING` across both clears, and the cursor takes the
+  locked path rather than claim from it. Stop-the-world collection (the
+  default) was not affected. Regression 91 (control arm: the block handed
+  out again 30 of 30 runs; fixed: 0 of 30). No row slower beyond what code
+  placement alone moves on the same runner (Perf A/B 41203821072, pads
+  41210728957; `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`).
+
+- **An idle stretch that begins while an idle collection is finishing now
+  gets a collection of its own.** The idle thread took its activity
+  baseline again once its collection returned, and an allocation made after
+  the collection let the mutator go — the last of a burst it had
+  interrupted — went into that baseline: the stretch it began looked
+  already collected, and the program kept its warm budget and unswept
+  garbage until it next allocated. The baseline is now the count the idle
+  decision read. Regression 93 holds the idle thread at its collection's
+  end until the last allocation is made: 1 idle collection before (the
+  held one), 2 after, the second re-armed by the allocation and not by the
+  collection. Found reading the loop for the flake below, not seen in it
+  (`bench/log/macos/2026-11-01-idle-release-flake/`).
+
+- **`make idle-release` no longer fails on macOS when the idle collection
+  comes after its read.** The release check read the counters 200 ms after
+  the last burst, assuming the idle collection had run; on macos-latest a
+  12.5 ms `nanosleep` takes 35–55 ms (p50), the idle thread's polls with it,
+  and the collection began after 200 ms in 86 of 1 014 runs, up to 377 ms.
+  When the burst had also run an ordinary collection, the read found that
+  one's warm budget and failed: 4 718 592 bytes in CI run 41209225316, 1 in
+  1 014 runs alone and 14 in 4 041 in all, on 0.38.0 as on 0.39.0 and with
+  0.39's dormant counter put back to its recount — not a regression. Every
+  failure re-read 0 once the collection came. The gate now waits up to 10 s
+  for the last gap's idle collection, reads it, reads again if a collection
+  began across the read, and fails by name if none comes; what it requires
+  is unchanged. 0 failures in 4 043 runs of the fixed gate on macos-latest
+  (1 013 alone), with and without the collector fix.
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On

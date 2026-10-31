@@ -116,7 +116,7 @@ describe "API misuse" do
 
   it "survives alternating malloc/free patterns" do
     # Verify rapid alloc/free doesn't corrupt internal structures
-    1000.times do |i|
+    1000.times do
       p1 = GC.malloc(16)
       p2 = GC.malloc(32)
       GC.free(p1)

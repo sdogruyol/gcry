@@ -71,6 +71,11 @@ So the M1's ~7 points split into three parts:
   exceeds its wall time by 27 ms: its parallel markers run on the runner's
   other two vCPUs. gcry marks serially below 32 MiB live, and Binarytrees'
   live set is ~0.1 MiB. In 0.36, four gcry workers cost 14 points.
+  *Corrected 2026-10-31:* Boehm with one marker (`GC_MARKERS=1`) is as fast
+  on Binarytrees on the M1 (100% [90, 108] of its default) and faster on
+  arm64 and x86 Linux, with less CPU; the overlap is its markers' overhead,
+  not work taken off the main thread
+  (`../../linux/2026-10-31-parallel-mark-floor/`).
 - **~2 points: kernel time.** gcry takes 33% more page faults on the 16 KiB
   pages (0.014 s more kernel time). Not attributed further here
   [INFERENCE: chunk release and refault across collections, the

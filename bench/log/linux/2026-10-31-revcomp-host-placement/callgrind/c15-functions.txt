@@ -1,0 +1,230 @@
+--------------------------------------------------------------------------------
+Profile data file 'cg/c15-Revcomp.out' (creator: callgrind-3.26.0)
+--------------------------------------------------------------------------------
+I1 cache: 65536 B, 64 B, 2-way associative
+D1 cache: 65536 B, 64 B, 2-way associative
+LL cache: 16777216 B, 64 B, 16-way associative
+Timerange: Basic block 0 - 7116002977
+Trigger: Program termination
+Profiled target:  /home/naruto/playground/.scratch/RevcompHost/bins/c15 Revcomp (PID 2159123, part 1)
+Events recorded:  Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+Events shown:     Ir
+Event sort order: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+Thresholds:       100 0 0 0 0 0 0 0 0 0 0 0 0
+Include dirs:     
+User annotated:   
+Auto-annotation:  off
+
+--------------------------------------------------------------------------------
+Ir                      
+--------------------------------------------------------------------------------
+27,582,257,969 (100.0%)  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+Ir                      file:function
+--------------------------------------------------------------------------------
+3,900,000,000 (14.14%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/char.cr:*Char#to_s<String::Builder>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+3,808,800,745 (13.81%)  work/c15/metric.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+2,664,235,978 ( 9.66%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*String#size:Int32 [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+2,244,331,734 ( 8.14%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+1,950,000,462 ( 7.07%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string/builder.cr:*String::Builder#increase_capacity_by<Int32>:(Pointer(UInt8) | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+1,334,977,976 ( 4.84%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*String#single_byte_optimizable?:Bool [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+1,189,500,810 ( 4.31%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*Revcomp#revcomp<String>:Nil
+1,165,608,845 ( 4.23%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+  989,564,368 ( 3.59%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+  938,167,370 ( 3.40%)  work/c15/metric.cr:*Benchmark::run<(String | Nil)>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+  931,667,559 ( 3.38%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*Benchmark::run<(String | Nil)>:Nil
+  910,000,276 ( 3.30%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Revcomp#revcomp<String>:Nil
+  485,333,986 ( 1.76%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*Benchmark::run<(String | Nil)>:Nil
+  407,431,706 ( 1.48%)  ./string/../sysdeps/x86_64/multiarch/memmove-ssse3.S:__memcpy_ssse3 [/usr/lib/x86_64-linux-gnu/libc.so.6]
+  396,500,249 ( 1.44%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Benchmark::run<(String | Nil)>:Nil
+  390,000,288 ( 1.41%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*Revcomp#revcomp<String>:Nil
+  369,085,355 ( 1.34%)  work/c15/lib/gcry/src/gcry/heap.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+  294,923,853 ( 1.07%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/io/memory.cr:*IO::Memory#write<Slice(UInt8)>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+  288,166,910 ( 1.04%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Benchmark::run<(String | Nil)>:Nil
+  260,000,116 ( 0.94%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*String#size:Int32
+  260,000,018 ( 0.94%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Revcomp#revcomp<String>:Nil
+  260,000,000 ( 0.94%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/io.cr:*Char#to_s<String::Builder>:Nil
+  260,000,000 ( 0.94%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/io.cr:*Revcomp#revcomp<String>:Nil
+  218,478,880 ( 0.79%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/io.cr:*IO::Memory@IO#write_string<Slice(UInt8)>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+  208,000,000 ( 0.75%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/float.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+  138,339,967 ( 0.50%)  work/c15/lib/gcry/src/gcry/gc_override.cr:*GC::malloc_atomic<UInt64>:Pointer(Void) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+  131,069,716 ( 0.48%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/io/memory.cr:*IO::Memory#increase_capacity_by<Int32>:(Pointer(UInt8) | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+  130,000,007 ( 0.47%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*String#single_byte_optimizable?:Bool
+  106,328,377 ( 0.39%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+  104,000,000 ( 0.38%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/array.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+   80,717,850 ( 0.29%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*String#[]<Int32, Int32>:String [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+   72,621,948 ( 0.26%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*String#byte_slice?<Int32, Int32>:(String | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+   56,504,025 ( 0.20%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*String#byte_slice?<Int32, Int32>:(String | Nil)
+   54,612,175 ( 0.20%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*IO::Memory#write<Slice(UInt8)>:Nil
+   54,599,979 ( 0.20%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*String#[]<Range(Int32, Int32)>:String [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+   53,532,528 ( 0.19%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+   47,666,696 ( 0.17%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*String#chomp:String [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+   46,182,563 ( 0.17%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap::tls_cursor_cache [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+   44,199,983 ( 0.16%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*String#[]<Range(Int32, Int32)>:String
+   33,430,135 ( 0.12%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+   32,771,832 ( 0.12%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/io.cr:*IO::Memory#write<Slice(UInt8)>:Nil
+   26,356,684 ( 0.10%)  work/c15/lib/gcry/src/gcry.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+   26,000,028 ( 0.09%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+   21,844,870 ( 0.08%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/slice.cr:*IO::Memory#write<Slice(UInt8)>:Nil
+   21,512,696 ( 0.08%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*String#byte_slice?<Int32, Int32>:(String | Nil)
+   13,170,186 ( 0.05%)  work/c15/lib/gcry/src/gcry/invariant.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+   13,170,186 ( 0.05%)  work/c15/lib/gcry/src/gcry/trace.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+   13,000,044 ( 0.05%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/steppable.cr:*Revcomp#revcomp<String>:Nil
+   13,000,035 ( 0.05%)  work/c15/metric.cr:*Revcomp#revcomp<String>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+   12,153,029 ( 0.04%)  work/c15/metric.cr:*Fasta#run:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+   10,198,772 ( 0.04%)  work/c15/lib/gcry/src/gcry/parallel_mark.cr:*Gcry::Heap#mark_worker_loop:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+    7,529,382 ( 0.03%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+    6,585,093 ( 0.02%)  work/c15/lib/gcry/src/gcry/kernels.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+    6,500,004 ( 0.02%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*String#chomp:String
+    5,381,192 ( 0.02%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/enumerable.cr:*String#byte_slice?<Int32, Int32>:(String | Nil)
+    5,378,174 ( 0.02%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/gc.cr:*String#byte_slice?<Int32, Int32>:(String | Nil)
+    5,007,930 ( 0.02%)  work/c15/lib/gcry/src/gcry/block.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+    4,896,527 ( 0.02%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/string.cr:*Fasta#run:Nil
+    4,333,353 ( 0.02%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/object.cr:*Benchmark::run<(String | Nil)>:Nil
+    4,333,350 ( 0.02%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/gc.cr:*Benchmark::run<(String | Nil)>:Nil
+    3,167,222 ( 0.01%)  work/c15/lib/gcry/src/gcry/collect_mark.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+    3,040,070 ( 0.01%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/intrinsics.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+    2,902,641 ( 0.01%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/atomic.cr:*Gcry::Heap#mark_worker_loop:Nil
+    2,689,087 ( 0.01%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/object.cr:*String#byte_slice?<Int32, Int32>:(String | Nil)
+    1,733,334 ( 0.01%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/object.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+    1,733,334 ( 0.01%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/gc.cr:*Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+    1,715,929 ( 0.01%)  work/c15/lib/gcry/src/gcry/collect_scan.cr:*Gcry::Heap#scan_static_ranges:UInt64 [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+    1,586,741 ( 0.01%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap#bitmap_chunk_has_free_block?<Pointer(Gcry::ChunkHeader)>:Bool [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+    1,502,457 ( 0.01%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+    1,443,674 ( 0.01%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/intrinsics.cr:*Gcry::Heap#mark_worker_loop:Nil
+    1,316,421 ( 0.00%)  work/c15/lib/gcry/src/gcry/roots.cr:*Gcry::Heap#allocate_entry<UInt64, Bool, Bool>:Pointer(Void)
+    1,212,851 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_mark.cr:*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Gcry::Heap::MarkShard>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+    1,087,104 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*Fasta#run:Nil
+    1,062,464 ( 0.00%)  work/c15/lib/gcry/src/gcry/mark_audit.cr:*Gcry::Heap#note_mutator_candidate<UInt64>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      980,736 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_mark.cr:*Gcry::Heap#scan_mutator_stack:Nil
+      874,962 ( 0.00%)  work/c15/lib/gcry/src/gcry/roots.cr:*Gcry::Heap#scan_static_ranges:UInt64
+      867,141 ( 0.00%)  work/c15/lib/gcry/src/gcry/kernels/scalar.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+      861,658 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_sweep.cr:*Gcry::Heap#sweep<Bool, Bool>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      765,982 ( 0.00%)  ./string/../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S:__memset_sse2_unaligned_erms [/usr/lib/x86_64-linux-gnu/libc.so.6]
+      686,338 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_sweep.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      672,732 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#flush_pending_empty_chunks:Nil
+      626,800 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_mark.cr:*Gcry::Heap#scan_other_thread_stacks:Nil
+      587,732 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      528,818 ( 0.00%)  work/c15/lib/gcry/src/gcry/block.cr:*Gcry::Heap#bitmap_chunk_has_free_block?<Pointer(Gcry::ChunkHeader)>:Bool
+      504,314 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#index_insert<Pointer(Gcry::ChunkHeader)>:Nil
+      493,436 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#radix_remove<Pointer(Gcry::ChunkHeader)>:Nil
+      467,802 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/intrinsics.cr:*Gcry::Heap#flush_pending_empty_chunks:Nil
+      453,244 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#index_remove_locked<Pointer(Gcry::ChunkHeader)>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      437,509 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#index_insert<Pointer(Gcry::ChunkHeader)>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      435,560 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_layout.cr:*GC::malloc_atomic<UInt64>:Pointer(Void)
+      417,973 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_radix.cr:*Gcry::Heap#radix_remove<Pointer(Gcry::ChunkHeader)>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      410,840 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+      388,729 ( 0.00%)  work/c15/lib/gcry/src/gcry/platform/linux_pagemap.cr:*Gcry::Platform::stack_low_water<UInt64, UInt64>:UInt64
+      368,152 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_radix.cr:*Gcry::Heap#index_insert<Pointer(Gcry::ChunkHeader)>:Nil
+      338,510 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#bitmap_indexed_chunk<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+      305,679 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#allocate_traced<UInt64, Bool, Bool>:Pointer(Void) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      294,912 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect.cr:*Gcry::Heap#flush_pending_empty_chunks:Nil
+      288,009 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#scan_static_ranges:UInt64
+      279,474 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#radix_remove<Pointer(Gcry::ChunkHeader)>:Nil
+      267,624 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil
+      254,056 ( 0.00%)  ./stdio-common/./stdio-common/vfscanf-internal.c:__vfscanf_internal [/usr/lib/x86_64-linux-gnu/libc.so.6]
+      246,052 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_scan.cr:*Gcry::Heap#scan_mutator_stack:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      242,911 ( 0.00%)  work/c15/lib/gcry/src/gcry/block.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+      241,787 ( 0.00%)  work/c15/lib/gcry/src/gcry/size_classes.cr:*Gcry::SizeClasses::payload<Int32>:UInt32 [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      239,568 ( 0.00%)  work/c15/lib/gcry/src/gcry/size_classes.cr:*Gcry::Heap#allocate_traced<UInt64, Bool, Bool>:Pointer(Void)
+      214,121 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_layout.cr:*Gcry::Heap#bitmap_chunk_has_free_block?<Pointer(Gcry::ChunkHeader)>:Bool
+      213,540 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#alloc_old_small<UInt32, UInt32, Int32, UInt64>:Tuple(Pointer(Void), Bool) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      210,348 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Gcry::Heap::MarkShard>:Nil
+      207,332 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_mark.cr:*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      201,234 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#bitmap_chunk_has_free_block?<Pointer(Gcry::ChunkHeader)>:Bool
+      184,031 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#index_insert<Pointer(Gcry::ChunkHeader)>:Nil
+      183,640 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      180,975 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect.cr:*Gcry::Heap#maybe_collect:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      180,271 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil
+      167,668 ( 0.00%)  work/c15/lib/gcry/src/gcry/roots.cr:*Gcry::Heap#scan_mutator_stack:Nil
+      156,506 ( 0.00%)  ./stdlib/./stdlib/getenv.c:getenv [/usr/lib/x86_64-linux-gnu/libc.so.6]
+      127,987 ( 0.00%)  ./elf/./elf/dl-lookup.c:do_lookup_x [/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2]
+      125,852 ( 0.00%)  ./stdlib/../stdlib/strtol_l.c:____strtoul_l_internal [/usr/lib/x86_64-linux-gnu/libc.so.6]
+      125,779 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/slice/sort.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+      125,424 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#bitmap_chunk_has_free_block?<Pointer(Gcry::ChunkHeader)>:Bool
+      118,991 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      118,854 ( 0.00%)  work/c15/lib/gcry/src/gcry/roots.cr:*Gcry::Heap#scan_other_thread_stacks:Nil
+      114,759 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_sweep.cr:*Gcry::Heap#note_chunk_fill<UInt64, UInt64>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      112,450 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_radix.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil
+      111,099 ( 0.00%)  work/c15/lib/gcry/src/gcry/block.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+      110,754 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/indexable.cr:*Gcry::Platform::stack_low_water<UInt64, UInt64>:UInt64
+      109,858 ( 0.00%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap#bitmap_settle_cursor_sets:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+      106,431 ( 0.00%)  ./string/../sysdeps/x86_64/multiarch/strcmp-sse2.S:__strncmp_sse2 [/usr/lib/x86_64-linux-gnu/libc.so.6]
+      105,771 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+       97,685 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:*Crystal::System::Thread::current_thread [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       97,508 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil
+       94,892 ( 0.00%)  work/c15/lib/gcry/src/gcry/block.cr:*Gcry::Heap#sweep<Bool, Bool>:Nil
+       94,629 ( 0.00%)  work/c15/lib/gcry/src/gcry/monitor_gate.cr:*Fiber::ExecutionContext::Monitor#run_loop':NoReturn
+       89,670 ( 0.00%)  work/c15/lib/gcry/src/gcry/block.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil
+       86,774 ( 0.00%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+       84,843 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#map_chunk<UInt64, UInt32, UInt32>:Pointer(Gcry::ChunkHeader) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       82,585 ( 0.00%)  work/c15/lib/gcry/src/gcry/platform/linux_address_space.cr:*Gcry::Platform::ensure_static_root_cache:Nil
+       81,782 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#scan_mutator_stack:Nil
+       80,864 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:*Gcry::Heap#scan_mutator_stack:Nil
+       78,324 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+       75,190 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#clear_all_marks:Nil
+       74,069 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/float/printer/ryu_printf_table.cr:*Float::Printer::RyuPrintf::put<Array(Tuple(UInt64, UInt64, UInt64)), UInt64, UInt64, UInt64>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       74,069 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/array.cr:*Float::Printer::RyuPrintf::put<Array(Tuple(UInt64, UInt64, UInt64)), UInt64, UInt64, UInt64>:Nil
+       66,462 ( 0.00%)  work/c15/lib/gcry/src/gcry/stw_slots.cr:*Gcry::Platform::thread_sp<UInt64>:(Pointer(Void) | Nil)
+       65,680 ( 0.00%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap#alloc_old_small<UInt32, UInt32, Int32, UInt64>:Tuple(Pointer(Void), Bool)
+       64,116 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_mark.cr:*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Gcry::Heap::MarkShard>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       61,560 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_layout.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+       61,453 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_scan.cr:*Gcry::Heap#scan_other_thread_stacks:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       59,386 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_scan.cr:*Gcry::Heap#sweep<Bool, Bool>:Nil
+       59,311 ( 0.00%)  work/c15/lib/gcry/src/gcry/parallel_mark.cr:*Gcry::Heap::MarkDrought#over?:Bool [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       58,977 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/slice/sort.cr:*Slice(T)::quick_sort_for_intro_sort!<Pointer(UInt64), (Int32 | Int64), Int32>:Nil'2 [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       58,637 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#chunk_containing<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       58,379 ( 0.00%)  work/c15/lib/gcry/src/gcry/platform/thread_staging.cr:*Gcry::Heap#stop_world_quiescing_roots:Nil
+       57,668 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+       57,470 ( 0.00%)  work/c15/lib/gcry/src/gcry/oom_reserve.cr:*Gcry::Heap::oom_depth [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       56,977 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#scan_other_thread_stacks:Nil
+       55,242 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Platform::stack_low_water<UInt64, UInt64>:UInt64
+       54,622 ( 0.00%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap#mark_bitmap_alloc_in_flight:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       53,818 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect.cr:*Gcry::Heap#find_object_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       51,590 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_layout.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+       49,788 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#refuse_live_release<UInt64, UInt64, UInt8>:Bool [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       48,912 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#sweep_small_blocks<Pointer(Gcry::ChunkHeader), Int32, Bool, Bool>:Gcry::Heap::SmallSweepCounts
+       46,940 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_radix.cr:*Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+       46,238 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/once.cr:*Fiber::ExecutionContext::Monitor#run_loop':NoReturn
+       44,220 ( 0.00%)  work/c15/lib/gcry/src/gcry/tlab.cr:*Gcry::Heap#sweep<Bool, Bool>:Nil
+       41,877 ( 0.00%)  work/c15/lib/gcry/src/gcry/thread_birth_root.cr:*Gcry::Heap#stop_world_quiescing_roots:Nil
+       41,241 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/slice/sort.cr:*Slice(T)::quick_sort_for_intro_sort!<Pointer(UInt64), (Int32 | Int64), Int32>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       41,050 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/atomic.cr:*Gcry::Heap#alloc_old_small<UInt32, UInt32, Int32, UInt64>:Tuple(Pointer(Void), Bool)
+       39,786 ( 0.00%)  ./string/../sysdeps/x86_64/multiarch/../multiarch/strcmp-sse2.S:strcmp [/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2]
+       39,353 ( 0.00%)  ./nptl/./nptl/cancellation.c:__syscall_cancel [/usr/lib/x86_64-linux-gnu/libc.so.6]
+       37,026 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:*Gcry::Heap#maybe_collect:Nil
+       36,907 ( 0.00%)  ./misc/../sysdeps/unix/sysv/linux/x86_64/syscall.S:syscall [/usr/lib/x86_64-linux-gnu/libc.so.6]
+       36,384 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Nil>:Nil
+       36,348 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_sweep.cr:*Gcry::Heap#rebuild_size_class_freelist:recalc<Int32, Bool, Bool>:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       35,932 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#sweep<Bool, Bool>:Nil
+       35,877 ( 0.00%)  ./elf/../sysdeps/x86_64/dl-machine.h:_dl_relocate_object_no_relro
+       35,595 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_sweep.cr:*Gcry::Heap#flush_pending_empty_chunks:Nil [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       35,301 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil
+       35,178 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#bitmap_indexed_chunk<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+       34,874 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/time/span.cr:*Fiber::ExecutionContext::Monitor#run_loop':NoReturn
+       34,805 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:*Gcry::Heap#radix_remove<Pointer(Gcry::ChunkHeader)>:Nil
+       34,748 ( 0.00%)  ./nptl/./nptl/pthread_mutex_lock.c:pthread_mutex_lock@@GLIBC_2.2.5 [/usr/lib/x86_64-linux-gnu/libc.so.6]
+       33,759 ( 0.00%)  work/c15/lib/gcry/src/gcry/bitmap_alloc.cr:*Gcry::Heap#bitmap_indexed_chunk<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil) [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
+       33,535 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#rebuild_size_class_freelist:recalc<Int32, Bool, Bool>:Nil
+       33,359 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:*Gcry::Heap#rebuild_size_class_freelist:recalc<Int32, Bool, Bool>:Nil
+       33,084 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/atomic.cr:*Gcry::Heap#sweep<Bool, Bool>:Nil
+       32,990 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+       32,630 ( 0.00%)  ./nptl/./nptl/pthread_mutex_unlock.c:pthread_mutex_unlock@@GLIBC_2.2.5 [/usr/lib/x86_64-linux-gnu/libc.so.6]
+       32,338 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+       32,338 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#chunk_search_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+       32,308 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/atomic.cr:*Fiber::ExecutionContext::Monitor#run_loop':NoReturn
+       32,306 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/atomic.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+       31,540 ( 0.00%)  work/c15/lib/gcry/src/gcry/collect_mark.cr:*Gcry::Heap#scan_batch_local_first<Pointer(Pointer(Void)), Int32, Gcry::Heap::MarkShard>:Nil
+       31,452 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#flush_pending_empty_chunks:Nil
+       30,780 ( 0.00%)  work/c15/lib/gcry/src/gcry/chunk_layout.cr:*Gcry::Heap#map_chunk<UInt64, UInt32, UInt32>:Pointer(Gcry::ChunkHeader)
+       29,765 ( 0.00%)  ./misc/../sysdeps/unix/sysv/linux/mmap64.c:mmap [/usr/lib/x86_64-linux-gnu/libc.so.6]
+       29,751 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#clear_all_marks:Nil
+       29,265 ( 0.00%)  ./elf/./elf/dl-lookup.c:_dl_lookup_symbol_x [/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2]
+       29,202 ( 0.00%)  ./elf/../sysdeps/generic/dl-new-hash.h:_dl_lookup_symbol_x
+       28,735 ( 0.00%)  work/c15/lib/gcry/src/gcry/oom_reserve.cr:*Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void)
+       28,629 ( 0.00%)  ./elf/./elf/dl-reloc.c:_dl_relocate_object_no_relro [/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2]
+       27,044 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:*Gcry::Heap#scan_edges_inline<Pointer(UInt64), UInt64, Bool, Gcry::Heap::MarkShard>:Nil
+       26,488 ( 0.00%)  ./nptl/../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:__syscall_cancel_arch [/usr/lib/x86_64-linux-gnu/libc.so.6]
+       25,971 ( 0.00%)  /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/int.cr:*Gcry::Heap#bitmap_indexed_chunk<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)
+       25,066 ( 0.00%)  work/c15/lib/gcry/src/gcry/heap.cr:*Gcry::Heap#index_reserve<Pointer(Gcry::ChunkHeader)>:Bool [/home/naruto/playground/.scratch/RevcompHost/bins/c15]
