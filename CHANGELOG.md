@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The `String::Builder` and `@[Raises]` reopens apply only below Crystal
+  1.22.1,** which fixed both upstream (crystal-lang/crystal#17650 for
+  #17645, #17656 for #17644; both on master too). Regressions 22 and 13 pass
+  on 1.21.0 with the reopens and on 1.22.2 without them. CI's second
+  compiler leg, the pinned `std_spec` arm and the compiler-with-gcry build
+  move from 1.22.0 to 1.22.2.
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On

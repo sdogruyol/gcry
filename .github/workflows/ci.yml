@@ -1101,14 +1101,15 @@ jobs:
   # applies only below 1.22.0, which allocates execve's argv terminator itself
   # (crystal-lang/crystal#17184), and
   # `process_spec/regression/73_execve_argv_terminator_spec.cr` checks the
-  # slot on both. The String::Builder and `@[Raises]` reopens still apply on
-  # 1.22.0 (crystal-lang/crystal#17645 and #17644 are open), and the
-  # regression specs for them run here too. Pinned rather than `latest`, which
+  # slot on both. The String::Builder and `@[Raises]` reopens apply only below
+  # 1.22.1, which fixed both upstream (crystal-lang/crystal#17650 and #17656),
+  # so this leg runs their regression specs (22, 13) against the compiler's own
+  # fix and `test` against the reopens. Pinned rather than `latest`, which
   # moves with each release; bump it when the next one is out.
   test-crystal-next:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    name: specs (x86_64, crystal 1.22.0)
+    name: specs (x86_64, crystal 1.22.2)
     steps:
       - uses: actions/checkout@v7
 
@@ -1118,7 +1119,7 @@ jobs:
         uses: ./.github/actions/apt-update
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: "1.22.0"
+          crystal: "1.22.2"
 
       - name: Create output dir
         run: mkdir -p bin
@@ -1163,9 +1164,10 @@ jobs:
   #
   # `latest` is back (see `test` above): the releases list answers again, and
   # this is the gate that tells us a compiler release broke the collector.
-  # 1.22.0 is also pinned, so the newest release keeps a leg of its own once
-  # `latest` has moved past it (on 2026-10-15 both, and nightly, installed
-  # 1.22.0 [39f3f4d08]: run 38709043581, 18 257 examples, 0 failures each).
+  # 1.22.2 is also pinned, so the newest release keeps a leg of its own once
+  # `latest` has moved past it (on 2026-10-15 1.22.0, latest and nightly all
+  # installed 1.22.0 [39f3f4d08]: run 38709043581, 18 257 examples, 0 failures
+  # each; 1.22.2 is the first with the String::Builder and raises fixes).
   # Nightly is allowed to fail: it also reports stdlib regressions that are
   # not gcry's.
   std-spec:
@@ -1174,7 +1176,7 @@ jobs:
       matrix:
         include:
           - crystal: "1.21.0"
-          - crystal: "1.22.0"
+          - crystal: "1.22.2"
           - crystal: latest
           - crystal: nightly
             experimental: true
@@ -1239,15 +1241,15 @@ jobs:
   # interpreter binds Boehm's C ABI from the compiler binary. The whole
   # compiler_spec suite (13 640 examples), built by the host compiler with
   # gcry linked in, runs on pull requests, weekly and on dispatch: it is a
-  # long release build. Both the pinned compiler and 1.22.0: the build is the
-  # String::Builder reopen's real load (crystal-lang/crystal#17645 is still
-  # open in 1.22.0), and the compiler's own source is what changes most
-  # between releases.
+  # long release build. Both the pinned compiler and 1.22.2: the build is the
+  # String::Builder reopen's real load on 1.21.0 and the upstream fix's on
+  # 1.22.2 (crystal-lang/crystal#17650), and the compiler's own source is what
+  # changes most between releases.
   compiler-gcry:
     strategy:
       fail-fast: false
       matrix:
-        crystal: ["1.21.0", "1.22.0"]
+        crystal: ["1.21.0", "1.22.2"]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     name: compiler built with gcry (crystal ${{ matrix.crystal }})
