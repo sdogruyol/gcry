@@ -115,6 +115,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placement alone moves on the same runner (Perf A/B 41203821072, pads
   41210728957; `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`).
 
+- **An idle stretch that begins while an idle collection is finishing now
+  gets a collection of its own.** The idle thread took its activity
+  baseline again once its collection returned, and an allocation made after
+  the collection let the mutator go — the last of a burst it had
+  interrupted — went into that baseline: the stretch it began looked
+  already collected, and the program kept its warm budget and unswept
+  garbage until it next allocated. The baseline is now the count the idle
+  decision read. Regression 93 holds the idle thread at its collection's
+  end until the last allocation is made: 1 idle collection before (the
+  held one), 2 after, the second re-armed by the allocation and not by the
+  collection. Found reading the loop for the flake below, not seen in it
+  (`bench/log/macos/2026-11-01-idle-release-flake/`).
+
+- **`make idle-release` no longer fails on macOS when the idle collection
+  comes after its read.** The release check read the counters 200 ms after
+  the last burst, assuming the idle collection had run; on macos-latest a
+  12.5 ms `nanosleep` takes 35–55 ms (p50), the idle thread's polls with it,
+  and the collection began after 200 ms in 86 of 1 014 runs, up to 377 ms.
+  When the burst had also run an ordinary collection, the read found that
+  one's warm budget and failed: 4 718 592 bytes in CI run 41209225316, 1 in
+  1 014 runs alone and 14 in 4 041 in all, on 0.38.0 as on 0.39.0 and with
+  0.39's dormant counter put back to its recount — not a regression. Every
+  failure re-read 0 once the collection came. The gate now waits up to 10 s
+  for the last gap's idle collection, reads it, reads again if a collection
+  began across the read, and fails by name if none comes; what it requires
+  is unchanged. 0 failures in 4 043 runs of the fixed gate on macos-latest
+  (1 013 alone), with and without the collector fix.
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On

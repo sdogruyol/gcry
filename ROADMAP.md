@@ -3008,6 +3008,21 @@ kept finding the rest.
       collector takes the per-major counts with one swap each.
       `bench/log/linux/2026-11-01-large-cache-counters/FINDINGS.md`.
 
+- [x] **`make idle-release` on macos-latest: the read came before the idle
+      collection — closed 2026-11-01.** CI run 41209225316 (one failure in
+      ~156 runs since 2026-10-10): "kept 4718592". The gate read 200 ms
+      after the last burst; on macos-latest a 12.5 ms `nanosleep` takes
+      35–55 ms (p50), so the idle thread's collection began after 200 ms in
+      86 of 1 014 runs, and when the burst had run an ordinary collection the
+      read found its warm budget. 14 of 4 041 probe runs (1 of 1 014 alone),
+      0.38.0 as 0.39.0 and with the dormant counter recounted — not 0.39's
+      transition-kept counter; every failure re-read 0 once the collection
+      came. The gate now waits for that collection; 0 of 4 043 after. Found
+      on the way, and fixed: an idle stretch begun while an idle collection
+      was finishing was never collected (the baseline was re-read after the
+      collection; regression 93).
+      `bench/log/macos/2026-11-01-idle-release-flake/FINDINGS.md`.
+
 - [x] **Stop-time freelist writes the per-class probe did not cover —
       closed 2026-10-22.** With `GCRY_TLAB=1`, `flush_all_tlabs` and
       `scrub_freelists` wrote every class list in the stop, whatever
