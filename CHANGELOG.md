@@ -28,6 +28,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cycles' hits. The four are atomic now. Regression 89
   (`bench/log/linux/2026-11-01-large-cache-counters/`).
 
+- **On macOS the heap no longer sits where 33-bit integers point.** The
+  kernel put it right after the executable, at 4–8 GiB, and any word holding
+  an integer from about 4.3 to 8.5 billion kept whatever block it named: a
+  `5 000 000 000` in a system library's data kept a dead 32–128 MiB buffer of
+  JsonGenerate's, whose peak landed on a high level in 35–90% of reps on
+  both macOS runners. Every heap mapping on macOS is now asked for at a
+  random base 16 to 32 TiB up (a hint, never `MAP_FIXED`; mapped where the
+  kernel answers if refused there; `GCRY_HIGH_HEAP=0` turns it off).
+  JsonGenerate reps on a high level over three sessions: `macos-latest` 0
+  of 75 against 112 of 130 for base and the same binary without it (peak
+  0.74–0.78× → 0.64× of Boehm's), `macos-15-intel` 0 of 75 against 59 of
+  130; Intel's Revcomp and RegexDna peaks drop 21% and 25% against the same
+  binary without it. No row slower beyond its spread that the same binary
+  without the placement or code placement alone does not move as much.
+  Linux and Windows build the same machine code as before (Perf A/B
+  41203146054, 41207913078, 41212311272;
+  `process_spec/regression/92_darwin_high_heap_spec.cr`,
+  `bench/log/macos/2026-10-31-heap-high/FINDINGS.md`).
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On

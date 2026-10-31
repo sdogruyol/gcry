@@ -4500,15 +4500,32 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       8/115 against 32/230; macOS unchanged (M1 61/75 against 115/150). No
       row slower beyond what placement moves on the same runner
       (`bench/log/linux/2026-10-26-four-gib/`).
-- [ ] **JsonGenerate's high peaks on macOS are not boundary words
-      (2026-10-26).** 35–80% of reps on both macOS runners land high, with
-      or without the 4 GiB fence. The M1 holders were full heap addresses in
-      the collector's and crystal-metric's frames and a `5 000 000 000`
-      constant in a system library's data, scanned as a static root
-      (`bench/log/macos/2026-10-23-jsongen-m1/`): the heap sits at 4–8 GiB,
-      right after the executable, where 33-bit integers land. Untried:
-      mapping the macOS heap far above that (a hint well past 2^40), so
-      integer-valued words miss it.
+- [x] **JsonGenerate's high peaks on macOS are not boundary words
+      (2026-10-26) — the macOS heap maps at 16–32 TiB (2026-10-31).** 35–80%
+      of reps on both macOS runners landed high, with or without the 4 GiB
+      fence. The M1 holders were full heap addresses in the collector's and
+      crystal-metric's frames and a `5 000 000 000` constant in a system
+      library's data, scanned as a static root
+      (`bench/log/macos/2026-10-23-jsongen-m1/`): the heap sat at 4–8 GiB,
+      right after the executable, where 33-bit integers land. Every heap
+      mapping on macOS is now asked for at a random base 2^44 + 23 bits × 2 MiB
+      (a hint, never `MAP_FIXED`, mapped where the kernel answers if refused;
+      `GCRY_HIGH_HEAP=0` off; regression 92). JsonGenerate reps on a high
+      level, the placement against base and the same binary without it:
+      `macos-latest` 0/75 against 112/130, `macos-15-intel` 0/75 against
+      59/130 (Perf A/B 41203146054, 40 reps; 41207913078, 15; 41212311272,
+      20). M1's JsonGenerate peak 0.74–0.78× → 0.64× of Boehm's; Intel's
+      Revcomp and RegexDna peaks −21% and −25% against the same binary. Keep
+      rule on both Macs: no wall or peak row slower beyond its spread but M1
+      JsonParseSerializable's peak (+3.5%, the same binary without the
+      placement +3.6%, −0.8% in the next session); Intel JsonGenerate's
+      timed section +2.4–4.2% in three sessions is the binary's code
+      placement (the same binary without the placement alike; 16 bytes of
+      nops +3.6%, 64 bytes +0.1%). Linux and Windows build byte-identical code
+      (`bench/log/macos/2026-10-31-heap-high/`). [INFERENCE] the collector
+      frame words the M1 probe named (`0x141000000`, `0x143000000`,
+      16 MiB-aligned) were integers in the heap's old range rather than stale
+      pointers, since nothing holds the buffers once the heap moves.
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
       0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
       output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,

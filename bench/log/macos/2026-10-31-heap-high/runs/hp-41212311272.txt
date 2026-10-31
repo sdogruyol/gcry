@@ -1,0 +1,15 @@
+== .
+perf-ab-macos-15-intel: floor 769 MiB
+  base     15/20 high  median 852  high: 796 796 796 797 826 852 852 852 893 893 893 893 895 948 948
+  baseprepad16 15/20 high  median 892  high: 785 798 825 852 892 892 892 892 892 892 892 892 893 895 907
+  baseprepad64 10/20 high  median 785  high: 785 796 797 892 892 892 892 892 907 948
+  prepad16  0/20 high  median 770  high: 
+  prepad64  0/20 high  median 770  high: 
+  var       0/20 high  median 770  high: 
+perf-ab-macos-latest: floor 770 MiB
+  base     15/20 high  median 924  high: 826 892 892 893 893 924 928 928 1056 1056 1056 1057 1057 1057 1057
+  baseprepad16 16/20 high  median 1056  high: 796 892 893 893 893 1056 1056 1056 1056 1056 1056 1056 1056 1056 1057 1057
+  baseprepad64 14/20 high  median 961  high: 796 796 893 893 961 1056 1056 1056 1056 1056 1056 1056 1057 1057
+  prepad16  0/20 high  median 770  high: 
+  prepad64  0/20 high  median 771  high: 
+  var       0/20 high  median 770  high: 

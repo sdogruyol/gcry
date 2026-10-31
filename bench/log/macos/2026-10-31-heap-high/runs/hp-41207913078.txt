@@ -1,0 +1,11 @@
+== .
+perf-ab-macos-15-intel: floor 769 MiB
+  base     12/15 high  median 826  high: 785 796 796 826 826 892 892 892 892 892 948 948
+  boehm     4/15 high  median 1194  high: 1211 1214 1335 1335
+  var       0/15 high  median 770  high: 
+  var_env  12/15 high  median 825  high: 785 796 796 811 825 826 828 892 892 893 906 948
+perf-ab-macos-latest: floor 770 MiB
+  base     14/15 high  median 1056  high: 892 892 924 927 928 960 1056 1056 1056 1056 1056 1056 1056 1056
+  boehm     4/15 high  median 1198  high: 1312 1363 1363 1363
+  var       0/15 high  median 770  high: 
+  var_env  12/15 high  median 892  high: 892 892 892 892 892 892 892 892 892 892 928 1056
