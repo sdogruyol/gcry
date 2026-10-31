@@ -774,7 +774,11 @@ module Gcry
     # `:before_relink_store` — the after-world sweep has walked `@chunks` and
     # not yet published its rebuild, no lock held; a chunk mapped here is a
     # prepend inside that window (`make chunk-list-drift`, on a process heap,
-    # so the hook must not capture: its closure would be unrooted).
+    # so the hook must not capture: its closure would be unrooted). And two
+    # pairs around the large-cache counters' resets after the flushes, no lock
+    # held between either pair: `:before_large_take`/`:after_large_take` (the
+    # per-major counts taken) and `:before_large_budget`/`:after_large_budget`
+    # (the recycling budget set), for process_spec/regression/89.
     property post_stw_hook : Proc(Symbol, Nil)? = nil
     # Research only, and it restores a defect: an unreachable object with a
     # finalizer is queued and *not* marked, so the sweep reclaims it and the
@@ -3187,6 +3191,10 @@ module Gcry
             @stw_owner = Thread.current if @stw_owner.nil?
             @block_other_heap = true
           end
+          # This major's large-cache hits and misses, taken below with the
+          # world running (`large_hits_take`).
+          large_hits = 0_u64
+          large_misses = 0_u64
           begin
             if hook = @post_stw_hook
               hook.call(:after_start_world)
@@ -3239,6 +3247,33 @@ module Gcry
             end
             # Anything a mutator queued while the walks were running.
             flush_pending_large_release
+
+            # The large-cache counters, read and reset with the world running
+            # and no lock: allocating threads count (`@alloc_lock`) and spend
+            # the recycling budget (`@alloc_lock`, or a class lock in
+            # `map_chunk`) all through here. Each was a plain store, and a
+            # mutator's plain read-modify-write that had loaded before it
+            # stored the old cycle's value back over the reset. They are
+            # atomic now, the per-major counts are taken in one swap each, and
+            # a subtraction that loaded first fails its compare-and-set
+            # against the reset (`def_shared_counter`). The two `post_stw_hook`
+            # pairs bracket the resets for process_spec/regression/89, which
+            # parks a mutator in each window; nothing between a pair takes a
+            # lock (`bench/log/linux/2026-11-01-large-cache-counters/`).
+            if hook = @post_stw_hook
+              hook.call(:before_large_take)
+            end
+            # Taken before the trims, so what is allocated while they run
+            # counts toward the next major.
+            large_since = major ? large_since_take : 0_u64
+            if major
+              large_hits = large_hits_take
+              large_misses = large_misses_take
+            end
+            if hook = @post_stw_hook
+              hook.call(:after_large_take)
+            end
+
             if @large_recycle && !@release_warm_this_collect
               # This cycle's frees stay for `Heap#recycle_large_mapping`, as
               # they are: an `MADV_FREE` now would cost a page walk here and
@@ -3253,17 +3288,23 @@ module Gcry
                 # the budget on the mutator instead; the pace, which times
                 # the cycle, then read collections as cheaper and fitted one
                 # more major into the run (`bench/log/linux/2026-10-06-large-recycle/`).
-                keep = @large_alloc_since_major
+                keep = large_since
                 trim_large_cache(keep, defer: false, cap: UInt64::MAX) if @large_free_bytes > keep
               end
-              @large_recycle_budget = @large_free_bytes
+              budget = @large_free_bytes
             else
               # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
               release_large_freelist_pages
               trim_large_cache(defer: false)
-              @large_recycle_budget = 0_u64
+              budget = 0_u64
             end
-            @large_alloc_since_major = 0_u64 if major
+            if hook = @post_stw_hook
+              hook.call(:before_large_budget)
+            end
+            @large_recycle_budget.set(budget)
+            if hook = @post_stw_hook
+              hook.call(:after_large_budget)
+            end
             @last_phase_flush_ns = monotonic_ns - t_flush
           ensure
             if ec1_lazy
@@ -3274,10 +3315,11 @@ module Gcry
 
           if major
             # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
-            # Resets counters each major so the policy tracks the current working set.
-            total_large = @large_cache_hits + @large_cache_misses
+            # The counts are this major's, taken (and zeroed) after the flushes
+            # above, so the policy tracks the current working set.
+            total_large = large_hits + large_misses
             if total_large > 0
-              hit_pct = (@large_cache_hits * 100) // total_large
+              hit_pct = (large_hits * 100) // total_large
               current = @large_cache_retain
               # current == 0 means cache disabled (Linux process default); do not
               # grow from zero — 0×2 would stay 0 anyway, but skip makes intent clear.
@@ -3289,8 +3331,6 @@ module Gcry
                 @large_cache_retain = {current >> 1, 1048576_u64}.max
               end
             end
-            @large_cache_hits = 0_u64
-            @large_cache_misses = 0_u64
             # Inside the post-STW section on purpose: after `unlock_post_stw`
             # a peer collection can begin and overwrite `@size_class_live_bytes`
             # and `@gc_threshold` before this thread's late write, which then

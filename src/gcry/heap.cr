@@ -146,8 +146,20 @@ module Gcry
     # Retain this many free large bytes after trim_large_cache (outside STW).
     property large_cache_retain : UInt64 = DEFAULT_LARGE_CACHE_RETAIN
     # Large-cache hit / miss counters for adaptive retain tuning (reset each major).
-    getter large_cache_hits : UInt64 = 0_u64
-    getter large_cache_misses : UInt64 = 0_u64
+    # Atomic: the large paths count under `@alloc_lock`, and the collector
+    # takes and zeroes them after the flushes without it (`def_shared_counter`,
+    # `take_large_counter`).
+    @large_cache_hits : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+    @large_cache_misses : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+
+    def large_cache_hits : UInt64
+      @large_cache_hits.get
+    end
+
+    def large_cache_misses : UInt64
+      @large_cache_misses.get
+    end
+
     # Size-class chunk mmap size (process default 128 KiB; macOS bumps to 256 KiB;
     # override via GCRY_CHUNK_BYTES).
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
@@ -536,8 +548,8 @@ module Gcry
       @live_objects.set(0_u64)
       @nursery_alloc_bytes.set(0_u64)
       @tlab_hits.set(0_u64)
-      @large_cache_hits = 0_u64
-      @large_cache_misses = 0_u64
+      @large_cache_hits.set(0_u64)
+      @large_cache_misses.set(0_u64)
       unless @chunk_index.null?
         LibC.free(@chunk_index.as(Void*))
         @chunk_index = Pointer(ChunkHeader*).null
@@ -1153,8 +1165,8 @@ module Gcry
           @large_reserved_bytes = sat_sub(@large_reserved_bytes, grown)
           # Fresh pages, as a fresh mapping's: they spend the recycling
           # budget (`map_chunk`) and count toward what a major may keep.
-          @large_recycle_budget = sat_sub(@large_recycle_budget, grown)
-          @large_alloc_since_major &+= grown
+          large_budget_sub(grown)
+          large_since_add(grown)
           CrystalTrace.heap_resize(self, heap_size)
           if hook = @heap_resize_hook
             hook.call(heap_size)
@@ -1827,8 +1839,11 @@ module Gcry
         needs_clear = clear && !clean
       end
       # Fresh mappings since the last major spend the recycling budget; the
-      # cache gives back what they spent (`large_recycle_keep`).
-      if @large_recycle && @large_free_bytes > @large_recycle_budget && !@collecting && !@world_stopped
+      # cache gives back what they spent (`large_recycle_keep`). A relaxed
+      # load: this runs on every allocation, and a plain `mov`/`ldr` is what
+      # the field cost before it was atomic (an ordered load is `ldar` on
+      # arm64). A stale budget only moves the trim by one allocation.
+      if @large_recycle && @large_free_bytes > @large_recycle_budget.get(:relaxed) && !@collecting && !@world_stopped
         keep = large_recycle_keep
         trim_large_cache(keep, cap: UInt64::MAX) if @large_free_bytes > keep
       end
@@ -2934,7 +2949,16 @@ module Gcry
     # and in the stop they cost a locked instruction per chunk.
     #
     # `_add` returns the new value. `_sub` saturates at zero, as `sat_sub`
-    # did, and for the reason it gives.
+    # did, and for the reason it gives. `_take` is the collector's
+    # read-and-reset of a per-cycle count: one swap, so a count made between
+    # the read and the reset goes to the next cycle instead of to neither;
+    # the control arm is the code before it, a load and a plain store of 0.
+    #
+    # The large-cache counters (`@large_recycle_budget`,
+    # `@large_alloc_since_major`, `@large_cache_hits`/`_misses`) use these
+    # too, for running threads rather than a frozen one: the collector resets
+    # them after the flushes with no lock while the large paths count under
+    # `@alloc_lock` and `map_chunk` spends the budget under a class lock.
     macro def_shared_counter(name, ivar)
       private def {{name.id}}_add(n : UInt64) : UInt64
         if (hook = @@shared_counter_hook) || !@@shared_counters_atomic
@@ -2962,6 +2986,13 @@ module Gcry
           break if swapped
           cur = seen
         end
+      end
+
+      private def {{name.id}}_take : UInt64
+        return {{ivar}}.swap(0_u64) if @@shared_counters_atomic
+        cur = {{ivar}}.get
+        {{ivar}}.set(0_u64)
+        cur
       end
     end
 
@@ -3010,7 +3041,7 @@ module Gcry
       # sizing by it leaves the object's tail outside the mapping.
       need = ChunkHeader.large_data_offset.to_u64 + payload
       mapped = align_up(need, Platform.host_page_size)
-      @large_alloc_since_major &+= mapped
+      large_since_add(mapped)
 
       # Under recycling the cache is the recycler's: it hands even an exact
       # fit out at a fresh address (`recycle_large_mapping`), so a stale word
@@ -3039,7 +3070,7 @@ module Gcry
         return {user, payload}
       end
 
-      @large_cache_misses += 1
+      large_misses_add(1_u64)
 
       reused = 0_u64
       written = 0_u64
@@ -3075,7 +3106,7 @@ module Gcry
         return {Pointer(Void).null, 0_u64}
       end
       # `map_chunk` spends the recycling budget only on a mapping it made.
-      @large_recycle_budget = sat_sub(@large_recycle_budget, mapped) if fresh_room
+      large_budget_sub(mapped) if fresh_room
       if extent > mapped
         @large_reservations &+= 1
         @large_reserved_bytes &+= extent &- mapped
@@ -3110,10 +3141,35 @@ module Gcry
     # cache, less every byte mapped fresh since. Without recycling those
     # bytes would have gone back at the sweep, so a cache that gives back
     # what fresh mappings take keeps the heap where it stood at the major.
-    property large_recycle_budget : UInt64 = 0_u64
+    #
+    # Atomic, as are `@large_alloc_since_major` and the hit and miss counts
+    # (`def_shared_counter` below). The collector resets all four after the
+    # flushes with no lock, beside running mutators: the large paths spend
+    # the budget and count under `@alloc_lock`, and `map_chunk` spends it
+    # for a size-class chunk under the class lock only. A plain
+    # `x = sat_sub(x, n)` that loaded before the reset stored the previous
+    # cycle's value back over it (process_spec/regression/89,
+    # `bench/log/linux/2026-11-01-large-cache-counters/FINDINGS.md`).
+    @large_recycle_budget : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+
+    def large_recycle_budget : UInt64
+      @large_recycle_budget.get
+    end
+
+    def large_recycle_budget=(bytes : UInt64) : UInt64
+      @large_recycle_budget.set(bytes)
+      bytes
+    end
+
     # Mapped bytes of every large allocation since the last major: what a
-    # major keeps for recycling at most.
-    @large_alloc_since_major = 0_u64
+    # major keeps for recycling at most. Declared by initializer, as it was
+    # as a plain `UInt64`, so the heap's layout does not move.
+    @large_alloc_since_major = Atomic(UInt64).new(0_u64)
+
+    def_shared_counter large_budget, @large_recycle_budget
+    def_shared_counter large_since, @large_alloc_since_major
+    def_shared_counter large_hits, @large_cache_hits
+    def_shared_counter large_misses, @large_cache_misses
 
     # What the cache may hold between majors under recycling: the budget, but
     # never less than the exact-size cache keeps without recycling
@@ -3125,7 +3181,8 @@ module Gcry
     # off (`bench/gzip_free_loop.cr`).
     private def large_recycle_keep : UInt64
       floor = @large_cache_retain &+ LARGE_FREE_TRIM_SLACK
-      @large_recycle_budget > floor ? @large_recycle_budget : floor
+      budget = @large_recycle_budget.get(:relaxed)
+      budget > floor ? budget : floor
     end
 
     # Leading bytes of the first `len` of a cached large chunk at `base` that
@@ -3219,7 +3276,7 @@ module Gcry
             Gcry.os_release_reserved(Pointer(Void).new(dst.address &+ mapped), extent &- mapped) if extent > mapped
             return Pointer(Void).null
           end
-          @large_recycle_budget = sat_sub(@large_recycle_budget, mapped)
+          large_budget_sub(mapped)
           return dst
         end
         if old_mapped > mapped
@@ -3243,7 +3300,7 @@ module Gcry
         end
         update_heap_bounds_after_unmap
         # A grown tail is fresh pages, as a fresh mapping's are.
-        @large_recycle_budget = sat_sub(@large_recycle_budget, mapped &- kept)
+        large_budget_sub(mapped &- kept)
         @recycled_from = kept
         @recycled_written = clear ? large_written_bytes(dst, kept) : kept
         @large_recycles &+= 1
@@ -3486,7 +3543,7 @@ module Gcry
           mapped = chunk.value.mapped_bytes
           free_bytes_sub(mapped)
           @large_free_bytes = sat_sub(@large_free_bytes, mapped)
-          @large_cache_hits += 1
+          large_hits_add(1_u64)
           return user
         end
         prev = user
@@ -4013,7 +4070,9 @@ module Gcry
         return Pointer(ChunkHeader).null
       end
       size = heap_size_add(bytes)
-      @large_recycle_budget = sat_sub(@large_recycle_budget, bytes) if at.null?
+      # A compare-and-set: for a size-class chunk this runs under the class
+      # lock only, beside the large paths and the collector's reset.
+      large_budget_sub(bytes) if at.null?
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
       CrystalTrace.heap_resize(self, size)
       if hook = @heap_resize_hook
