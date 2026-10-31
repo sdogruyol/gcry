@@ -220,7 +220,10 @@ module Gcry
     #    clear bits, so no update is lost either way: that is what the
     #    per-block `lock or` was for. A double or stale free into a claimed
     #    block is refused under the lock (`block_allocated_exact?`), which is
-    #    also the lock any change of the chunk's owner takes.
+    #    also the lock any change of the chunk's owner takes. Its `mark`
+    #    clear follows its `occ` clear, and the owner, which claims with no
+    #    lock, claims nothing from the chunk between them: the chunk carries
+    #    FREEING across both (regression 91).
     # 5. **The sweep's `occ = mark`.** In a stop, the settle runs before the
     #    mark (`bitmap_settle_cursor_sets`): a set not mid-allocation is
     #    retired and releases its claims; a set frozen mid-allocation keeps
@@ -340,6 +343,21 @@ module Gcry
     # 2026-10-22 — CURSOR cleared, then the chunk read, then the slot
     # cleared — the control arm of regression 82 (`retire_cursor_slot`).
     property cursor_retire_slot_first : Bool = true
+    # Word advances the hit path gave up because a `free` was in flight on
+    # the chunk (`cursor_advance_word`, FREEING): each one an allocation
+    # that took the locked path instead. Plain increments, like the census
+    # counters above.
+    getter cursor_free_deferrals : UInt64 = 0_u64
+    # Research only: called by `bitmap_free_block` between its `occ` clear
+    # and its `mark` clear, on the freeing thread under the class lock; must
+    # not allocate. A hook that parks the thread there puts another thread's
+    # lock-free claim of the freed block, and a stop, between the two
+    # clears (`process_spec/regression/91_free_mark_clear_claim_spec.cr`).
+    property bitmap_free_split_hook : Proc(ChunkHeader*, Nil)? = nil
+    # Research only: false frees a bitmap block as before 2026-10-31, with
+    # no FREEING on the chunk, so its owner may claim the block between the
+    # two clears — the control arm of regression 91 (`bitmap_free_block`).
+    property bitmap_free_claim_guard : Bool = true
 
     # A failed capacity search remains true until a free, sweep, or retirement
     # publishes capacity for this (class, kind). The same generation invalidates
@@ -1210,12 +1228,18 @@ module Gcry
     # occupancy is a `free` clearing a bit, and the locked refill tolerates
     # that the same way — a block freed behind the cursor is found on the
     # chunk's next pass; the claim (`cursor_claim_word`) sets only bits it
-    # found clear, which no `free` touches. The blacklist is written only
+    # found clear, which no `free` touches. The `free`'s `mark` clear comes
+    # after its `occ` clear, though, and a claim between the two would have
+    # its mark wiped (`bitmap_free_block`): so a word is claimed here only
+    # with no `free` in flight on the chunk (FREEING clear), and otherwise
+    # the caller takes the locked path, which waits for that `free` on the
+    # class lock and claims after it. The blacklist is written only
     # while marking, when this thread is stopped. Runs inside the
     # mid-allocation window, so a stop-the-world that lands during the scan
     # pins the set rather than retiring the slot under it. Zero when the slot
-    # holds no chunk or the chunk is exhausted; the caller then takes the
-    # locked path, which retires the chunk and takes another from the pool.
+    # holds no chunk, the chunk is exhausted or a `free` is in flight on it;
+    # the caller then takes the locked path, which retires an exhausted chunk
+    # and takes another from the pool.
     #
     # Measured before this: 96% of locked refills (`bitmap_alloc_refills`
     # 705 k against `bitmap_alloc_chunk_advances` 29 k per 15 s of Kemal
@@ -1230,6 +1254,15 @@ module Gcry
       while word < words
         mask = chunk_free_mask(chunk, word, nblocks)
         if mask != 0_u64
+          # The `occ` loads above before the FREEING load: a `free` whose
+          # `occ` clear they saw set FREEING before that clear (a release).
+          # On x86-64 the fence is a compiler barrier and the acquire load
+          # a plain one; it runs once per word, not per block.
+          Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+          if ChunkHeader.freeing?(chunk)
+            @cursor_free_deferrals &+= 1
+            return 0_u64
+          end
           cursor_claim_word(s, chunk, word, mask, index)
           @cursor_word_advances &+= 1
           return mask
@@ -1564,19 +1597,48 @@ module Gcry
     #
     # Both clears are atomic for the usual reason: 64 blocks share each word,
     # and a cursor's claim and release write other bits of the same word.
+    #
+    # And the two must look like one to the chunk's cursor owner, which
+    # claims words with no lock (`cursor_advance_word`). Between them the
+    # block is free in `occ` and its mark clear is still to come. A claim of
+    # the word there takes the block, and when a sweep can run before the
+    # next stop it marks it (`cursor_claim_word`); the hand-out marks it
+    # again (allocate-black), and a stop marks it as a claim, an `in_flight`
+    # root or a block the trace reaches — a stop this thread can be frozen
+    # across, still between the clears. The mark clear then wipes that mark,
+    # and the incremental finishing slice, which sweeps with no settle,
+    # takes the block out of `occ` under the claim or under the object
+    # handed out of it: one block handed out twice
+    # (`process_spec/regression/91_free_mark_clear_claim_spec.cr`). So the
+    # chunk carries FREEING from before the `occ` clear to after the `mark`
+    # clear, and the cursor owner claims nothing from it while it is set.
+    # Reversing the clears is no answer: a `free` frozen between them would
+    # leave its block occupied and unmarked for the stop's sweep, which
+    # frees it and counts it freed a second time.
+    #
+    # The orderings pair with `cursor_advance_word`'s: the FREEING set is
+    # ordered before the `occ` clear by the clear's release, so an owner that
+    # sees the block free sees FREEING (its acquire fence); the clear of
+    # FREEING is a release after the `mark` clear, so an owner that sees it
+    # clear claims after the `mark` clear.
     @[AlwaysInline]
     protected def bitmap_free_block(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       occ = ChunkHeader.occ_bitmap(chunk)
-      return if occ.null?
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return if occ.null? || mark.null?
       ordinal = chunk_block_ordinal(chunk, header.address)
       word = ordinal >> 6
       clear = ~(1_u64 << (ordinal & 63))
+      guard = @bitmap_free_claim_guard
+      ChunkHeader.set_freeing(chunk, true) if guard
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, occ + word, clear,
-        LLVM::AtomicOrdering::Monotonic, false)
-      mark = ChunkHeader.mark_bitmap(chunk)
-      return if mark.null?
+        LLVM::AtomicOrdering::Release, false)
+      if hook = @bitmap_free_split_hook
+        hook.call(chunk)
+      end
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, mark + word, clear,
         LLVM::AtomicOrdering::Monotonic, false)
+      ChunkHeader.set_freeing(chunk, false) if guard
       bitmap_capacity_changed(chunk)
     end
 

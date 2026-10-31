@@ -485,6 +485,15 @@ module Gcry
       # through the recycler's fresh mapping (`Heap#take_large_free`).
       # Cleared when taken.
       FREED = 2048_u32
+      # A bitmap chunk one of whose blocks a `free` is releasing: set under
+      # the class lock before the block's `occ` clear and cleared after its
+      # `mark` clear (`Heap#bitmap_free_block`). The chunk's cursor owner,
+      # which claims words of it with no lock, claims nothing while it is set
+      # and takes the locked path instead (`Heap#cursor_advance_word`), so a
+      # claim can never land between the two clears. Small chunks only. A
+      # fork that leaves another thread's `free` in flight leaves it set in
+      # the child, where that chunk is then claimed from under the lock only.
+      FREEING = 4096_u32
       # Bits 16–21 of a large chunk's flags: the address space reserved for
       # it from its base, mapped or not (`Heap#grow_large`), as log2 of what
       # it holds past its first page: the extent is that power of two plus
@@ -715,6 +724,28 @@ module Gcry
 
     def self.set_freed(chunk : ChunkHeader*, value : Bool) : Nil
       update_flag(chunk, Flags::FREED, value)
+    end
+
+    # Acquire: a cursor owner that finds FREEING clear because the `free`
+    # cleared it (release, `set_freeing(chunk, false)`) sees that free's
+    # `mark` clear before anything it writes next (`Heap#cursor_advance_word`).
+    def self.freeing?(chunk : ChunkHeader*) : Bool
+      flags = pointerof(chunk.value.@flags)
+      (Atomic::Ops.load(flags, LLVM::AtomicOrdering::Acquire, false) & Flags::FREEING) != 0
+    end
+
+    # Set: relaxed, because the `occ` clear that follows it is a release and
+    # carries it. Clear: a release, which carries the `mark` clear before it.
+    # Both under the class lock, so a chunk has one `free` in flight at most.
+    def self.set_freeing(chunk : ChunkHeader*, value : Bool) : Nil
+      flags = pointerof(chunk.value.@flags)
+      if value
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, flags, Flags::FREEING,
+          LLVM::AtomicOrdering::Monotonic, false)
+      else
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, flags, ~Flags::FREEING,
+          LLVM::AtomicOrdering::Release, false)
+      end
     end
 
     def self.idle?(chunk : ChunkHeader*) : Bool
