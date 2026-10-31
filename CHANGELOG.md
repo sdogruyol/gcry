@@ -129,6 +129,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placement alone moves on the same runner (Perf A/B 41203821072, pads
   41210728957; `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`).
 
+- **On Crystal 1.22 the idle collector runs; it never had.** 1.22
+  wraps `Thread.sleep` and the condition-variable waits in `GC.syscall`,
+  and `gc/none.cr`'s takes its block as a captured proc, so each call
+  allocated a 48-byte closure — the Monitor's every 10 ms, for the life of
+  the process. The allocation count the idle collector waits on never stood
+  still: a program spinning without allocating read +4 752 bytes a second
+  on 1.22.2 (0 on 1.21.0), and an idle one got no idle collection
+  (regression 93 and `make idle-release` red on 1.22.2 only: 0 idle
+  collections of 47). gcry now defines `GC.syscall` itself, yielding.
+  Regression 94: the runtime's threads allocate nothing over 300 ms of a
+  program that does not, and a thousand `GC.syscall` calls allocate
+  nothing (1 392 bytes in the 300 ms before, on 1.22.2); its control arm
+  checks that a closure of that shape is counted.
+
 - **An idle stretch that begins while an idle collection is finishing now
   gets a collection of its own.** The idle thread took its activity
   baseline again once its collection returned, and an allocation made after

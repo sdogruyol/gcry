@@ -2061,6 +2061,22 @@ module GC
     Gcry.default_heap.start_world_external if @@gcry_ready
   end
 
+  # :nodoc:
+  # The stdlib wraps every blocking syscall a thread makes outside the event
+  # loop in this (Crystal 1.22: `Thread.sleep`, condition-variable waits).
+  # `gc/none.cr`'s takes the block as a captured `&proc`, so every call
+  # allocated its closure — 48 bytes each time the Monitor (SYSMON) slept,
+  # every 10 ms, for the life of the process. That kept
+  # `Heap#allocation_activity` moving in a program that had stopped, and on
+  # 1.22 the idle collector never ran at all: 0 idle collections where 1.21
+  # ran one (`process_spec/regression/94_runtime_idle_allocates_nothing_spec.cr`,
+  # `process_spec/regression/93_idle_stretch_inside_collection_spec.cr`).
+  # gcry needs nothing around the call — a stop suspends a thread blocked in
+  # one like any other — so this only yields. Below 1.22 nothing calls it.
+  def self.syscall(&) : Nil
+    yield
+  end
+
   private def self.bootstrap_malloc(size : LibC::SizeT, clear : Bool) : Void*
     ptr = LibC.malloc(size)
     raise Gcry::OutOfMemoryError.new("bootstrap malloc failed") if ptr.null?
