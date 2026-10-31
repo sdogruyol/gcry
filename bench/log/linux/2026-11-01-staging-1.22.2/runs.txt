@@ -1,0 +1,34 @@
+# process_spec at staging-122-040 (built with GCRY_SPEC_BUILD=1 ci/crystal-spec.sh); bitmap = GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 -Dgc_none -Dgcry_block_headers, default = -Dgc_none
+full 1.21.0 default exit=0 326 examples, 0 failures, 0 errors, 2 pending
+full 1.21.0 bitmap exit=0 327 examples, 0 failures, 0 errors, 2 pending
+full 1.22.2 default exit=1 326 examples, 2 failures, 0 errors, 2 pending
+full 1.22.2 bitmap exit=1 327 examples, 2 failures, 0 errors, 2 pending
+example 1.22.2 default #1 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #2 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #3 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #4 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #5 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #6 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #7 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #8 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #9 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #10 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #11 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 default #12 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #1 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #2 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #3 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #4 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #5 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #6 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #7 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #8 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #9 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #10 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #11 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+example 1.22.2 bitmap #12 exit=0 1 examples, 0 failures, 0 errors, 0 pending
+
+# The 2 failures on 1.22.2 (both configs) are regression 93 (idle stretch inside an idle collection), both arms,
+# 'no idle collection reached its end'. Pre-existing: the untouched release-0.40.0 tip 9dc77af5 fails it the same way
+# on 1.22.2 when built alone (4 examples, 2 failures) and passes it on 1.21.0 (4 examples, 0 failures).
+# The staging example passed in all four full runs.

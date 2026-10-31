@@ -58,6 +58,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`thread_staged_total` no longer loses births to concurrent thread
+  creation.** Every creating thread bumped it with a plain `&+= 1`, and a
+  parallel context's schedulers start each other's threads, so two births at
+  once could count as one. It is an atomic add now. Found with the
+  thread-staging spec, which read 0 on CI (crystal 1.22.2,
+  `make bitmap-marks-freelist`) for a different reason: the execution
+  context it creates took its threads from Crystal's thread pool — the main
+  thread among them, parked there for good once the monitor has moved its
+  scheduler off a blocking `open(2)` — so it created none. Not a staging
+  miss, and not 1.22.2: it reproduces on 1.21.0. The spec now seeds the pool,
+  asserts that every thread the context did create was staged, and asserts
+  the hook ran on a `Thread.new`, which never goes through the pool
+  (`bench/log/linux/2026-11-01-staging-1.22.2/`).
+
 - **The large-cache counters' resets after a collection are no longer lost
   to a running allocation.** The collector reset the recycling budget, the
   large bytes allocated since the last major and the cache's hit and miss
