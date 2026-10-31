@@ -59,6 +59,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `process_spec/regression/92_darwin_high_heap_spec.cr`,
   `bench/log/macos/2026-10-31-heap-high/FINDINGS.md`).
 
+- **A growth reservation too long to place whole now has its front kept
+  off the 4 GiB windows, as 0.39.0 meant to.** Such a reservation (a block
+  `realloc` grew past about 1 GiB) has only its committed front placed;
+  when the front entered a window, 0.39.0 fenced the window and asked
+  again, and on Linux, which maps top-down and fits no extent that long
+  between two fences, every try went right under the last fence with its
+  front across the boundary 4 GiB lower, until the 17th try was kept in a
+  window, 16 fences spent. The reservation now goes back and is asked
+  for again with its front ending where the window starts, the room over
+  the window; the window is fenced only when that hint is not taken. The
+  spec example for it failed 6 of 60 local runs (a CI flake in 0.39.0);
+  a new example reproduces the walk
+  (`bench/log/linux/2026-10-26-four-gib/` §5).
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On
