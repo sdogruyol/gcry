@@ -1,0 +1,3 @@
+Binarytrees    base       wall   0.598 ( 0.563- 0.626) cpu   0.607 ( 0.570- 0.633) mark  19.267 (10.313-30.002) pause  32.149 (22.421-42.341) maxp   2.232 ( 1.861- 3.054) gcs 233.000 (217.000-243.000)
+Binarytrees    boehm1     wall   0.617 ( 0.579- 0.697) cpu   0.613 ( 0.576- 0.694) mark       - pause       - maxp       - gcs       -
+Binarytrees    boehm3     wall   0.625 ( 0.594- 0.857) cpu   0.647 ( 0.619- 0.878) mark       - pause       - maxp       - gcs       -

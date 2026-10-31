@@ -4488,6 +4488,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       to read), the M1's extra faults. The image-0 assumption in
       `darwin_roots.cr` it raised was a real root-set hole, fixed in 0.39.0
       (`bench/log/macos/2026-10-23-darwin-image0/`).
+      **The "~3 points of Boehm's parallel markers" are not there to take
+      (2026-10-31).** With one marker (`GC_MARKERS=1`) Boehm runs Binarytrees
+      at 100% [90, 108] of its default on the M1, 102% [101, 104] on arm64
+      Linux and 101% [100, 102] on x86 Linux, with 37–62 ms less user CPU
+      (probe 41203148970, 30 reps): its CPU above wall is its markers' own
+      overhead. gcry's live floor does not reach Binarytrees either — 219 of its
+      ~231 collections end under 4 MiB live — and every floor from 0 to
+      32 MiB, or a serial mark, runs inside every other's range on all three
+      runners, where floor 0 costs 3–16% more user CPU. The 32 MiB default
+      stays (`bench/log/linux/2026-10-31-parallel-mark-floor/`). Left of the
+      M1 gap: the extra faults and the mutator's user time.
 - [x] **Prefetch-for-write in the allocation hit path on aarch64
       (2026-10-23) — not taken, 2026-10-24.** `GCRY_ALLOC_PFW=0` read −3.2% and −3.6% on
       `ubuntu-24.04-arm` Binarytrees (Perf A/B 39937695085, 20 reps, two
