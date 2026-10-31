@@ -185,10 +185,76 @@ describe "4 GiB fence" do
     release_reservation(ptr, extent, commit)
 
     b = free_boundary(span)
+    remaps = Gcry.four_gib_remaps
+    fences = Gcry.four_gib_fences
     ptr = with_hint(b &- (commit >> 1)) { Gcry.os_reserve_placed(extent, commit) }
     ptr.null?.should be_false
+    # Asked for again with its front ending where the window starts, the
+    # room over the window: one remap, no fence.
+    ptr.address.should eq(b &- FENCE &- commit)
     Gcry.four_gib_window(ptr.address, commit).should eq({0_u64, 0_u64})
+    Gcry.four_gib_remaps.should eq(remaps &+ 1)
+    Gcry.four_gib_fences.should eq(fences)
     release_reservation(ptr, extent, commit)
+  end
+
+  # Linux maps top-down: at the top of the highest free range that holds the
+  # mapping. No reservation too long to place whole fits between two fences,
+  # so one asked for again after the window its front entered was fenced
+  # went right under that fence, its front across the boundary 4 GiB lower;
+  # fenced again, the next went under that one, every try, and the last was
+  # kept in a window. The setup makes the range under a lid (a fence's
+  # stand-in) the highest one the reservation fits in, so the kernel's own
+  # choice, unhinted, is that walk's step: the control maps there first.
+  it "moves a long reservation's front off a window the kernel puts it in, under a fence" do
+    pending! "Linux maps top-down; macOS and Windows map upward, past a fence" unless {{ flag?(:linux) }}
+    commit = 64_u64 << 20
+    extent = Gcry::FOUR_GIB &+ 65536
+    g = Gcry::FOUR_GIB
+    prot_none = ->(at : UInt64, len : UInt64) do
+      Gcry::OS.mmap(Pointer(Void).new(at), LibC::SizeT.new(len), Gcry::OS::PROT_NONE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+    end
+    # Room for the walk: 17 tries, 4 GiB each.
+    span = g &* 20
+    region = prot_none.call(0_u64, span)
+    Gcry.mmap_failed?(region).should be_false
+    Gcry::OS.munmap(region, LibC::SizeT.new(span))
+    top = region.address &+ span
+    # The highest boundary whose window ends inside the range, lidded from
+    # its window up.
+    b = (top &- FENCE) & ~(g &- 1)
+    lid = prot_none.call(b &- FENCE, top &- (b &- FENCE))
+    lid.address.should eq(b &- FENCE)
+    # Every higher range that holds the reservation, filled.
+    fillers = [] of Void*
+    probe = Pointer(Void).null
+    64.times do
+      probe = prot_none.call(0_u64, extent)
+      Gcry.mmap_failed?(probe).should be_false
+      break unless probe.address > b
+      fillers << probe
+    end
+    begin
+      # The control: the kernel's own choice is right under the lid, its
+      # front across the boundary 4 GiB lower.
+      probe.address.should eq(b &- FENCE &- extent)
+      Gcry.four_gib_window(probe.address, commit).should eq({b &- g &- FENCE, b &- g &+ FENCE})
+      Gcry::OS.munmap(probe, LibC::SizeT.new(extent))
+
+      remaps = Gcry.four_gib_remaps
+      fences = Gcry.four_gib_fences
+      ptr = Gcry.os_reserve_placed(extent, commit)
+      ptr.null?.should be_false
+      Gcry.four_gib_window(ptr.address, commit).should eq({0_u64, 0_u64})
+      ptr.address.should eq(b &- g &- FENCE &- commit)
+      Gcry.four_gib_remaps.should eq(remaps &+ 1)
+      Gcry.four_gib_fences.should eq(fences)
+      release_reservation(ptr, extent, commit)
+    ensure
+      Gcry::OS.munmap(lid, LibC::SizeT.new(top &- (b &- FENCE)))
+      fillers.each { |f| Gcry::OS.munmap(f, LibC::SizeT.new(extent)) }
+    end
   end
 
   it "leaves a mapping beside a window where the kernel put it" do

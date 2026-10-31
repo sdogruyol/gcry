@@ -485,11 +485,23 @@ module Gcry
   # 4 GiB − 2 MiB, `Heap#large_reserve_extent`) cannot be; its committed
   # front is placed instead, so the block covers no window until it grows
   # across one.
+  #
+  # Such a front is moved off its window, not fenced off it: the reservation
+  # goes back and is asked for again with a hint so that the front ends where
+  # the window starts, the room over the window (nothing else can be mapped
+  # there while the room holds it). Fenced, it walked: no extent that long
+  # fits between two fences, so Linux, which places top-down, put the next
+  # one right under the fence, its front across the boundary 4 GiB lower,
+  # every try, until the last was kept in a window (6 of 60 spec runs;
+  # `bench/log/linux/2026-10-26-four-gib/` §5). A hint the kernel does not
+  # take (that room is not free) fences the window as before. Windows takes
+  # no hint here and places bottom-up, past a fence: the fence alone.
   def self.os_reserve_placed(extent : UInt64, commit : UInt64) : Void*
     span = extent > FOUR_GIB &- 2_u64 &* FOUR_GIB_FENCE ? commit : extent
     tries = 0
+    at = 0_u64
     loop do
-      ptr = heap_reserve(extent, commit)
+      ptr = at == 0_u64 ? heap_reserve(extent, commit) : os_reserve_at(Pointer(Void).new(at), extent, commit)
       return ptr if ptr.null? || !@@four_gib_fence
       lo, hi = four_gib_window(ptr.address, span)
       return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
@@ -498,8 +510,25 @@ module Gcry
       return ptr unless Gcry::OS.munmap(ptr, LibC::SizeT.new(extent)) == 0
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), commit,
         LLVM::AtomicOrdering::Monotonic, false)
-      fence_four_gib(ptr.address, span, lo, hi)
       tries += 1
+      {% unless flag?(:win32) %}
+        # A window the front enters lies above `commit` bytes outside every
+        # window (`four_gib_window` names none for a longer one). On macOS
+        # not below the high base (`high_heap_base`): a front at the base
+        # is fenced, and first fit upward places it past the fence.
+        floor = 0_u64
+        {% if flag?(:darwin) %}
+          floor = high_heap_hint
+        {% end %}
+        if span < extent && at == 0_u64 && lo > commit && lo &- commit >= floor
+          Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@four_gib_remaps), 1_u64,
+            LLVM::AtomicOrdering::Monotonic, false)
+          at = lo &- commit
+          next
+        end
+      {% end %}
+      fence_four_gib(ptr.address, span, lo, hi)
+      at = 0_u64
     end
   end
 
