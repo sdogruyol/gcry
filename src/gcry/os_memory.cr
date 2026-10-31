@@ -320,11 +320,13 @@ module Gcry
     #
     # Where. The user address space is 47 bits on both architectures
     # (`MACH_VM_MAX_ADDRESS`: `0x7FFFFE000000` arm64, `0x7FFFFFE00000`
-    # x86-64). What sits high is the malloc nano zone at `0x600000000000`
-    # (96 TiB), x86-64 secondary thread stacks at `0x700000000000` and the
-    # x86-64 shared cache at `0x7FF800000000`; arm64's shared cache, stacks
-    # and the rest of malloc sit below 64 GiB. 16 to 32 TiB is empty on
-    # both, with 64 TiB of room above the base before the nano zone.
+    # x86-64). On the runners (`vmmap`, `bench/log/macos/2026-10-31-heap-high/`)
+    # x86-64 has the malloc nano zone at `0x600000000000` (96 TiB), thread
+    # stacks at `0x700000000000`, malloc's helper zone, the main stack and
+    # the shared cache past `0x7F0000000000`; arm64 has the shared cache at
+    # 6–11 GiB and malloc's small regions near 51 GiB. 16 to 32 TiB was
+    # empty on both, with 64 TiB above the highest base before x86-64's
+    # nano zone.
     #
     # How. A hint only, never `MAP_FIXED`: Darwin's `mmap` without
     # `MAP_FIXED` takes the address as the start of its search for a free
