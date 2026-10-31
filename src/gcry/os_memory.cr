@@ -318,8 +318,8 @@ module Gcry
     # 2^44, which counts, sizes, times in seconds or milliseconds since 1970
     # (2^40.7 now) and flags never are.
     #
-    # Where. The user address space is 47 bits on both architectures
-    # (`MACH_VM_MAX_ADDRESS`: `0x7FFFFE000000` arm64, `0x7FFFFFE00000`
+    # Where. The user address space is 47 bits on both macOS arm64 and
+    # x86-64 (`MACH_VM_MAX_ADDRESS`: `0x7FFFFE000000` arm64, `0x7FFFFFE00000`
     # x86-64). On the runners (`vmmap`, `bench/log/macos/2026-10-31-heap-high/`)
     # x86-64 has the malloc nano zone at `0x600000000000` (96 TiB), thread
     # stacks at `0x700000000000`, malloc's helper zone, the main stack and
@@ -341,7 +341,16 @@ module Gcry
     # The base is random: 2^44 plus 2^44 in 2 MiB steps (23 bits), chosen at
     # the first heap mapping from `arc4random`. A fixed base would put the
     # heap at the same address in every process, which the kernel's
-    # placement never did (it followed the executable's slide).
+    # placement never did (it followed the executable's slide). A forked
+    # child inherits the base with the parent's address space, which is
+    # right: its heap is the parent's, mapped where the parent mapped it,
+    # and its next mappings pack above the same base.
+    #
+    # One mapping the kernel puts below the base (a miss) widens the heap
+    # bounds (`@heap_min`, `@heap_max`) to about [4 GiB, 2^44+), so every
+    # low word then passes the bounds filter and costs a chunk-index lookup.
+    # No run has missed (`high_heap_misses` 0 everywhere measured); a count
+    # above 0 is the cue to look.
     #
     # Cost: none on the paths that matter. The chunk index keys on the
     # address's bits 32–47 (`chunk_radix.cr`), so the heap takes the same
@@ -355,8 +364,9 @@ module Gcry
     # stands for the kernel's answer and does not move the base: it places
     # a heap mapping only with the placement off.
     HIGH_HEAP_FLOOR = 17592186044416_u64 # 2^44, 16 TiB
-    # The base's random offset: bits 21–43, 2 MiB steps below 2^44.
-    HIGH_HEAP_SLIDE_MASK = 17592184995840_u64
+    # The base's random offset: bits 21–43, 2 MiB steps below 2^44
+    # (2^44 − 2^21).
+    HIGH_HEAP_SLIDE_MASK = 17592183947264_u64
     HIGH_HEAP_STEP       =        2097152_u64
 
     @@high_heap = true
@@ -376,12 +386,14 @@ module Gcry
       Atomic::Ops.load(pointerof(@@high_heap_misses), LLVM::AtomicOrdering::Monotonic, false)
     end
 
-    # The base heap mappings are asked for at, chosen on the first call; one
-    # per process, whichever thread chooses first. Never in a 4 GiB window:
-    # a 2 MiB step enters one only on its boundary.
+    # The base heap mappings are asked for at, chosen on the first call with
+    # the placement on; one per process, whichever thread chooses first.
+    # 0 while the placement is off and none was chosen, so a counter line
+    # never names a base the heap did not use. Never in a 4 GiB window: a
+    # 2 MiB step enters one only on its boundary.
     def self.high_heap_base : UInt64
       base = Atomic::Ops.load(pointerof(@@high_heap_base), LLVM::AtomicOrdering::Monotonic, false)
-      return base unless base == 0_u64
+      return base unless base == 0_u64 && @@high_heap
       base = HIGH_HEAP_FLOOR | ((LibC.arc4random.to_u64 << 21) & HIGH_HEAP_SLIDE_MASK)
       base &+= HIGH_HEAP_STEP if base & (FOUR_GIB &- 1) == 0_u64
       old, won = Atomic::Ops.cmpxchg(pointerof(@@high_heap_base), 0_u64, base,

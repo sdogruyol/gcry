@@ -177,6 +177,20 @@ Every peak stays within 1.1× Boehm's but Knuckeotide's (1.32× M1, 1.56×
 Intel, as base), the documented exception. Linux and Windows: the same
 `.text` as base (§4), so nothing to run there.
 
+## Open
+
+- A miss widens the heap bounds (review, 2026-10-31). One heap mapping the
+  kernel puts below the base, or maps without the hint after refusing it,
+  sets `@heap_min` near the old 4–8 GiB range while `@heap_max` stays past
+  2^44: the bounds filter in `find_block_with_chunk` then passes every word
+  from about 4 GiB up, and each costs a chunk-index lookup where it cost a
+  compare. Not hit: `high_heap_misses` was 0 in every counter run (three per
+  arm per Mac in 41203146054) and every probe child. A non-zero count on any
+  run is the cue to measure it; the fix then would be to keep missing
+  mappings out of the bounds or to retry above the base.
+- The 47-bit user address space (`MACH_VM_MAX_ADDRESS`) is from XNU's
+  headers, not read on the runners.
+
 ## Tools
 
 `../../linux/2026-10-26-four-gib/hp.py` (high reps per arm, unchanged; output

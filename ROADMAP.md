@@ -4526,6 +4526,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       frame words the M1 probe named (`0x141000000`, `0x143000000`,
       16 MiB-aligned) were integers in the heap's old range rather than stale
       pointers, since nothing holds the buffers once the heap moves.
+- [ ] **A macOS high-heap miss widens the heap bounds to ~[4 GiB, 2^44+)
+      (2026-10-31, review).** One heap mapping the kernel puts below
+      `Gcry.high_heap_base` (or maps without the hint) lowers `@heap_min` to
+      the old range while `@heap_max` stays past 2^44, so every low word
+      passes the bounds filter and costs a chunk-index lookup. Never hit
+      (`high_heap_misses` 0 in every run); measure if a counter line shows a
+      miss (`bench/log/macos/2026-10-31-heap-high/`, Open).
 - [x] **Kemal `/json` on the 4-vCPU `ubuntu-latest` runner is 2–7% below
       0.36.0 (2026-10-18) — code placement of the stdlib's JSON and HTTP
       output path (2026-10-19).** The three paired runs (−2.3%, −6.6%,
