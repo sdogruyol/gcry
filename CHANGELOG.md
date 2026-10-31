@@ -101,6 +101,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a new example reproduces the walk
   (`bench/log/linux/2026-10-26-four-gib/` §5).
 
+- **Under incremental collection (`GCRY_INCREMENTAL=1`, or a heap driven
+  by `collect_a_little`), a block `GC.free` released could be handed out
+  twice.** A bitmap `free` clears the block's occupancy bit, then its mark
+  bit. The chunk's own cursor, which claims words with no lock, could
+  claim and hand out the block between the two, and a stop could mark it
+  there; the free's mark clear then unmarked a block in use, and the
+  cycle's finishing slice swept it free under the program. A `free` now
+  marks the chunk `FREEING` across both clears, and the cursor takes the
+  locked path rather than claim from it. Stop-the-world collection (the
+  default) was not affected. Regression 91 (control arm: the block handed
+  out again 30 of 30 runs; fixed: 0 of 30). No row slower beyond what code
+  placement alone moves on the same runner (Perf A/B 41203821072, pads
+  41210728957; `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`).
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On

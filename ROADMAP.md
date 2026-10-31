@@ -3082,16 +3082,24 @@ kept finding the rest.
       hook, 0 of 220 on the new). Nothing in `src/` changed.
       `bench/log/linux/2026-10-22-r84-double-handout/FINDINGS.md`.
 
-- [ ] **A bitmap `free`'s `mark` clear can wipe a concurrent claim's mark
-      ([INFERENCE], found 2026-10-22, not reproduced).** Between the free's
-      `occ` clear and its `mark` clear, the chunk's cursor owner can advance
-      lock-free into the word and claim the freed bit. While a sweep can run
-      before the next stop (lazy sweep pending, or incremental marking), the
-      claim marks it, and the free then clears that mark. The sweep's
-      `occ = mark` takes the block from under the claim. The window is two
-      adjacent atomics on one thread, widened only by preemption. Needs a
-      construction of its own (the frozen-class-gaps FINDINGS has the
-      reading).
+- [x] **A bitmap `free`'s `mark` clear can wipe a concurrent claim's mark
+      — reproduced and fixed 2026-10-31.** Between the free's `occ` clear
+      and its `mark` clear the chunk's cursor owner can claim the freed
+      block lock-free on the hit path and hand it out, and a stop (the
+      free's thread frozen between the clears) can mark it; the free's
+      clear then removes that mark. Only the incremental finishing slice
+      consumes it (it sweeps the cycle's marks with no settle, pinned
+      chunks included): the lazy-sweep case in the reading is unreachable,
+      because the hit path is closed while `@lazy_sweep_pending` and a
+      pinned set's chunks are skipped by the after-world sweep. Worse than
+      read: the block can already be handed out, so the slice frees it
+      under the program. Regression 91 forces it: on the control arm the
+      block is free in `occ` under its owner after the cycle and one of the
+      class's next 64 allocations returns it again, 30 of 30 runs; fixed,
+      30 of 30 clean. A `free` now holds `FREEING` on the chunk across both
+      clears and `cursor_advance_word` claims nothing from such a chunk
+      (the allocation takes the locked path and waits for the free).
+      `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**
