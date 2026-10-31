@@ -3098,7 +3098,9 @@ kept finding the rest.
       class's next 64 allocations returns it again, 30 of 30 runs; fixed,
       30 of 30 clean. A `free` now holds `FREEING` on the chunk across both
       clears and `cursor_advance_word` claims nothing from such a chunk
-      (the allocation takes the locked path and waits for the free).
+      (the allocation takes the locked path and waits for the free). Keep
+      rule: every flagged row inside the band 16/64-byte code padding
+      makes on the same runner (Perf A/B 41203821072, pads 41210728957).
       `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
