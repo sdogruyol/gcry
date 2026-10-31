@@ -1084,11 +1084,16 @@ module Gcry
 
     # Free blocks in one bitmap word, with every correction applied. See the
     # note above for why each is needed.
+    #
+    # The `occ` read is an atomic (relaxed) load: a `free` on another thread
+    # clears bits of the word with a release RMW, and the acquire fence in
+    # `cursor_advance_word` pairs with that clear only through an atomic
+    # read. Relaxed costs nothing over the plain load on x86-64 or arm64.
     @[AlwaysInline]
     protected def chunk_free_mask(chunk : ChunkHeader*, word : Int32, nblocks : UInt64) : UInt64
       occ = ChunkHeader.occ_bitmap(chunk)
       return 0_u64 if occ.null?
-      mask = ~occ[word]
+      mask = ~Atomic::Ops.load(occ + word, LLVM::AtomicOrdering::Monotonic, false)
       last_word = ((nblocks - 1) >> 6).to_i32
       mask &= Heap.tail_mask(nblocks) if word == last_word
       mask &= blacklist_free_mask(chunk, word, mask) if @blacklist_enabled && mask != 0_u64
