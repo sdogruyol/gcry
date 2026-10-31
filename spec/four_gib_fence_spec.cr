@@ -36,12 +36,23 @@ private def in_window?(at : UInt64, len : UInt64, b : UInt64) : Bool
   at < b &+ FENCE && at &+ len > b &- FENCE
 end
 
+# The hint stands for where the kernel would put a mapping. On macOS a heap
+# mapping is asked for at the high base instead (`Gcry.high_heap_base`),
+# where no hint reaches it, so the placement is off for the block: these
+# examples test the fence wherever the kernel answers.
 private def with_hint(at : UInt64, &)
   Gcry.map_hint = at
+  {% if flag?(:darwin) %}
+    high = Gcry.high_heap?
+    Gcry.high_heap = false
+  {% end %}
   begin
     yield
   ensure
     Gcry.map_hint = 0_u64
+    {% if flag?(:darwin) %}
+      Gcry.high_heap = high
+    {% end %}
   end
 end
 
