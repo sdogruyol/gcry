@@ -2991,14 +2991,22 @@ kept finding the rest.
       (The fourth, a bitmap `free` frozen between its `occ` and `mark`
       clears across the incremental finishing slice, is fixed: see below.)
 
-- [ ] **Large-cache counters written after the flushes with no lock.**
-      `@large_recycle_budget`, `@large_alloc_since_major` and
-      `@large_cache_hits`/`_misses` are reset by the collector after the
-      flushes without `@alloc_lock`, which the mutators' read-modify-writes
-      hold, and `map_chunk` spends the budget for size-class chunks under the
-      class lock only. Running threads, not a frozen one; they feed the
-      large-cache trim and the adaptive retain (RSS for a cycle). Not
-      reproduced. `bench/log/linux/2026-10-23-frozen-counter-rmw/FINDINGS.md`.
+- [x] **Large-cache counters written after the flushes with no lock —
+      fixed 2026-11-01.** `@large_recycle_budget`, `@large_alloc_since_major`
+      and `@large_cache_hits`/`_misses` were reset by the collector after
+      the flushes without `@alloc_lock`, which the mutators'
+      read-modify-writes hold, and `map_chunk` spent the budget for
+      size-class chunks under the class lock only. A running allocation
+      that had loaded before a reset stored the cycle before's value back
+      over it. All four feed decisions (the mutators' large-cache trim and
+      `large_recycle_keep`, the recycling major's keep, the adaptive
+      retain): RSS and recycling hit rate, not memory safety. Forced by
+      regression 89, four counters, each control losing the reset (since
+      557 056 + 204 800 kept over the zero, hits 1 + 1, misses 4 + 1, budget
+      2^40 less the chunks mapped since over the collection's 0). Fixed: the
+      four are atomic and written through `def_shared_counter`, and the
+      collector takes the per-major counts with one swap each.
+      `bench/log/linux/2026-11-01-large-cache-counters/FINDINGS.md`.
 
 - [x] **Stop-time freelist writes the per-class probe did not cover —
       closed 2026-10-22.** With `GCRY_TLAB=1`, `flush_all_tlabs` and
@@ -4035,7 +4043,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       and is red in every run before, in every layout
       (`bench/log/macos/2026-10-19-tlab-nursery-crash/FINDINGS.md`).
 - [ ] **A cached large chunk released while something still read its block
-      header (`dormant_flush`, 2026-09-28; narrowed 2026-10-21).** One run on
+      header (`dormant_flush`, 2026-09-28; narrowed 2026-10-21 and
+      2026-11-01).** One run on
       `2a46123` (seed 20012, 2 of 6 queued children) faulted. The old
       description was wrong in both halves. The header recorded at release
       was `FREE | LARGE` (`0x9_0000_a000`, where a live block in this harness
@@ -4059,6 +4068,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       trim after every free again (control 66 of 66), and the parent now
       prints the failing child's whole report, writer pc included: resolve
       it with `addr2line` on the campaign's binary at the next sighting.
+      **2026-11-01:** the release paths re-read against every reader of a
+      large header on 0.39.0 (two-hold trim, the walkers, the collector's
+      releases, the unlocked readers): still no path, so no hook to write.
+      The restored-trim gate's queued children on GitHub's runners, pinned
+      to 0.39.0: **0 of 3 600** (1 800 each on ubuntu-latest and
+      ubuntu-24.04-arm; runs 41202609665, 41205878106), with 36 600 direct
+      and 3 600 queued mutator releases and 560 live walks a child and
+      `lg_by_sweep` 0 throughout. The per-child rate is below 0.083% (95%);
+      the sighting's run read 2 of 6.
+      `bench/log/linux/2026-11-01-dormant-flush-rate/FINDINGS.md`,
       `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`,
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
 - [x] **Freeing a large object costs O(live large chunks), so freeing many is

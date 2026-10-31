@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler leg, the pinned `std_spec` arm and the compiler-with-gcry build
   move from 1.22.0 to 1.22.2.
 
+### Fixed
+
+- **The large-cache counters' resets after a collection are no longer lost
+  to a running allocation.** The collector reset the recycling budget, the
+  large bytes allocated since the last major and the cache's hit and miss
+  counts with the world running and no lock, while allocating threads
+  updated them with plain read-modify-writes; one that had read before the
+  reset stored the old cycle's value back. The large cache then kept more or
+  less than intended for a cycle (RSS) and the adaptive retain read two
+  cycles' hits. The four are atomic now. Regression 89
+  (`bench/log/linux/2026-11-01-large-cache-counters/`).
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On
