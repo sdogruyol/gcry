@@ -83,8 +83,9 @@ summary on the job page. Job timeout 355 min.
 | 41203206908 | `0c54b22a` (first cut) | scale 0.05, 15 jobs: 11 green; Windows self-test failed ×3 (no symbols, overwritten log); macOS gates and Windows gates red on the loops in the table above |
 | 41208072684 | `c3222171` (skips, Windows capture) | scale 0.05, 15 jobs: 14 green; `ubuntu-24.04-arm, gates` self-test failed only because gdb's `bt 40` stopped short of `__crystal_main` (frames from `src/gcry/os_memory.cr` down to `bitmap_alloc.cr`); the check now accepts any symbolized gcry frame |
 | 41208076342 | `c3222171` | **scale 1 on `ubuntu-latest`**, 3 jobs, all green: 1 652 runs, 0 fail, 0 stall, 0 scheduler deadlocks |
+| 41216390987 | `3d4a128c` (this branch's tree + the probe trigger) | scale 0.05, **15 jobs, all green**: 465 runs, 0 fail, 0 stall, 0 scheduler deadlocks, 10 skip lines (4 Windows ×1 job, 3 macOS × 2); every self-test captured symbolized gcry frames (7–1 200 matching lines) and left nothing running |
 
-Both smoke runs also caught the Crystal scheduler deadlock and classified it
+The first two smoke runs also caught the Crystal scheduler deadlock and classified it
 without failing the job (`ubuntu-24.04-arm` and `ubuntu-latest`,
 `stw-mt-property-test-release`, 1 run of 15 each in 41208072684, and arm64 in
 41203206908;
@@ -94,8 +95,10 @@ fails the job: 41203206908's macOS gates jobs went red on their `-fail-` runs
 with the logs in the artifact.
 
 Summaries: `full-ubuntu-latest-{fuzz,mt,gates}-summary.txt` (the full run),
-`smoke-41203206908-summaries.txt` and `smoke-41208072684-summaries.txt` (every
-job's, prefixed by runner and shard).
+`smoke-41203206908-summaries.txt`, `smoke-41208072684-summaries.txt` and
+`smoke-41216390987-summaries.txt` (every job's, prefixed by runner and shard).
+The probes ran from push-triggered copies on `probe/stress-ci` (scale 0.05)
+and `probe/stress-ci-full` (scale 1, `ubuntu-latest`), both deleted.
 
 ## Time
 
