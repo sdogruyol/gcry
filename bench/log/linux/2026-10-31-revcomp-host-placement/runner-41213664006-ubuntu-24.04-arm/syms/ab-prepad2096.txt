@@ -1,0 +1,5 @@
+0000000000016318 t __crystal_main
+000000000001c668 t *GC::malloc_atomic<UInt64>:Pointer(Void)
+000000000011713c t *Fasta#run:Nil
+00000000001173fc t *Fasta#make_random_fasta<String, String, Array(Tuple(Char, Float64)), Int32>:Nil
+000000000011ffbc t *Revcomp#revcomp<String>:Nil

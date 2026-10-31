@@ -4400,6 +4400,22 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       The back-link's 64-byte object start costs nothing: rebuilt at 96 and
       112 it reads within 0.4%
       (`bench/log/linux/2026-10-15-revcomp-attribution/`).
+- [x] **Revcomp 1–2% slower in 0.39.0 than 0.38.0 on the Linux host
+      (2026-10-24) — code placement of the allocation entry, settled
+      2026-10-31.** `GC::malloc_atomic` (gcry's hit path inlined, 6.59 M
+      calls a run) starts ≡ 0 mod 64 in v0.38.0 and ≡ 16 in v0.39.0, and
+      Revcomp is slowest at ≡ 16 on x86-64 whichever tree is built there:
+      on `ubuntu-latest` the four ≡ 16 arms of five pads per tree are the
+      four slowest, two of them 0.38.0's (Perf A/B 41212029709). `9e89fddc`
+      moved it: five new mprotect class variables grew `__crystal_main`,
+      which is emitted just ahead of it, by 80 bytes. Pooled over every
+      placement, 0.39.0 is level locally (+0.05% [−0.38, +0.23], eight pads
+      per tree) and faster on `ubuntu-latest` (−0.92%) and arm64 (−0.45%,
+      41213664006). Collections, pauses, grows and faults are equal; the
+      one real cost found is `e508db25`'s tail call spilling the heap and
+      size around `tls_cursor_cache`, +5 instructions per allocation (+0.12%
+      Ir), too small to measure
+      (`bench/log/linux/2026-10-31-revcomp-host-placement/`).
 - [ ] **macOS: Binarytrees runs at 88% of Boehm on M1 since 0.37.0 (was
       ~80%; Intel 131%) (2026-10-03, narrowed 2026-10-05).** User CPU equals wall time and system time is the same as
       Boehm's, so nothing blocks; parallel mark does not help (four workers

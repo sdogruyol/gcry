@@ -1,0 +1,2422 @@
+[
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.125309841008857,
+"timed": 0.591,
+"rss_kb": 538632,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.1496062928345054,
+"timed": 0.614,
+"rss_kb": 538796,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.216626113979146,
+"timed": 0.6,
+"rss_kb": 538872,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.1854841439053416,
+"timed": 0.642,
+"rss_kb": 540988,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.1078700160142034,
+"timed": 0.592,
+"rss_kb": 538916,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.1574148640502244,
+"timed": 0.613,
+"rss_kb": 540728,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.177668994059786,
+"timed": 0.641,
+"rss_kb": 540736,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.1529251758474857,
+"timed": 0.62,
+"rss_kb": 538788,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.1161802841816097,
+"timed": 0.574,
+"rss_kb": 538792,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.1356795949395746,
+"timed": 0.597,
+"rss_kb": 538800,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.1696418318897486,
+"timed": 0.635,
+"rss_kb": 540848,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 2.6767256851308048,
+"timed": 2.674,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 2.6547282019164413,
+"timed": 2.652,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.7096311268396676,
+"timed": 2.707,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 2.646861291024834,
+"timed": 2.644,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 2.6754096881486475,
+"timed": 2.669,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 2.668072982924059,
+"timed": 2.666,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 2.9652370801195502,
+"timed": 2.962,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 2.767275857971981,
+"timed": 2.764,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 2.8217852080706507,
+"timed": 2.819,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.8577073491178453,
+"timed": 2.855,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 0,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 2.779134310083464,
+"timed": 2.773,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.1538340889383107,
+"timed": 0.614,
+"rss_kb": 538772,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.304414811078459,
+"timed": 0.717,
+"rss_kb": 540728,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.2075528888963163,
+"timed": 0.618,
+"rss_kb": 538660,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.2270046789199114,
+"timed": 0.606,
+"rss_kb": 538708,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.228382664034143,
+"timed": 0.655,
+"rss_kb": 571640,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.2284723857883364,
+"timed": 0.641,
+"rss_kb": 538820,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.2444028919562697,
+"timed": 0.639,
+"rss_kb": 538844,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.2498907919507474,
+"timed": 0.699,
+"rss_kb": 540728,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 3.6500573470257223,
+"timed": 1.058,
+"rss_kb": 538612,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.20917071797885,
+"timed": 0.633,
+"rss_kb": 540812,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.2233888909686357,
+"timed": 0.643,
+"rss_kb": 540768,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 2.6569291099440306,
+"timed": 2.654,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 2.695531415985897,
+"timed": 2.693,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 2.6308816249947995,
+"timed": 2.628,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 2.7509498500730842,
+"timed": 2.748,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.6407446910161525,
+"timed": 2.638,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 2.6173442220315337,
+"timed": 2.615,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 3.021178960101679,
+"timed": 3.019,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 3.6269931921269745,
+"timed": 3.624,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 3.7677507798653096,
+"timed": 3.764,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 3.286748660961166,
+"timed": 3.284,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 1,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 3.0328716090880334,
+"timed": 3.024,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.6109164599329233,
+"timed": 0.684,
+"rss_kb": 540720,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.3397854261565953,
+"timed": 0.683,
+"rss_kb": 540708,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.1676165361423045,
+"timed": 0.614,
+"rss_kb": 538652,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.6228089118376374,
+"timed": 0.682,
+"rss_kb": 540732,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.6223065860103816,
+"timed": 0.758,
+"rss_kb": 538520,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.516618218040094,
+"timed": 0.732,
+"rss_kb": 540748,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.252787789097056,
+"timed": 0.68,
+"rss_kb": 540956,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.176423778058961,
+"timed": 0.61,
+"rss_kb": 540712,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 3.1177577700000256,
+"timed": 1.046,
+"rss_kb": 538760,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.5044013711158186,
+"timed": 0.828,
+"rss_kb": 538596,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.5047457050532103,
+"timed": 0.672,
+"rss_kb": 538804,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 2.9555869470350444,
+"timed": 2.953,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 2.896946104010567,
+"timed": 2.894,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.977584298932925,
+"timed": 2.974,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 3.0593398390337825,
+"timed": 3.055,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 2.8408262219745666,
+"timed": 2.837,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 3.0209845160134137,
+"timed": 3.017,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 3.2845423228573054,
+"timed": 3.278,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 3.610314088873565,
+"timed": 3.606,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 3.3005425289738923,
+"timed": 3.296,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 3.182337670121342,
+"timed": 3.178,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 2,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 3.3590788492001593,
+"timed": 3.353,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.71182978595607,
+"timed": 0.745,
+"rss_kb": 538796,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.383792810840532,
+"timed": 0.682,
+"rss_kb": 538704,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.386275173863396,
+"timed": 0.653,
+"rss_kb": 540768,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.3587933010421693,
+"timed": 0.748,
+"rss_kb": 538852,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.497193349059671,
+"timed": 0.72,
+"rss_kb": 540876,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.7059501700568944,
+"timed": 0.677,
+"rss_kb": 538468,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.322222770890221,
+"timed": 0.638,
+"rss_kb": 538808,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.718609472969547,
+"timed": 0.876,
+"rss_kb": 540836,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.581363539909944,
+"timed": 0.736,
+"rss_kb": 538768,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.5877067940309644,
+"timed": 0.771,
+"rss_kb": 538740,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.5201842351816595,
+"timed": 0.697,
+"rss_kb": 538808,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 3.83393088192679,
+"timed": 3.825,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 3.4919560027774423,
+"timed": 3.481,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 3.367946789134294,
+"timed": 3.361,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 3.263385334983468,
+"timed": 3.26,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 3.0590549260377884,
+"timed": 3.056,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 3.172709137899801,
+"timed": 3.167,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 3.3148630259092897,
+"timed": 3.311,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 3.5717265410348773,
+"timed": 3.568,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 3.548876726999879,
+"timed": 3.546,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 3.5177398351952434,
+"timed": 3.514,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 3,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 3.565731053939089,
+"timed": 3.562,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.7477636819239706,
+"timed": 0.699,
+"rss_kb": 538808,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.8592963670380414,
+"timed": 1.0,
+"rss_kb": 538524,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.5810665781609714,
+"timed": 0.744,
+"rss_kb": 538524,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.652841350995004,
+"timed": 0.64,
+"rss_kb": 538628,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.853453181916848,
+"timed": 0.795,
+"rss_kb": 540716,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.7527539569418877,
+"timed": 0.783,
+"rss_kb": 538480,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.671224038815126,
+"timed": 0.799,
+"rss_kb": 538844,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.7010094299912453,
+"timed": 0.713,
+"rss_kb": 538640,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.768446448026225,
+"timed": 0.791,
+"rss_kb": 538816,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.345567919081077,
+"timed": 0.698,
+"rss_kb": 540724,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.436647910857573,
+"timed": 0.668,
+"rss_kb": 540748,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 3.420646788086742,
+"timed": 3.417,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 3.2526239559520036,
+"timed": 3.25,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 3.0248752059414983,
+"timed": 3.022,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 3.124174493132159,
+"timed": 3.121,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 3.331302626989782,
+"timed": 3.321,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 3.644062159815803,
+"timed": 3.641,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 3.3972982971463352,
+"timed": 3.394,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 3.5602247330825776,
+"timed": 3.557,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.900255912914872,
+"timed": 2.897,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 3.0336310488637537,
+"timed": 3.031,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 4,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 3.1563891468103975,
+"timed": 3.153,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.466895209858194,
+"timed": 0.681,
+"rss_kb": 540956,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.554262574063614,
+"timed": 0.734,
+"rss_kb": 540844,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.7002576410304755,
+"timed": 0.669,
+"rss_kb": 538868,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.6956960009410977,
+"timed": 0.734,
+"rss_kb": 540776,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.9830186979379505,
+"timed": 0.74,
+"rss_kb": 540712,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.8077734739053994,
+"timed": 1.053,
+"rss_kb": 540804,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.814459959976375,
+"timed": 0.753,
+"rss_kb": 538928,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.803131455089897,
+"timed": 0.64,
+"rss_kb": 538548,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.895652843872085,
+"timed": 0.86,
+"rss_kb": 540620,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.538158966926858,
+"timed": 0.901,
+"rss_kb": 538852,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.207331680925563,
+"timed": 0.638,
+"rss_kb": 538848,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 2.7230444049928337,
+"timed": 2.72,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 2.995194074930623,
+"timed": 2.993,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 2.9459067310672253,
+"timed": 2.943,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 3.149824433028698,
+"timed": 3.147,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 2.960556088015437,
+"timed": 2.958,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.654498703079298,
+"timed": 2.652,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.7248930979985744,
+"timed": 2.722,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 2.6267114258371294,
+"timed": 2.624,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 3.0475206070113927,
+"timed": 3.045,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 3.7950227910187095,
+"timed": 3.789,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 5,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 3.3004714709240943,
+"timed": 3.297,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.558746871072799,
+"timed": 0.684,
+"rss_kb": 538404,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.8350142538547516,
+"timed": 0.652,
+"rss_kb": 540712,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.9785433509387076,
+"timed": 0.998,
+"rss_kb": 540616,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.6807661498896778,
+"timed": 0.816,
+"rss_kb": 538996,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.6931231000926346,
+"timed": 0.686,
+"rss_kb": 538720,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.8519351920112967,
+"timed": 0.763,
+"rss_kb": 538784,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.8585153981111944,
+"timed": 0.993,
+"rss_kb": 538656,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.441886509070173,
+"timed": 0.694,
+"rss_kb": 538892,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.5072597810067236,
+"timed": 0.63,
+"rss_kb": 538592,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.277095389086753,
+"timed": 0.592,
+"rss_kb": 540820,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.1766544859856367,
+"timed": 0.624,
+"rss_kb": 540752,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 2.7776498270686716,
+"timed": 2.773,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 2.753251923015341,
+"timed": 2.75,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.792398866964504,
+"timed": 2.79,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 2.9517279560677707,
+"timed": 2.949,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 3.1323725099209696,
+"timed": 3.13,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 2.917127601103857,
+"timed": 2.915,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.915964125888422,
+"timed": 2.913,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 3.2238074250053614,
+"timed": 3.221,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 2.941606926964596,
+"timed": 2.939,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 3.491481278091669,
+"timed": 3.488,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 6,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 3.376729171955958,
+"timed": 3.373,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.4735820761416107,
+"timed": 0.68,
+"rss_kb": 540984,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.715906263096258,
+"timed": 0.736,
+"rss_kb": 538580,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.707993851043284,
+"timed": 0.914,
+"rss_kb": 540564,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.4475963809527457,
+"timed": 0.646,
+"rss_kb": 540668,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.4858633428812027,
+"timed": 0.727,
+"rss_kb": 538764,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.3947299420833588,
+"timed": 0.665,
+"rss_kb": 540776,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.4701789831742644,
+"timed": 0.665,
+"rss_kb": 538540,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.382739468012005,
+"timed": 0.679,
+"rss_kb": 538672,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.615580623038113,
+"timed": 0.776,
+"rss_kb": 538660,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.4010156609583646,
+"timed": 0.696,
+"rss_kb": 540964,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.227838314138353,
+"timed": 0.638,
+"rss_kb": 538728,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 2.9666962982155383,
+"timed": 2.964,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 2.9419909599237144,
+"timed": 2.939,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 2.9125820719636977,
+"timed": 2.91,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 2.823142072185874,
+"timed": 2.82,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 2.9113768259994686,
+"timed": 2.909,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 3.1501933180261403,
+"timed": 3.147,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 3.198295006994158,
+"timed": 3.196,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 3.4687092460226268,
+"timed": 3.454,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 3.2533737148623914,
+"timed": 3.238,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 3.2311439409386367,
+"timed": 3.229,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 7,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 3.606358194956556,
+"timed": 3.604,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.536771368002519,
+"timed": 0.795,
+"rss_kb": 540728,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.6616322638001293,
+"timed": 0.69,
+"rss_kb": 538508,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.5940058450214565,
+"timed": 0.715,
+"rss_kb": 538628,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.817465069005266,
+"timed": 0.672,
+"rss_kb": 538700,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.503783314023167,
+"timed": 0.666,
+"rss_kb": 538884,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.877110155997798,
+"timed": 0.813,
+"rss_kb": 538572,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.8471310711465776,
+"timed": 0.938,
+"rss_kb": 540720,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.643603633157909,
+"timed": 0.769,
+"rss_kb": 540948,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.631108063040301,
+"timed": 0.765,
+"rss_kb": 538424,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.766936938976869,
+"timed": 0.677,
+"rss_kb": 538700,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.6295283411163837,
+"timed": 0.81,
+"rss_kb": 595548,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.735633805161342,
+"timed": 2.733,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 3.091800677124411,
+"timed": 3.088,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 3.6112031179945916,
+"timed": 3.609,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 3.519068572903052,
+"timed": 3.511,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 3.279674573102966,
+"timed": 3.277,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.787375041982159,
+"timed": 2.785,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 2.7649021029938012,
+"timed": 2.762,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 2.7480642260052264,
+"timed": 2.745,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 2.7037613969296217,
+"timed": 2.7,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 2.8121537808328867,
+"timed": 2.81,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 8,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 2.906988719943911,
+"timed": 2.905,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.200866897124797,
+"timed": 0.628,
+"rss_kb": 538772,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.186923199798912,
+"timed": 0.624,
+"rss_kb": 538764,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.231900576967746,
+"timed": 0.642,
+"rss_kb": 540792,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.2461563399992883,
+"timed": 0.644,
+"rss_kb": 538768,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.1805721670389175,
+"timed": 0.603,
+"rss_kb": 538776,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.2067626940552145,
+"timed": 0.637,
+"rss_kb": 540740,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.310430607991293,
+"timed": 0.678,
+"rss_kb": 538792,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.2034381520934403,
+"timed": 0.645,
+"rss_kb": 540856,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.258317237952724,
+"timed": 0.622,
+"rss_kb": 538800,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.236346143996343,
+"timed": 0.634,
+"rss_kb": 538824,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.1800025701522827,
+"timed": 0.624,
+"rss_kb": 540852,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 2.8236098180059344,
+"timed": 2.821,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 2.781883210875094,
+"timed": 2.779,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 2.734436361119151,
+"timed": 2.732,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.7063446200918406,
+"timed": 2.704,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 2.93904512305744,
+"timed": 2.936,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 2.751432280987501,
+"timed": 2.749,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.7706461758352816,
+"timed": 2.768,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 2.8382097959984094,
+"timed": 2.836,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 2.8948603440076113,
+"timed": 2.892,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 2.79549219715409,
+"timed": 2.793,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 9,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 3.054953214013949,
+"timed": 3.052,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "v039p64",
+"wall": 2.168366350000724,
+"timed": 0.599,
+"rss_kb": 540820,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "c15",
+"wall": 2.166605487000197,
+"timed": 0.607,
+"rss_kb": 538852,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "v039",
+"wall": 2.2708446190226823,
+"timed": 0.64,
+"rss_kb": 540948,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "c18",
+"wall": 2.2000253070145845,
+"timed": 0.629,
+"rss_kb": 540744,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "v038p64",
+"wall": 2.2410096852108836,
+"timed": 0.641,
+"rss_kb": 538776,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "c31",
+"wall": 2.2508456201758236,
+"timed": 0.668,
+"rss_kb": 538780,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "c25",
+"wall": 2.25723767420277,
+"timed": 0.679,
+"rss_kb": 538912,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "c12",
+"wall": 2.348118582041934,
+"timed": 0.657,
+"rss_kb": 538820,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "v038",
+"wall": 2.2112441109493375,
+"timed": 0.61,
+"rss_kb": 538676,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "c24",
+"wall": 2.2809906599577516,
+"timed": 0.665,
+"rss_kb": 669852,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Revcomp",
+"arm": "c29",
+"wall": 2.1726611950434744,
+"timed": 0.634,
+"rss_kb": 540796,
+"ok": false,
+"exit": 1
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "c18",
+"wall": 2.725539638195187,
+"timed": 2.722,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "c24",
+"wall": 2.8170059830881655,
+"timed": 2.813,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "c15",
+"wall": 2.745500362943858,
+"timed": 2.743,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "v038",
+"wall": 2.7998462319374084,
+"timed": 2.797,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "c12",
+"wall": 2.724661663873121,
+"timed": 2.722,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "v039p64",
+"wall": 3.167440532008186,
+"timed": 3.164,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "v038p64",
+"wall": 2.8862720739562064,
+"timed": 2.884,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "c25",
+"wall": 2.6620807310100645,
+"timed": 2.66,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "c29",
+"wall": 2.7135404120199382,
+"timed": 2.711,
+"rss_kb": 14228,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "v039",
+"wall": 2.667943336069584,
+"timed": 2.665,
+"rss_kb": 14356,
+"ok": true,
+"exit": 0
+},
+{
+"rep": 10,
+"bench": "Brainfuck",
+"arm": "c31",
+"wall": 2.749278672039509,
+"timed": 2.747,
+"rss_kb": 14356,
+"ok": true,
+"exit": 0
+}
+]

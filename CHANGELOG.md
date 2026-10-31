@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler leg, the pinned `std_spec` arm and the compiler-with-gcry build
   move from 1.22.0 to 1.22.2.
 
+- **0.39.0's Revcomp row on the Linux host, 1–2% slower than 0.38.0, is
+  code placement (README, ROADMAP).** The allocation entry
+  `GC::malloc_atomic` starts 16 bytes past a 64-byte line in the 0.39.0
+  binary, moved there by 80 bytes of the mprotect fix's class-variable
+  initializers ahead of it, and Revcomp is slowest at that phase on x86-64
+  whichever release is built there. Over eight placements of each release
+  0.39.0 is level with 0.38.0 on the host (+0.05% [−0.38, +0.23]); over five
+  it is 0.9% faster on `ubuntu-latest` and 0.5% faster on arm64 (Perf A/B
+  41212029709 and 41213664006). Collections, pauses, grows and faults are
+  the same, and 0.39.0 runs 0.12% more instructions, five per allocation
+  from the slow path's tail call (`bench/log/linux/2026-10-31-revcomp-host-placement/`).
+
 ### Fixed
 
 - **The large-cache counters' resets after a collection are no longer lost
