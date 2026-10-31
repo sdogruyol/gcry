@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The overnight stress runs every week on the five GitHub runners**
+  (`.github/workflows/stress.yml`): Linux x86_64 and arm64, macOS arm64 and
+  Intel, Windows x86_64, three jobs each. `bench/stress_overnight.sh` takes
+  `--only`/`--skip` loop filters, builds only what the selected loops run,
+  runs without the heavy lock where there is no `flock`, exits 1 on any
+  failed or stalled run (a classified Crystal scheduler deadlock is counted,
+  not failed), and prints `<loop> skipped: <reason>` for a loop that cannot
+  run on that OS or lacks its compiler or `wrk`. `bench/run_bounded.sh`
+  captures a Windows stall with cdb and the executable's PDB and kills the
+  whole native tree. The full set on `ubuntu-latest`: 1 652 runs in three
+  jobs of 75–100 minutes, all passing; every runner at scale 0.05 passing
+  (`bench/log/linux/2026-11-01-stress-ci/`).
+
 ### Changed
 
 - **The `String::Builder` and `@[Raises]` reopens apply only below Crystal

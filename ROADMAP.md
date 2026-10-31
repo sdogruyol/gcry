@@ -4738,6 +4738,16 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
       way. The gate now puts every child under a deadline and forces that
       cycle on every run, with the shipped tree as its control
       (`bench/log/linux/2026-10-23-drift-stall/`).
+      Since 2026-10-31 the overnight set also runs weekly on the five GitHub
+      runners (`.github/workflows/stress.yml`, Saturdays, three jobs a
+      runner). The full set on `ubuntu-latest` passed 1 652 runs (75–100 min
+      a job); the other runners passed at scale 0.05 and are estimated at
+      0.8–2.5 h a job. Not covered there: `chunk-list-drift`,
+      `realloc-move-stress` and `thread-churn-uaf` on macOS (Linux-calibrated
+      controls), and `chunk-list-drift`, `realloc-move-stress`, `soak-smoke`
+      and the EC4 soft soak on Windows (POSIX calls, no RSS reader, no `wrk`);
+      each prints why it is skipped
+      (`bench/log/linux/2026-11-01-stress-ci/`).
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 
