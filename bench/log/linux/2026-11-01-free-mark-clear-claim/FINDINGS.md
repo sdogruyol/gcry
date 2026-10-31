@@ -173,6 +173,17 @@ per-allocation code is unchanged.
 
 ## claim_stress
 
-`bench/claim_stress.cr` built `--release`, 200 bounded runs per arm
-(`bench/run_bounded.sh 90`, 5 s, 4 workers, seeds 1–200, one run per hold
-of the shared lock): see the totals below.
+`bench/claim_stress.cr` built `--release` at `364e4018`, 200 bounded runs
+per arm (`bench/run_bounded.sh 90`, 5 s, 4 workers, seeds 1–200), on a
+push-triggered probe (run **41221456395**, branch deleted after):
+
+| runner | lazy sweep | in-stop sweep (`GCRY_DISABLE_LAZY_SWEEP=1`) |
+|---|---:|---:|
+| ubuntu-latest | 200 pass, 0 fail, 0 stall | 200 pass, 0 fail, 0 stall |
+| ubuntu-24.04-arm | 200 pass, 0 fail, 0 stall | 200 pass, 0 fail, 0 stall |
+
+arm64 is the runner where the new orderings are instructions rather than
+compiler barriers. Locally the lazy arm ran its first 50 seeds clean
+before the shared lock's queue made 400 runs a two-day job and it was
+stopped for the probe. claim_stress runs no incremental cycle, so it
+guards the changed hit and free paths, not the window regression 91 forces.
