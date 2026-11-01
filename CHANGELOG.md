@@ -28,6 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Revcomp#revcomp` lands; 95–120% of Boehm. Kemal `/json` is level on three
   of the four runners it runs on and 7.3% faster on arm64.
 
+- **Windows: 0.40.0's seven slower rows are code placement, row by row.**
+  Same-session runs on `windows-latest` with nops ahead of all the code at
+  each of the four 16-byte phases, for both 0.40.0 and 0.39.0
+  (`bench/log/windows/2026-11-02-0.40-win-rows/`; four sessions on two CPU
+  models, 21 reps): at the same phase the two read the same time (medians
+  −2.3% to +3.3% apart, both signs), and unpadded 0.40.0 sits on a slow
+  phase of each row and 0.39.0 on a fast one — JsonParsePure,
+  JsonParseSerializable, JsonParsePull (3.5–6% between phases), JsonGenerate
+  (7%), RegexDna (1.4%), Revcomp (16–19%, where `Revcomp#revcomp` lands);
+  a control that allocates nothing moves 4%. Primes reads the same at equal
+  collection counts; 0.40.0 reaches the pace's tenth collection more often,
+  about half of that with the mark unroll on an EPYC 7763, at rates
+  placement moves for both releases. No default-path commit reverted alone
+  brings a row under the tip's band, 0.39.0 with 0.40.0's heap field layout
+  overlaps both releases' ranges, and on Windows the hit path adds one load
+  and one test per 64 blocks. Nothing changes in `src/`. README, COMPARISON
+  and WINDOWS say so.
+
 - **The overnight stress runs every week on the five GitHub runners**
   (`.github/workflows/stress.yml`): Linux x86_64 and arm64, macOS arm64 and
   Intel, Windows x86_64, three jobs each. `bench/stress_overnight.sh` takes

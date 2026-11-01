@@ -43,12 +43,17 @@ other six are:
 - **JsonParsePure, JsonParseSerializable, JsonParsePull, RegexDna** were
   flagged the same way in the keep-rule file's tip run with two pads a side
   (41248448693, §6: +3.7%, +5.7%, +6.3%, +1.0% timed), and each had a 0.40
-  arm inside 0.39.0's band there. [INFERENCE] placement, as there; this run's
-  one pad a side does not show it.
+  arm inside 0.39.0's band there. This run's one pad a side does not show
+  it; placement, shown since in same-session runs with all four 16-byte
+  phases of both trees (`../2026-11-02-0.40-win-rows/` §1–2): the trees
+  read the same at the same phase, and 0.40 unpadded sits on a slow one,
+  0.39.0 on a fast one.
 - **Primes**, +6.3% wall, was within the spread in both earlier 0.40 runs
   (41233405753, 41248448693). It sits on a 9-or-10-collection step (a run with 10 is 3–4%
   slower): 0.40 collected 10 times in 11 of 15 runs, 0.39.0 in 6, 0.39.0
-  padded in none; at equal counts 0.40 is still 2–3% slower, as the JSON
-  rows are.
+  padded in none; at equal counts 0.40 is still 2–3% slower here, as the JSON
+  rows are. With four phases a side the trees read the same at equal counts
+  and the same phase, and 0.39.0 reaches the tenth collection in 0 to 20 of
+  21 runs depending on its placement (`../2026-11-02-0.40-win-rows/` §3).
 
 Knuckeotide is −1.7% wall and −2.3% timed, faster at the edge of its spread.

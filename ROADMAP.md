@@ -4626,6 +4626,23 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `malloc_atomic` placement-insensitive would need function or loop
       alignment control Crystal doesn't expose
       (`bench/log/windows/2026-10-16-revcomp-attribution/`).
+- [x] **Windows: seven crystal-metric rows of 0.40 slower than 0.39.0
+      (2026-11-01) — code placement, row by row (2026-11-02).** Perf A/B
+      41253485376 read JsonParsePure, JsonParseSerializable, JsonParsePull,
+      JsonGenerate, Primes, Revcomp and RegexDna 1.4–7.3% slower in wall
+      time, the JSON parse rows with both 0.40 arms above both 0.39.0 arms.
+      With nops ahead of all the code at each of the four 16-byte phases of
+      both trees in one session (EPYC 7763 and 9V74, 21 reps), the two read
+      the same at the same phase (−2.3% to +3.3%), unpadded 0.40 sits on a
+      slow phase of each row and 0.39.0 on a fast one, and a control that
+      allocates nothing moves 4% the same way. Primes is level at equal
+      collection counts; 0.40 reaches the pace's tenth collection more
+      often, about half of that with the mark unroll on the 7763 (the pace
+      item below). One session per default-path commit, reverted alone, and
+      0.39.0 with 0.40's heap field layout: no row under the tip's band. The
+      Windows hit path adds one flags load and one test per 64 blocks; the
+      FREEING RMWs are on explicit `GC.free` only. No change
+      (`bench/log/windows/2026-11-02-0.40-win-rows/`).
 - [ ] **Per-object mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-23).** Per collection at the same (full) live set,
       gcry's one marker took 0.39× / 0.43× / 0.67× of Boehm's one marker on

@@ -29,19 +29,23 @@ numbers for the docs, one pad a side as 0.39's was.
   Intel, 3–4% on Windows. Here 0.40 collected 10 times in 11 of 15 runs on
   each, 0.39.0 in 4 (Intel) and 6 (Windows) of 15, and 0.39.0 padded by 16
   bytes in 11 (Intel) and 0 (Windows) of 15. At equal counts Intel is level
-  (9: 2.095 against 2.155 s; 10: 2.541 against 2.493 s); Windows is still
-  2–3% slower (9: 1.526 against 1.491 s; 10: 1.586 against 1.537 s), as its
-  other rows are (below). The two earlier 0.40 runs (`9dc77af5` and `2c600dfb`) read
+  (9: 2.095 against 2.155 s; 10: 2.541 against 2.493 s); Windows read 2–3%
+  slower here (9: 1.526 against 1.491 s; 10: 1.586 against 1.537 s) and level
+  at equal counts and the same code phase with four pads a side
+  (`../../windows/2026-11-02-0.40-win-rows/` §3). The two earlier 0.40 runs (`9dc77af5` and `2c600dfb`) read
   Intel Primes +3.5% [+0.7, +10.5] and +3.5% [−1.5, +6.8] with 0.39.0 padded
   at 10 collections in 13 of 15 runs both times, and Windows Primes within
   its spread (keep-rule §1, §6). [INFERENCE] the pace step the keep-rule
   file's §4 finds for arm64 JsonGenerate: a cheaper cycle lowers the paced
-  threshold enough for one more collection.
+  threshold enough for one more collection. On a Windows EPYC 7763 the tip
+  without the mark unroll reaches the tenth about halfway between 0.40 and
+  0.39.0 (`../../windows/2026-11-02-0.40-win-rows/` §3).
 - **Windows:** seven rows slower in wall time beyond the spread, Revcomp
   +7.3% the largest; with one pad a side only JsonGenerate's is inside
-  0.39.0's band here. Six of the seven were flagged in the keep-rule file's
-  tip run with two pads a side (§6) and each sat inside the band there;
-  Revcomp follows `Revcomp#revcomp`'s alignment (§2). See the Windows file.
+  0.39.0's band here. All seven are placement: with the four 16-byte code
+  phases of each tree in one session the trees read the same at the same
+  phase, and 0.40 unpadded sits on a slow one
+  (`../../windows/2026-11-02-0.40-win-rows/`). See the Windows file.
 - **Peaks:** macOS JsonGenerate −13.6% on both Macs (0.74× → 0.64× M1, 0.75×
   → 0.65× Intel) and Intel Revcomp −11.7%, from the heap placed at 16–32 TiB
   (`bench/log/macos/2026-10-31-heap-high/`). Knuckeotide's peak is level with
