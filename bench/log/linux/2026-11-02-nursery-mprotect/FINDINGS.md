@@ -375,3 +375,11 @@ reclaims the target" example (its positive control expects a conservative
 collection to free a target). Three more runs on this tree passed. On base
 `87ccf4f4` alone, the same example failed in 1 of 3 runs. That is a flake
 already on base, not this change.
+
+After the *race* and *softdirty* fixes, on `39c96a15` (base `551acbfc`):
+format and lint clean (249 inspected); `spec/all_specs.cr` 303 / 325 / 303,
+0 failures; `process_spec` 366 / 367 / 367 (headerless, headers, headers
+with `GCRY_BITMAP_ALLOC=0`), 0 failures, 2 pending; Crystal 1.22.2 366 /
+367, 0 failures; both typechecks ok; `make alloc-entry-frame` 5 / 0.
+Regression 99, 30 runs per arm: all twelve header arms and the eight
+incremental arms headerless gave their expected outcome every time.
