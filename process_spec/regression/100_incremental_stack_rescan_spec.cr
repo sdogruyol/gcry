@@ -17,13 +17,16 @@ require "spec"
 #   arm protects the chunks it finds; a new one stays writable with no dirty
 #   bit for its writes, and what is allocated in it while marking is black
 #   and never scanned. The termination scan now reads every page the cards
-#   neither protect nor mark dirty (`Platform.each_mprotect_untracked_page`).
+#   neither protect nor mark dirty (`Platform.each_mprotect_untracked_page`),
+#   and every page of a chunk the barrier did not protect itself: the bits
+#   over one mapped where a chunk unmapped mid-cycle was can still be that
+#   chunk's, protected and clean.
 #
 # The construction, deterministic: an object X, its 64 bytes a pattern, is
 # held only by a field of a holder at the end of a 4 000-node chain from a
 # static root. One slice of one unit begins the cycle; X is unmarked
 # (checked). Then X's pointer moves out of the field and the field is
-# cleared, and the cycle runs out. Four windows, by where X goes:
+# cleared, and the cycle runs out. Five windows, by where X goes:
 #
 # - *stack*: a stack slot of the frame driving the slices;
 # - *static*: a class variable (static data);
@@ -31,24 +34,36 @@ require "spec"
 #   finished;
 # - *newchunk*: the first word of a 4 MiB block allocated after the arm (a
 #   mapping of its own, its page checked untracked), held by a class
-#   variable.
+#   variable;
+# - *remap*: a word 16 KiB into the same, but the block is mapped where a
+#   4 MiB block the arm protected was freed and unmapped mid-cycle (no root
+#   held that block at the begin stop, checked unmarked — a false root in
+#   static data marks it about 1 run in 100, and then that cycle is run out
+#   and the window built again, at most three times), so the cards still
+#   call its pages protected and clean (checked); the termination reads
+#   such a chunk whole, the barrier never having protected it
+#   (`ChunkHeader::Flags::BARRIER_ARMED`). It prints X's mark state at each
+#   stop.
 #
 # The fixed arm must find X allocated, its pattern intact after 4 096 more
-# allocations of its size, and none of them X. The control arm must find X
-# swept, or the fixed arm passes on nothing: the root windows' control turns
-# the rescan off (`Heap.inc_finish_rescan_roots = false`), *newchunk*'s the
-# untracked pages (`Platform.mprotect_scan_untracked = false`), each the code
-# before. Each arm runs in a process of its own. The cycle runs on the
-# mprotect barrier, as regressions 85, 91 and 95 do: Linux only. A heap that
-# cannot reach the window prints `RESCAN100_SKIP_MARK` and passes, and the
-# parent then does not ask for the control's mark.
+# allocations of its size, and none of them X, and the cycle must not end
+# in the lost-barrier full collection. The control arm must find X swept,
+# or the fixed arm passes on nothing: the root windows' control turns the
+# rescan off (`Heap.inc_finish_rescan_roots = false`), *newchunk*'s the
+# untracked pages (`Platform.mprotect_scan_untracked = false`), *remap*'s
+# the whole read of an unarmed chunk
+# (`Platform.mprotect_scan_unarmed_chunks = false`), each the code before.
+# Each arm runs in a process of its own. The cycle runs on the mprotect
+# barrier, as regressions 85, 91 and 95 do: Linux only. A heap that cannot
+# reach the window prints `RESCAN100_SKIP_MARK` and passes, and the parent
+# then does not ask for the control's mark.
 # `bench/log/linux/2026-11-02-incremental-stack-rescan/FINDINGS.md`.
 
 private RESCAN100_SKIP_MARK    = "rescan100: this heap cannot reach the window, skipped"
 private RESCAN100_FIXED_MARK   = "rescan100: the moved object is alive"
 private RESCAN100_CONTROL_MARK = "rescan100: the control arm swept the moved object"
 
-private RESCAN100_WINDOWS = {"stack", "static", "thread", "newchunk"}
+private RESCAN100_WINDOWS = {"stack", "static", "thread", "newchunk", "remap"}
 
 # Links between the static root and the holder: far more marking than the
 # begin slice's one unit does.
@@ -60,7 +75,25 @@ private RESCAN100_NEW_BYTES = 4 * 1024 * 1024
 private class Rescan100Roots
   class_property head : Void* = Pointer(Void).null
   class_property moved : Void* = Pointer(Void).null
+  class_property big : Void* = Pointer(Void).null
+  # *remap*: old blocks a false root marked, held so the next is mapped
+  # elsewhere.
+  class_property spares = [] of Void*
   class_property sink = 0_u64
+  # *remap*: the old block's address, complemented, and X's, for the stop
+  # trace.
+  class_property big_inv = 0_u64
+  class_property x_inv = 0_u64
+  # *remap*'s stop trace, written by the collection event hook (which must
+  # not allocate): the stops seen, the first one X was marked on entering
+  # (-1 for none), whether X and the old block were marked when the begin
+  # stop ended, and whether X was marked when the finishing mark ended (the
+  # sweep after it clears the marks).
+  class_property stops = 0
+  class_property x_first_marked_stop = -1
+  class_property x_marked_begin = false
+  class_property big_marked_begin = false
+  class_property x_marked_mark_end = false
 end
 
 class Gcry::Heap
@@ -96,9 +129,26 @@ private def rescan100_build : UInt64
   ~x.address
 end
 
+# *remap*'s old block: mapped and collected once before the cycle, so the
+# arm protects it as an old chunk, and returned as its address complemented.
+# No root may hold it when the cycle begins: the begin stop would push it,
+# and the mark, popping it after the remap, would read the new block at its
+# address and find X there whatever the termination does. Its own frame, so
+# no slot or register of the window's frame keeps the block, as
+# `rescan100_build` for X.
+@[NoInline]
+private def rescan100_old_block : UInt64
+  Rescan100Roots.big = GC.malloc(RESCAN100_NEW_BYTES)
+  GC.collect
+  inv = ~Rescan100Roots.big.address
+  Rescan100Roots.big = Pointer(Void).null
+  inv
+end
+
 # The begin stop scans this thread's stack from the collector's frames up,
-# and their unused slots can still hold what `rescan100_build`'s frames left
-# there: zeroed first, so X begins white.
+# and their unused slots can still hold what `rescan100_build`'s and
+# `rescan100_old_block`'s frames left there: zeroed first, so X and the old
+# block begin white.
 @[NoInline]
 private def rescan100_scrub_stack : Nil
   buf = uninitialized StaticArray(UInt64, 8192)
@@ -121,12 +171,46 @@ private def rescan100_move(slot : Void**, holder : Void**) : Nil
   holder[0] = Pointer(Void).null
 end
 
+# Runs the cycle out. A fixed arm must not pass through the lost-barrier
+# full collection, which marks from every root whatever the slices missed.
 private def rescan100_finish(heap : Gcry::Heap) : Nil
+  lost = heap.inc_barrier_lost_collections
   slices = 0
   until heap.collect_a_little(4096)
     slices += 1
     fail "the cycle did not finish in #{slices} slices" if slices > 100_000
   end
+  heap.inc_barrier_lost_collections.should eq(lost)
+end
+
+# *remap*'s stop trace: X's mark state at each stop, so a control that keeps
+# X says where it was marked.
+private def rescan100_trace(heap : Gcry::Heap) : Nil
+  Rescan100Roots.stops = 0
+  Rescan100Roots.x_first_marked_stop = -1
+  heap.collection_event_hook = ->(event : Gcry::Heap::CollectionEvent) do
+    x = Pointer(Void).new(~Rescan100Roots.x_inv)
+    if event.post_stop_world?
+      stop = Rescan100Roots.stops
+      Rescan100Roots.stops = stop + 1
+      marked = heap.rescan100_marked?(x) || false
+      Rescan100Roots.x_first_marked_stop = stop if marked && Rescan100Roots.x_first_marked_stop < 0
+    elsif event.pre_start_world? && Rescan100Roots.stops == 1
+      Rescan100Roots.x_marked_begin = heap.rescan100_marked?(x) || false
+      Rescan100Roots.big_marked_begin = heap.rescan100_marked?(Pointer(Void).new(~Rescan100Roots.big_inv)) || false
+    elsif event.mark_end?
+      Rescan100Roots.x_marked_mark_end = heap.rescan100_marked?(x) || false
+    end
+    nil
+  end
+end
+
+private def rescan100_say_trace : Nil
+  rescan100_say("rescan100 remap trace: stops=#{Rescan100Roots.stops} " \
+                "X marked at the begin stop's end=#{Rescan100Roots.x_marked_begin} " \
+                "old block marked there=#{Rescan100Roots.big_marked_begin} " \
+                "first stop X was marked entering=#{Rescan100Roots.x_first_marked_stop} " \
+                "X marked at the finishing mark's end=#{Rescan100Roots.x_marked_mark_end}")
 end
 
 # The heap, ready for the window, or nil when it cannot reach it.
@@ -164,17 +248,39 @@ private def rescan100_window(heap : Gcry::Heap, window : String) : {Bool, Bool, 
   GC.collect
   # Nothing cached for the *newchunk* block to be given instead of a mapping.
   heap.trim_large_cache(0_u64, defer: false)
-  x_inv = rescan100_build
-  rescan100_scrub_stack
-  # The begin stop and one unit of marking.
-  heap.collect_a_little(1) && fail "the cycle finished in its first slice"
-  unless heap.incremental_in_progress? && heap.barrier_backend_name == "mprotect"
-    rescan100_say("#{RESCAN100_SKIP_MARK}: no incremental cycle on the mprotect barrier")
-    return nil
+  x_inv = 0_u64
+  attempt = 0
+  loop do
+    attempt += 1
+    Rescan100Roots.big_inv = rescan100_old_block if window == "remap"
+    x_inv = rescan100_build
+    Rescan100Roots.x_inv = x_inv
+    rescan100_scrub_stack
+    rescan100_trace(heap) if window == "remap"
+    # The begin stop and one unit of marking.
+    heap.collect_a_little(1) && fail "the cycle finished in its first slice"
+    unless heap.incremental_in_progress? && heap.barrier_backend_name == "mprotect"
+      rescan100_say("#{RESCAN100_SKIP_MARK}: no incremental cycle on the mprotect barrier")
+      return nil
+    end
+    marked = heap.rescan100_marked?(Pointer(Void).new(~x_inv))
+    fail "X is not an allocated block after the begin slice" if marked.nil?
+    fail "X was marked before the move: the window was not reached" if marked
+    break unless window == "remap"
+    old_marked = heap.rescan100_marked?(Pointer(Void).new(~Rescan100Roots.big_inv))
+    fail "the old block is not an allocated block: the window was not reached" if old_marked.nil?
+    break unless old_marked
+    # A false root marked the old block in the begin stop: a word of static
+    # data (the first-mark attribution said so) pointing into its 4 MiB,
+    # about 1 run in 100 with ASLR. Then it is grey, and its entry, popped
+    # after the remap, reads the new block: no window. Run this cycle out
+    # and build the window again on a new old block, this one held so the
+    # next is mapped elsewhere.
+    fail "the old block was marked in the begin slice #{attempt} times: the window was not reached" if attempt == 3
+    rescan100_say("rescan100 remap: a false root marked the old block, attempt #{attempt} run out and built again")
+    Rescan100Roots.spares << Pointer(Void).new(~Rescan100Roots.big_inv)
+    rescan100_finish(heap)
   end
-  marked = heap.rescan100_marked?(Pointer(Void).new(~x_inv))
-  fail "X is not an allocated block after the begin slice" if marked.nil?
-  fail "X was marked before the move: the window was not reached" if marked
 
   slot = uninitialized StaticArray(Void*, 1)
   slot[0] = Pointer(Void).null
@@ -212,12 +318,35 @@ private def rescan100_window(heap : Gcry::Heap, window : String) : {Bool, Bool, 
     block[0] = slot[0]
     slot[0] = Pointer(Void).null
     block = Pointer(Void*).null
+  when "remap"
+    old = Pointer(Void).new(~Rescan100Roots.big_inv)
+    GC.free(old)
+    heap.trim_large_cache(0_u64, defer: false)
+    block = GC.malloc(RESCAN100_NEW_BYTES).as(Void**)
+    Rescan100Roots.moved = block.as(Void*)
+    fail "the new block is not where the old one was: the window was not reached" unless block.address == old.address
+    old = Pointer(Void).null
+    # 16 KiB in, past the first page, which the free's header write dirtied.
+    far = block + 2048
+    fail "the cards do not call the new block protected: the window was not reached" if rescan100_untracked?(far.address)
+    rescan100_move(slot.to_unsafe, holder)
+    far.value = slot[0]
+    slot[0] = Pointer(Void).null
+    block = Pointer(Void*).null
+    # The move's frame and the calls since leave X's address in dead stack
+    # slots the terminating stop's root rescan reads; the control must find
+    # X through the block alone.
+    rescan100_scrub_stack
   else
     fail "unknown window #{window}"
   end
   holder = Pointer(Void*).null
 
   rescan100_finish(heap)
+  if window == "remap"
+    heap.collection_event_hook = nil
+    rescan100_say_trace
+  end
   done.set(1)
   thread.try &.join
 
@@ -244,6 +373,10 @@ private def rescan100_child(window : String, fixed : Bool) : Nil
     if window == "newchunk"
       {% if flag?(:linux) %}
         Gcry::Platform.mprotect_scan_untracked = false
+      {% end %}
+    elsif window == "remap"
+      {% if flag?(:linux) %}
+        Gcry::Platform.mprotect_scan_unarmed_chunks = false
       {% end %}
     else
       Gcry::Heap.inc_finish_rescan_roots = false

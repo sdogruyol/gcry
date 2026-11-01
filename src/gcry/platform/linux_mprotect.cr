@@ -218,6 +218,12 @@ module Gcry
     # `process_spec/regression/100_incremental_stack_rescan_spec.cr`'s
     # *newchunk* window.
     class_property mprotect_scan_untracked : Bool = true
+    # Research only: false makes that scan trust the cards' bits for a chunk
+    # the barrier never protected (`ChunkHeader::Flags::BARRIER_ARMED` unset),
+    # the code before — a chunk mapped mid-cycle where one unmapped since the
+    # arm left its pages marked protected and clean goes unread. The control
+    # arm of regression 100's *remap* window.
+    class_property mprotect_scan_unarmed_chunks : Bool = true
 
     # Install SEGV handler that re-enables write + marks page dirty.
     # Faults the barrier did not cause are forwarded to the previous handler.

@@ -494,6 +494,13 @@ module Gcry
       # fork that leaves another thread's `free` in flight leaves it set in
       # the child, where that chunk is then claimed from under the lock only.
       FREEING = 4096_u32
+      # The mprotect barrier protected this chunk under the current cards
+      # (`Heap#arm_mprotect_on_old_chunks`, the re-protect in
+      # `Heap#scan_mprotect_pages`). A chunk mapped since has a fresh header
+      # without it, even where the cards still call an earlier chunk's pages
+      # at the same address protected and clean: an incremental termination
+      # then reads every page of it rather than trust those bits.
+      BARRIER_ARMED = 8192_u32
       # Bits 16–21 of a large chunk's flags: the address space reserved for
       # it from its base, mapped or not (`Heap#grow_large`), as log2 of what
       # it holds past its first page: the extent is that power of two plus
@@ -684,6 +691,17 @@ module Gcry
 
     def self.set_dormant(chunk : ChunkHeader*, value : Bool) : Nil
       update_flag(chunk, Flags::DORMANT, value)
+    end
+
+    def self.barrier_armed?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::BARRIER_ARMED) != 0
+    end
+
+    # Collector only, world stopped, before the chunk's pages are protected
+    # (the header write would otherwise fault). Writes only on a change.
+    def self.set_barrier_armed(chunk : ChunkHeader*, value : Bool) : Nil
+      return if barrier_armed?(chunk) == value
+      update_flag(chunk, Flags::BARRIER_ARMED, value)
     end
 
     def self.cursor?(chunk : ChunkHeader*) : Bool

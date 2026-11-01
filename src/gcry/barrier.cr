@@ -119,6 +119,7 @@ module Gcry
           next if ChunkHeader.dormant?(chunk)
           low = chunk.address
           high = chunk.address + chunk.value.mapped_bytes
+          ChunkHeader.set_barrier_armed(chunk, Platform.mprotect_cards_cover?(low, high))
           Platform.mprotect_protect_range(low, high)
         end
         true
@@ -298,12 +299,18 @@ module Gcry
         if !nursery_only && Platform.mprotect_scan_untracked
           each_chunk do |chunk|
             next if ChunkHeader.dormant?(chunk)
-            Platform.each_mprotect_untracked_page(chunk.address, chunk.address + chunk.value.mapped_bytes) do |page|
-              scan_range_for_barrier_pointers(
-                Pointer(Void).new(page),
-                Pointer(Void).new(page + Platform::PAGE),
-                false,
-              )
+            low = chunk.address
+            high = low + chunk.value.mapped_bytes
+            if ChunkHeader.barrier_armed?(chunk) || !Platform.mprotect_scan_unarmed_chunks
+              Platform.each_mprotect_untracked_page(low, high) do |page|
+                scan_range_for_barrier_pointers(Pointer(Void).new(page), Pointer(Void).new(page + Platform::PAGE), false)
+              end
+            else
+              # Never protected under these cards — mapped since, maybe where
+              # a chunk unmapped mid-cycle left its pages marked protected and
+              # clean (a large block freed, its mapping released, a new one
+              # mapped at the same address). The bits say nothing about it.
+              scan_range_for_barrier_pointers(Pointer(Void).new(low), Pointer(Void).new(high), false)
             end
           end
         end
@@ -333,6 +340,7 @@ module Gcry
           each_chunk do |chunk|
             next if ChunkHeader.nursery?(chunk)
             next if ChunkHeader.dormant?(chunk)
+            ChunkHeader.set_barrier_armed(chunk, Platform.mprotect_cards_cover?(chunk.address, chunk.address + chunk.value.mapped_bytes))
             Platform.mprotect_protect_range(chunk.address, chunk.address + chunk.value.mapped_bytes)
           end
         else
