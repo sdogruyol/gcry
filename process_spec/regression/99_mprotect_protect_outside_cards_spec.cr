@@ -43,6 +43,12 @@ require "spec"
 #   is blind: the cycle finishes and sweeps an object whose only heap
 #   reference was stored after the cards were lost. (Before the clip, the
 #   pages were protected anyway and the first write died.)
+# - *race*: the slice that lost the barrier released the section with the
+#   cycle still open, and a slice queued behind it (it checked
+#   `@inc_active` before queueing) finished the cycle on those blind marks
+#   ahead of the full collection. Now the losing slice drops the cycle
+#   inside its stop, and a slice re-reads `@inc_active` once it holds the
+#   section (`inc_lost_cycle_ends_in_stop = false` restores both).
 #
 # *outside* and *stale* run the nursery with the mprotect barrier and a
 # minor to arm it. *outside*: a large block big enough that no hole inside
@@ -51,9 +57,10 @@ require "spec"
 # dirtied), the cache trimmed to nothing (unmapped), then a second minor.
 # Their control arms (`Gcry::Platform.mprotect_cards_cover_protection`,
 # `mprotect_dirty_scan_by_chunk` = false, the code before) must die in that
-# minor. *rebuild* and *nocards* begin an incremental cycle with automatic
-# collection off and drive its slices (`mprotect99_incremental_window`);
-# their controls must report the untracked chunk and the swept object. A
+# minor. *rebuild*, *nocards* and *race* begin an incremental cycle with
+# automatic collection off and drive its slices
+# (`mprotect99_incremental_window`); their controls must report the
+# untracked chunk, the swept object and the queued slice's sweep. A
 # fixed arm passes on nothing without its control. Every arm runs in a
 # process of its own. A child that cannot build its construction — no
 # nursery (the headerless layout), no mprotect barrier (Linux only), the
@@ -218,7 +225,8 @@ end
 # cards. Then drives slices until the termination scan has run (or the
 # cycle has ended). Returns nil after saying why it skipped, else whether
 # the cycle finished.
-private def mprotect99_incremental_window(heap : Gcry::Heap, refuse : Bool, pin : Void** = Pointer(Void*).null) : Bool?
+private def mprotect99_incremental_window(heap : Gcry::Heap, refuse : Bool, pin : Void** = Pointer(Void*).null,
+                                          work : Int32 = MPROTECT99_WORK, before_slices : Proc(Nil)? = nil) : Bool?
   {% if flag?(:linux) %}
     heap.disable
     heap.prefer_mprotect_barrier = true
@@ -250,11 +258,12 @@ private def mprotect99_incremental_window(heap : Gcry::Heap, refuse : Bool, pin 
       return nil
     end
     Gcry::Platform.mprotect_refuse_cards = true if refuse
+    before_slices.try &.call
     rescans = heap.barrier_dirty_rescans
     lost = heap.inc_barrier_lost_collections
     slices = 0
     until heap.barrier_dirty_rescans > rescans || heap.inc_barrier_lost_collections > lost
-      return true if heap.collect_a_little(MPROTECT99_WORK)
+      return true if heap.collect_a_little(work)
       slices += 1
       fail "no termination scan in #{slices} slices" if slices > 100_000
     end
@@ -354,6 +363,96 @@ private def mprotect99_nocards(arm : String) : Nil
   {% end %}
 end
 
+# *race*: the slice that loses its barrier must end the cycle inside its
+# stop, and a slice queued behind it must not finish the cycle it left. A
+# second thread is queued for the collection section from inside the
+# losing slice — `Heap.inc_slice_locked_hook` releases it there, before
+# the slice sets `@collecting`, and waits until it holds a ticket — so it
+# runs the moment the losing slice lets the section go, ahead of the full
+# collection. Fixed: it finds the cycle dropped and returns false. Control
+# (`inc_lost_cycle_ends_in_stop = false`): it runs a slice on the marks the
+# blind barrier left, finds nothing more to mark, and sweeps on them —
+# finishing the cycle (true) before the full collection runs.
+private module Mprotect99Race
+  @@armed = Atomic(Int32).new(0)
+  @@go = Atomic(Int32).new(0)
+  # 0 not run, 1 returned false, 2 returned true.
+  @@result = Atomic(Int32).new(0)
+  # Whether the second thread took a ticket while the losing slice held
+  # the section, rather than arriving after it.
+  @@queued = Atomic(Int32).new(0)
+
+  def self.queued? : Bool
+    @@queued.get == 1
+  end
+
+  def self.arm : Nil
+    @@armed.set(1)
+  end
+
+  # In the losing slice, holding the section. Allocates nothing.
+  def self.locked : Nil
+    return unless @@armed.swap(0) == 1
+    heap = Gcry.default_heap
+    queued = heap.@post_stw_next
+    @@go.set(1)
+    deadline = Gcry::Clock.monotonic_ns &+ 10_000_000_000_u64
+    loop do
+      Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, false)
+      if heap.@post_stw_next != queued
+        @@queued.set(1)
+        break
+      end
+      break if Gcry::Clock.monotonic_ns > deadline
+      Intrinsics.pause
+    end
+  end
+
+  def self.second_slice : Nil
+    until @@go.get == 1
+      Intrinsics.pause
+    end
+    @@result.set(Gcry.default_heap.collect_a_little(MPROTECT99_WORK) ? 2 : 1)
+  end
+
+  def self.result : Int32
+    @@result.get
+  end
+end
+
+private def mprotect99_race(arm : String) : Nil
+  {% if flag?(:linux) %}
+    heap = Gcry.default_heap
+    heap.inc_lost_cycle_ends_in_stop = arm == "fixed"
+    second = Thread.new { Mprotect99Race.second_slice }
+    Gcry::Heap.inc_slice_locked_hook = -> { Mprotect99Race.locked }
+    finished = mprotect99_incremental_window(heap, refuse: true, work: Int32::MAX,
+      before_slices: -> { Mprotect99Race.arm })
+    if finished.nil?
+      Mprotect99Race.arm
+      Mprotect99Race.locked
+      second.join
+      return
+    end
+    second.join
+    Gcry::Heap.inc_slice_locked_hook = nil
+    finished.should be_true
+    heap.inc_barrier_lost_collections.should eq(1)
+    Mprotect99Race.queued?.should be_true
+    result = Mprotect99Race.result
+    mprotect99_say("mprotect99 race: the queued slice returned #{result == 2}")
+    if arm == "control"
+      result.should eq(2)
+      mprotect99_say("mprotect99 race: control finished the cycle on the blind marks")
+    else
+      result.should eq(1)
+      mprotect99_say(MPROTECT99_FIXED_MARK)
+    end
+  {% else %}
+    mprotect99_say("#{MPROTECT99_SKIP_MARK}: Linux only")
+  {% end %}
+end
+
 # Runs one child; kills it past *seconds*. Returns its status and output.
 private def mprotect99_child(arm : String, seconds : Int32 = 90) : {Process::Status, String}
   captured = IO::Memory.new
@@ -427,6 +526,14 @@ describe "Regression: the mprotect dirty-page scan against a chunk set that move
     mprotect99_expect_mark("nocards-control", "mprotect99 nocards: control swept an object stored after the cards were lost")
   end
 
+  it "race: fixed arm in a process of its own" do
+    mprotect99_expect_mark("race-fixed", MPROTECT99_FIXED_MARK)
+  end
+
+  it "race: control arm finishes the cycle in a queued slice" do
+    mprotect99_expect_mark("race-control", "mprotect99 race: control finished the cycle on the blind marks")
+  end
+
   it "mprotect-outside-cards child outside-fixed" do
     next unless ENV["GCRY_MPROTECT99_CHILD"]? == "outside-fixed"
     mprotect99_outside
@@ -477,5 +584,15 @@ describe "Regression: the mprotect dirty-page scan against a chunk set that move
       Gcry::Platform.mprotect_drop_without_cards = false
     {% end %}
     mprotect99_nocards("control")
+  end
+
+  it "mprotect-outside-cards child race-fixed" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "race-fixed"
+    mprotect99_race("fixed")
+  end
+
+  it "mprotect-outside-cards child race-control" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "race-control"
+    mprotect99_race("control")
   end
 end

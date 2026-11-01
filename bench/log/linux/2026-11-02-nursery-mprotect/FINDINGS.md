@@ -180,6 +180,20 @@ construction cannot be built. *outside* and *stale* need the header layout
 | rebuild control | 0 | 30 / headerless 30 ("covered: false, its write recorded: false") | 0 | 0 |
 | nocards fixed | 30 / headerless 30 | — | 0 | 0 |
 | nocards control | 0 | 30 / headerless 30 ("alive: false") | 0 | 0 |
+| race fixed | 30 / headerless 30 (the queued slice returned false) | — | 0 | 0 |
+| race control | 0 | 30 / headerless 30 (the queued slice finished the cycle) | 0 | 0 |
+
+*race* (from the re-review): the slice that lost the barrier released the
+section with `@inc_active` still true, and `collect_a_little` reads
+`@inc_active`/`@collecting` before queueing for the section, so a second
+thread's slice queued behind it ran first, found the backend `None`
+(`armed` false, so no loss detected) and swept the partial mark. Now
+the losing slice calls `abort_incremental` inside its stop, and a slice
+returns false if `@inc_active` is false once it holds the section. The
+arm queues the second thread from `Heap.inc_slice_locked_hook` in the
+losing slice (a single slice of `Int32::MAX` marks, cards refused), waits
+until `@post_stw_next` shows its ticket, and asserts it did queue. Control:
+`inc_lost_cycle_ends_in_stop = false`.
 
 The first *nocards* build had both arms backwards (fixed swept the object,
 control kept it): the object was marked at the cycle's begin from stale

@@ -3152,6 +3152,13 @@ kept finding the rest.
       mprotect) — `GCRY_NURSERY` alone crashed a large-buffer loop and
       `pattern_fuzz` on both Linux runners (probe 41299975823).
       0.38.0 and 0.39.0 reproduce. Opt-in paths only; no perf-ab.
+      Re-review: the lost-barrier slice dropped the cycle only later, in
+      `collect`, and a slice another thread had queued (it read
+      `@inc_active` before queueing) swept the blind marks first. The
+      losing slice now drops the cycle inside its stop and a slice re-reads
+      `@inc_active` under the section; regression 99 *race* (two threads,
+      `inc_slice_locked_hook` queues the second; control's slice finishes
+      the cycle).
       The overnight stress had no nursery or mprotect loop and now has
       both. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
 

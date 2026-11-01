@@ -988,6 +988,15 @@ module Gcry
     # the adaptive retain does not move (`settle_large_cache`) — the control
     # arm of `process_spec/regression/95_incremental_large_counters_spec.cr`.
     property inc_finish_large_settle : Bool = true
+    # Research only. False: a slice whose scan lost the barrier leaves the
+    # cycle open until its full collection, and a slice does not re-read
+    # `@inc_active` after queueing for the section — the code before
+    # 2026-11-02, the control arm of regression 99's *race* window.
+    property inc_lost_cycle_ends_in_stop : Bool = true
+    # Research only: called by `collect_a_little` on the slicing thread just
+    # after it takes the collection section, before anything else; must not
+    # allocate (regression 99's *race* queues a second slice there).
+    class_property inc_slice_locked_hook : Proc(Nil)? = nil
     @world_stopped = false
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
@@ -2195,6 +2204,17 @@ module Gcry
 
       barrier_lost = false
       lock_post_stw
+      if hook = @@inc_slice_locked_hook
+        hook.call
+      end
+      # Read again under the section: the checks above were made before
+      # this thread queued for it, and the slice ahead of it may have ended
+      # the cycle — one whose scan lost the barrier ends it inside its stop
+      # (below). Running on would sweep that cycle's marks, made blind.
+      if @inc_lost_cycle_ends_in_stop && !@inc_active
+        unlock_post_stw
+        return false
+      end
       finished = false
       begin
         # Owner first, then the flag, with a release fence between them: the
@@ -2243,9 +2263,14 @@ module Gcry
             # goes unrecorded; finishing on this mark — the code before
             # 2026-11-02 — swept objects whose only reference was stored
             # after the scan. The cycle ends in a full collection instead,
-            # below, once this stop is over.
+            # below, once this stop is over — and it is dropped here, inside
+            # the stop, so that no slice queued behind this one finds it
+            # still open and finishes it on these marks first (the re-check
+            # after `lock_post_stw`). The backend is `None` already, so the
+            # drop unprotects nothing.
             # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
             barrier_lost = armed && @barrier_backend.none?
+            abort_incremental if barrier_lost && @inc_lost_cycle_ends_in_stop
           end
           if @mark_stack.empty? && !barrier_lost
             collection_event(CollectionEvent::MarkEnd)
