@@ -243,6 +243,51 @@ describe "adaptive collection threshold" do
       Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 50_000_000_u64, mib * 8, 300_u64).should eq 300
     end
 
+    it "prices a growing scanned set against at least the floor, up to the maximum" do
+      floor = Gcry::Heap::PACE_GROWTH_SCAN_FLOOR
+      # 20 ms after 100 ms of allocating 8 MiB holds this cycle at 16 MiB.
+      # Nothing survived: the cycle is priced at its own cost.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        floor * 2, 0_u64).should eq 200
+      # Half of each allocated byte survives into a 128 MiB scanned set: the
+      # next 16 MiB stretch adds 8 MiB, 1/16 of it, so T = 16 / (1 − 16 ×
+      # 0.5 / 128) MiB, 17.07 MiB.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        floor * 2, mib * 4).should eq 213
+      # A scanned set under the floor is priced as the floor: 16 / (1 − 16 ×
+      # 0.5 / 64) MiB = 18.29 MiB, whether it scanned 6 MiB or none.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        mib * 6, mib * 4).should eq 228
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        0_u64, mib * 4).should eq 228
+      # 80 ms holds this cycle at 64 MiB, 800% under a 1000% maximum. If all
+      # of it survives into a 64 MiB scanned set, the next cycle reads twice
+      # as much however short the stretch (P × rate ≥ scanned): the maximum.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 80_000_000_u64, mib * 8, 1000_u64,
+        floor, 0_u64).should eq 800
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 80_000_000_u64, mib * 8, 1000_u64,
+        floor, mib * 8).should eq 1000
+      # Survived past allocated counts as allocated: 32 / (1 − 32 × 1 / 256)
+      # MiB at 40 ms, not the 64 MiB that 4 bytes per allocated byte gives.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 40_000_000_u64, mib * 8, 1000_u64,
+        floor * 4, mib * 32).should eq 457
+      # A cheap cycle stays unpaced however fast the heap grows.
+      Gcry::Heap.threshold_pace_pct(mib * 2, 100_000_000_u64, 1_000_000_u64, mib * 8, 300_u64,
+        floor, mib * 2).should eq 100
+    end
+
+    it "prices the lower of the last two stretches' survival rates" do
+      # No previous stretch: nothing is a trend yet.
+      Gcry::Heap.pace_survived(mib * 8, mib * 16, 0_u64, 0_u64).should eq 0
+      # A step after a steady stretch (Knuckeotide's rebuild): not priced.
+      Gcry::Heap.pace_survived(mib * 5, mib * 16, 0_u64, mib * 8).should eq 0
+      # The previous stretch kept a quarter, this one half: a quarter of
+      # this stretch's 16 MiB.
+      Gcry::Heap.pace_survived(mib * 8, mib * 16, mib * 2, mib * 8).should eq mib * 4
+      # This stretch kept less than the previous rate: what it kept.
+      Gcry::Heap.pace_survived(mib * 2, mib * 16, mib * 8, mib * 8).should eq mib * 2
+    end
+
     it "scales the live-sized threshold, keeps its pace across an unmeasured cycle and drops it on a releasing one" do
       heap = Gcry::Heap.new
       begin
