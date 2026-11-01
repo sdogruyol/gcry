@@ -176,6 +176,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend, and its `pattern-fuzz-headers-freelist` loop on the header
   layout it is named for (`bench/log/linux/2026-11-02-nursery-mprotect/`).
 
+- **An incremental cycle no longer sweeps an object the program moved out
+  of a heap field mid-cycle.** `GCRY_INCREMENTAL=1` (or `collect_a_little`)
+  missed two places such a pointer can go, and swept the object while the
+  program held it: the next allocation of its size reused the block. Its
+  page barrier records the store that clears the field and nothing about
+  where the pointer went.
+  Onto a stack, into a register or a static, or onto another thread's
+  stack: the cycle scanned the roots in its first stop only. The stop that
+  finishes it now marks that whole root set again, as Boehm's final stopped
+  mark does, and sweeps only once what that finds is marked within the
+  slice's budget; otherwise the cycle stays open for the next slice.
+  Into an object in a chunk mapped since the cycle began, with the mprotect
+  barrier (`GCRY_MPROTECT_BARRIER=1`, and aarch64 Linux): the barrier
+  protected only the chunks it found when it was armed, so writes to a new
+  one went unrecorded. The finishing scan now reads every page the barrier
+  neither protects nor has seen written, once; it is protected from then on.
+  Regression 100 forces each for a stack slot, a class variable, a second
+  thread's stack and a 4 MiB block allocated mid-cycle: the code before
+  swept the object in 30 of 30 runs of each, on both layouts. 0.38.0 and
+  0.39.0 reproduce the first; no release since 0.1.0 scanned a root after
+  the first stop. The default stop-the-world collector scans every root and
+  the whole heap in every collection and is unaffected
+  (`bench/log/linux/2026-11-02-incremental-stack-rescan/`).
+
 - **`thread_staged_total` no longer loses births to concurrent thread
   creation.** Every creating thread bumped it with a plain `&+= 1`, and a
   parallel context's schedulers start each other's threads, so two births at

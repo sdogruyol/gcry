@@ -3171,18 +3171,50 @@ kept finding the rest.
       The overnight stress had no nursery or mprotect loop and now has
       both. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
 
-- [ ] **The incremental cycle never scans a stack after its first stop —
-      found 2026-11-02, not reproduced.** [INFERENCE, code reading]
-      `begin_incremental` scans the stacks and registers once; no later
-      slice does, and the finishing slice sweeps on that. A mutator that
-      loads a pointer to a not-yet-marked object onto its stack and then
-      clears the heap field it came from leaves the object reachable only
-      from the stack: the page barrier rescans the cleared field and finds
-      nothing. Boehm's incremental mode rescans roots at the end. Opt-in
-      (`GCRY_INCREMENTAL=1`). Seen while building regression 99's *nocards*
-      arm, whose object is held on the stack after the root scan and is
-      swept by the finishing slice for exactly this reason when no store
-      reports it. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
+- [x] **The incremental cycle never scans a stack after its first stop —
+      found 2026-11-02, reproduced and fixed the same day.** Found by code
+      reading while building regression 99's *nocards* arm, whose object is
+      held on the stack after the root scan and was swept by the finishing
+      slice when no store reported it. `begin_incremental` scanned the
+      roots — stacks, registers, static data, the explicit and
+      before-collect roots — once; no later slice did, and the finishing
+      slice swept on that. The page barrier records stores into heap pages
+      (an insertion barrier, not a deletion one), so a mutator that loads a
+      pointer to an object the mark has not reached into a local, a static
+      or another thread's stack and then clears the field leaves it held by
+      a root alone: the termination rescans the cleared field and finds
+      nothing. Regression 100: X held only by a field at the end of a
+      4 000-node chain, one slice of one unit, X unmarked (checked), the
+      pointer moved into a stack slot, a class variable or a second thread's
+      stack slot and the field cleared, the cycle run out; the control
+      (`inc_finish_rescan_roots = false`) finds X swept and its block handed
+      out again, 30 of 30 runs per window on both layouts, and soft-dirty
+      does the same as mprotect (probe). Fixed: the terminating stop runs
+      the begin stop's root scan again (`mark_incremental_roots`) after the
+      dirty-page scan and sweeps only if the mark stack is empty after one
+      more budget; otherwise the cycle stays open and the next slice to
+      empty the stack rescans both — Boehm's `GC_stopped_mark` pushes the
+      dirty pages and then every root again. Regressions 91 and 99
+      *nocards* name their block from a root, so they turn the rescan off
+      to keep measuring their own defects. 0.38.0 and 0.39.0 reproduce; no
+      release scanned a root after the first stop. Opt-in only: the default
+      collector scans every root in every collection.
+      Found on the way, the same move into a heap object: with the mprotect
+      backend a chunk mapped after the arm (or revived from dormant, or a
+      nursery chunk) was never protected, so a store of X into a black
+      object there set no dirty bit and X was swept (probe 4/4, soft-dirty
+      4/4 too — that one through the too-dirty fallback, which
+      `nursery-mprotect-040` now ends in a full collection). Fixed: the
+      incremental termination scan also reads every page the cards neither
+      protect nor mark dirty (`each_mprotect_untracked_page`), once — the
+      re-protect after it brings the chunk under the barrier — rather than
+      protecting chunks as they are mapped, which cannot cover a chunk
+      outside the cards and would fault on the allocator's own first
+      writes. Regression 100 *newchunk* (control
+      `mprotect_scan_untracked = false`), 30 of 30 both ways on both
+      layouts; 99 *nocards*' control turns it off as well, since with no
+      cards every page is untracked and the scan finds its object.
+      `bench/log/linux/2026-11-02-incremental-stack-rescan/FINDINGS.md`.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**
