@@ -101,6 +101,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cycles' hits. The four are atomic now. Regression 89
   (`bench/log/linux/2026-11-01-large-cache-counters/`).
 
+- **An incremental cycle's finish now takes and resets the large-cache
+  counters as a stop-the-world major does.** Under `GCRY_INCREMENTAL=1` the
+  large bytes allocated since the last major and the cache's hit and miss
+  counts used to add up across every sliced cycle. The recycling budget
+  stayed what the last stop-the-world major had set, and the adaptive
+  retain never moved. Both majors now run the same code
+  (`Heap#settle_large_cache`). That code keeps a cycle's large frees for
+  recycling only while no page barrier is armed, because the recycler
+  refuses to take them under one. The incremental and nursery modes arm one
+  between collections. Peak RSS under `GCRY_INCREMENTAL=1` is unchanged on
+  the nine benches. Regression 95
+  (`bench/log/linux/2026-11-02-large-cache-incr/`).
+
 - **On macOS the heap no longer sits where 33-bit integers point.** The
   kernel put it right after the executable, at 4–8 GiB, and any word holding
   an integer from about 4.3 to 8.5 billion kept whatever block it named: a
