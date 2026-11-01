@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **README, COMPARISON, WINDOWS and the RFC carry 0.40.0's numbers on every
+  platform.** Linux x86_64 on the 12-vCPU host, against v0.39.0 and Boehm in
+  one quiet session with 16- and 64-byte pad arms
+  (`bench/log/linux/2026-11-01-0.40-linux-host/`): every crystal-metric row
+  level with 0.39.0 or inside its placements; Revcomp 97% of Boehm (0.39.0
+  96%), the allocation entry at the same address in both; Kemal `/json`
+  106.8% at 1.24× (0.39.0 104.4% in the same session, paired level). The
+  other four from `perf-ab.yml` on the GitHub runners at `69bfcaf2` (run
+  41253485376, 0.39's inputs;
+  `bench/log/{linux,macos,windows}/2026-11-01-0.40-runners/`): JsonGenerate's
+  peak falls 13.6% on both Macs (0.74× → 0.64× Boehm's on M1) with the heap
+  at 16–32 TiB. Linux and M1 have no row slower than 0.39.0 that a 0.40.0
+  pad arm does not read inside 0.39.0's, except arm64 JsonGenerate (+1.1%, a
+  fifteenth collection). Primes is +7.6% on Intel and +6.3% on Windows, on a
+  9-or-10-collection step 0.40.0 reached more often in this run. Windows has
+  seven rows 1.4–7.3% slower in wall time, Revcomp the largest, from where
+  `Revcomp#revcomp` lands; 95–120% of Boehm. Kemal `/json` is level on three
+  of the four runners it runs on and 7.3% faster on arm64.
+
 - **The overnight stress runs every week on the five GitHub runners**
   (`.github/workflows/stress.yml`): Linux x86_64 and arm64, macOS arm64 and
   Intel, Windows x86_64, three jobs each. `bench/stress_overnight.sh` takes
