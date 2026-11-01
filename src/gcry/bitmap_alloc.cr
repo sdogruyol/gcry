@@ -340,6 +340,11 @@ module Gcry
     # 2026-10-22 — CURSOR cleared, then the chunk read, then the slot
     # cleared — the control arm of regression 82 (`retire_cursor_slot`).
     property cursor_retire_slot_first : Bool = true
+    # Probe only: the three ivars 6aa84284 adds, unused, so 0.39.0's code
+    # runs with 0.40's heap layout.
+    getter cursor_free_deferrals : UInt64 = 0_u64
+    property bitmap_free_split_hook : Proc(ChunkHeader*, Nil)? = nil
+    property bitmap_free_claim_guard : Bool = true
 
     # A failed capacity search remains true until a free, sweep, or retirement
     # publishes capacity for this (class, kind). The same generation invalidates
