@@ -281,6 +281,32 @@ module Gcry
             )
           end
         end
+        # An incremental termination also reads every page the cards cannot
+        # vouch for: neither protected nor dirty, or outside them. The arm
+        # protected the chunks it found; a chunk mapped since (a large
+        # allocation's own mapping, a class's next chunk), one revived from
+        # dormant and the nursery's were never protected, so their writes
+        # set no dirty bit — and what is allocated in them while marking is
+        # black and never scanned. A pointer the mutator moved out of a
+        # heap field into such an object, the field cleared, was swept by the
+        # finish until 2026-11-02. Each such page is read once: the
+        # re-protect below brings it under the barrier (the nursery aside,
+        # bounded by its size). Minors need none of it: they walk every old
+        # object for nursery pointers whatever the barrier says
+        # (`scan_old_for_nursery_pointers`).
+        # `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+        if !nursery_only && Platform.mprotect_scan_untracked
+          each_chunk do |chunk|
+            next if ChunkHeader.dormant?(chunk)
+            Platform.each_mprotect_untracked_page(chunk.address, chunk.address + chunk.value.mapped_bytes) do |page|
+              scan_range_for_barrier_pointers(
+                Pointer(Void).new(page),
+                Pointer(Void).new(page + Platform::PAGE),
+                false,
+              )
+            end
+          end
+        end
         Platform.clear_mprotect_dirty_bits
         # Re-arm RO on old chunks for the next mutator window — under cards
         # that cover them. The cards were sized to the heap at the arm, and a

@@ -242,7 +242,9 @@ private def mprotect99_incremental_window(heap : Gcry::Heap, refuse : Bool, pin 
       mprotect99_say("#{MPROTECT99_SKIP_MARK}: no incremental cycle on the mprotect barrier")
       return nil
     end
-    # After the cycle's root scan: the slices never scan a stack again.
+    # After the cycle's root scan. The terminating stop scans the stacks
+    # again (regression 100), and *nocards*' control turns that off, or its
+    # stack would keep the object it needs swept.
     mprotect99_pin(pin, Pointer(Void).new(~Mprotect99Inc.x_inv)) unless pin.null?
     holder1 = GC.malloc(64).as(Void**)
     Mprotect99Inc.holder1 = holder1
@@ -327,6 +329,10 @@ end
 # Fixed: the cycle ends in a full collection at that slice, which finds the
 # object on this stack, and it lives. Control (`mprotect_drop_without_cards
 # = false`): the cycle finishes on its blind barrier and sweeps the object.
+# Regression 100's two termination fixes would each find the object anyway
+# — the root rescan on this stack, the untracked-page scan in a heap no
+# cards vouch for — so the control turns both off
+# (`inc_finish_rescan_roots`, `mprotect_scan_untracked`).
 private def mprotect99_nocards(arm : String) : Nil
   {% if flag?(:linux) %}
     heap = Gcry.default_heap
@@ -679,6 +685,8 @@ describe "Regression: the mprotect dirty-page scan against a chunk set that move
     next unless ENV["GCRY_MPROTECT99_CHILD"]? == "nocards-control"
     {% if flag?(:linux) %}
       Gcry::Platform.mprotect_drop_without_cards = false
+      Gcry::Platform.mprotect_scan_untracked = false
+      Gcry::Heap.inc_finish_rescan_roots = false
     {% end %}
     mprotect99_nocards("control")
   end

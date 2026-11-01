@@ -36,11 +36,14 @@ private CLAIM91_CONTROL_MARK = "claim91: the control arm went wrong"
 # (`FAST_PATH_MAX`): the class lock the parked free holds stops nobody else.
 private CLAIM91_BYTES = 24576
 
-# Static data is scanned by the begin stop and by no slice after it, so a
-# block named only from here is marked once, at the begin stop — the mark
-# the free's clear wipes. Pointers between the threads go through here and
-# not through closures, whose captures live in a heap object every slice
-# can trace.
+# Static data is scanned by the begin stop, so a block named only from here
+# is marked there — the mark the free's clear wipes. The terminating stop
+# scans the roots again (regression 100) and would mark it a second time,
+# hiding the wipe; both arms turn that off (`claim91_heap`), so the window
+# measures the guard alone: a block held through a heap object the trace
+# has already scanned gets no second mark from any root. Pointers between
+# the threads go through here and not through closures, whose captures live
+# in a heap object every slice can trace.
 private class Claim91Roots
   class_property victim : Void* = Pointer(Void).null
   class_property mine : Void* = Pointer(Void).null
@@ -109,6 +112,9 @@ private def claim91_heap : Gcry::Heap?
     # No collection but the ones the window asks for: a threshold crossed
     # also closes the hit path the window needs.
     heap.gc_threshold = 1_u64 << 40
+    # The terminating stop's root rescan would mark the block again from
+    # static data and hide the wipe; see `Claim91Roots`.
+    Gcry::Heap.inc_finish_rescan_roots = false
     heap
   {% else %}
     nil

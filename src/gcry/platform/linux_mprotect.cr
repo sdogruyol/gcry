@@ -211,6 +211,13 @@ module Gcry
     # Research only: true makes `mprotect_set_heap_range` give up as on a
     # span past its page limit or a refused `malloc`, leaving no cards.
     class_property mprotect_refuse_cards : Bool = false
+    # Research only: false makes an incremental termination scan read the
+    # dirty pages alone, the code before 2026-11-02 — a chunk mapped since
+    # the arm goes unread until the cycle ends (`Heap#scan_mprotect_pages`,
+    # `each_mprotect_untracked_page`). The control arm of
+    # `process_spec/regression/100_incremental_stack_rescan_spec.cr`'s
+    # *newchunk* window.
+    class_property mprotect_scan_untracked : Bool = true
 
     # Install SEGV handler that re-enables write + marks page dirty.
     # Faults the barrier did not cause are forwarded to the previous handler.
@@ -601,6 +608,39 @@ module Gcry
         end
         yield base + i.to_u64 * PAGE if (word & (1_u64 << (i & 63))) != 0
         i += 1
+      end
+    end
+
+    # Each page whole inside [low, high) that the cards cannot vouch for:
+    # outside them, or inside them and neither protected nor dirty. A page
+    # protected and clean has seen no write since it was protected; a dirty
+    # one is read by `each_mprotect_dirty_page`. Anything else has been
+    # writable with nothing recording its writes — a chunk mapped since the
+    # arm (inside the cards or past them), a dormant chunk revived since,
+    # a nursery chunk (never protected). Collector only, world stopped, as
+    # every reader of the bits: no handler is inside.
+    def self.each_mprotect_untracked_page(low : UInt64, high : UInt64, & : UInt64 ->) : Nil
+      page = (low + PAGE - 1) & ~(PAGE - 1)
+      page_hi = high & ~(PAGE - 1)
+      return if page_hi <= page
+      st = @@mp_state.get
+      base = st.null? ? 0_u64 : st.value.base
+      limit = st.null? ? 0_u64 : base + st.value.pages.to_u64 * PAGE
+      while page < page_hi
+        if page < base || page >= limit
+          yield page
+          page += PAGE
+          next
+        end
+        i = ((page - base) // PAGE).to_i32
+        vouched = (dirty_words(st) + (i >> 6)).value | (protected_words(st) + (i >> 6)).value
+        if vouched == UInt64::MAX
+          # The whole word is protected or dirty: on to the next one.
+          page = base + ((i | 63) + 1).to_u64 * PAGE
+          next
+        end
+        yield page if (vouched & (1_u64 << (i & 63))) == 0
+        page += PAGE
       end
     end
 

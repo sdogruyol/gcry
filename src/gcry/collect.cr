@@ -1002,6 +1002,14 @@ module Gcry
     # after it takes the collection section, before anything else; must not
     # allocate (regression 99's *race* queues a second slice there).
     class_property inc_slice_locked_hook : Proc(Nil)? = nil
+    # Research only: false leaves the roots out of the incremental
+    # terminating stop, the code before 2026-11-02 — the finish marks from
+    # the begin stop's root scan and the dirty pages alone, and sweeps an
+    # object a mutator moved from a heap field to a root meanwhile. The
+    # control arm of `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+    # A class property, not a field: a `Heap` field here would move every
+    # field after it.
+    class_property inc_finish_rescan_roots : Bool = true
     @world_stopped = false
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
@@ -2280,6 +2288,27 @@ module Gcry
                              armed && @barrier_backend.none?
                            end
             abort_incremental if barrier_lost && @inc_lost_cycle_ends_in_stop
+          end
+          if @mark_stack.empty? && !barrier_lost && @@inc_finish_rescan_roots
+            # And the roots again, the begin stop's whole set. The barrier
+            # records stores into heap pages and nothing else: a pointer a
+            # mutator loads out of a field into a local, a register, a
+            # static or another thread's stack — and then clears or
+            # overwrites the field — leaves the object reachable from a root
+            # alone, and nothing reports it. Until 2026-11-02 no stop after
+            # the first scanned a root, and the finish swept such an object
+            # while the program held it, as Boehm's incremental mode does not
+            # (`GC_stopped_mark` pushes the roots again). The sweep below
+            # runs only in a stop that rescanned the roots and the dirty
+            # pages and drained what they found within this slice's budget;
+            # a slice that cannot drain it leaves the cycle open, and the
+            # next one to empty the stack rescans both. A slice stays
+            # bounded: the dirty-page scan, one root scan (the begin stop's
+            # cost) and at most three budgets of marking.
+            # `collect_a_little` begins every cycle with these arguments.
+            # `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+            mark_incremental_roots(scan_stack: true, roots: nil)
+            mark_loop_budget(work_units)
           end
           if @mark_stack.empty? && !barrier_lost
             collection_event(CollectionEvent::MarkEnd)
@@ -3761,20 +3790,7 @@ module Gcry
         # marks, and a root marked before it there would be swept.
         bitmap_settle_cursor_sets
         mark_bitmap_alloc_in_flight
-        @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_explicit_root(ptr) }
-        mark_large_alloc_in_flight
-        roots.try &.each { |ptr| mark_explicit_root(ptr) }
-        mark_metadata_roots
-        other_stacks = other_stacks_are_roots?(scan_stack)
-        scrub_parked_fiber_stacks if other_stacks
-        scan_all_fiber_roots if other_stacks
-        scan_thread_roots if other_stacks && @stop_the_world
-        if @scan_static_roots
-          scan_static_ranges
-        end
-        scan_mutator_stack if scan_stack
-        scan_other_thread_stacks if other_stacks
+        mark_incremental_roots(scan_stack, roots)
         # Arm page-dirty barrier for mutator writes between incremental slices.
         arm_page_barrier_after_collect
         # The check above chose a backend; the arm can still leave none
@@ -3793,6 +3809,29 @@ module Gcry
         unlock_write
         @collecting = false
       end
+    end
+
+    # The root set of an incremental cycle, marked by its begin stop and
+    # again by every terminating stop (`collect_a_little`): the explicit and
+    # in-flight roots, the before-collect callbacks (Boehm's `GC_add_roots`
+    # ranges and push-other-roots), static data, and every thread's and
+    # fiber's stack and registers. Marks are idempotent, so a second pass
+    # pushes only what the first did not reach.
+    private def mark_incremental_roots(scan_stack : Bool, roots : Array(Void*)?) : Nil
+      @before_collect_callbacks.each(&.call)
+      @roots.each { |ptr| mark_explicit_root(ptr) }
+      mark_large_alloc_in_flight
+      roots.try &.each { |ptr| mark_explicit_root(ptr) }
+      mark_metadata_roots
+      other_stacks = other_stacks_are_roots?(scan_stack)
+      scrub_parked_fiber_stacks if other_stacks
+      scan_all_fiber_roots if other_stacks
+      scan_thread_roots if other_stacks && @stop_the_world
+      if @scan_static_roots
+        scan_static_ranges
+      end
+      scan_mutator_stack if scan_stack
+      scan_other_thread_stacks if other_stacks
     end
 
     private def abort_incremental : Nil
