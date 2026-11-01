@@ -3,10 +3,11 @@ name: Probe win rows
 # Probe only, deleted afterwards. Windows rows of 0.40 against 0.39.0: one
 # session of four prepad phases of each tree, and one session per default-path
 # commit with the tip and the tip less that commit at four phases each;
-# probe/win-rows-3: three more placement sessions, on whatever runner CPUs come.
+# probe/win-rows-3: three more placement sessions, on whatever runner CPUs come;
+# probe/win-rows-4: two of RegexDna.
 on:
   push:
-    branches: [probe/win-rows-3]
+    branches: [probe/win-rows-4]
 
 jobs:
   ab:
@@ -14,16 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - session: placement2
-            benches: "Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Revcomp Fannkuchredux"
+          - session: regexdna1
+            benches: "RegexDna Revcomp Fannkuchredux"
             pads: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
             revs: ""
-          - session: placement3
-            benches: "Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Revcomp Fannkuchredux"
-            pads: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
-            revs: ""
-          - session: placement4
-            benches: "Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Revcomp Fannkuchredux"
+          - session: regexdna2
+            benches: "RegexDna Revcomp Fannkuchredux"
             pads: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
             revs: ""
     runs-on: windows-latest
