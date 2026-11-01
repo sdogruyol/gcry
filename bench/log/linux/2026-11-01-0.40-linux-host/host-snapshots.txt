@@ -1,0 +1,75 @@
+2026-10-31T23:40:59Z
+ 02:40:59  up 14 days  7:07,  0 users,  load average: 0.11, 0.09, 0.25
+%CPU     PID ELAPSED     COMMAND
+50.3    8836 14-07:04:21 gnome-shell
+39.1   15011 14-07:01:09 ptyxis
+ 3.1 2189215 7-18:21:17  omp
+ 1.7 2967353 13-15:13:02 resources-proce
+ 1.1   43983 14-05:49:31 omp
+ 0.7    9236 14-07:04:21 gnome-remote-de
+ 0.7    9284 14-07:04:21 xdg-desktop-por
+ 0.5   18260 14-06:59:59 rustdesk
+ 0.4 3821081 12-11:13:02 omp
+ 0.3 2385690 52:41       rustdesk
+ 0.3    8567 14-07:04:21 pipewire
+ 0.3    4954 14-07:07:03 tailscaled
+ 0.3 2967259 13-15:13:03 resources
+ 0.3 3987727 5-08:39:01  omp
+
+== start 23:46:03
+ 02:46:03 up 14 days,  7:12,  1 user,  load average: 1.07, 0.80, 0.53
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+   8836 naruto    20   0   10.9g 329788 122528 S  10.0   2.8     7d+4h gnome-s+
+  43983 naruto    20   0   56.5g 460880  90512 S  10.0   3.9 231:37.80 omp
+2967259 naruto    20   0 7246936 113128  46020 S  10.0   1.0  52:50.19 resourc+
+      1 root      20   0   26448   9420   4920 S   0.0   0.1   5:41.80 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.37 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+== after-cm 00:02:02
+ 03:02:02 up 14 days,  7:28,  1 user,  load average: 1.12, 1.22, 1.01
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+      1 root      20   0   26448   9420   4920 S   0.0   0.1   5:42.10 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.37 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      8 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+     10 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+     13 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+== end 00:14:12
+ 03:14:12 up 14 days,  7:40,  1 user,  load average: 2.20, 2.09, 1.66
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+   9284 naruto    20   0 4943484  12616   5892 S   9.1   0.1 137:29.92 xdg-des+
+      1 root      20   0   26448   9420   4920 S   0.0   0.1   5:42.28 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.37 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      8 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+     10 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+
+2026-11-01T00:14:19Z
+ 03:14:19  up 14 days  7:40,  0 users,  load average: 2.02, 2.06, 1.65
+%CPU     PID ELAPSED     COMMAND
+50.2    8836 14-07:37:40 gnome-shell
+39.0   15011 14-07:34:28 ptyxis
+ 3.1 2189215 7-18:54:36  omp
+ 1.7 2967353 13-15:46:21 resources-proce
+ 1.1   43983 14-06:22:50 omp
+ 0.7    9284 14-07:37:40 xdg-desktop-por
+ 0.7    9236 14-07:37:40 gnome-remote-de
+ 0.5   18260 14-07:33:18 rustdesk
+ 0.4 3821081 12-11:46:21 omp
+ 0.3 2442910 25:59       rustdesk
+ 0.3    8567 14-07:37:40 pipewire
+ 0.3    4954 14-07:40:22 tailscaled
+ 0.3 2967259 13-15:46:22 resources
+ 0.3 3987727 5-09:12:21  omp
