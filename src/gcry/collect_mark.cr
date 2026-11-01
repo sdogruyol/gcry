@@ -669,7 +669,7 @@ module Gcry
     # chunk — goes to `mark_impl`, which stays the authority.
     private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
       hits = scan_edges_run(cursor, cursor + words, base_only, shard,
-        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask)
+        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: true)
       # `radix_note_fast_hit`, once per payload.
       @radix_fast_hits &+= hits unless @mark_parallel
     end
@@ -687,12 +687,13 @@ module Gcry
     @[AlwaysInline]
     private def scan_edges_run(p : UInt64*, finish : UInt64*, base_only : Bool, shard : MarkShard?,
                                lo : UInt64, hi : UInt64, l1 : Pointer(Pointer(ChunkHeader*)),
-                               shift : Int32, l2_mask : UInt64) : UInt64
+                               shift : Int32, l2_mask : UInt64, unrolled : Bool) : UInt64
       hits = 0_u64
-      # Four words a turn: the end is tested once per four words instead of
-      # once per word (crystal-metric's pointer payloads average ten words),
-      # each word's low-end test first and the rest in `scan_edge_word`. With
-      # one unsigned tag test per batch entry (`scan_batch_prefetched`,
+      # Four words a turn when `unrolled` (a constant at every caller): the end
+      # is tested once per four words instead of once per word
+      # (crystal-metric's pointer payloads average ten words), each word's
+      # low-end test first and the rest in `scan_edge_word`. With one
+      # unsigned tag test per batch entry (`scan_batch_prefetched`,
       # `prefetch_mark_entry`) that is 7.2% fewer instructions in
       # JsonGenerate's batch scans (callgrind, one marker), and Σ mark −4% to
       # −12% on arm64 Linux's pointer-heavy rows, −1% to −5% on Windows,
@@ -701,20 +702,32 @@ module Gcry
       # candidate and was 3–15% slower; gathering every in-span word
       # branch-free into a buffer first cost 46% more instructions and 28–31%
       # more time (`bench/log/linux/2026-10-31-mark-cost/`).
-      # From `quad_end` on fewer than four words are left. Compared as
-      # addresses, so a payload of under three words never forms a pointer
-      # before `p`.
-      quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
-      while p < quad_end
-        w = p[0]
-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
-        w = p[1]
-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
-        w = p[2]
-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
-        w = p[3]
-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
-        p += 4
+      #
+      # The unrolled loop inlines the candidate code five times, and a mark
+      # that scans little pays for that in instruction fetch: on Revcomp
+      # (about 100 small objects a collection, the code evicted by the
+      # program between collections) it read 25 more lines from memory per
+      # collection than the one-copy loop, Σ mark +9% to +15% on 2 MB
+      # scanned. One copy with an exit per candidate from an unrolled
+      # search cost JsonGenerate's batch scan 16% to 40% more instructions,
+      # so `scan_batch_prefetched` picks the one-copy loop for a cycle after
+      # a short one instead (`bench/log/linux/2026-11-02-mark-short/`).
+      if unrolled
+        # From `quad_end` on fewer than four words are left. Compared as
+        # addresses, so a payload of under three words never forms a
+        # pointer before `p`.
+        quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
+        while p < quad_end
+          w = p[0]
+          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+          w = p[1]
+          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+          w = p[2]
+          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+          w = p[3]
+          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+          p += 4
+        end
       end
       while p < finish
         w = p.value

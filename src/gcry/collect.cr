@@ -73,6 +73,22 @@ module Gcry
     # cycle (`take_parallel_scanned_bytes`).
     getter mark_scanned_bytes : UInt64 = 0_u64
 
+    # Whether this cycle's batch scan runs the unrolled word loop
+    # (`scan_batch_prefetched`): only after a major that scanned at least
+    # `MARK_UNROLL_MIN_SCANNED`. The unrolled loop saves a few instructions
+    # per payload and costs a fixed number of cold instruction lines per
+    # cycle; below the floor the lines cost more than the scan saves.
+    @mark_scan_unrolled : Bool = false
+
+    MARK_UNROLL_MIN_SCANNED = 512_u64 * 1024
+
+    # Starts a major's count of scanned bytes, after taking the last one's
+    # for `@mark_scan_unrolled`.
+    private def reset_mark_scanned_bytes : Nil
+      @mark_scan_unrolled = @mark_scanned_bytes >= MARK_UNROLL_MIN_SCANNED
+      @mark_scanned_bytes = 0_u64
+    end
+
     # The cap grows with the bytes the mark has to *read*, a third of them
     # × factor once that passes the floor, so the schedule stays geometric
     # where marking is what a major costs. Atomic bytes (strings, buffers)
@@ -2988,7 +3004,7 @@ module Gcry
             # chunks that clear will reach.
             audit_chunk_list
             clear_all_marks
-            @mark_scanned_bytes = 0_u64
+            reset_mark_scanned_bytes
           else
             clear_nursery_marks
           end
@@ -3587,7 +3603,7 @@ module Gcry
         note_collection_begin
         @mark_stack.clear
         clear_all_marks
-        @mark_scanned_bytes = 0_u64
+        reset_mark_scanned_bytes
         # Settle first, as in `run_collection_body`: it zeroes pinned chunks'
         # marks, and a root marked before it there would be swept.
         bitmap_settle_cursor_sets
