@@ -14,11 +14,11 @@ require "spec"
 #   Linux the kernel places new mappings below the existing ones — and it
 #   was made read-only all the same, with no protected bit anywhere
 #   (`mprotect_protect_range` set only the bits inside the cards and
-#   protected the whole range). The sweep of the same collection wrote to it
-#   (a dead large chunk's free-list link, `ChunkHeader.link`; under an
-#   incremental cycle a new small chunk's occupancy bitmap), the fault had
-#   no card to claim it, and the handler handed it to Crystal's. Now the
-#   re-protect replaces cards the heap has outgrown, and
+#   protected the whole range). The sweep of the same collection wrote its
+#   header (the chunk-list rebuild, `ChunkHeader.link`; under an
+#   incremental cycle's last slice, a new small chunk's occupancy bitmap),
+#   the fault had no card to claim it, and the handler handed it to
+#   Crystal's. Now the re-protect replaces cards the heap has outgrown, and
 #   `mprotect_protect_range` never protects outside the cards.
 # - *stale*: the scan read every dirty page in the cards. A page of a
 #   cached large chunk is dirtied when the chunk is unlinked from the cache
@@ -29,10 +29,10 @@ require "spec"
 #
 # Each construction runs the nursery with the mprotect barrier and a minor
 # to arm it. *outside*: a large block big enough that no hole inside the
-# cards holds it, freed, then a second minor. *stale*: a large block held
-# across the arm, freed (its first page dirtied), the cache trimmed to
-# nothing (unmapped), then a second minor. Each control arm
-# (`Gcry::Platform.mprotect_cards_cover_protection`,
+# cards holds it, freed into the large cache, then a second minor.
+# *stale*: a large block held across the arm, freed (its first page
+# dirtied), the cache trimmed to nothing (unmapped), then a second minor.
+# Each control arm (`Gcry::Platform.mprotect_cards_cover_protection`,
 # `mprotect_dirty_scan_by_chunk` = false, the code before) must die in that
 # minor, or the fixed arm passes on nothing. Every arm runs in a process of
 # its own. A child that cannot build its construction — no nursery (the
@@ -42,8 +42,7 @@ require "spec"
 
 private MPROTECT99_SKIP_MARK  = "mprotect99: this heap cannot reach the window, skipped"
 private MPROTECT99_FIXED_MARK = "mprotect99: the second minor returned"
-# Larger than any hole the spec runner's heap has when the child starts, and
-# small enough that a free keeps it in the large cache (`LARGE_CACHE_LIMIT`).
+# Larger than any hole the spec runner's heap has when the child starts.
 private MPROTECT99_OUTSIDE_BYTES = 16 * 1024 * 1024
 private MPROTECT99_STALE_BYTES   = 1 * 1024 * 1024
 
@@ -84,8 +83,10 @@ private def mprotect99_outside : Nil
     if Gcry::Platform.mprotect_cards_cover?(low, low + MPROTECT99_OUTSIDE_BYTES.to_u64)
       return mprotect99_say("#{MPROTECT99_SKIP_MARK}: the block landed inside the cards")
     end
-    # Keep it cached when freed, as a smaller block is: the sweep's write
-    # to it is the free-list link (`LARGE_CACHE_LIMIT` caps this at 32 MiB).
+    # Freed into the large cache, as the report's 300 000 bytes were; the
+    # default retain (4 MiB) would unmap a block this big at once. Kept live
+    # instead, it does not reach the window in this runner: the sweep wrote
+    # no header of it.
     heap.large_cache_retain = 2_u64 * MPROTECT99_OUTSIDE_BYTES
     cached = heap.large_free_bytes
     GC.free(block)

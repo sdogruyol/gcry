@@ -385,10 +385,11 @@ module Gcry
     # dirty-page scan (`Heap#scan_mprotect_pages`) protected a chunk mapped
     # since the arm below or above the arm's cards — a large allocation, in
     # a new mapping — with no protected bit anywhere, and the sweep that
-    # followed died on its first write to it. That re-protect now replaces
-    # cards the heap has outgrown; this keeps the rule for every caller,
-    # and with no cards at all (the heap span past the sanity limit in
-    # `mprotect_set_heap_range`, or `malloc` refused them) protects nothing.
+    # followed died on its first write to it (the chunk-list link in its
+    # header). That re-protect now replaces cards the heap has outgrown;
+    # this keeps the rule for every caller, and with no cards at all (the
+    # heap span past the sanity limit in `mprotect_set_heap_range`, or
+    # `malloc` refused them) protects nothing.
     # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
     def self.mprotect_protect_range(low : UInt64, high : UInt64) : Nil
       return unless @@mp_enabled

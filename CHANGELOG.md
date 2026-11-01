@@ -121,16 +121,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path had dirtied and unmapped since (`trim_large_cache`): a fault with
   nothing mapped. And it protected the old chunks again, including one
   mapped since the arm below or above the cards (a large allocation's own
-  mapping), so the same collection's sweep faulted on it with no card to
-  claim the fault. Either way the handler passed the fault on and the
-  program died with "Invalid memory access". `GCRY_NURSERY` on the header
-  layout with `GCRY_MPROTECT_BARRIER=1` crashed `bench/pattern_fuzz.cr` in 3
-  of 3 seeds; `GCRY_NURSERY` or `GCRY_INCREMENTAL=1` alone get this backend
-  on aarch64 Linux, which has no soft-dirty. The scan now reads the dirty
-  pages of the chunks the heap holds, replaces cards the heap has outgrown
-  before it protects again, and nothing protects a page outside the cards.
-  Affects 0.38.0 and 0.39.0 (both reproduced; the same code is in 0.35.0
-  to 0.37.0); the default configuration arms no barrier. Regression 99; the
+  mapping), so the same collection's sweep faulted on its header, live or
+  freed, with no card to claim the fault. Either way the handler passed the
+  fault on and the program died with "Invalid memory access". The scan now
+  reads the dirty pages of the chunks the heap holds, replaces cards the
+  heap has outgrown before it protects again, and nothing protects a page
+  outside the cards. `GCRY_NURSERY` alone (header layout) reaches it on
+  Linux: aarch64 has no soft-dirty, so the barrier is mprotect from the
+  start, and on x86-64 a minor that finds too many soft-dirty pages hands
+  it to mprotect until the next major. With only `GCRY_NURSERY=262144`, a
+  loop dropping 200 KiB buffers and `bench/pattern_fuzz.cr` crashed 5 of 5
+  and 3 of 3 on both `ubuntu-24.04-arm` and `ubuntu-latest`, and pass on
+  the fix. 0.38.0 and 0.39.0 reproduce; the same code is in 0.35.0 to
+  0.37.0. The default configuration arms no barrier. Regression 99; the
   overnight stress now runs `pattern_fuzz` with each opt-in on the mprotect
   backend, and its `pattern-fuzz-headers-freelist` loop on the header
   layout it is named for (`bench/log/linux/2026-11-02-nursery-mprotect/`).

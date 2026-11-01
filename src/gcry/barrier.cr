@@ -255,12 +255,13 @@ module Gcry
         # chunk mapped since then can lie below or above them (a large
         # allocation's own mapping, typically below on Linux). Protecting it
         # under the old cards made a page no fault could claim, and the
-        # sweep's first write to it — a freed large chunk's free-list link —
-        # died in the forwarded fault. When the heap has outgrown the cards
-        # they are replaced, as the arm does it: every chunk unprotected,
-        # cards sized to the heap now, the old chunks protected again. Both
-        # callers run inside a stop, as the arm after an in-stop sweep does,
-        # and the dirty bits were taken just above.
+        # sweep's first write to it — the chunk-list rebuild's link in its
+        # header (`ChunkHeader.link`) — died in the forwarded fault. When
+        # the heap has outgrown the cards they are replaced, as the arm does
+        # it: every chunk unprotected, cards sized to the heap now, the old
+        # chunks protected again. Both callers run inside a stop, as the arm
+        # after an in-stop sweep does, and the dirty bits were taken just
+        # above.
         # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
         if !Platform.mprotect_cards_cover_protection || Platform.mprotect_cards_cover?(@heap_min, @heap_max)
           each_chunk do |chunk|

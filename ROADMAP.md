@@ -3126,7 +3126,8 @@ kept finding the rest.
       (sized to `@heap_min..@heap_max` at the arm) going stale against the
       chunks: the re-protect after the scan made a chunk mapped since the
       arm outside the cards read-only with no protected bit, and the sweep's
-      `ChunkHeader.link` on it was an unclaimable `SEGV_ACCERR`; and the
+      chunk-list rebuild (`ChunkHeader.link`, every kept chunk when it
+      relinks) hit an unclaimable `SEGV_ACCERR` on it; and the
       scan read every dirty bit in the cards, including a cached large
       chunk's first page that `detach_large_cache` had dirtied and
       `release_large_chain` unmapped on the allocation path, a
@@ -3135,8 +3136,12 @@ kept finding the rest.
       `mprotect_protect_range` never protects outside the cards. Regression
       99, two constructions, each control dying in the second minor.
       Reached with `GCRY_NURSERY` (headers) or `GCRY_INCREMENTAL=1` on the
-      mprotect backend: `GCRY_MPROTECT_BARRIER=1`, or by default on aarch64
-      Linux. 0.38.0 and 0.39.0 reproduce. Opt-in paths only; no perf-ab.
+      mprotect backend: `GCRY_MPROTECT_BARRIER=1`, from the start on aarch64
+      Linux (no soft-dirty), and on x86-64 after a minor's soft-dirty
+      fallback (`@soft_dirty_skip_until_major` hands the next arm to
+      mprotect) — `GCRY_NURSERY` alone crashed a large-buffer loop and
+      `pattern_fuzz` on both Linux runners (probe 41299975823).
+      0.38.0 and 0.39.0 reproduce. Opt-in paths only; no perf-ab.
       The overnight stress had no nursery or mprotect loop and now has
       both. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
 

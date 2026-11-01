@@ -219,9 +219,11 @@ loop pattern-fuzz-headers-freelist 30 300 env GCRY_BITMAP_ALLOC=0 bin/pattern_fu
 # unmapped since the arm and protected one mapped outside its cards
 # (`bench/log/linux/2026-11-02-nursery-mprotect/`). The nursery needs the
 # header layout. Off Linux there is no mprotect barrier and the knob is
-# ignored: the loops run the opt-in alone.
+# ignored: the loops run the opt-in alone. A 200-phase run took 51 s with the
+# nursery and 208 s incremental on the 12-vCPU host, so the incremental loop
+# runs half the phases and fewer times.
 loop pattern-fuzz-nursery-mprotect 20 300 env GCRY_NURSERY=262144 GCRY_MPROTECT_BARRIER=1 bin/pattern_fuzz_hdr --seed=@SEED@ --phases=200 --objects-per-phase=5000
-loop pattern-fuzz-incremental-mprotect 20 300 env GCRY_INCREMENTAL=1 GCRY_MPROTECT_BARRIER=1 bin/pattern_fuzz --seed=@SEED@ --phases=200 --objects-per-phase=5000
+loop pattern-fuzz-incremental-mprotect 10 600 env GCRY_INCREMENTAL=1 GCRY_MPROTECT_BARRIER=1 bin/pattern_fuzz --seed=@SEED@ --phases=100 --objects-per-phase=5000
 loop claim-stress-lazy 200 90 bin/claim_stress_rel --seconds=5 --workers=4 --seed=@SEED@
 loop claim-stress-in-stop 300 90 env GCRY_DISABLE_LAZY_SWEEP=1 bin/claim_stress_rel --seconds=5 --workers=4 --seed=@SEED@
 loop thread-storm-release 200 120 bin/thread_storm_rel --iterations=2000 --workers=16
