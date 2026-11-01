@@ -1,0 +1,149 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 378f7666..1fe67e8f 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -902,6 +902,27 @@ module Gcry
+         i = 0
+         while i < POOL_SLOTS
+           u = CursorSet.slot(set, i).value.in_flight
++          if @reg61_watch != 0 && u.address &- ((@reg61_watch ^ 0x5a5a_5a5a_5a5a_5a5a_u64) &- 16_u64) < 32_u64
++            rbuf = uninitialized UInt8[256]
++            rlen = RawOut.append(rbuf.to_unsafe, 0, "REG61 INFLIGHT set=0x")
++            rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, set.address)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, " slot=")
++            rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, i.to_u64)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, " owner=0x")
++            rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, set.value.owner)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, " state=")
++            rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, set.value.state.to_u64)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, " no_hit_path=")
++            rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, set.value.no_hit_path.to_u64)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, " fallback=")
++            rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, set == @fallback_cursor_set ? 1_u64 : 0_u64)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, " reserve=")
++            rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, set == @oom_reserve_set ? 1_u64 : 0_u64)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, " collection ")
++            rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, @collections)
++            rlen = RawOut.append(rbuf.to_unsafe, rlen, "\n")
++            RawOut.flush(rbuf.to_unsafe, rlen)
++          end
+           mark_explicit_root(u) if u.address > CursorSet.sentinel.address
+           i += 1
+         end
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index d7e5e021..16e204f2 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -44,8 +44,47 @@ module Gcry
+     # it swept a class variable's `Pointer(String)` buffer the same way, which
+     # is why it has been off since 2026-09-29. Heap edges use mark_candidate
+     # and were never gated.
++    property reg61_watch : UInt64 = 0_u64
++    property reg61_seed_slot : UInt64 = 0_u64
++
+     private def mark_root_candidate(pointer : Void*, source : RootSource = RootSource::Stack) : Nil
+       gate = @type_id_gate && (source == RootSource::Static || @type_id_gate_stacks)
++      if @reg61_watch != 0 && pointer.address &- ((@reg61_watch ^ 0x5a5a_5a5a_5a5a_5a5a_u64) &- 16_u64) < 32_u64
++        @reg61_seed_slot = Roots.hl_slot
++        rbuf = uninitialized UInt8[256]
++        rlen = RawOut.append(rbuf.to_unsafe, 0, "REG61 SEED source=")
++        rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, source.value.to_u64)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, " cand=0x")
++        rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, pointer.address)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, " slot=0x")
++        rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, Roots.hl_slot)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, " entry_sp=0x")
++        rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, @collect_entry_sp)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, " sp=0x")
++        rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, Roots.hardware_stack_pointer.address)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, " scan=[0x")
++        rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, Roots.last_mutator_low)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, ",0x")
++        rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, Roots.last_mutator_high)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, ") collection ")
++        rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, @collections)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, "\n")
++        RawOut.flush(rbuf.to_unsafe, rlen)
++        slot = Roots.hl_slot
++        a = Roots.last_mutator_low & ~7_u64
++        stop = @collect_entry_sp &+ 0x80_u64
++        while a < stop
++          rlen = RawOut.append(rbuf.to_unsafe, 0, "REG61 W 0x")
++          rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, a)
++          rlen = RawOut.append(rbuf.to_unsafe, rlen, " e-")
++          rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, @collect_entry_sp &- a)
++          rlen = RawOut.append(rbuf.to_unsafe, rlen, " = 0x")
++          rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, Pointer(UInt64).new(a).value)
++          rlen = RawOut.append(rbuf.to_unsafe, rlen, a == slot ? " <== seed\n" : "\n")
++          RawOut.flush(rbuf.to_unsafe, rlen)
++          a &+= 8
++        end
++      end
+       {% if flag?(:gcry_hl_assert) %}
+         # Stack-seed dump: which stack words become first marks, and what they
+         # point at. Printed only when the candidate is accepted and was not
+@@ -79,6 +118,15 @@ module Gcry
+     # @entries / Array @buffer have no Crystal type_id). Interior policy matches
+     # ambient roots so allow_interior_pointers still applies.
+     private def mark_explicit_root(pointer : Void*) : Nil
++      if @reg61_watch != 0 && pointer.address &- ((@reg61_watch ^ 0x5a5a_5a5a_5a5a_5a5a_u64) &- 16_u64) < 32_u64
++        rbuf = uninitialized UInt8[128]
++        rlen = RawOut.append(rbuf.to_unsafe, 0, "REG61 EXPLICIT cand=0x")
++        rlen = RawOut.append_hex(rbuf.to_unsafe, rlen, pointer.address)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, " collection ")
++        rlen = RawOut.append_u64(rbuf.to_unsafe, rlen, @collections)
++        rlen = RawOut.append(rbuf.to_unsafe, rlen, "\n")
++        RawOut.flush(rbuf.to_unsafe, rlen)
++      end
+       mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Stack)
+     end
+ 
+diff --git a/src/gcry/roots.cr b/src/gcry/roots.cr
+index f48a41e0..f7162702 100644
+--- a/src/gcry/roots.cr
++++ b/src/gcry/roots.cr
+@@ -483,7 +483,7 @@ module Gcry
+     class_getter last_mutator_low : UInt64 = 0_u64
+     class_getter last_mutator_high : UInt64 = 0_u64
+ 
+-    {% if flag?(:gcry_hl_assert) %}
++    {% if true %}
+       # Address of the word most recently yielded by a scan loop (diagnostics).
+       class_property hl_slot : UInt64 = 0_u64
+     {% end %}
+@@ -512,7 +512,7 @@ module Gcry
+         cursor = Pointer(UInt64).new(lo)
+         end_ptr = Pointer(UInt64).new(hi)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          @@hl_slot = cursor.address
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end
+@@ -599,7 +599,7 @@ module Gcry
+           cursor = Pointer(UInt64).new(start)
+           end_ptr = Pointer(UInt64).new(finish)
+           while cursor < end_ptr
+-            {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++            @@hl_slot = cursor.address
+             yield Pointer(Void).new(cursor.value)
+             cursor += 1
+           end
+@@ -623,7 +623,7 @@ module Gcry
+         cursor = Pointer(UInt64).new(start)
+         end_ptr = Pointer(UInt64).new(finish)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          @@hl_slot = cursor.address
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end
+@@ -652,7 +652,7 @@ module Gcry
+         cursor = Pointer(UInt64).new(start)
+         end_ptr = Pointer(UInt64).new(finish)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          @@hl_slot = cursor.address
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end

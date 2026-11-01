@@ -100,6 +100,19 @@ describe "Regression: freeing a WeakRef drops the link inside it" do
     heap.finalizer_link_count.should eq(links - 1)
 
     holder.clear
+    # The dead frames below this one go before the collections run. The
+    # target can be its chunk's first block, whose header address is the
+    # chunk's data start, and `reuse_block`'s allocations compute that (the
+    # cursor's word base) on this stack. The collection's entry scrub leaves
+    # the 192 bytes below its own `memset` call unwiped, the collector's
+    # frames are built over them, and the stack scan read that word as an
+    # interior pointer to the target in all three collections. 2026-11-01,
+    # the block-headers process_spec up to this file on 551acbfc: 4 of 20
+    # runs failed here without this scrub and 0 of 20 with it; every failure
+    # instrumented had the target at its chunk's first block, and runs that
+    # put it there on purpose failed 3 of 3 without the scrub and 0 of 6
+    # with it (`bench/log/linux/2026-11-02-reg61-flake/`).
+    freed_holder_scrub
     3.times { GC.collect }
     # Positive control: the target did die and its live link was cleared.
     control[0].value.should be_nil
