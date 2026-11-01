@@ -667,11 +667,25 @@ module Gcry
     # `occ` line is never touched. Every candidate this does not handle in
     # full — not in the table, outside the chunk's blocks, a large or nursery
     # chunk — goes to `mark_impl`, which stays the authority.
+    #
+    # Unrolled or one copy as the cycle's batch scans are
+    # (`@mark_scan_unrolled`), each out of line.
     private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
-      hits = scan_edges_run(cursor, cursor + words, base_only, shard,
-        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: true)
+      hits = @mark_scan_unrolled ? scan_edges_unrolled(cursor, words, base_only, shard) : scan_edges_compact(cursor, words, base_only, shard)
       # `radix_note_fast_hit`, once per payload.
       @radix_fast_hits &+= hits unless @mark_parallel
+    end
+
+    @[NoInline]
+    private def scan_edges_unrolled(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : UInt64
+      scan_edges_run(cursor, cursor + words, base_only, shard,
+        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: true)
+    end
+
+    @[NoInline]
+    private def scan_edges_compact(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : UInt64
+      scan_edges_run(cursor, cursor + words, base_only, shard,
+        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: false)
     end
 
     # `scan_edges_inline`'s loop over the words in `[p, finish)`, with the span
@@ -705,13 +719,16 @@ module Gcry
       #
       # The unrolled loop inlines the candidate code five times, and a mark
       # that scans little pays for that in instruction fetch: on Revcomp
-      # (about 100 small objects a collection, the code evicted by the
-      # program between collections) it read 25 more lines from memory per
-      # collection than the one-copy loop, Σ mark +9% to +15% on 2 MB
-      # scanned. One copy with an exit per candidate from an unrolled
-      # search cost JsonGenerate's batch scan 16% to 40% more instructions,
-      # so `scan_batch_prefetched` picks the one-copy loop for a cycle after
-      # a short one instead (`bench/log/linux/2026-11-02-mark-short/`).
+      # (about 100 small objects and 72 KiB a collection, the code evicted
+      # by the program between collections) the batch scan took 25 more
+      # instruction-cache misses a collection than the one-copy loop, 22 of
+      # them from memory (callgrind), Σ mark +9% to +15%. Keeping one copy
+      # behind an unrolled search for the next candidate cost 10% to 39%
+      # more instructions than the one-copy loop on a parsed JSON graph,
+      # against the unrolled loop's −10%, in all three shapes tried. So a
+      # cycle after a major that scanned under `MARK_UNROLL_MIN_SCANNED`
+      # runs the one-copy loop instead (`@mark_scan_unrolled`,
+      # `bench/log/linux/2026-11-02-mark-short/`).
       if unrolled
         # From `quad_end` on fewer than four words are left. Compared as
         # addresses, so a payload of under three words never forms a
