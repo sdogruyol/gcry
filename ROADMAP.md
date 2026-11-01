@@ -3214,6 +3214,37 @@ kept finding the rest.
       `mprotect_scan_untracked = false`), 30 of 30 both ways on both
       layouts; 99 *nocards*' control turns it off as well, since with no
       cards every page is untracked and the scan finds its object.
+      Found in review, the same hole through an address reused mid-cycle:
+      nothing clears a page's protected bit when its chunk is unmapped, so
+      a chunk mapped where a protected chunk was freed and released inherits
+      bits that say protected and clean, and both scans pass over its pages
+      (probe 4/4 with both fixes on). Fixed: `ChunkHeader::Flags::
+      BARRIER_ARMED`, set when the arm or the re-protect protects a chunk
+      under covering cards; the termination reads a chunk without it whole,
+      and the re-protect then flags it — no allocation path touched, no
+      mutator writes to the cards. Regression 100 *remap* (control
+      `mprotect_scan_unarmed_chunks = false`), 30 of 30 both ways on both
+      layouts and 100 of 100 more of each child. Its first construction held
+      the freed chunk from a root at the begin stop, and the mark popped
+      that stale entry after the remap and found X through the new chunk
+      (stop trace in the findings); a false root in static data marks the
+      old chunk now and then (first-mark attribution; 3 of about 530
+      header-layout runs, none headerless), and the arm then runs that
+      cycle out and builds the window again.
+      `bench/log/linux/2026-11-02-incremental-stack-rescan/FINDINGS.md`.
+
+- [ ] **`free` of a grey large block mid-cycle leaves its mark-stack entry
+      behind — found 2026-11-02 in review, not probed for a crash.**
+      An incremental cycle pushes a large block, the program frees it before
+      a slice pops it, and the cache trim unmaps it. The pop then scans
+      whatever is mapped at that address (seen: regression 100's first
+      *remap* construction kept X alive through it, conservative only).
+      With nothing mapped there, [INFERENCE, code reading] the headerless
+      layout is safe — `scan_object` resolves the chunk first and finds
+      none — but the header layout reads `BlockHeader.atomic?(entry)` before
+      the chunk lookup, a read of unmapped memory. Needs a probe on
+      `-Dgcry_block_headers` (free and trim between two slices, nothing
+      allocated after) before any fix; opt-in incremental only.
       `bench/log/linux/2026-11-02-incremental-stack-rescan/FINDINGS.md`.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two

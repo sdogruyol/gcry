@@ -192,12 +192,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protected only the chunks it found when it was armed, so writes to a new
   one went unrecorded. The finishing scan now reads every page the barrier
   neither protects nor has seen written, once; it is protected from then on.
+  A chunk mapped where a chunk the barrier protected was freed and unmapped
+  mid-cycle got that chunk's page records too, all protected and unwritten,
+  so writes to it hid as well: a chunk now carries a flag when the barrier
+  protects it, and the finishing scan reads a chunk without it whole.
   Regression 100 forces each for a stack slot, a class variable, a second
-  thread's stack and a 4 MiB block allocated mid-cycle: the code before
-  swept the object in 30 of 30 runs of each, on both layouts. 0.38.0 and
-  0.39.0 reproduce the first; no release since 0.1.0 scanned a root after
-  the first stop. The default stop-the-world collector scans every root and
-  the whole heap in every collection and is unaffected
+  thread's stack, a 4 MiB block allocated mid-cycle and one mapped at a
+  freed block's address: the code before swept the object in 30 of 30 runs
+  of each, on both layouts. 0.38.0 and 0.39.0 reproduce the first; no
+  release since 0.1.0 scanned a root after the first stop. Opt-in only
+  (`GCRY_INCREMENTAL=1`): the default stop-the-world collector scans every
+  root and the whole heap in every collection and is unaffected
   (`bench/log/linux/2026-11-02-incremental-stack-rescan/`).
 
 - **`thread_staged_total` no longer loses births to concurrent thread
