@@ -10,8 +10,10 @@ code placement, the high heap, or a commit?
 Each of the two changes the allocation hit path's machine code in
 `Heap#malloc`, and either change is enough to keep the slowdown.** The time
 goes to the mutator, not to the collector. The fix moves the word advance
-out of line and moves FREEING's three fields after the hit path's fields.
-With both changes, Binarytrees reads as 0.39.0's pad arms do.
+out of line and declares the hit path's heap fields first
+(`src/gcry/heap_hot.cr`), so no field added elsewhere moves them. On the
+final source, Binarytrees reads +0.8% [−2.9, +2.6] against 0.39.0 and −6.0%
+[−10.9, −3.4] against the tip; the five-runner keep rule passes.
 
 All sessions ran on `i7-8700B` runners, Crystal 1.21.0 (LLVM 15.0.7),
 interleaved per rep, 21 reps, `base` = `v0.39.0`. They come from the probe
@@ -40,7 +42,7 @@ base, averaged over the sessions an arm ran in (min to max in brackets).
 | base-code pads (bp16…bp64, b16…b2096) | 3–12 each | −2.8 to +1.1 (min −5.0, max +2.9) | −2.9 to −7.4 |
 | **rv_all** | 12 | **+0.9** (−2.5, +3.3) | −3.7 |
 | rv_mem | 3 | +0.4 (−1.1, +1.2) | −4.6 |
-| **f24** (the fix) | 3 | **+1.2** (+0.5, +1.7) | −3.3 |
+| **f24** (the first fix, §6) | 3 | **+1.2** (+0.5, +1.7) | −3.3 |
 | f2, f4, f1, f12 | 3–6 | +2.5 to +2.7 | −1.2 to −1.9 |
 | rv_counters | 3 | +3.1 (+2.5, +3.8) | −1.8 |
 | var-code pads (p16…p64, 16…2096) | 3–12 each | +2.7 to +6.9 | −2.2 to +0.3 |
@@ -109,67 +111,127 @@ base-code arm except one. `layout.py` (run on the downloaded artifacts,
 which hold `syms/`) shows the slowest arms all share var's `Heap#malloc`
 code.
 
-## 6. Fix and A/B
+## 6. Fix candidates and A/B
 
-The candidates, each a patch on var (`AB_PATCHES`; `f24.patch` is what
-landed):
+The candidates, each a patch on var (`AB_PATCHES`):
 
 - f1: re-read `bytes_local` at its store instead of keeping `local` live.
   This removes one spill, but the frame stays 0x98: +2.5.
 - f2: `cursor_advance_word` `@[NoInline]`. It runs once per word, up to 64
   hand-outs. `Heap#malloc` drops to 302 lines, a 0x28 frame and 5 stack
   stores: +2.5 over 6 sessions.
-- f4: FREEING's fields declared inferred, last (in this probe at the end of
-  `thread_block_audit.cr`). Every 0.39.0 field is back at its offset: +2.5.
+- f4: FREEING's fields declared inferred, last (`f24.patch` without f2).
+  Every 0.39.0 field is back at its offset: +2.5.
 - f13 (f1, plus `@block_bytes[index]` read before the sentinel): +5.4,
   worse.
 - **f24 = f2 + f4: +1.3 [−2.4, +3.9], +0.5 [−6.6, +3.2], +1.7 [−0.3, +7.2]
-  against base; −1.6, −4.1, −4.2 against var.** In the same sessions the
-  base pad `baseprepad16` read +1.3, +1.3, +1.1, and `rv_all` −0.9, −0.8,
-  +0.9.
+  against base; −1.6, −4.1, −4.2 against var** (41325522076). In the same
+  sessions `baseprepad16` read +1.3, +1.3, +1.1 and `rv_all` −0.9, −0.8,
+  +0.9. On the 87ccf4f4 base with the keep rule's pads (41328410784,
+  41328418845) f24 read +2.2% [−2.6, +6.2] and +1.6% [−4.6, +4.5].
 
-What landed on `intel-bt-040`, on `release-0.40.0` `367c3707`:
+f24's "cold fields last" works only for fields that no earlier file
+assigns. On the rebased base the pace's `@pace_*` (`a62a47fd`) and
+`@inc_barrier_lost_collections` (`7d101c9a`) still moved the hit path's
+fields by 8 to 32 bytes. Moving their declarations into a last-required file
+did not move them: a plain `@x = …` in `collect.cr`'s methods places them
+where `collect.cr` is met.
+
+## 7. What landed: hit path fields first, word advance out of line
+
+`intel-bt-040`, on `release-0.40.0` `16a6804b`:
 
 - `cursor_advance_word` is `@[NoInline]` (`bitmap_alloc.cr`).
-- The three FREEING fields live in `src/gcry/heap_cold.cr`, inferred and
-  required last from `gcry.cr`, with typed accessors so regression 91's
-  hook still auto-casts.
-- `spec/heap_cold_fields_spec.cr` checks that the cold fields sit after the
-  hit path's fields. It is green on the fix and red on the tip ("Expected
-  736 to be GreaterThan 86723").
+- `src/gcry/heap_hot.cr`, required first by `heap.cr`, declares every heap
+  field `Heap#fast_alloc` reads, typed:
+  - the flags `@fast_path`, `@collecting`, `@incremental_marking`,
+    `@lazy_sweep_pending` and (Darwin) `@cursor_tsd_slot`;
+  - the counters `@bytes_since_gc`, `gc_threshold`, `alloc_pfw` and the
+    five `fast_miss_*`;
+  - the tables `@block_bytes`, `@fit_index`, `@fit_payload`.
 
-On the 87ccf4f4 base, the fix against v0.39.0 with the keep rule's pads, in
-two Intel sessions (perf-ab 41328410784, 41328418845):
+  Crystal lays out typed declarations first, in program order, so these
+  take the lowest offsets whatever is added elsewhere. This is now the only
+  layout convention; f24's cold file was dropped.
+- `spec/heap_hot_fields_spec.cr` asserts the behaviour, not numbers: every
+  hot field's offset is below every other field's (`@type.instance_vars`).
+  It is green on the fix and red on the tip ("Expected 86723 to be LessThan
+  8").
+- Regression 86's control arm (the slow path without the wipe) now finds 0
+  stale words on x86-64 Linux, where it found 2: with the advance out of
+  line, `Heap#malloc`'s frame no longer leaves unwritten slots below it. The
+  spec no longer requires a non-zero control there. It still requires 0 in
+  the fixed arm and still checks where the wipe starts.
 
-- Binarytrees +2.2% [−2.6, +6.2] and +1.6% [−4.6, +4.5]. Both IQRs span
-  zero, so not flagged.
-- In 41328418845 the fix's `var` (1.629 s) is inside base's 1.627–1.678 s.
+Fast-path fields, byte offset in `Heap` (`runs/offsets-*.txt`, from
+`offsets.cr`, x86-64). Darwin agrees: the fix's `Heap#malloc` reads
+`@fast_path` at `0x4(%rdi)`, 0.39.0's at `0x1509c(%rdi)`.
 
-## 7. Keep rule and verification: not finished
+| field | v0.39.0 | 0.40 tip (87ccf4f4) | fix |
+|---|---:|---:|---:|
+| `@fast_path` | 86124 | 86156 | 4 |
+| `@collecting` | 86496 | 86528 | 5 |
+| `@incremental_marking` | 86512 | 86544 | 6 |
+| `@lazy_sweep_pending` | 86691 | 86723 | 7 |
+| `@bytes_since_gc` | 85840 | 85872 | 8 |
+| `@gc_threshold` | 14368 | 14400 | 16 |
+| `@alloc_pfw` | 6616 | 6648 | 24 |
+| `@fast_miss_refill` | 656 | 656 | 56 |
+| `@block_bytes` | 8472 | 8504 | 72 |
+| `@fit_index` | 12648 | 12680 | 392 |
+| `@fit_payload` | 12908 | 12940 | 652 |
 
-- The five-runner keep rule on the final source was not run. The dispatch
-  on the pre-rebase commit (41328401326) was cancelled when the base moved.
-  Next: `gh workflow run perf-ab.yml --ref intel-bt-040 -f base=v0.39.0
-  -f reps=15 -f benches="Primes JsonParsePure Binarytrees JsonGenerate
-  JsonParseSerializable JsonParsePull Revcomp RegexDna Knuckeotide"
-  -f os='["ubuntu-latest","ubuntu-24.04-arm","macos-latest","macos-15-intel","windows-latest"]'
-  -f pads="p16 p64 bp16 bp64"`, then
-  `../../linux/2026-11-01-0.40-keep-rule/keep.py`.
-- `verify.sh`, `make windows-typecheck`, `make darwin-typecheck` and
-  `make alloc-entry-frame` have not run on the final tree. A run was
-  started and killed when the tree was rebased under it. The darwin
-  cross-typecheck of the revert trees passed.
+`Heap#malloc` on macos-15-intel (LLVM 15; probes 41320057272 and 41331431976;
+`dis/`):
+
+| tree | lines | frame | stack stores |
+|---|---:|---:|---:|
+| v0.39.0 | 499 | 0x88 | 18 |
+| 0.40 tip | 504 | 0x98 | 19 |
+| **fix** (`dis/heap-malloc-fix.s`) | **298** | **0x28** | **5** |
+
+## 8. Keep rule on the final source (src `19cf3a60`, run at `6ac62ad9`)
+
+Five runners, nine benches, 15 reps, Boehm, pads `p16 p64 bp16 bp64`,
+against `v0.39.0`: perf-ab 41331393029 (`keep/`; `keep.py`'s output is
+`keep/41331393029-keep.txt`).
+
+**Placement by the rule:** every flagged row but one. They are Intel
+JsonParsePull, Revcomp and RegexDna; arm64 JsonGenerate; and Windows
+JsonParsePure, JsonParseSerializable, JsonParsePull, Revcomp and RegexDna.
+0.40's own keep rule (41248448693) flagged and excused the same rows.
+
+**The exception, Intel JsonGenerate,** read +7.1% [+2.0, +19.6]. That session
+ran slow throughout (Intel Primes 2.7 s, against about 1 s elsewhere). Two
+rechecks, 15 reps each, same pads:
+
+- **Against v0.39.0** (41339843203): time +6.1% [+1.3, +8.8], wall +2.6%
+  [−1.4, +4.8]. The var-code medians are 2.250, 2.113 and 2.023 s, the
+  base-code ones 2.242, 2.092 and 2.151 s: placement by the rule.
+- **Against the tip** `16a6804b` (41339851130): +1.6% [−0.5, +3.6], wall
+  −0.6%. The fix leaves JsonGenerate where the tip has it. Intel
+  JsonGenerate's timed section has read +2–4% against 0.39.0 since the high
+  heap's code landed (`../2026-10-31-heap-high/` §5).
+
+**Binarytrees:**
+
+| run | against | Binarytrees |
+|---|---|---|
+| 41331400915 (Intel only, 21 reps) | v0.39.0 | **+0.8% [−2.9, +2.6]**, with `baseprepad16` +5.3% and `baseprepad64` −1.3% |
+| 41339843203 | v0.39.0 | +0.4% [−5.0, +3.8] |
+| 41339851130 | tip | **−6.0% [−10.9, −3.4]** |
+
+**Local, on the final tree, all passing:**
+
+- `verify.sh`: format, lint, `spec/all_specs.cr` (307 examples; 330 with
+  block headers; 307 with invariants), `process_spec` (366; 367 and 367 in
+  the block-header arms);
+- `make windows-typecheck` and `make darwin-typecheck`;
+- `make alloc-entry-frame`, 5/5 after the regression 86 change;
+- `process_spec` under Crystal 1.22.2: 366 examples, 0 failures.
 
 ## Open
 
-- On the rebased base, the pace's `@pace_*` (`a62a47fd`) and
-  `@inc_barrier_lost_collections` (`7d101c9a`) again move the hit path's
-  fields, by +8 bytes (`@fast_path`, `@bytes_since_gc`) and +32 bytes
-  (`@collecting`, `@incremental_marking`, `@lazy_sweep_pending`) against
-  0.39.0 (`runs/offsets-fix.txt` is the pre-rebase layout). Moving only
-  their declarations into `heap_cold.cr` does not move them, because a plain
-  `@x = …` in `collect.cr`'s methods places them where that file is met
-  (tried, reverted). Whether that shift costs Intel Binarytrees has not been
-  measured; the keep rule's Intel row will show it.
-- Why the 32-byte field shift costs ~1.5–2% (f4) is [INFERENCE]; the
-  hit path's distinct cache lines are 9 in both layouts.
+- Why the 32-byte field shift cost ~1.5–2% (f4) is [INFERENCE]: the hit
+  path touches 9 distinct cache lines in both layouts. With the hot fields
+  at offsets 4–1680 the question no longer applies to the fix.

@@ -7,5 +7,6 @@ class Gcry::Heap
     {% end %}
   end
 end
+
 puts "instance_sizeof #{instance_sizeof(Gcry::Heap)}"
 Gcry::Heap.__dump_ivars
