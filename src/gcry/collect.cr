@@ -3352,7 +3352,13 @@ module Gcry
         hook.call(:after_large_take)
       end
 
-      if @large_recycle && !@release_warm_this_collect
+      # Kept only when `Heap#recycle_large_mapping` can take them before the
+      # next collection: it refuses while a page barrier is armed, which the
+      # stop has decided by now (`arm_page_barrier_after_major`), and under
+      # `GCRY_INCREMENTAL=1` or the nursery one is armed from collection to
+      # collection. Kept there anyway, Revcomp's cycles held 37 MiB more at
+      # peak and recycled nothing (`bench/log/linux/2026-11-02-large-cache-incr/`).
+      if @large_recycle && !@release_warm_this_collect && @barrier_backend.none?
         # This cycle's frees stay for `Heap#recycle_large_mapping`, as they
         # are: an `MADV_FREE` now would cost a page walk here and a dirtying
         # write per page on reuse. The budget is what they hold, and every
