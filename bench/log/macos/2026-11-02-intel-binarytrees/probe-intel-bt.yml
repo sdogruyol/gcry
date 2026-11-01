@@ -1,0 +1,62 @@
+name: Probe intel-bt
+
+# Temporary (IntelBT): macos-15-intel Binarytrees, 0.40 tip against v0.39.0,
+# with GCRY_HIGH_HEAP=0 and revert-one-commit arms, same session. Deleted after.
+on:
+  push:
+    branches: [probe/intel-bt]
+
+jobs:
+  ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        session: [1, 2, 3]
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Machine
+        run: |
+          uname -a
+          sysctl -n hw.ncpu machdep.cpu.brand_string hw.memsize
+      - env:
+          AB_BASE: c0d570c52793cfa144d88f3f4b600c839f7a40ce
+          AB_REPS: "21"
+          AB_BENCHES: Binarytrees Nbody
+          AB_BOEHM: "0"
+          AB_VAR_ENV: ""
+          AB_PADS: p16 bp16
+          AB_STATS: "0"
+          AB_REVERTS: >-
+            all=cbf1b2e8ba379136c516a3bb19a0d67d450435e9,e3a2de7a4860f00d419ac029cdadd45f1eec4de5,6aa84284c24715dc0892bd7b22c3149120d2fc52,2e91d538566258175fc54905342d952088d2f24f,606017b0cc6b7ae9ecba35b2053a923e74119ced,b8bbd85cda3eb3de408d0fd66bbc6dbdc200a7b4,f18e9c1715774ea045e68b1fb4ff7ad7481fa06a
+          AB_PATCHES: f2=.probe/f2.patch f4=.probe/f4.patch f24=.probe/f24.patch
+          AB_OUT: bench/log/_ab
+        run: bench/runner_ab/ab.sh
+      - name: Disassemble the hot path
+        run: |
+          mkdir -p bench/log/_ab/dis
+          objdump --version | head -2
+          for b in bin/ab-*; do
+            a=$(basename "$b")
+            for f in '_*Gcry::Heap#malloc<UInt64>:Pointer(Void)' '_*GC::malloc<UInt64>:Pointer(Void)' '_*Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode' '_*Gcry::Heap#tlab_alloc_small<UInt32, UInt32, Int32, Bool, UInt64>:Pointer(Void)'; do
+              n=$(echo "$f" | sed 's/[^A-Za-z]//g' | cut -c1-30)
+              objdump -d --no-show-raw-insn --disassemble-symbols="$f" "$b" > "bench/log/_ab/dis/$a-$n.s" || true
+            done
+          done
+          ls -la bench/log/_ab/dis | head -40
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-intel-bt-${{ matrix.session }}
+          path: bench/log/_ab/
+          if-no-files-found: ignore
+          retention-days: 30

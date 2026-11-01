@@ -1,0 +1,65 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 378f7666..fa6843dd 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -343,21 +343,6 @@ module Gcry
+     # 2026-10-22 — CURSOR cleared, then the chunk read, then the slot
+     # cleared — the control arm of regression 82 (`retire_cursor_slot`).
+     property cursor_retire_slot_first : Bool = true
+-    # Word advances the hit path gave up because a `free` was in flight on
+-    # the chunk (`cursor_advance_word`, FREEING): each one an allocation
+-    # that took the locked path instead. Plain increments, like the census
+-    # counters above.
+-    getter cursor_free_deferrals : UInt64 = 0_u64
+-    # Research only: called by `bitmap_free_block` between its `occ` clear
+-    # and its `mark` clear, on the freeing thread under the class lock; must
+-    # not allocate. A hook that parks the thread there puts another thread's
+-    # lock-free claim of the freed block, and a stop, between the two
+-    # clears (`process_spec/regression/91_free_mark_clear_claim_spec.cr`).
+-    property bitmap_free_split_hook : Proc(ChunkHeader*, Nil)? = nil
+-    # Research only: false frees a bitmap block as before 2026-10-31, with
+-    # no FREEING on the chunk, so its owner may claim the block between the
+-    # two clears — the control arm of regression 91 (`bitmap_free_block`).
+-    property bitmap_free_claim_guard : Bool = true
+ 
+     # A failed capacity search remains true until a free, sweep, or retirement
+     # publishes capacity for this (class, kind). The same generation invalidates
+@@ -1249,7 +1234,7 @@ module Gcry
+     # Measured before this: 96% of locked refills (`bitmap_alloc_refills`
+     # 705 k against `bitmap_alloc_chunk_advances` 29 k per 15 s of Kemal
+     # `/json`) were exactly this word advance, taken under the class lock.
+-    @[AlwaysInline]
++    @[NoInline]
+     protected def cursor_advance_word(s : CursorSlot*, index : Int32) : UInt64
+       chunk = s.value.chunk
+       return 0_u64 if chunk.null?
+diff --git a/src/gcry/thread_block_audit.cr b/src/gcry/thread_block_audit.cr
+index cae2b72a..0942de6d 100644
+--- a/src/gcry/thread_block_audit.cr
++++ b/src/gcry/thread_block_audit.cr
+@@ -103,6 +103,25 @@ module Gcry
+     @thread_pop_staged_reported = 0
+     @thread_pop_staged_now_reported = 0
+ 
++    # Word advances the hit path gave up because a `free` was in flight on
++    # the chunk (`cursor_advance_word`, FREEING): each one an allocation
++    # that took the locked path instead. Plain increments, like the census
++    # counters above.
++    @cursor_free_deferrals = 0_u64
++    getter cursor_free_deferrals
++    # Research only: called by `bitmap_free_block` between its `occ` clear
++    # and its `mark` clear, on the freeing thread under the class lock; must
++    # not allocate. A hook that parks the thread there puts another thread's
++    # lock-free claim of the freed block, and a stop, between the two
++    # clears (`process_spec/regression/91_free_mark_clear_claim_spec.cr`).
++    @bitmap_free_split_hook = nil.as(Proc(ChunkHeader*, Nil)?)
++    property bitmap_free_split_hook
++    # Research only: false frees a bitmap block as before 2026-10-31, with
++    # no FREEING on the chunk, so its owner may claim the block between the
++    # two clears — the control arm of regression 91 (`bitmap_free_block`).
++    @bitmap_free_claim_guard = true
++    property bitmap_free_claim_guard
++
+     # Called with the world stopped, after `mark_loop` and before `sweep`.
+     #
+     # *major* is the sweep's own flag and this walk needs it, because "unmarked"
