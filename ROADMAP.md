@@ -4697,6 +4697,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       41207501220), and gathering in-span words branch-free into a buffer
       (+46% instructions, +28–31% ns per object). What is left needs fewer
       instructions per word or per object, not a different branch shape.
+      **The unroll's Σ mark on Revcomp and RegexDna (2026-11-02,
+      `bench/log/linux/2026-11-02-mark-short/`)** is instruction fetch: the
+      five inlined candidate copies are all reached in a ~100-object
+      collection and run cold, 25 more instruction-cache misses a collection
+      (22 from memory) on 30% fewer instructions; warm, the unroll is
+      faster. One copy behind an unrolled search cost 10–39% more
+      instructions on a JSON graph. A one-copy batch twin for cycles after a
+      major under 512 KiB scanned kept the JSON rows' gain and removed the
+      loss locally, on arm64 and on Windows Revcomp, but left Revcomp +13%
+      and RegexDna +8.6% over the no-unroll probe on `ubuntu-latest` (Perf
+      A/B 41298289986); not taken. Open: whether that residual is the
+      parallel cycle (both rows mark in parallel, half their Σ mark).
 - [ ] **The pace prices the next cycle at the last one's cost (2026-11-01,
       `bench/log/macos/2026-11-01-primes-collections/`).** Primes' 9-or-10
       collections on Intel and Windows are one step of the pacing:
