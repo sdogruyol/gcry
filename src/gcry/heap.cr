@@ -742,9 +742,26 @@ module Gcry
         @slow_wipe_sp = sp if @slow_wipe_sp == 0 && sp < watch && watch &- sp < 65536
       end
       Roots.wipe_below_sp(limit)
+      return allocate_traced_below_gap(size, flags & 1 != 0, flags & 2 != 0) if @slow_wipe_gap
       allocate_traced(size, flags & 1 != 0, flags & 2 != 0)
     end
 
+    # Research only, regression 86's known stale words: `allocate_traced`'s
+    # frame and the collector's, built below `SLOW_WIPE_GAP_WORDS` words that
+    # nothing writes, inside the band `allocate_wipe` clears (1 KiB below its
+    # SP). Whatever the stack held there before the allocation (the pattern
+    # the spec plants) is still there at the collection unless the wipe ran,
+    # on every target and whatever the hit path's frame looks like.
+    @[NoInline]
+    private def allocate_traced_below_gap(size : UInt64, atomic : Bool, clear : Bool) : Void*
+      gap = uninitialized StaticArray(UInt64, SLOW_WIPE_GAP_WORDS)
+      asm("" :: "r"(gap.to_unsafe) : "memory" : "volatile")
+      ptr = allocate_traced(size, atomic, clear)
+      asm("" :: "r"(gap.to_unsafe) : "memory" : "volatile")
+      ptr
+    end
+
+    SLOW_WIPE_GAP_WORDS = 32
     @[NoInline]
     private def allocate_traced(size : UInt64, atomic : Bool, clear : Bool) : Void*
       ptr = allocate(size, atomic: atomic, clear: clear)
@@ -767,6 +784,9 @@ module Gcry
     # called with: the wipe must start within a frame record of it.
     property slow_wipe_watch : UInt64 = 0_u64
     property slow_wipe_sp : UInt64 = 0_u64
+    # Regression 86: build the slow path's frames below an unwritten gap
+    # (`allocate_traced_below_gap`).
+    property slow_wipe_gap : Bool = false
 
     # Boehm's `GC_realloc`: null is `malloc(size)`, and size 0 frees
     # `pointer` and answers null (`mallocx.c`, as C's `realloc` does in glibc).

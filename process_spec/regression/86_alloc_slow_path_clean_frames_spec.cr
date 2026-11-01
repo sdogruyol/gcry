@@ -29,18 +29,20 @@ require "spec"
 #   the allocating call and the collector's entry SP that still hold a
 #   pattern a deeper call wrote there just before: words no frame on the way
 #   wrote (the measure regression 79 bounds). The fixed arm must find none.
-#   The control arm (`slow_entry_wipe = false`: the tail calls without the
-#   wipe) must find some, or the fixed arm could pass on a layout where
-#   nothing is left to wipe; both run in this process, one after the other,
-#   from the same depth. Measured on x86-64 Linux, Crystal 1.21.0: 13 on the
-#   tree before the tail calls (the entry's frame, live across the
-#   collection), 2 in the control arm (slots of the frames built below it
-#   that they do not write), 0 fixed. Since the hit path's word advance went
-#   out of line (`cursor_advance_word`, 2026-11-02) `Heap#malloc`'s frame is
-#   0x18 bytes where it was 0x88, and the control arm finds 0 there too
-#   (`bench/log/macos/2026-11-02-intel-binarytrees/`): the control's count
-#   is the layout's, so no runner requires it to be non-zero any more, and
-#   it is printed for the record.
+#   Both arms build the slow path's frames below 32 words nothing writes
+#   (`Heap#slow_wipe_gap`, `allocate_traced_below_gap`), inside the band the
+#   wipe clears, so the planted pattern is known to be there: the control
+#   arm (`slow_entry_wipe = false`: the tail calls without the wipe) must
+#   find it, on every target, or the fixed arm could pass on a layout where
+#   nothing is left to wipe; the fixed arm must find none. A third arm, the
+#   wipe on and no gap, must find none on the real layout. All run in this
+#   process, one after the other, from the same depth. Measured on x86-64
+#   Linux, Crystal 1.21.0, before the gap: 13 on the tree before the tail
+#   calls (the entry's frame, live across the collection), 2 in the control
+#   arm (slots of the frames built below it that they do not write), 0
+#   fixed; after the hit path's word advance went out of line
+#   (`cursor_advance_word`, 2026-11-02, `Heap#malloc`'s frame 0x88 → 0x18)
+#   that control found 0, which is why the gap plants its own.
 # - Where the wipe starts: the SP `allocate_wipe` ran at
 #   (`Heap#slow_wipe_sp`, recorded while `slow_wipe_watch` holds an SP
 #   above it) must be within 16 bytes (a frame record) of the SP the
@@ -90,13 +92,14 @@ end
 
 # Pattern words in `[collect_entry_sp, caller SP)` at the collection, with the
 # slow path's wipe on or off, and the SP the wipe started at.
-private def stale86_count(wipe : Bool) : {Int32, UInt64, UInt64}
+private def stale86_count(wipe : Bool, gap : Bool = true) : {Int32, UInt64, UInt64}
   heap = Gcry.default_heap
   saved_threshold = heap.gc_threshold
   caller_sp = 0_u64
   stale = -1
   collections_before = heap.collections
   heap.slow_entry_wipe = wipe
+  heap.slow_wipe_gap = gap
   heap.post_stw_hook = ->(stage : Symbol) do
     if stage == :after_start_world && stale < 0
       h = Gcry.default_heap
@@ -123,6 +126,7 @@ private def stale86_count(wipe : Bool) : {Int32, UInt64, UInt64}
     heap.gc_threshold = saved_threshold
     heap.post_stw_hook = nil
     heap.slow_entry_wipe = true
+    heap.slow_wipe_gap = false
     heap.slow_wipe_watch = 0_u64
   end
   heap.collections.should be > collections_before
@@ -135,8 +139,11 @@ describe "Regression: an allocation's slow path collects on frames built over ze
     {% if flag?(:release) && (flag?(:x86_64) || flag?(:aarch64)) %}
       control, _, _ = stale86_count(wipe: false)
       fixed, entry_sp, wipe_sp = stale86_count(wipe: true)
-      STDERR.puts "stale86: control #{control}, fixed #{fixed}; wipe starts #{entry_sp.to_i64 - wipe_sp.to_i64} bytes below the entry SP"
+      natural, _, _ = stale86_count(wipe: true, gap: false)
+      STDERR.puts "stale86: control #{control}, fixed #{fixed}, no gap #{natural}; wipe starts #{entry_sp.to_i64 - wipe_sp.to_i64} bytes below the entry SP"
+      control.should be > 0
       fixed.should eq(0)
+      natural.should eq(0)
       # The wipe starts at the SP the slow path was entered with, less at
       # most a frame record: no frame of the slow path is above it.
       wipe_sp.should_not eq(0)
