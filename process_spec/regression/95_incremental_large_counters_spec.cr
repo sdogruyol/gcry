@@ -28,13 +28,26 @@ require "spec"
 #
 # The control arm (`Heap#inc_finish_large_settle = false`, the code before)
 # must find the counters and the budget as they were, or the fixed arm passes
-# on nothing. Each arm runs in a process of its own. A heap that cannot run
-# a sliced cycle (no page barrier; Linux only, as regression 85) prints
-# `LARGE95_SKIP_MARK` and passes, and the parent then does not ask for the
-# control's mark. `bench/log/linux/2026-11-02-large-cache-incr/FINDINGS.md`.
+# on nothing.
+#
+# A third window, *minor*, pins what the barrier condition must not touch: a
+# minor collection (nursery, `-Dgcry_block_headers`) under an armed barrier
+# keeps the program's own large frees, which `alloc_large` takes back in
+# place under any barrier (`bench/gzip_free_loop.cr`). The first version of
+# the condition applied to minors too and trimmed them at every minor. Its
+# fixed arm must find a `GC.free`d block still cached after a minor; its
+# control arm runs a major on the same construction, which trims the cache
+# to 0 first, and must find the block gone, or the fixed arm passes on an
+# instrument that sees nothing.
+#
+# Each arm runs in a process of its own. A heap that cannot reach its window
+# (no page barrier, Linux only as regression 85; no nursery without block
+# headers) prints `LARGE95_SKIP_MARK` and passes, and the parent then does
+# not ask for the control's mark.
+# `bench/log/linux/2026-11-02-large-cache-incr/FINDINGS.md`.
 
-private LARGE95_SKIP_MARK    = "large95: this heap cannot run a sliced cycle, skipped"
-private LARGE95_CONTROL_MARK = "large95: control carried the large-cache counters over"
+private LARGE95_SKIP_MARK    = "large95: this heap cannot reach the window, skipped"
+private LARGE95_CONTROL_MARK = "large95: the control arm went wrong"
 
 # Large sizes nothing else in the spec runner asks for.
 private C95_HIT_BYTES  = 208 * 1024 + 4096
@@ -135,8 +148,50 @@ private def c95_recycle_window(heap : Gcry::Heap) : {UInt64, UInt64, UInt64}?
   {flushed.get, heap.large_free_bytes, heap.large_recycle_budget}
 end
 
+private C95_FREED_BYTES = 304 * 1024 + 4096
+
+# A nursery heap with recycling, or nil when it cannot have one (headerless
+# layout, or off Linux). The barrier is whatever the heap picks, soft-dirty
+# where the kernel has it: the nursery under the mprotect barrier crashes in
+# a minor after a large `GC.free`, on 0.40.0's base as well (reported, not
+# this window's subject).
+private def c95_minor_heap : Gcry::Heap?
+  {% if flag?(:linux) && flag?(:gcry_block_headers) %}
+    heap = Gcry.default_heap
+    heap.large_recycle = true
+    heap.nursery_enabled = true
+    heap.nursery_enabled ? heap : nil
+  {% else %}
+    nil
+  {% end %}
+end
+
+# *minor*: a minor first, which arms the barrier; then the program frees a
+# large block of its own, and a minor (or, for the control, a major) runs.
+# Returns what the cache held before and after that collection, or nil when
+# no barrier was armed (the window needs one).
+private def c95_minor_window(heap : Gcry::Heap, major : Bool) : {UInt64, UInt64}?
+  heap.minor_collect
+  return nil if heap.@barrier_backend.none?
+  p = GC.malloc(C95_FREED_BYTES)
+  GC.free(p)
+  before = heap.large_free_bytes
+  before.should be >= C95_FREED_BYTES
+  collections = heap.collections
+  majors = heap.major_collections
+  if major
+    GC.collect
+  else
+    heap.minor_collect
+    (heap.major_collections - majors).should eq(0)
+  end
+  (heap.collections - collections).should eq(1)
+  heap.@barrier_backend.none?.should be_false
+  {before, heap.large_free_bytes}
+end
+
 describe "Regression: the incremental cycle's finish takes the large-cache counters as a major does" do
-  {"counters", "recycle"}.each do |window|
+  {"counters", "recycle", "minor"}.each do |window|
     {"fixed", "control"}.each do |arm|
       it "#{window} #{arm} arm in a process of its own" do
         captured = IO::Memory.new
@@ -197,6 +252,25 @@ describe "Regression: the incremental cycle's finish takes the large-cache count
     _, _, budget = window
     budget.should eq(C95_STALE)
     STDOUT.puts "#{LARGE95_CONTROL_MARK} (budget=#{budget})"
+    STDOUT.flush
+  end
+
+  it "large95 child minor fixed" do
+    next unless ENV["GCRY_LARGE95_CHILD"]? == "minor-fixed"
+    next c95_skip unless heap = c95_minor_heap
+    next c95_skip unless window = c95_minor_window(heap, major: false)
+    before, after = window
+    # The program's own free is still there for `alloc_large` to take.
+    after.should eq(before)
+  end
+
+  it "large95 child minor control" do
+    next unless ENV["GCRY_LARGE95_CHILD"]? == "minor-control"
+    next c95_skip unless heap = c95_minor_heap
+    next c95_skip unless window = c95_minor_window(heap, major: true)
+    before, after = window
+    after.should be < C95_FREED_BYTES
+    STDOUT.puts "#{LARGE95_CONTROL_MARK} (the major trimmed the cache: #{before} -> #{after})"
     STDOUT.flush
   end
 end

@@ -3352,13 +3352,19 @@ module Gcry
         hook.call(:after_large_take)
       end
 
-      # Kept only when `Heap#recycle_large_mapping` can take them before the
-      # next collection: it refuses while a page barrier is armed, which the
-      # stop has decided by now (`arm_page_barrier_after_major`), and under
-      # `GCRY_INCREMENTAL=1` or the nursery one is armed from collection to
-      # collection. Kept there anyway, Revcomp's cycles held 37 MiB more at
-      # peak and recycled nothing (`bench/log/linux/2026-11-02-large-cache-incr/`).
-      if @large_recycle && !@release_warm_this_collect && @barrier_backend.none?
+      # A major keeps them only when `Heap#recycle_large_mapping` can take
+      # them before the next collection: it refuses while a page barrier is
+      # armed, which the stop has decided by now
+      # (`arm_page_barrier_after_major`), and under `GCRY_INCREMENTAL=1` or
+      # the nursery one is armed from collection to collection. A major's
+      # cache holds only what this cycle swept (it was trimmed to 0 before
+      # the flushes), which nothing else takes; kept anyway, Revcomp's
+      # sliced cycles held 37 MiB more at peak and recycled nothing. A minor
+      # trims nothing first, and its cache holds the program's own frees,
+      # which `alloc_large` takes back in place under any barrier
+      # (`take_large_free(freed_only: true)`), so a minor keeps them as it
+      # always has (`bench/log/linux/2026-11-02-large-cache-incr/`).
+      if @large_recycle && !@release_warm_this_collect && (!major || @barrier_backend.none?)
         # This cycle's frees stay for `Heap#recycle_large_mapping`, as they
         # are: an `MADV_FREE` now would cost a page walk here and a dirtying
         # write per page on reuse. The budget is what they hold, and every
