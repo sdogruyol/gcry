@@ -174,7 +174,7 @@ mprotect:
   `scan_mprotect_pages`, with no mprotect knob set).
 
 Probe run 41299975823 (push-triggered, deleted afterwards; base `07b61d28`
-against the fix `9ba2744a`, Crystal 1.21.0, header build, **`GCRY_NURSERY`
+against the fix `9ba2744a` (the same source, rebased as `530afd6e`), Crystal 1.21.0, header build, **`GCRY_NURSERY`
 as the only knob**):
 
 | runner | barrier at exit | `nmp_env2`, `GCRY_NURSERY=262144` | `pattern_fuzz --phases=40`, `GCRY_NURSERY=262144` | `GCRY_INCREMENTAL=1` backend |
@@ -230,7 +230,7 @@ needs one of the opt-ins above; the default path arms no barrier.
 
 ## Checks
 
-On the fix (`9ba2744a` plus docs), x86-64 Linux host:
+On the fix (`9ba2744a`, rebased as `530afd6e`, plus docs), x86-64 Linux host:
 
 | check | result |
 |---|---|
