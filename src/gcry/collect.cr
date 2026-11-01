@@ -73,29 +73,6 @@ module Gcry
     # cycle (`take_parallel_scanned_bytes`).
     getter mark_scanned_bytes : UInt64 = 0_u64
 
-    # Whether this cycle's batch scan (`scan_batch_prefetched`) runs the
-    # unrolled word loop: only after a major that scanned at least
-    # `MARK_UNROLL_MIN_SCANNED`. The unrolled loop saves about a tenth of the
-    # batch scan's instructions and costs a fixed number of cold instruction
-    # lines per cycle, about 1 µs on the x86 host and 2–3 µs on
-    # `ubuntu-latest`; at 0.09 ns a scanned byte (JsonGenerate) that breaks
-    # even near 100–300 KiB. On crystal-metric, Revcomp, RegexDna
-    # and the Base64 rows scan 71–73 KiB every cycle, Primes' and the JSON
-    # rows' short cycles under 240 KiB and their long ones from 2.6 MiB;
-    # Binarytrees (71 KiB–8 MiB) and Knuckeotide cross the floor
-    # (`bench/log/linux/2026-11-02-mark-short/`). Read by `make mark-audit`,
-    # which runs its planted miss through both loops.
-    getter? mark_scan_unrolled : Bool = false
-
-    MARK_UNROLL_MIN_SCANNED = 512_u64 * 1024
-
-    # Starts a major's count of scanned bytes, after taking the last one's
-    # for `@mark_scan_unrolled`.
-    private def reset_mark_scanned_bytes : Nil
-      @mark_scan_unrolled = @mark_scanned_bytes >= MARK_UNROLL_MIN_SCANNED
-      @mark_scanned_bytes = 0_u64
-    end
-
     # The cap grows with the bytes the mark has to *read*, a third of them
     # × factor once that passes the floor, so the schedule stays geometric
     # where marking is what a major costs. Atomic bytes (strings, buffers)
@@ -3011,7 +2988,7 @@ module Gcry
             # chunks that clear will reach.
             audit_chunk_list
             clear_all_marks
-            reset_mark_scanned_bytes
+            @mark_scanned_bytes = 0_u64
           else
             clear_nursery_marks
           end
@@ -3610,7 +3587,7 @@ module Gcry
         note_collection_begin
         @mark_stack.clear
         clear_all_marks
-        reset_mark_scanned_bytes
+        @mark_scanned_bytes = 0_u64
         # Settle first, as in `run_collection_body`: it zeroes pinned chunks'
         # marks, and a root marked before it there would be swept.
         bitmap_settle_cursor_sets

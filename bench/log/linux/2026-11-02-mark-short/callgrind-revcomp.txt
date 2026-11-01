@@ -1,0 +1,24 @@
+# callgrind, crystal-metric Revcomp, default markers, GCRY_COLLECT_SCRUB=0, counting inside the batch scan
+# (cg.sh; the kept tree with both batch functions toggled). LL is the host default (instruction LL miss = a line from memory).
+# group: batch = scan_batch_* (everything inlined into it), edges = scan_edges_inline (large/untagged payloads), other = callees
+arm   group  Ir  I1mr  ILmr  DLmr  Bcm
+probe batch  501383 537 459 2315 10923
+probe edges  1328362 94 82 22548 78
+probe other  152520 267 238 0 2973
+probe total  1982265 898 779 24863 13974   # probe e9e9f0a9 (tip without cbf1b2e8)
+tip   batch  441650 1231 1064 2251 10617
+tip   edges  800189 86 68 21518 111
+tip   other  144423 283 251 1 2749
+tip   total  1386262 1600 1383 23770 13477   # tip 07b61d28
+one   batch  536955 628 545 2317 11981
+one   edges  941736 121 109 22548 133
+one   other  155345 219 182 2 3231
+one   total  1634036 968 836 24867 15345   # one-copy, exit per word >= lo (dropped-one-exit.patch)
+s6    batch  509544 414 350 2349 11052
+s6    edges  830955 181 159 22562 118
+s6    other  154985 239 211 0 3039
+s6    total  1495484 834 720 24911 14209   # 5b8ec420 (batch scan twinned only)
+s7    batch  509048 411 351 2346 11097
+s7    edges  1328348 55 42 22560 80
+s7    other  152075 278 229 1 3140
+s7    total  1989471 744 622 24907 14317   # kept d3aeaca9 (batch scan and scan_edges_inline follow the cycle's loop)

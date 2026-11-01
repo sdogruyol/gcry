@@ -669,10 +669,7 @@ poison-freed: $(BIN)
 # mark stop short of) and requires the audit to name it — an audit that only
 # ever reports zero is worth nothing.
 # `clean` requires a non-trivial edge count with zero misses on the same
-# workload; `hold-unrolled` and `clean-unrolled` repeat both with 1 MiB of
-# pointer slots held, so the batch scan's unrolled loop runs them, not its
-# one-copy loop (each child reports which); `--control` shows nothing is
-# walked with the knob off. ~3 s.
+# workload; `--control` shows nothing is walked with the knob off. ~3 s.
 mark-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/mark_audit.cr -o $(BIN)/mark_audit --error-trace
 	$(BIN)/mark_audit

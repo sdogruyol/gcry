@@ -561,35 +561,10 @@ module Gcry
     # Without them, ns per marked object with one marker: Primes −14% to
     # −16%, JsonParsePure −11% to −12%, JsonGenerate −7% to −14%,
     # Binarytrees −18% to −20% (three sessions,
-    # `bench/log/linux/2026-10-23-mark-cost/`).
-    #
-    # Two copies, out of line so the collector's own frame
-    # (`run_collection_body`) does not carry the loop: `scan_edges_run`
-    # unrolled, and with one copy of the candidate code for a cycle that
-    # follows a major which scanned less than `MARK_UNROLL_MIN_SCANNED`
-    # (`@mark_scan_unrolled`, `reset_mark_scanned_bytes`). Each copy only
-    # costs instruction fetch on the cycles that run it.
-    @[AlwaysInline]
+    # `bench/log/linux/2026-10-23-mark-cost/`). Out of line, so the
+    # collector's own frame (`run_collection_body`) does not carry the loop.
+    @[NoInline]
     private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
-      if @mark_scan_unrolled
-        scan_batch_unrolled(batch, m, shard)
-      else
-        scan_batch_compact(batch, m, shard)
-      end
-    end
-
-    @[NoInline]
-    private def scan_batch_unrolled(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
-      scan_batch_body(batch, m, shard, unrolled: true)
-    end
-
-    @[NoInline]
-    private def scan_batch_compact(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
-      scan_batch_body(batch, m, shard, unrolled: false)
-    end
-
-    @[AlwaysInline]
-    private def scan_batch_body(batch : Pointer(Void*), m : Int32, shard : MarkShard?, unrolled : Bool) : Nil
       unless @mark_prefetch
         i = 0
         while i < m
@@ -643,7 +618,7 @@ module Gcry
           words -= 1
         end
         cursor = user.as(UInt64*)
-        hits &+= scan_edges_run(cursor, cursor + words, base_only, shard, lo, hi, l1, shift, l2_mask, unrolled)
+        hits &+= scan_edges_run(cursor, cursor + words, base_only, shard, lo, hi, l1, shift, l2_mask)
       end
       if @mark_parallel
         count_parallel_scanned_bytes(bytes, shard)
