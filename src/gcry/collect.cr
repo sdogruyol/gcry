@@ -77,8 +77,9 @@ module Gcry
     # (`scan_batch_prefetched`): only after a major that scanned at least
     # `MARK_UNROLL_MIN_SCANNED`. The unrolled loop saves a few instructions
     # per payload and costs a fixed number of cold instruction lines per
-    # cycle; below the floor the lines cost more than the scan saves.
-    @mark_scan_unrolled : Bool = false
+    # cycle; below the floor the lines cost more than the scan saves. Read by
+    # `make mark-audit`, which runs its planted miss through both loops.
+    getter? mark_scan_unrolled : Bool = false
 
     MARK_UNROLL_MIN_SCANNED = 512_u64 * 1024
 
