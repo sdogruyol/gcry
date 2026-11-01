@@ -61,6 +61,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The pace prices a growing heap's next cycle.** It held the threshold to
+  the cost of the cycle just measured, and a heap that grows every stretch
+  reads more in the next one. Primes spent 18–36% of each stretch
+  collecting against the 10% target, and took a tenth collection whenever a
+  few percent of mark time moved its seventh major. The threshold is now
+  `P / (1 − P × survived / (allocated × max(scanned, 64 MiB)))`, with
+  `survived` at most the previous stretch's survival rate, so a one-off step
+  is not priced (`Heap.pace_survived`, `PACE_GROWTH_SCAN_FLOOR`). Five-runner
+  A/B against the previous tree (41293132278): Primes collected 10 times in
+  1 of 75 runs instead of 13, and the JSON rows had 1–2 fewer collections.
+  JsonParsePure's wall was −0.5% to −3.4% on four runners and its peak
+  stayed 1.07× Boehm's. Knuckeotide's peak was −2.6% to +3.6%, and Kemal
+  was level. JsonParseSerializable and JsonParsePull peak 3–16% higher, at
+  most 0.99× Boehm's. The pricing without the trend and the floor put
+  Knuckeotide's peak up 23–26% on Linux
+  (`bench/log/linux/2026-11-02-pace-growth/`).
+
 - **The `String::Builder` and `@[Raises]` reopens apply only below Crystal
   1.22.1,** which fixed both upstream (crystal-lang/crystal#17650 for
   #17645, #17656 for #17644; both on master too). Regressions 22 and 13 pass

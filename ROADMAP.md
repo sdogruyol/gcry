@@ -4722,27 +4722,32 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       and RegexDna +8.6% over the no-unroll probe on `ubuntu-latest` (Perf
       A/B 41298289986); not taken. Open: whether that residual is the
       parallel cycle (both rows mark in parallel, half their Σ mark).
-- [ ] **The pace prices the next cycle at the last one's cost (2026-11-01,
-      `bench/log/macos/2026-11-01-primes-collections/`).** Primes' 9-or-10
-      collections on Intel and Windows are one step of the pacing:
-      the run collects a tenth time when the seventh major lands under
-      about 300.5 MiB live (half of Primes' allocation). Where it lands is
-      set mostly by the fifth cycle's pace, from a 11–34 ms mark against a
-      39–112 ms stretch. Code placement and the runner session move that
-      ratio past the step. 0.39.0 has the step too (same session: Intel 25/60
-      against 0.40's 28/60, Windows 14/20 against 15/20; padded, 17/20 and
-      19/20). The extra major marks the whole ~545 MiB live set. The realized
-      cost is 18–36% of the mutator time in every stretch against the
-      pace's 10% target, because a growing heap's next cycle reads more than
-      the last. Pricing that growth (`pace-growth.patch`, `T = P / (1 − P ×
-      survived / (allocated × scanned))`) gave 9 in every traced and A/B
-      run (Windows Primes −6.2% wall, Perf A/B 41265551528). It also took
-      5.6–20% of the collections off the four JSON rows (wall +0.2% to −4.4%,
-      JsonParsePure 1.07× → 1.10× Boehm's peak on arm64 and Windows) and
-      put Knuckeotide's peak up 17–28% on Linux, where its 80 KiB scanned
-      set jumps to megabytes on a rehash. Not taken. Next: weight the growth
-      by the mark's share of the cycle, or floor the scanned bytes it
-      divides by, then a budget run.
+- [x] **The pace prices the next cycle at the last one's cost — fixed
+      2026-11-02 (`bench/log/linux/2026-11-02-pace-growth/`;
+      found in `bench/log/macos/2026-11-01-primes-collections/`).** Primes'
+      9-or-10 collections on Intel and Windows were one step of the pacing.
+      The run collected a tenth time when the seventh major landed under
+      about 300.5 MiB live, and that was set mostly by the fifth cycle's
+      pace. The realized cost was 18–36% of the mutator time in every
+      stretch against the 10% target, because a growing heap's next cycle
+      reads more than the last. The pace now prices that growth: `T = P /
+      (1 − P × survived / (allocated × max(scanned, 64 MiB)))`. `survived`
+      is held to the previous stretch's survival rate, so one stretch's step
+      is not priced (`Heap.pace_survived`, `PACE_GROWTH_SCAN_FLOOR`). The
+      plain formula (`pace-growth.patch`) put Knuckeotide's peak up 23–26%
+      on Linux, which neither weighting the growth by the mark's share (a
+      growing heap's cycle is 85–98% mark) nor a 16 MiB floor changed. The
+      trend and the 64 MiB floor together leave Knuckeotide's step at the
+      tip's pace. Five-runner A/B against the tip (41293132278): Primes took
+      a tenth collection in 1 of 75 runs against the tip's 13. JsonParsePure
+      had 1–2 fewer collections, wall −0.5% to −3.4% on four runners, and
+      its peak stayed 1.07× Boehm's. Knuckeotide's peak was −2.6% to +3.6%
+      and Kemal was level. The cost is JsonParseSerializable and
+      JsonParsePull's peak, +3% to +16%, at most 0.99× Boehm's. Against
+      v0.39.0 (41293138039, 41297103900) every flagged row is placement
+      except Intel Binarytrees, which the release tip fails the same way
+      (+5.7% unexcused, +3.6% within spread in its own Binarytrees-only
+      sessions; the candidate against the tip is within spread).
 - [x] **Decide what to do with `Gcry::Layout` registration — removed in
       0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
       collided with registered maps
