@@ -32,7 +32,7 @@ private MPROTECT83_SPAN  = 64 * 1024 * 1024
 
 private def mprotect83_page_dirty?(page : UInt64) : Bool
   dirty = false
-  Gcry::Platform.each_mprotect_dirty_page { |p| dirty = true if p == page }
+  Gcry::Platform.each_mprotect_dirty_page(page, page + Gcry::Platform::PAGE) { |p| dirty = true if p == page }
   dirty
 end
 

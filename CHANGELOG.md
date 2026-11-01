@@ -112,6 +112,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The nursery and incremental marking no longer crash on the mprotect
+  page barrier when the heap's chunks change between collections.** The
+  barrier's cards are sized to the heap at the arm, and the dirty-page scan
+  of every minor (and of an incremental cycle's last slice) ran against
+  them after the chunk set had moved on, two ways. It read every dirty page
+  in the cards, including one of a cached large chunk that the allocation
+  path had dirtied and unmapped since (`trim_large_cache`): a fault with
+  nothing mapped. And it protected the old chunks again, including one
+  mapped since the arm below or above the cards (a large allocation's own
+  mapping), so the same collection's sweep faulted on it with no card to
+  claim the fault. Either way the handler passed the fault on and the
+  program died with "Invalid memory access". `GCRY_NURSERY` on the header
+  layout with `GCRY_MPROTECT_BARRIER=1` crashed `bench/pattern_fuzz.cr` in 3
+  of 3 seeds; `GCRY_NURSERY` or `GCRY_INCREMENTAL=1` alone get this backend
+  on aarch64 Linux, which has no soft-dirty. The scan now reads the dirty
+  pages of the chunks the heap holds, replaces cards the heap has outgrown
+  before it protects again, and nothing protects a page outside the cards.
+  Affects 0.38.0 and 0.39.0 (both reproduced; the same code is in 0.35.0
+  to 0.37.0); the default configuration arms no barrier. Regression 99; the
+  overnight stress now runs `pattern_fuzz` with each opt-in on the mprotect
+  backend, and its `pattern-fuzz-headers-freelist` loop on the header
+  layout it is named for (`bench/log/linux/2026-11-02-nursery-mprotect/`).
+
 - **`thread_staged_total` no longer loses births to concurrent thread
   creation.** Every creating thread bumped it with a plain `&+= 1`, and a
   parallel context's schedulers start each other's threads, so two births at

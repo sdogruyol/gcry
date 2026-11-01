@@ -3118,6 +3118,28 @@ kept finding the rest.
       makes on the same runner (Perf A/B 41203821072, pads 41210728957).
       `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`.
 
+- [x] **The mprotect dirty-page scan against a chunk set that moved since
+      the arm — fixed 2026-11-02.** Found by another audit as a SIGSEGV in
+      `minor_collect` (header layout, nursery, `prefer_mprotect_barrier`, a
+      300 000-byte `GC.malloc`/`GC.free` between two minors, 3 of 3, base
+      07b61d28). Two defects in `scan_mprotect_pages`, both the cards
+      (sized to `@heap_min..@heap_max` at the arm) going stale against the
+      chunks: the re-protect after the scan made a chunk mapped since the
+      arm outside the cards read-only with no protected bit, and the sweep's
+      `ChunkHeader.link` on it was an unclaimable `SEGV_ACCERR`; and the
+      scan read every dirty bit in the cards, including a cached large
+      chunk's first page that `detach_large_cache` had dirtied and
+      `release_large_chain` unmapped on the allocation path, a
+      `SEGV_MAPERR`. Fixed: the scan walks the dirty pages chunk by chunk,
+      the re-protect replaces outgrown cards as the arm does, and
+      `mprotect_protect_range` never protects outside the cards. Regression
+      99, two constructions, each control dying in the second minor.
+      Reached with `GCRY_NURSERY` (headers) or `GCRY_INCREMENTAL=1` on the
+      mprotect backend: `GCRY_MPROTECT_BARRIER=1`, or by default on aarch64
+      Linux. 0.38.0 and 0.39.0 reproduce. Opt-in paths only; no perf-ab.
+      The overnight stress had no nursery or mprotect loop and now has
+      both. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
+
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**
       The mechanism now fits without any gap: the crash faults in `find_block`

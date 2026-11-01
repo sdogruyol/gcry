@@ -219,19 +219,58 @@ module Gcry
           @barrier_backend = Platform::BarrierBackend::None
           return false
         end
-        Platform.each_mprotect_dirty_page do |page|
-          scan_range_for_barrier_pointers(
-            Pointer(Void).new(page),
-            Pointer(Void).new(page + Platform::PAGE),
-            nursery_only,
-          )
+        # Through the chunks the heap holds now, not every dirty bit in the
+        # cards. A bit outlives the chunk it was set in: a cached large
+        # chunk the arm protected is written when the allocation path trims
+        # the cache (`detach_large_cache` claims its first page) and then
+        # unmapped (`release_large_chain`), all between two collections, and
+        # its page stays dirty in cards with no chunk under it any more.
+        # Reading that page faulted with nothing mapped there (`SEGV_MAPERR`,
+        # never the barrier's), and the minor died in the forwarded fault.
+        # A dormant chunk holds no objects to find.
+        # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
+        if Platform.mprotect_dirty_scan_by_chunk
+          each_chunk do |chunk|
+            next if ChunkHeader.dormant?(chunk)
+            Platform.each_mprotect_dirty_page(chunk.address, chunk.address + chunk.value.mapped_bytes) do |page|
+              scan_range_for_barrier_pointers(
+                Pointer(Void).new(page),
+                Pointer(Void).new(page + Platform::PAGE),
+                nursery_only,
+              )
+            end
+          end
+        else
+          Platform.each_mprotect_dirty_page(0_u64, UInt64::MAX) do |page|
+            scan_range_for_barrier_pointers(
+              Pointer(Void).new(page),
+              Pointer(Void).new(page + Platform::PAGE),
+              nursery_only,
+            )
+          end
         end
         Platform.clear_mprotect_dirty_bits
-        # Re-arm RO on old chunks for the next mutator window.
-        each_chunk do |chunk|
-          next if ChunkHeader.nursery?(chunk)
-          next if ChunkHeader.dormant?(chunk)
-          Platform.mprotect_protect_range(chunk.address, chunk.address + chunk.value.mapped_bytes)
+        # Re-arm RO on old chunks for the next mutator window — under cards
+        # that cover them. The cards were sized to the heap at the arm, and a
+        # chunk mapped since then can lie below or above them (a large
+        # allocation's own mapping, typically below on Linux). Protecting it
+        # under the old cards made a page no fault could claim, and the
+        # sweep's first write to it — a freed large chunk's free-list link —
+        # died in the forwarded fault. When the heap has outgrown the cards
+        # they are replaced, as the arm does it: every chunk unprotected,
+        # cards sized to the heap now, the old chunks protected again. Both
+        # callers run inside a stop, as the arm after an in-stop sweep does,
+        # and the dirty bits were taken just above.
+        # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
+        if !Platform.mprotect_cards_cover_protection || Platform.mprotect_cards_cover?(@heap_min, @heap_max)
+          each_chunk do |chunk|
+            next if ChunkHeader.nursery?(chunk)
+            next if ChunkHeader.dormant?(chunk)
+            Platform.mprotect_protect_range(chunk.address, chunk.address + chunk.value.mapped_bytes)
+          end
+        else
+          disarm_mprotect_barrier
+          arm_mprotect_on_old_chunks
         end
         @barrier_dirty_rescans += 1
         true

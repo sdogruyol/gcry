@@ -191,6 +191,16 @@ module Gcry
     # False lets a handler that finds the page already claimed return without
     # making it writable, trusting the claimer to.
     class_property mprotect_claim_unprotects : Bool = true
+    # Research only, the control arms of regression 99, each restoring the
+    # code before 2026-11-02 for one of the two ways the dirty-page scan
+    # (`Heap#scan_mprotect_pages`) went wrong on a chunk set that had moved
+    # since the arm. False here: `mprotect_protect_range` protects the whole
+    # range asked for, inside the cards or not, and the re-protect after the
+    # scan keeps the arm's cards however far the heap has grown past them.
+    class_property mprotect_cards_cover_protection : Bool = true
+    # False: the scan reads every dirty page in the cards, chunk under it
+    # or not.
+    class_property mprotect_dirty_scan_by_chunk : Bool = true
 
     # Install SEGV handler that re-enables write + marks page dirty.
     # Faults the barrier did not cause are forwarded to the previous handler.
@@ -272,6 +282,15 @@ module Gcry
       ptr.as(UInt8*).clear(bytes)
       ptr.value = MprotectCards.new(page_lo, pages, nwords)
       @@mp_state.set(ptr)
+    end
+
+    # Whether the current cards cover every page of [low, high). Collector
+    # only. False with no cards at all.
+    def self.mprotect_cards_cover?(low : UInt64, high : UInt64) : Bool
+      st = @@mp_state.get
+      return false if st.null?
+      base = st.value.base
+      low >= base && high <= base + st.value.pages.to_u64 * PAGE
     end
 
     # Unpublish the card state and retire it. Collector only. What is
@@ -358,11 +377,33 @@ module Gcry
     # Protect old (non-nursery) size-class / large chunk pages as read-only.
     # The protected bits are set before the pages are: a write in between
     # faults onto a page the handler already owns.
+    #
+    # Only pages the current cards cover are protected. A protection fault
+    # outside them has no card to claim it: the handler retries it once and
+    # then hands it to the previous action, which for a Crystal program is
+    # "Invalid memory access". Until 2026-11-02 the re-protect after a
+    # dirty-page scan (`Heap#scan_mprotect_pages`) protected a chunk mapped
+    # since the arm below or above the arm's cards — a large allocation, in
+    # a new mapping — with no protected bit anywhere, and the sweep that
+    # followed died on its first write to it. That re-protect now replaces
+    # cards the heap has outgrown; this keeps the rule for every caller,
+    # and with no cards at all (the heap span past the sanity limit in
+    # `mprotect_set_heap_range`, or `malloc` refused them) protects nothing.
+    # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
     def self.mprotect_protect_range(low : UInt64, high : UInt64) : Nil
       return unless @@mp_enabled
       return if high <= low
       page_lo = (low + PAGE - 1) & ~(PAGE - 1)
       page_hi = high & ~(PAGE - 1)
+      if @@mprotect_cards_cover_protection
+        # Collector only, as every swap of the state: it cannot change here.
+        st = @@mp_state.get
+        return if st.null?
+        base = st.value.base
+        limit = base + st.value.pages.to_u64 * PAGE
+        page_lo = base if page_lo < base
+        page_hi = limit if page_hi > limit
+      end
       return if page_hi <= page_lo
       note_protected(page_lo, page_hi, true)
       if hook = @@mprotect_protect_hook
@@ -510,15 +551,29 @@ module Gcry
       @@mp_enabled = false
     end
 
-    def self.each_mprotect_dirty_page(& : UInt64 ->) : Nil
+    # Each dirty page whole inside [low, high) and the cards, the same
+    # rounding as `mprotect_protect_range`: only such a page can have been
+    # protected, and so dirtied. A word with no bit set is passed over whole.
+    def self.each_mprotect_dirty_page(low : UInt64, high : UInt64, & : UInt64 ->) : Nil
       st = @@mp_state.get
       return if st.null?
+      base = st.value.base
+      limit = base + st.value.pages.to_u64 * PAGE
+      page_lo = (low + PAGE - 1) & ~(PAGE - 1)
+      page_lo = base if page_lo < base
+      page_hi = high & ~(PAGE - 1)
+      page_hi = limit if page_hi > limit
+      return if page_hi <= page_lo
       words = dirty_words(st)
-      i = 0
-      while i < st.value.pages
-        if ((words + (i >> 6)).value & (1_u64 << (i & 63))) != 0
-          yield st.value.base + i.to_u64 * PAGE
+      i = ((page_lo - base) // PAGE).to_i32
+      last = ((page_hi - base) // PAGE).to_i32
+      while i < last
+        word = (words + (i >> 6)).value
+        if word == 0
+          i = (i | 63) + 1
+          next
         end
+        yield base + i.to_u64 * PAGE if (word & (1_u64 << (i & 63))) != 0
         i += 1
       end
     end

@@ -149,6 +149,7 @@ build() {
     bin/stw_mt_property_test_rel) locked crystal build -Dgc_none --release bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_rel || ok=1 ;;
     bin/stw_mt_property_test_hdr) locked crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr || ok=1 ;;
     bin/pattern_fuzz) locked crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz || ok=1 ;;
+    bin/pattern_fuzz_hdr) locked crystal build -Dgc_none -Dgcry_block_headers bench/pattern_fuzz.cr -o bin/pattern_fuzz_hdr || ok=1 ;;
     bin/thread_storm_rel) locked crystal build -Dgc_none --release bench/thread_storm.cr -o bin/thread_storm_rel || ok=1 ;;
     bin/claim_stress_rel) locked crystal build -Dgc_none --release bench/claim_stress.cr -o bin/claim_stress_rel || ok=1 ;;
     # Windows' process_spec binaries (see the header).
@@ -207,7 +208,20 @@ loop stw-mt-property-test 200 90 bin/stw_mt_property_test --seed=@SEED@ --iterat
 loop stw-mt-property-test-release 300 90 bin/stw_mt_property_test_rel --seed=@SEED@ --iterations=400 --workers=2,4,8
 loop stw-mt-property-test-headers-freelist 150 90 env GCRY_BITMAP_ALLOC=0 bin/stw_mt_property_test_hdr --seed=@SEED@ --iterations=200 --workers=2,4
 loop pattern-fuzz 30 300 bin/pattern_fuzz --seed=@SEED@ --phases=200 --objects-per-phase=5000
-loop pattern-fuzz-headers-freelist 30 300 env GCRY_BITMAP_ALLOC=0 bin/pattern_fuzz --seed=@SEED@ --phases=200 --objects-per-phase=5000
+# The header layout: until 2026-11-02 this ran the headerless build, where
+# `GCRY_BITMAP_ALLOC=0` is ignored (it says so on stderr), so its runs were
+# `pattern-fuzz` again.
+loop pattern-fuzz-headers-freelist 30 300 env GCRY_BITMAP_ALLOC=0 bin/pattern_fuzz_hdr --seed=@SEED@ --phases=200 --objects-per-phase=5000
+# The page barrier's two opt-ins with the mprotect backend, which is what they
+# get on aarch64 Linux (no soft-dirty) and what `GCRY_MPROTECT_BARRIER=1`
+# forces elsewhere. No loop ran either until 2026-11-02, when the nursery one
+# crashed base in 3 of 3 seeds: the dirty-page scan read a large chunk
+# unmapped since the arm and protected one mapped outside its cards
+# (`bench/log/linux/2026-11-02-nursery-mprotect/`). The nursery needs the
+# header layout. Off Linux there is no mprotect barrier and the knob is
+# ignored: the loops run the opt-in alone.
+loop pattern-fuzz-nursery-mprotect 20 300 env GCRY_NURSERY=262144 GCRY_MPROTECT_BARRIER=1 bin/pattern_fuzz_hdr --seed=@SEED@ --phases=200 --objects-per-phase=5000
+loop pattern-fuzz-incremental-mprotect 20 300 env GCRY_INCREMENTAL=1 GCRY_MPROTECT_BARRIER=1 bin/pattern_fuzz --seed=@SEED@ --phases=200 --objects-per-phase=5000
 loop claim-stress-lazy 200 90 bin/claim_stress_rel --seconds=5 --workers=4 --seed=@SEED@
 loop claim-stress-in-stop 300 90 env GCRY_DISABLE_LAZY_SWEEP=1 bin/claim_stress_rel --seconds=5 --workers=4 --seed=@SEED@
 loop thread-storm-release 200 120 bin/thread_storm_rel --iterations=2000 --workers=16
