@@ -73,13 +73,13 @@ module Gcry
     # cycle (`take_parallel_scanned_bytes`).
     getter mark_scanned_bytes : UInt64 = 0_u64
 
-    # Whether this cycle's edge scans (`scan_batch_prefetched`,
-    # `scan_edges_inline`) run the unrolled word loop: only after a major that
-    # scanned at least `MARK_UNROLL_MIN_SCANNED`. The unrolled loop saves
-    # about a tenth of the batch scan's instructions and costs a fixed
-    # number of cold instruction lines per cycle, about 1 µs on the x86 host
-    # and 2–3 µs on `ubuntu-latest`; at 0.09 ns a scanned byte (JsonGenerate)
-    # that breaks even near 100–300 KiB. On crystal-metric, Revcomp, RegexDna
+    # Whether this cycle's batch scan (`scan_batch_prefetched`) runs the
+    # unrolled word loop: only after a major that scanned at least
+    # `MARK_UNROLL_MIN_SCANNED`. The unrolled loop saves about a tenth of the
+    # batch scan's instructions and costs a fixed number of cold instruction
+    # lines per cycle, about 1 µs on the x86 host and 2–3 µs on
+    # `ubuntu-latest`; at 0.09 ns a scanned byte (JsonGenerate) that breaks
+    # even near 100–300 KiB. On crystal-metric, Revcomp, RegexDna
     # and the Base64 rows scan 71–73 KiB every cycle, Primes' and the JSON
     # rows' short cycles under 240 KiB and their long ones from 2.6 MiB;
     # Binarytrees (71 KiB–8 MiB) and Knuckeotide cross the floor

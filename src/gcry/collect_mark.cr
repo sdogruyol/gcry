@@ -668,24 +668,17 @@ module Gcry
     # full — not in the table, outside the chunk's blocks, a large or nursery
     # chunk — goes to `mark_impl`, which stays the authority.
     #
-    # Unrolled or one copy as the cycle's batch scans are
-    # (`@mark_scan_unrolled`), each out of line.
+    # Always unrolled, short cycle or not: the payloads that come here are
+    # the large and untagged ones, and on a long run of words below the span
+    # the one-copy loop is a taken branch per word. Following the cycle's
+    # choice (`@mark_scan_unrolled`) put 30–37% on Base64Encode's and
+    # Base64Decode's Σ mark on `ubuntu-latest` (393 and 224 collections of
+    # 72 KiB, about 64 KiB of it scanned here; Perf A/B 41294029368).
     private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
-      hits = @mark_scan_unrolled ? scan_edges_unrolled(cursor, words, base_only, shard) : scan_edges_compact(cursor, words, base_only, shard)
+      hits = scan_edges_run(cursor, cursor + words, base_only, shard,
+        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: true)
       # `radix_note_fast_hit`, once per payload.
       @radix_fast_hits &+= hits unless @mark_parallel
-    end
-
-    @[NoInline]
-    private def scan_edges_unrolled(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : UInt64
-      scan_edges_run(cursor, cursor + words, base_only, shard,
-        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: true)
-    end
-
-    @[NoInline]
-    private def scan_edges_compact(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : UInt64
-      scan_edges_run(cursor, cursor + words, base_only, shard,
-        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: false)
     end
 
     # `scan_edges_inline`'s loop over the words in `[p, finish)`, with the span
@@ -725,10 +718,10 @@ module Gcry
       # them from memory (callgrind), Σ mark +9% to +15%. Keeping one copy
       # behind an unrolled search for the next candidate cost 10% to 39%
       # more instructions than the one-copy loop on a parsed JSON graph,
-      # against the unrolled loop's −10%, in all three shapes tried. So a
-      # cycle after a major that scanned under `MARK_UNROLL_MIN_SCANNED`
-      # runs the one-copy loop instead (`@mark_scan_unrolled`,
-      # `bench/log/linux/2026-11-02-mark-short/`).
+      # against the unrolled loop's −10%, in all three shapes tried. So the
+      # batch scan of a cycle after a major that scanned under
+      # `MARK_UNROLL_MIN_SCANNED` runs the one-copy loop instead
+      # (`@mark_scan_unrolled`, `bench/log/linux/2026-11-02-mark-short/`).
       if unrolled
         # From `quad_end` on fewer than four words are left. Compared as
         # addresses, so a payload of under three words never forms a
