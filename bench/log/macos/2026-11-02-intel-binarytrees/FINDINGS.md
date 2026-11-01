@@ -157,11 +157,23 @@ where `collect.cr` is met.
   hot field's offset is below every other field's (`@type.instance_vars`).
   It is green on the fix and red on the tip ("Expected 86723 to be LessThan
   8").
-- Regression 86's control arm (the slow path without the wipe) now finds 0
-  stale words on x86-64 Linux, where it found 2: with the advance out of
-  line, `Heap#malloc`'s frame no longer leaves unwritten slots below it. The
-  spec no longer requires a non-zero control there. It still requires 0 in
-  the fixed arm and still checks where the wipe starts.
+- Regression 86's control arm (the slow path without the wipe) found 0
+  stale words on x86-64 Linux with the fix, where it found 2: with the
+  advance out of line, `Heap#malloc`'s frame no longer leaves unwritten
+  slots below it. The control is now deterministic instead. A research knob,
+  `Heap#slow_wipe_gap`, makes `allocate_wipe` tail-call
+  `allocate_traced_below_gap`, which builds the slow path's frames below 32
+  words nothing writes, inside the wipe's band. The spec plants its pattern
+  there; the control must find it (> 0) on every target, the fixed arm none,
+  and a third arm (wipe on, no gap) none. `--release`, regressions 79 and 86,
+  5/5 in all four runs:
+
+  | tree | layout | control | fixed | no gap |
+  |---|---|---:|---:|---:|
+  | fix | default | 27 | 0 | 0 |
+  | fix | `-Dgcry_block_headers` | 26 | 0 | 0 |
+  | tip `16a6804b` with the hook | default | 25 | 0 | 0 |
+  | tip `16a6804b` with the hook | `-Dgcry_block_headers` | 25 | 0 | 0 |
 
 Fast-path fields, byte offset in `Heap` (`runs/offsets-*.txt`, from
 `offsets.cr`, x86-64). Darwin agrees: the fix's `Heap#malloc` reads
@@ -221,13 +233,13 @@ rechecks, 15 reps each, same pads:
 | 41339843203 | v0.39.0 | +0.4% [−5.0, +3.8] |
 | 41339851130 | tip | **−6.0% [−10.9, −3.4]** |
 
-**Local, on the final tree, all passing:**
+**Local, all passing** (format, lint and both typechecks rerun after the regression 86 hook):
 
 - `verify.sh`: format, lint, `spec/all_specs.cr` (307 examples; 330 with
   block headers; 307 with invariants), `process_spec` (366; 367 and 367 in
   the block-header arms);
 - `make windows-typecheck` and `make darwin-typecheck`;
-- `make alloc-entry-frame`, 5/5 after the regression 86 change;
+- `make alloc-entry-frame`, 5/5 with regression 86's planted control (both layouts, fix and tip);
 - `process_spec` under Crystal 1.22.2: 366 examples, 0 failures.
 
 ## Open
