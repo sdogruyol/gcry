@@ -31,6 +31,14 @@
 #   --control the knob off: zero edges walked, so the other arms' numbers are
 #             attributable to it.
 #
+# The batch scan has two word loops (`scan_batch_prefetched`): one copy of the
+# candidate code for a cycle after a major that scanned under
+# `MARK_UNROLL_MIN_SCANNED`, as these small heaps do, and the unrolled loop
+# otherwise. `hold-unrolled` and `clean-unrolled` repeat the two arms with
+# 1 MiB of pointer slots held, so the collections that see the planted
+# pointers run the unrolled loop; each child reports which loop its first of
+# them ran, and the parent checks it.
+#
 #   crystal build -Dgc_none bench/mark_audit.cr -o bin/mark_audit
 #   GCRY_MARK_AUDIT=1 bin/mark_audit
 #   bin/mark_audit --control
@@ -64,26 +72,33 @@ end
 def run_child(arm : String) : NoReturn
   heap = Gcry.default_heap
   keeper = [] of Slacker
+  # Null slots, read word by word: the next major's loop choice comes from
+  # this collection's scanned bytes.
+  ballast = arm.ends_with?("-unrolled") ? Array(Void*).new(131_072, Pointer(Void).null) : [] of Void*
+  GC.collect
 
   200.times do
     s = Slacker.new
     child = GC.malloc(48)
-    case arm
-    when "hold"
+    if arm.starts_with?("hold")
       # Reachable only through the slack: the mark cannot see it, the audit can.
       s.plant(child)
-    when "clean"
+    else
       # Reachable through a real ivar: both see it.
       s.keep(child)
     end
     keeper << s
   end
 
-  3.times { GC.collect }
+  # The planted children are missed, and freed, in the first of these.
+  GC.collect
+  unrolled = heap.mark_scan_unrolled?
+  2.times { GC.collect }
 
-  STDERR.puts "edges=#{heap.mark_audit_edges} misses=#{heap.mark_audit_misses}"
-  # Keep the keeper alive across the collections above.
+  STDERR.puts "edges=#{heap.mark_audit_edges} misses=#{heap.mark_audit_misses} unrolled=#{unrolled}"
+  # Keep the keeper and the ballast alive across the collections above.
   Gcry::Roots.keep_alive(keeper.as(Void*))
+  Gcry::Roots.keep_alive(ballast.as(Void*))
   exit 0
 end
 
@@ -100,10 +115,10 @@ puts "mode: #{control ? "control (GCRY_MARK_AUDIT unset; nothing may be walked)"
 exe = Process.executable_path.not_nil!
 failures = [] of String
 
-["hold", "clean"].each do |arm|
+["hold", "clean", "hold-unrolled", "clean-unrolled"].each do |arm|
   env = control ? {"GCRY_MARK_AUDIT" => "0"} : {"GCRY_MARK_AUDIT" => "1"}
   # The planted miss is what makes the slack unreachable to the mark; see the header.
-  env["GCRY_MARK_TEST_SHORT_TID"] = Slacker.crystal_instance_type_id.to_s if arm == "hold"
+  env["GCRY_MARK_TEST_SHORT_TID"] = Slacker.crystal_instance_type_id.to_s if arm.starts_with?("hold")
   captured = IO::Memory.new
   Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
   text = captured.to_s
@@ -112,9 +127,16 @@ failures = [] of String
     failures << "#{arm}: the child did not report its counters. What it said:\n#{text.lines.first(6).join("\n")}"
     next
   end
-  edges = line.split(' ')[0].split('=')[1].to_u64
-  misses = line.split(' ')[1].split('=')[1].to_u64
-  puts "#{arm}: #{edges} edges walked, #{misses} missed"
+  fields = line.split(' ').to_h { |f| {f.split('=')[0], f.split('=')[1]} }
+  edges = fields["edges"].to_u64
+  misses = fields["misses"].to_u64
+  unrolled = fields["unrolled"]? == "true"
+  puts "#{arm}: #{edges} edges walked, #{misses} missed, #{unrolled ? "unrolled" : "one-copy"} loop"
+
+  if unrolled != arm.ends_with?("-unrolled")
+    failures << "#{arm}: the planted collection ran the #{unrolled ? "unrolled" : "one-copy"} loop, " \
+                "so this arm does not test the loop it is named for"
+  end
 
   if control
     failures << "#{arm}: the knob is off but #{edges} edges were walked" if edges > 0
@@ -127,14 +149,14 @@ failures = [] of String
   end
 
   case arm
-  when "hold"
+  when .starts_with?("hold")
     if misses == 0
-      failures << "hold: a pointer the mark was made to stop short of is an edge it does not " \
+      failures << "#{arm}: a pointer the mark was made to stop short of is an edge it does not " \
                   "follow, and the audit did not name it — it cannot detect a missed edge"
     end
-  when "clean"
+  else
     if misses > 0
-      failures << "clean: #{misses} missed edge(s) with nothing planted. Either the mark is " \
+      failures << "#{arm}: #{misses} missed edge(s) with nothing planted. Either the mark is " \
                   "incomplete on this workload, or the audit reports edges that are not real"
     end
   end
