@@ -1,0 +1,44 @@
+name: probe pace growth
+
+# Probe only, on `probe/pace-growth-*`: pace variants (GCRY_PACE_VARIANT,
+# GCRY_PACE_FLOOR on one probe build), every arm traced, peak RSS where the OS
+# reports it.
+on:
+  push:
+    branches: ["probe/pace-growth-*"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - env:
+          PROBE_BENCHES: "Primes Knuckeotide JsonParsePure JsonGenerate JsonParseSerializable JsonParsePull Binarytrees"
+          PROBE_REPS: "12"
+          PROBE_ARMS: >-
+            tip=KNOB
+            g1=KNOB|GCRY_PACE_VARIANT=1
+            g2=KNOB|GCRY_PACE_VARIANT=2
+            g3=KNOB|GCRY_PACE_VARIANT=3
+            g1f16=KNOB|GCRY_PACE_VARIANT=1,GCRY_PACE_FLOOR=16777216
+            g1f64=KNOB|GCRY_PACE_VARIANT=1,GCRY_PACE_FLOOR=67108864
+            g3f64=KNOB|GCRY_PACE_VARIANT=3,GCRY_PACE_FLOOR=67108864
+        run: bench/runner_ab/probe_pace.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.os }}
+          path: probe-out

@@ -129,6 +129,7 @@ module Gcry
         len = append_u64(buf, len, "size_class_live_bytes", heap.size_class_live_bytes)
         len = append_u64(buf, len, "scanned_bytes", heap.mark_scanned_bytes)
         len = append_u64(buf, len, "threshold_pace_pct", heap.threshold_pace_pct)
+        len = append_u64(buf, len, "bytes_before_gc", heap.bytes_before_gc)
         # Post-STW reclaim (munmap / dormant / page release / large trim).
         append_u64(buf, len, "flush_ns", heap.last_phase_flush_ns)
       end

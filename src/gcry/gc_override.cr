@@ -452,6 +452,13 @@ module GC
       if pace = env_u64("GCRY_THRESHOLD_PACE")
         heap.threshold_pace_max_pct = pace.clamp(100_u64, 1000_u64)
       end
+      # PROBE ONLY (pace-growth-040): pace variant and scanned-bytes floor.
+      if v = env_u64("GCRY_PACE_VARIANT")
+        heap.pace_variant = v
+      end
+      if f = env_u64("GCRY_PACE_FLOOR")
+        heap.pace_floor = f
+      end
       # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
       if (ec = env_u64("EC_PARALLELISM")) && ec > 1
