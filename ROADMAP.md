@@ -4113,16 +4113,19 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       finish trimmed the cache and did nothing else. Now it runs the major's
       code, `Heap#settle_large_cache`, which was moved out of
       `run_collection_body` (the trim to 0 before the flushes, the takes,
-      keep or trim, the budget, the adaptive retain). That code now keeps a
+      keep or trim, the budget, the adaptive retain). A major now keeps a
       cycle's frees for recycling only while no page barrier is armed:
       `recycle_large_mapping` refuses while one is armed, and under
       `GCRY_INCREMENTAL=1` one is armed between every pair of cycles. Without
       that condition Revcomp's sliced runs peaked at 658 MiB instead of 621
       and recycled nothing. With it, the nine benches' peaks under
-      `GCRY_INCREMENTAL=1` match base. Keep rule on five runners, Perf A/B
-      41289615508: every flagged row is excused by the same-session pads.
-      `Heap#inc_finish_large_settle = false` is the control
-      (`bench/log/linux/2026-11-02-large-cache-incr/`).
+      `GCRY_INCREMENTAL=1` match base. Minors are as before. The first version
+      applied the condition to them too, and under the nursery
+      `bench/gzip_free_loop.cr` then unmapped 1.3 GB and mapped 19 868 chunks
+      instead of 37. Regression 95's *minor* window pins this. Keep rule on
+      five runners, Perf A/B 41296291944: every flagged row is excused by
+      the same-session pads. `Heap#inc_finish_large_settle = false` is the
+      control (`bench/log/linux/2026-11-02-large-cache-incr/`).
 - [x] **Freeing a large object costs O(live large chunks), so freeing many is
       quadratic (diagnosed 2026-10-01) — closed 2026-10-14.** Measured with
       `bench/log/linux/2026-10-01-large-free-quadratic/largefree_scale.cr`:
