@@ -17,6 +17,14 @@ private record Cycle, count : Int32, drift : Int64 do
   end
 end
 
+# Zeroes 64 KiB of dead stack below the caller's frame.
+@[NoInline]
+private def drift_scrub : Nil
+  buf = uninitialized StaticArray(UInt8, 65536)
+  buf.to_unsafe.clear(buf.size)
+  asm("" :: "r"(buf.to_unsafe) : "memory" : "volatile")
+end
+
 # Allocate `count` blocks, free every one explicitly, collect, and report how
 # far the counter came back.
 private def drift_cycle(heap, count : Int32) : Cycle
@@ -32,6 +40,20 @@ private def drift_cycle(heap, count : Int32) : Cycle
   # first cycle read -110 on x86_64 and -1007 on aarch64 / -1006 on darwin,
   # while a second cycle on the same process read -2, because the first cycle
   # had already done the cleaning.
+  #
+  # The dead frames below this one go first. A word an earlier example left
+  # there can hold a dead object that has a finalizer, and with it everything
+  # it reaches; the four collections leave it, and once the word is gone it
+  # takes two more, one to run the finalizer and one to reclaim. When this
+  # cycle's own calls overwrite the word, the reclaim lands between the
+  # baseline and the check: count=10000 drift=-1457 and -1225 in 2 of 160
+  # suite-order runs (2026-11-02, `87ccf4f4` block headers and the 0.40 tip
+  # headerless on Crystal 1.22.2). A copy that scrubbed after the four
+  # collections showed it in 1 run of 30: a fifth collection changed nothing,
+  # the scrub's collection ran one finalizer and the next reclaimed 1 686
+  # objects (`bench/log/linux/2026-11-02-scrub-band/`). Scrubbed first, the
+  # four collections run the finalizer and reclaim before the baseline.
+  drift_scrub
   4.times { GC.collect }
   # No collection between the baseline and the check: the arithmetic below
   # assumes none. A background one (`GCRY_IDLE_RELEASE_MS`) landing in this
