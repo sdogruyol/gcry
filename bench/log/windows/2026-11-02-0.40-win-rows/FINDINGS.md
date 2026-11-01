@@ -28,10 +28,12 @@ sessions), no Boehm arm. `var` = the 0.40 tip `07b61d28`, `base` =
 of all their code (`ab.sh`, `prep`). `AB_REVS` added arms built from other
 revisions' `src/`, padded the same way (`revpN`). The control row,
 Fannkuchredux, works on stack arrays: 3 collections a run, 0.03 ms of
-marking. Raw: `raw/` (per-session `summary.md`, the placement and Primes
-sessions' `runs.json`, `phases.txt`, `phases-wall.txt`, `revert-bands.md`);
-`bands.py` and `phases.py` print the tables below from a session's artifact
-(`phases.py` reads the artifact's `syms/` link maps).
+marking. Data: `sessions/` (each session's `summary.md`; the two EPYC 7763
+placement sessions' `runs.json`; `phases.txt`, `phases-wall.txt`,
+`revert-bands.md` and `primes-tenth.txt` from all of them). The rest, link
+maps included, is in each run's `probe-win-rows-<session>` artifact (30
+days). `bands.py` and `phases.py` print the tables below from an artifact
+(`phases.py` reads its `syms/` link maps).
 
 | run | branch tip (tag) | sessions (runner CPU) |
 |---|---|---|
@@ -73,7 +75,7 @@ JsonParsePure 1.851–1.900 against 1.850–1.900, JsonParseSerializable
 1.859–1.922 against 1.864–1.929, JsonParsePull 1.846–1.920 against
 1.853–1.928, JsonGenerate 3.110–3.198 against 3.080–3.215, Primes
 1.492–1.540 against 1.418–1.531, Revcomp 3.798–4.046 against 3.751–3.997
-(`raw/phases-wall.txt`).
+(`sessions/phases-wall.txt`).
 
 - **The JSON parse rows** have two placements, 3.5–6% apart: phases 0 and
   32 slow, 16 and 48 fast, in both trees (JsonParseSerializable 0.730–0.739
@@ -90,7 +92,7 @@ JsonParsePure 1.851–1.900 against 1.850–1.900, JsonParseSerializable
 - **Primes**: §3.
 - **Fannkuchredux** moves 4% with placement too (phase 16 slow in both).
 
-The same in the other three placement sessions (`raw/phases.txt`;
+The same in the other three placement sessions (`sessions/phases.txt`;
 `placement3` on an EPYC 7763, `placement2` and `placement4` on an EPYC
 9V74): every row's ranges overlap, in timed section and wall time, and
 same-phase medians are −2.3% to +3.3% apart, Primes aside (§3); the widest
@@ -115,7 +117,7 @@ counts the trees read the same per phase: at 10 collections 0.40's arms are
 1.423–1.472 s and 0.39.0's 1.422–1.478 (`placement`), 1.208–1.220 against
 1.215–1.234 (`placement2`), 1.531–1.583 against 1.517–1.572 (`placement3`).
 The tenth comes more often with 0.40, in all four placement sessions, but at
-a rate placement moves for both trees:
+a rate placement moves for both trees (`sessions/primes-tenth.txt`):
 
 | session | 0.40 arms at 10 (var, p16, p32, p48, p64) | 0.39.0 arms at 10 (base, bp16, bp32, bp48, bp64) |
 |---|---|---|
@@ -132,7 +134,8 @@ unroll (`cbf1b2e8`) makes the mark cheaper, so a probe with it reverted
 (`archive/probe/keep-040-unroll`) went into three Primes-only sessions, 31
 reps, 0.40, 0.39.0 and the tip less the unroll, each unpadded and padded by
 16, 32 and 48 bytes (0.40 and the probe at phases 32, 0, 16, 32; 0.39.0 at
-48, 16, 32, 48). Runs at 10 collections, summed over the four arms (of 124):
+48, 16, 32, 48). Runs at 10 collections, summed over the four arms (of 124;
+`sessions/primes-tenth.txt`):
 
 | session | 0.40 | tip less unroll | 0.39.0 | timed-section medians: 0.40 / less unroll / 0.39.0 |
 |---|---:|---:|---:|---|
@@ -163,7 +166,7 @@ unpadded 0.39.0. The reverts: `cbf1b2e8` (mark unroll,
 `-reserve`), `b209b395` alone (staging counter, `archive/probe/win-rows-staging`).
 `2c600dfb`, `bf607374` and the Darwin heap commits compile to nothing here
 on 1.21.0 (keep-rule file, intro). Timed-section medians, 0.40 range / tip
-less the commit range / 0.39.0 (`raw/revert-bands.md`):
+less the commit range / 0.39.0 (`sessions/revert-bands.md`):
 
 | session (CPU) | Primes | JsonParsePure | JsonParseSerializable | JsonParsePull | JsonGenerate | Fannkuchredux |
 |---|---|---|---|---|---|---|
@@ -190,7 +193,7 @@ bytes of `Heap` fields `6aa84284` adds (`cursor_free_deferrals`,
 `bitmap_free_split_hook`, `bitmap_free_claim_guard`, unused;
 `archive/probe/win-rows-layout`), so 0.39.0's code reads 0.40's heap field
 offsets (`+0x20` past them, checked in the Windows disassembly). Its four
-placements' range overlaps both trees' on every row (`raw/revert-bands.md`,
+placements' range overlaps both trees' on every row (`sessions/revert-bands.md`,
 `# layout`); the one arm far out, the probe padded by 32 on JsonParsePure
 (0.796 s against 0.664–0.702 for every arm of both trees), is slower than
 0.40 as well. The heap layout is not the cost either.
