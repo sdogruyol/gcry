@@ -314,3 +314,15 @@ failures; `process_spec` 346 / 347 / 347 (headerless, headers, headers with
 `make alloc-entry-frame` 5 examples, 0 failures. `pattern_fuzz --phases=40`
 seeds 1–3 with `GCRY_NURSERY=262144 GCRY_MPROTECT_BARRIER=1` (headers) and
 `GCRY_INCREMENTAL=1 GCRY_MPROTECT_BARRIER=1` (headerless): 6 of 6 pass.
+
+Rebased on `87ccf4f4` (the incremental finish's large-cache settle) and run
+again: format and lint clean (249 inspected); `spec/all_specs.cr` 303 / 325
+/ 303, 0 failures; `process_spec` headerless 358 and headers with
+`GCRY_BITMAP_ALLOC=0` 359, 0 failures; Crystal 1.22.2 358 / 359, 0
+failures; typechecks ok; `make alloc-entry-frame` 5 / 0; regression 99's
+eight arms 30 of 30 each as tabled (headerless *rebuild*/*nocards* too).
+The headers `process_spec` run failed once, in regression 61's "collection
+reclaims the target" example (its positive control expects a conservative
+collection to free a target). Three more runs on this tree passed. On base
+`87ccf4f4` alone, the same example failed in 1 of 3 runs. That is a flake
+already on base, not this change.
