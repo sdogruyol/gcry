@@ -3001,12 +3001,15 @@ module Gcry
                                idle : Bool = false, release_warm : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
       # Everything below the SP is dead here, and it is last cycle's collector
-      # residue. Zero it before this cycle's scan chain overlays and scans it.
+      # residue. Zero it before this cycle's scan chain overlays and scans it,
+      # then the band the scrub's own call left (`collect_band_wipe`).
       collect_scrub
+      collect_band_wipe_here
       run_collection_body(major, scan_stack, roots, coalesce, idle, release_warm)
       # The frames this cycle just used are dead below the SP again. Zero them
       # so nothing between now and the next entry scans them as live.
       collect_scrub
+      collect_band_wipe_here
     end
 
     @[NoInline]

@@ -147,6 +147,30 @@ module Gcry
     # thread; `make collect-scrub-cost` uses it as the red arm.
     property scrub_libc_bounds : Bool = false
 
+    # The collector scrub leaves `CLEAR_STACK_RED_ZONE + CLEAR_STACK_LEAF_MARGIN`
+    # bytes just below its own SP as they were: its `memset` runs there. That
+    # band is dead once the scrub returns, and it held the allocation slow
+    # path's residue: `cursor_claim_word` leaves a chunk's data start there,
+    # which is the header address of the chunk's first block, accepted as a
+    # pointer into that block, so a fresh chunk's first block was kept through
+    # every collection that built its frames over the word (regression 61's
+    # flake, `bench/log/linux/2026-11-02-reg61-flake/`). `run_collection`
+    # wipes it after each scrub with the slow path's frameless wipe
+    # (`Roots.wipe_below_sp`). `GCRY_COLLECT_BAND_WIPE=0` turns that off, the
+    # control arm of regression 101 and of the measurement
+    # (`bench/log/linux/2026-11-02-scrub-band/`).
+    property collect_band_wipe : Bool = true
+
+    # Regression 101's hook: when not 0, each collector scrub writes
+    # `scrub_band_plant ^ SCRUB_BAND_PLANT_MASK` over the band it skipped
+    # (`scrub_band_low`...`scrub_band_high`, recorded by each collector
+    # scrub) once its `memset` is done: the residue the band wipe exists for,
+    # on every build and layout. Stored masked so the field is no root.
+    property scrub_band_plant : UInt64 = 0_u64
+    SCRUB_BAND_PLANT_MASK = 0x5a5a_a5a5_5a5a_a5a5_u64
+    getter scrub_band_low : UInt64 = 0_u64
+    getter scrub_band_high : UInt64 = 0_u64
+
     # Zero unused stack below the hardware SP (stack grows down).
     def clear_stack(bytes : UInt64 = @clear_stack_bytes) : Nil
       len = clear_stack_guarded(bytes, fiber_bounds: false)
@@ -161,6 +185,15 @@ module Gcry
       return if len == 0
       @collect_scrub_bytes_total += len
       @collect_scrub_runs += 1
+    end
+
+    # The band `collect_scrub` skipped, and the frames it ran on, zeroed from
+    # the caller's frame (see `collect_band_wipe`). Inlined: a call would push
+    # its return address into the range it clears.
+    @[AlwaysInline]
+    protected def collect_band_wipe_here : Nil
+      return unless @collect_band_wipe && @collect_scrub_bytes > 0
+      Roots.wipe_below_sp(Roots.wipe_limit(Roots.hardware_stack_pointer.address))
     end
 
     # Bytes zeroed, 0 when nothing was (disabled, re-entered, or no room).
@@ -273,7 +306,18 @@ module Gcry
       len = high - low
       return 0_u64 if len == 0 || len > Roots::MAX_SCAN_BYTES
 
+      if fiber_bounds
+        @scrub_band_low = high
+        @scrub_band_high = sp_addr
+      end
       Pointer(UInt8).new(low).clear(len)
+      if fiber_bounds && (plant = @scrub_band_plant) != 0
+        p = high & ~7_u64
+        while p < sp_addr
+          Pointer(UInt64).new(p).value = plant ^ SCRUB_BAND_PLANT_MASK
+          p &+= 8
+        end
+      end
       len
     end
 

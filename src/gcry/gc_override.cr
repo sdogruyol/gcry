@@ -946,6 +946,9 @@ module GC
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
       heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
     end
+    # Research only: leave the band below the collector scrub's own call as it
+    # was (`Heap#collect_band_wipe`), the control arm of its measurement.
+    heap.collect_band_wipe = false if env_flag_zero?("GCRY_COLLECT_BAND_WIPE")
     # Research only: the collector scrub's bounds from libc, which is a
     # `/proc/self/maps` parse per call on the initial thread.
     heap.scrub_libc_bounds = true if env_flag_one?("GCRY_SCRUB_LIBC_BOUNDS")
