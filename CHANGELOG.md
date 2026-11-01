@@ -112,6 +112,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A collection no longer leaves the 192 bytes under its own stack scrub
+  as they were.** `run_collection`'s scrubs zero 16 KiB below the scrub's
+  SP but skip the red zone and leaf margin where their `memset` runs. The
+  allocation slow path left a chunk's data start there, the first block's
+  header address, and the collector's stack scan kept that block through
+  every collection built over the word (regression 61's flake: 10 of 100
+  suite-order runs on the trees before this, 0 of 30 after). `run_collection`
+  now wipes 1 KiB below its own SP after each scrub with the slow path's
+  frameless wipe (`Roots.wipe_below_sp`), on every target.
+  `GCRY_COLLECT_BAND_WIPE=0` turns it off (research knob). Regression 101
+  plants a word in the band on every build: the control arm keeps the
+  block and the fixed arm frees it. Keep rule against 0.39.0 on the five
+  runners: every flagged row is placement
+  (`bench/log/linux/2026-11-02-scrub-band/`).
+
+- **Regression 1 no longer fails once in about 80 suite-order runs.** A
+  word in the dead frames below its cycle held a dead object with a
+  finalizer and ~1 700 objects behind it, through all four pre-baseline
+  collections. Once the word goes it takes two more, one to run the
+  finalizer and one to reclaim, and when the cycle's own calls overwrote it
+  the reclaim landed inside the measured window (drift −1 225 and −1 457).
+  The cycle now scrubs those frames before its pre-baseline collections:
+  0 of 40 against 2 of 160. Regression 21's one sighting ("controls kept
+  8 > 1") did not recur in 200 runs, and no probe reproduced it.
+
 - **The nursery and incremental marking no longer crash on the mprotect
   page barrier when the heap's chunks change between collections.** The
   barrier's cards are sized to the heap at the arm, and the dirty-page scan

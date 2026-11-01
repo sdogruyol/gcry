@@ -1,0 +1,77 @@
+--- wt/process_spec/regression/21_boehm_c_abi_spec.cr	2026-11-01 20:17:09.346697336 +0300
++++ d21/diag21.cr	2026-11-01 21:57:07.562172823 +0300
+@@ -1,4 +1,12 @@
+-require "../../src/gcry"
++require "../wt/src/gcry"
++class Gcry::Heap
++  def diag_audit(t : UInt64)
++    @address_space_audit = true
++    @address_space_audited_at = UInt64::MAX
++    audit_address_space_once(t, 16_u64)
++    @address_space_audit = false
++  end
++end
+ require "spec"
+ 
+ # Readiness B4 / M8: code compiled against Boehm's C API inside a gcry process.
+@@ -30,15 +38,22 @@
+ private def fresh_block(&store : Void* ->) : UInt64
+   hidden = 0_u64
+   done = Channel(Nil).new
+-  spawn do
++  body = -> do
++    diag_move("spawn")
+     p = LibGC.malloc_atomic(BLOCK_BYTES)
+     p.as(UInt8*).fill(BLOCK_BYTES) { PATTERN }
+     store.call(p)
+     hidden = hide(p)
+     p = Pointer(Void).null
+     scrub_frames
++    diag_move("send")
+     done.send(nil)
+   end
++  if ENV["CTX"]? == "1"
++    DiagCtx.ctx.spawn { body.call }
++  else
++    spawn { body.call }
++  end
+   done.receive
+   Fiber.yield
+   hidden
+@@ -51,6 +66,13 @@
+   asm("" :: "r"(buf.to_unsafe) : "memory")
+ end
+ 
++
++def diag_move(at)
++  return unless ENV["MOVEAT"]? == at
++  ts = LibC::Timespec.new(tv_sec: 0, tv_nsec: 60_000_000)
++  Fiber.syscall { LibC.nanosleep(pointerof(ts), nil) }
++end
++
+ private def live_and_intact?(hidden : UInt64) : Bool
+   p = unhide(hidden)
+   return false unless LibGC.base(p) == p
+@@ -123,7 +145,14 @@
+       LibGC.add_roots(rooted.as(Void*), (rooted + 1).as(Void*))
+       hidden
+     end
++    diag_move("collect")
++    c0 = Gcry.default_heap.collections
+     collect
++    n = controls.count { |h| live_and_intact?(h) }
++    STDERR.puts "DIAG21 live=#{n} enabled=#{Gcry.default_heap.enabled?} depth=#{Gcry.default_heap.disable_depth} cols=#{Gcry.default_heap.collections - c0} moved=#{Gcry::Platform.current_thread_id != BoehmAbiLog.initial_thread} pinned=#{Gcry.default_heap.sweep_cursor_pinned}"
++    if n > 1
++      controls.each { |h| Gcry.default_heap.diag_audit(h ^ MASK) if live_and_intact?(h) }
++    end
+     controls.count { |h| live_and_intact?(h) }.should be <= 1
+     kept.each { |h| live_and_intact?(h).should be_true }
+   end
+@@ -267,3 +296,7 @@
+     {% end %}
+   end
+ end
++
++module DiagCtx
++  class_getter ctx : Fiber::ExecutionContext::Parallel { Fiber::ExecutionContext::Parallel.new("diag21", 1) }
++end

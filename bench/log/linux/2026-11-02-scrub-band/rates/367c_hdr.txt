@@ -1,0 +1,15 @@
+367c_hdr 1 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 2 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 3 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 4 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 5 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 6 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 7 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 8 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 9 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 10 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 11 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending
+367c_hdr 12 rc=1 fail=[61_free_link_holder_spec.cr ] other=[] 237 examples, 1 failures, 0 errors, 2 pending
+367c_hdr 13 rc=1 fail=[61_free_link_holder_spec.cr ] other=[] 237 examples, 1 failures, 0 errors, 2 pending
+367c_hdr 14 rc=1 fail=[61_free_link_holder_spec.cr ] other=[] 237 examples, 1 failures, 0 errors, 2 pending
+367c_hdr 15 rc=0 fail=[] other=[] 237 examples, 0 failures, 0 errors, 2 pending

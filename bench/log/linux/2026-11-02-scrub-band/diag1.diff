@@ -1,0 +1,52 @@
+--- old/process_spec/regression/1_live_objects_dormant_spec.cr	2026-11-01 20:26:24.276469349 +0300
++++ d1/diag1.cr	2026-11-01 23:36:56.979222177 +0300
+@@ -8,7 +8,14 @@
+ # Trigger: allocate, free everything, collect. After sweep, the empty chunk
+ # goes DORMANT and live_objects must be 0 (or the runtime baseline).
+ 
+-require "../../src/gcry"
++require "../wt/src/gcry"
++lib LibC
++  fun dprintf(fd : Int, fmt : Char*, ...) : Int
++end
++private def d1(tag : String, heap)
++  m = Gcry.metrics(heap)
++  LibC.dprintf(2, "D1 %s live=%llu cols=%llu fin_entries=%llu\n", tag, m.live_objects.to_u64, heap.collections.to_u64, heap.finalizer_entry_count.to_u64)
++end
+ require "spec"
+ 
+ private record Cycle, count : Int32, drift : Int64 do
+@@ -32,7 +39,10 @@
+   # first cycle read -110 on x86_64 and -1007 on aarch64 / -1006 on darwin,
+   # while a second cycle on the same process read -2, because the first cycle
+   # had already done the cleaning.
+-  4.times { GC.collect }
++  4.times { |k| GC.collect; d1("pre#{k}", heap) }
++  GC.collect; d1("extra", heap)
++  d1_scrub
++  GC.collect; d1("scrubbed", heap)
+   # No collection between the baseline and the check: the arithmetic below
+   # assumes none. A background one (`GCRY_IDLE_RELEASE_MS`) landing in this
+   # window reclaimed the few objects made just before the baseline and read
+@@ -51,8 +61,9 @@
+   ptrs.each { |p| GC.free(p) }
+   ptrs.clear
+ 
++  d1("freed", heap)
+   # Collect — the empty chunks should go DORMANT.
+-  4.times { GC.collect }
++  4.times { |k| GC.collect; d1("post#{k}", heap) }
+ 
+   Cycle.new(count, Gcry.metrics(heap).live_objects.to_i64 - baseline.to_i64)
+ end
+@@ -102,3 +113,10 @@
+     (big.drift - small.drift).abs.should(be < 500, detail)
+   end
+ end
++
++@[NoInline]
++private def d1_scrub : Nil
++  buf = uninitialized StaticArray(UInt8, 65536)
++  buf.to_unsafe.clear(buf.size)
++  asm("" :: "r"(buf.to_unsafe) : "memory" : "volatile")
++end
