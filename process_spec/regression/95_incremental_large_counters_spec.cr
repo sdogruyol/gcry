@@ -79,48 +79,100 @@ private def c95_since(heap : Gcry::Heap) : UInt64
   heap.@large_alloc_since_major.get
 end
 
-private record C95Counters, since : UInt64, hits : UInt64, misses : UInt64, budget : UInt64
+private record C95Counters, since : UInt64, hits : UInt64, misses : UInt64, budget : UInt64,
+  cache : UInt64, mapped : UInt64
 
 private def c95_counters(heap : Gcry::Heap) : C95Counters
-  C95Counters.new(c95_since(heap), heap.large_cache_hits, heap.large_cache_misses, heap.large_recycle_budget)
+  C95Counters.new(c95_since(heap), heap.large_cache_hits, heap.large_cache_misses,
+    heap.large_recycle_budget, heap.large_free_bytes, heap.chunks_mapped)
 end
 
-# Runs one whole incremental cycle; false when none began. Any cycle an
-# allocation had started is finished first.
-private def c95_cycle(heap : Gcry::Heap) : Bool
+# The control's budget, from the cycle's `Start` to its `End`. The finish it
+# runs writes no budget, so the planted value is there at `End`, less only
+# what chunks mapped meanwhile spent (`map_chunk`, saturating, and
+# `chunks_mapped` counts every such mapping; the large paths that spend it
+# also move `since`, which the control holds equal). With no chunk mapped it
+# is the same to the byte. Sometimes one is mapped, 128 KiB, by *another*
+# thread with the world running between slices (`heap_resize_hook` probe:
+# 39 of 1 200 children in the full block-headers suite binary, never this
+# thread, never in a stop); then the budget must have dropped and still be
+# the planted value's, which nothing a finish that sets it writes can be: 0,
+# or the cache's bytes.
+private def c95_budget_kept(before : C95Counters, after : C95Counters) : Nil
+  if after.mapped == before.mapped
+    after.budget.should eq(before.budget)
+  else
+    after.budget.should be < before.budget
+    after.budget.should be > C95_STALE // 2
+  end
+end
+
+# Runs one whole incremental cycle and returns the counters as its `Start`
+# event saw them and as its `End` event did, or nil when no cycle began. Any
+# cycle an allocation had started is finished first.
+#
+# Read by `collection_event_hook`, on this thread inside the cycle: `Start`
+# fires in `begin_incremental`, `End` after the finish's large-cache passes,
+# and between the two this thread runs only `collect_a_little`. Read before
+# and after the cycle instead, as until 2026-11-01, the control's budget
+# equality also took in the spec's own allocations and any other thread's,
+# and read the planted 2^40 less 128 KiB once in about 45 block-headers
+# suite runs.
+private def c95_cycle(heap : Gcry::Heap) : {C95Counters, C95Counters}?
   10_000.times do
     break unless heap.incremental_in_progress?
     heap.collect_a_little
   end
   majors = heap.major_collections
+  zero = C95Counters.new(0_u64, 0_u64, 0_u64, 0_u64, 0_u64, 0_u64)
+  at = StaticArray(C95Counters, 2).new(zero)
+  seen = StaticArray(Bool, 2).new(false)
+  at_ptr = at.to_unsafe
+  seen_ptr = seen.to_unsafe
+  saved = heap.collection_event_hook
+  # Inside the collection: allocates nothing (a record is a value).
+  heap.collection_event_hook = ->(event : Gcry::Heap::CollectionEvent) do
+    i = event.start? ? 0 : (event.end? ? 1 : -1)
+    if i >= 0 && !seen_ptr[i]
+      at_ptr[i] = c95_counters(heap)
+      seen_ptr[i] = true
+    end
+    nil
+  end
   finished = heap.collect_a_little
-  return false unless finished || heap.incremental_in_progress?
+  began = finished || heap.incremental_in_progress?
   10_000.times do
-    break if finished
+    break if finished || !began
     finished = heap.collect_a_little
   end
+  heap.collection_event_hook = saved
+  return nil unless began
   fail "the incremental cycle never finished" unless finished
-  # One major, and it was the sliced one.
+  # One major, and it was the sliced one, seen at both ends.
   (heap.major_collections - majors).should eq(1)
-  true
+  seen[0].should be_true
+  seen[1].should be_true
+  {at[0], at[1]}
 end
 
 # *counters*: counts a miss, a hit and large bytes, plants the budget, then
-# runs the cycle. The counters before and after it, or nil.
+# runs the cycle. The counters at its start and end, or nil.
 private def c95_counters_window(heap : Gcry::Heap) : {C95Counters, C95Counters}?
   keep = [GC.malloc(C95_MISS_BYTES)]
   first = GC.malloc(C95_HIT_BYTES)
   GC.free(first)
   keep << GC.malloc(C95_HIT_BYTES)
   heap.large_recycle_budget = C95_STALE
-  before = c95_counters(heap)
-  before.since.should be > 0
-  before.hits.should be > 0
-  before.misses.should be > 0
-  return nil unless c95_cycle(heap)
-  after = c95_counters(heap)
+  window = c95_cycle(heap)
   keep.size.should eq(2)
-  {before, after}
+  return nil unless window
+  start, _ = window
+  start.since.should be > 0
+  start.hits.should be > 0
+  start.misses.should be > 0
+  # Planted, less at most what the spec mapped before the cycle began.
+  start.budget.should be > C95_STALE // 2
+  window
 end
 
 # Large blocks nothing refers to once this frame returns.
@@ -131,9 +183,9 @@ end
 
 # *recycle*: drops large blocks, plants the budget, then runs the cycle.
 # Returns what the cache held after the flushes (seen at the first counter
-# stage; 0 when the finish never reached it), the cache and the budget after
-# the cycle, or nil.
-private def c95_recycle_window(heap : Gcry::Heap) : {UInt64, UInt64, UInt64}?
+# stage; 0 when the finish never reached it) and the counters at the cycle's
+# start and end, or nil.
+private def c95_recycle_window(heap : Gcry::Heap) : {UInt64, C95Counters, C95Counters}?
   c95_drop_large
   heap.large_recycle_budget = C95_STALE
   flushed = Atomic(UInt64).new(0_u64)
@@ -142,10 +194,12 @@ private def c95_recycle_window(heap : Gcry::Heap) : {UInt64, UInt64, UInt64}?
     flushed.set(heap.large_free_bytes) if stage == :before_large_take
     nil
   end
-  ran = c95_cycle(heap)
+  window = c95_cycle(heap)
   heap.post_stw_hook = nil
-  return nil unless ran
-  {flushed.get, heap.large_free_bytes, heap.large_recycle_budget}
+  return nil unless window
+  start, finish = window
+  start.budget.should be > C95_STALE // 2
+  {flushed.get, start, finish}
 end
 
 private C95_FREED_BYTES = 304 * 1024 + 4096
@@ -213,6 +267,7 @@ describe "Regression: the incremental cycle's finish takes the large-cache count
     next c95_skip unless heap = c95_heap(false)
     next c95_skip unless window = c95_counters_window(heap)
     _, after = window
+    # At the cycle's `End`: the finish took the counts and set the budget.
     after.since.should eq(0)
     after.hits.should eq(0)
     after.misses.should eq(0)
@@ -225,11 +280,12 @@ describe "Regression: the incremental cycle's finish takes the large-cache count
     heap.inc_finish_large_settle = false
     next c95_skip unless window = c95_counters_window(heap)
     before, after = window
+    # Start to `End` of the cycle, with nothing but the cycle running.
     after.since.should eq(before.since)
     after.hits.should eq(before.hits)
     after.misses.should eq(before.misses)
-    after.budget.should eq(before.budget)
-    STDOUT.puts "#{LARGE95_CONTROL_MARK} (since=#{after.since}, hits=#{after.hits}, misses=#{after.misses}, budget=#{after.budget})"
+    c95_budget_kept(before, after)
+    STDOUT.puts "#{LARGE95_CONTROL_MARK} (since=#{after.since}, hits=#{after.hits}, misses=#{after.misses}, budget=#{after.budget}, chunks mapped in the cycle=#{after.mapped - before.mapped})"
     STDOUT.flush
   end
 
@@ -237,11 +293,11 @@ describe "Regression: the incremental cycle's finish takes the large-cache count
     next unless ENV["GCRY_LARGE95_CHILD"]? == "recycle-fixed"
     next c95_skip unless heap = c95_heap(true)
     next c95_skip unless window = c95_recycle_window(heap)
-    flushed, cached, budget = window
+    flushed, _, after = window
     # The sweep cached dead blocks, and the finish did not keep them.
     flushed.should be >= C95_DEAD_BYTES
-    cached.should be <= heap.large_cache_retain
-    budget.should eq(0)
+    after.cache.should be <= heap.large_cache_retain
+    after.budget.should eq(0)
   end
 
   it "large95 child recycle control" do
@@ -249,9 +305,9 @@ describe "Regression: the incremental cycle's finish takes the large-cache count
     next c95_skip unless heap = c95_heap(true)
     heap.inc_finish_large_settle = false
     next c95_skip unless window = c95_recycle_window(heap)
-    _, _, budget = window
-    budget.should eq(C95_STALE)
-    STDOUT.puts "#{LARGE95_CONTROL_MARK} (budget=#{budget})"
+    _, before, after = window
+    c95_budget_kept(before, after)
+    STDOUT.puts "#{LARGE95_CONTROL_MARK} (budget=#{after.budget}, chunks mapped in the cycle=#{after.mapped - before.mapped})"
     STDOUT.flush
   end
 
