@@ -3,10 +3,11 @@ name: Probe win rows
 # Probe only, deleted afterwards. Windows rows of 0.40 against 0.39.0: one
 # session of four prepad phases of each tree, and one session per default-path
 # commit with the tip and the tip less that commit at four phases each;
-# probe/win-rows-2: 0.39.0 with 0.40's heap layout at four phases.
+# probe/win-rows-2: 0.39.0 with 0.40's heap layout at four phases;
+# probe/win-rows-5: Primes' tenth collection, the tip less the mark unroll.
 on:
   push:
-    branches: [probe/win-rows-2]
+    branches: [probe/win-rows-5]
 
 jobs:
   ab:
@@ -14,8 +15,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - session: layout
-            rev: fb4a7572581f59325c12af2d94fd33f7fe61f94e
+          - session: primes-unroll1
+            rev: e9e9f0a99dd66fa9be6987699c9848ffd50873fe
+            benches: "Primes"
+          - session: primes-unroll2
+            rev: e9e9f0a99dd66fa9be6987699c9848ffd50873fe
+            benches: "Primes"
+          - session: primes-unroll3
+            rev: e9e9f0a99dd66fa9be6987699c9848ffd50873fe
+            benches: "Primes"
     runs-on: windows-latest
     timeout-minutes: 330
     defaults:
@@ -33,7 +41,7 @@ jobs:
           echo "$NUMBER_OF_PROCESSORS cpus"; pwsh -c '(Get-CimInstance Win32_Processor).Name'
       - env:
           AB_BASE: c0d570c52793cfa144d88f3f4b600c839f7a40ce
-          AB_REPS: "21"
+          AB_REPS: "31"
           AB_BENCHES: ${{ matrix.benches || 'Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Fannkuchredux' }}
           AB_BOEHM: "0"
           AB_PADS: ${{ matrix.pads || 'p16 p32 p48 bp16 bp32 bp48' }}
