@@ -118,11 +118,7 @@ module Gcry
 
       @@staged[i] = id
       @@staged_seq[i] = (@@staged_next_seq &+= 1)
-      # Atomic: creators run concurrently — a parallel context's schedulers
-      # start each other's threads — and a plain `&+= 1` loses births, which
-      # the thread-staging spec counts against the threads it saw created.
-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@staged_total), 1_u64,
-        LLVM::AtomicOrdering::Monotonic, false)
+      @@staged_total &+= 1
     end
 
     # Claim a free bit, publishing the slot **before** its id is written. A
