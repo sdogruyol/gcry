@@ -4105,14 +4105,24 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `bench/log/linux/2026-11-01-dormant-flush-rate/FINDINGS.md`,
       `bench/log/linux/2026-10-21-dormant-flush-sighting/FINDINGS.md`,
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
-- [ ] **The incremental finishing path never takes or resets the large-cache
-      counters (2026-11-01, by reading).** `collect_a_little`'s finish does
-      not do what a major's flush does with `@large_alloc_since_major`,
-      `@large_cache_hits` / `@large_cache_misses` and `@large_recycle_budget`
-      (0.40's atomic shared counters, regression 89), so under
-      `GCRY_INCREMENTAL=1` they would carry over from cycle to cycle and the
-      retain and recycle decisions read the sum. Not measured
-      (`bench/log/linux/2026-11-01-large-cache-counters/`).
+- [x] **The incremental finishing path never takes or resets the large-cache
+      counters (2026-11-01, by reading) — fixed 2026-11-02.** Confirmed by
+      regression 95's control arm: after a whole sliced cycle,
+      `@large_alloc_since_major`, `@large_cache_hits` / `_misses` and a
+      planted `@large_recycle_budget` were all as they were before it. The
+      finish trimmed the cache and did nothing else. Now it runs the major's
+      code, `Heap#settle_large_cache`, which was moved out of
+      `run_collection_body` (the trim to 0 before the flushes, the takes,
+      keep or trim, the budget, the adaptive retain). That code now keeps a
+      cycle's frees for recycling only while no page barrier is armed:
+      `recycle_large_mapping` refuses while one is armed, and under
+      `GCRY_INCREMENTAL=1` one is armed between every pair of cycles. Without
+      that condition Revcomp's sliced runs peaked at 658 MiB instead of 621
+      and recycled nothing. With it, the nine benches' peaks under
+      `GCRY_INCREMENTAL=1` match base. Keep rule on five runners, Perf A/B
+      41289615508: every flagged row is excused by the same-session pads.
+      `Heap#inc_finish_large_settle = false` is the control
+      (`bench/log/linux/2026-11-02-large-cache-incr/`).
 - [x] **Freeing a large object costs O(live large chunks), so freeing many is
       quadratic (diagnosed 2026-10-01) — closed 2026-10-14.** Measured with
       `bench/log/linux/2026-10-01-large-free-quadratic/largefree_scale.cr`:
