@@ -128,10 +128,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page outside the cards, and an incremental slice's scan replaces cards
   the heap has outgrown. Where no cards can be had (a span past 64 GiB, or
   a refused `malloc`) the barrier is taken down instead of left blind: no
-  incremental cycle starts, and one that loses its barrier in a slice ends
-  in a full collection rather than finishing on a mark that missed stores
-  (the cycle is dropped inside that slice's stop, so no other thread's
-  slice can finish it first).
+  incremental cycle starts, and one whose termination scan fails ends in a
+  full collection rather than finishing on a mark that missed stores (the
+  cycle is dropped inside that slice's stop, so no other thread's slice can
+  finish it first). That last rule also fixes incremental marking on
+  soft-dirty, x86-64's backend for `GCRY_INCREMENTAL=1`: when the
+  termination scan found too many dirty pages it gave up on the dirty set
+  and the slice swept anyway, so an object moved into an already-marked
+  block during the cycle was freed (IncStack's probe, 4 of 4). It falls back
+  in 2–3 of 23–28 majors on the JSON benches, 9 of 16 on Primes, 4 of 198 on
+  Binarytrees and 0 of 2 813 in `pattern_fuzz`; each now costs a full
+  collection.
   `GCRY_NURSERY` alone (header layout) reaches it on
   Linux: aarch64 has no soft-dirty, so the barrier is mprotect from the
   start, and on x86-64 a minor that finds too many soft-dirty pages hands

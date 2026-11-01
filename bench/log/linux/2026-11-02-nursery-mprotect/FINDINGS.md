@@ -182,6 +182,8 @@ construction cannot be built. *outside* and *stale* need the header layout
 | nocards control | 0 | 30 / headerless 30 ("alive: false") | 0 | 0 |
 | race fixed | 30 / headerless 30 (the queued slice returned false) | — | 0 | 0 |
 | race control | 0 | 30 / headerless 30 (the queued slice finished the cycle) | 0 | 0 |
+| softdirty fixed | 30 / headerless 30 | — | 0 | 0 |
+| softdirty control | 0 | 30 / headerless 30 ("alive: false") | 0 | 0 |
 
 *race* (from the re-review): the slice that lost the barrier released the
 section with `@inc_active` still true, and `collect_a_little` reads
@@ -194,6 +196,39 @@ arm queues the second thread from `Heap.inc_slice_locked_hook` in the
 losing slice (a single slice of `Int32::MAX` marks, cards refused), waits
 until `@post_stw_next` shows its ticket, and asserts it did queue. Control:
 `inc_lost_cycle_ends_in_stop = false`.
+
+*softdirty* (found by IncStack): on soft-dirty, x86-64's backend for
+`GCRY_INCREMENTAL=1`, `scan_softdirty_pages` returns false when the dirty
+set passes `soft_dirty_max_pct` (and when it reads no dirty page, or no
+pagemap) with the backend still `SoftDirty`, so `barrier_lost` stayed
+false and the slice swept on a dirty set it never read. IncStack's probe:
+an object moved during the cycle into a block allocated black in an old
+chunk, its old field cleared, swept 4 of 4. Now any termination scan that
+returns false on an armed heap ends the cycle (inside the stop) in a full
+collection. The arm uses the probe's construction with
+`soft_dirty_max_pct = 1`; control `inc_scan_false_is_lost = false`.
+
+Fallback rate, x86-64 host, `GCRY_INCREMENTAL=1`, soft-dirty, `--release`,
+one run each (`lost` = cycles ended in a full collection, all of them
+soft-dirty too-dirty fallbacks here):
+
+| program | majors | lost | successful dirty rescans | last dirty/total pages |
+|---|---|---|---|---|
+| JsonGenerate | 27 | 2 | 32 | 10 436 / 137 684 |
+| JsonParsePure | 28 | 3 | 29 | 15 447 / 150 158 |
+| JsonParseSerializable | 26 | 3 | 31 | 1 323 / 119 727 |
+| JsonParsePull | 23 (24) | 3 (1) | 23 (31) | 6 297 / 114 641 |
+| Binarytrees | 198 | 4 | 425 | 50 / 8 461 |
+| Primes | 16 | 9 | 4 | 88 870 / 126 413 |
+| `pattern_fuzz` 100 phases, seeds 1–3 | 2 812–2 813 | 0 | 2 409–2 410 | ~4 900 / 160 000 |
+
+So the fallback is not every cycle. The mark's own writes don't dirty
+most pages in these programs; Primes is the exception, where the
+termination finds 70% of pages dirty and more than half its cycles end
+in a full collection. Bringing that rate down is a separate question.
+(The JSON benches print `err` for a last-digit float mismatch with or
+without `GCRY_INCREMENTAL`, filtered one at a time on this host; the
+results are identical either way.)
 
 The first *nocards* build had both arms backwards (fixed swept the object,
 control kept it): the object was marked at the cycle's begin from stale

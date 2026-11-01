@@ -49,6 +49,11 @@ require "spec"
 #   ahead of the full collection. Now the losing slice drops the cycle
 #   inside its stop, and a slice re-reads `@inc_active` once it holds the
 #   section (`inc_lost_cycle_ends_in_stop = false` restores both).
+# - *softdirty*: a termination scan that returns false with the backend
+#   still up — soft-dirty's too-dirty fallback — let the slice finish on a
+#   mark whose dirty set it never read. Any failed termination scan now
+#   ends the cycle the same way (`inc_scan_false_is_lost = false` restores
+#   the old rule). Its window is described at `mprotect99_softdirty`.
 #
 # *outside* and *stale* run the nursery with the mprotect barrier and a
 # minor to arm it. *outside*: a large block big enough that no hole inside
@@ -453,6 +458,90 @@ private def mprotect99_race(arm : String) : Nil
   {% end %}
 end
 
+# *softdirty*: on the soft-dirty backend the termination scan's too-dirty
+# fallback (`scan_softdirty_pages`) returns false with the backend still
+# up, and the slice used to finish on the mark, its dirty set unread. An
+# object X reachable when the cycle begins only from the end of a chain is
+# moved, before the mark gets there, into a block allocated black (never
+# scanned) and the chain's field cleared: only the dirty page of that
+# block holds it. `soft_dirty_max_pct = 1` makes the fallback certain (the
+# mark's own writes dirty enough pages anyway: 335 of 538 in IncStack's
+# probe). Fixed: the cycle ends in a full collection and X lives. Control
+# (`inc_scan_false_is_lost = false`): the slice sweeps X. Nothing here is
+# on a stack, so a root rescan at the finish cannot save it either.
+private class Mprotect99Sd
+  class_property head = Pointer(Void).null
+  class_property moved = Pointer(Void*).null
+end
+
+private MPROTECT99_SD_CHAIN = 4000
+
+# Returns X complemented; the chain's last node is the holder, X its field.
+@[NoInline]
+private def mprotect99_sd_graph : UInt64
+  holder = GC.malloc(64).as(Void**)
+  x = GC.malloc_atomic(64).as(UInt8*)
+  64.times { |i| x[i] = 0x5A_u8 }
+  holder[0] = x.as(Void*)
+  last = holder.as(Void*)
+  MPROTECT99_SD_CHAIN.times do
+    node = GC.malloc(16).as(Void**)
+    node[0] = last
+    last = node.as(Void*)
+  end
+  Mprotect99Sd.head = last
+  ~x.address
+end
+
+# Moves the holder's field into *target* and clears it, through no slot
+# that outlives the call.
+@[NoInline]
+private def mprotect99_sd_move(target : Void**) : Nil
+  p = Mprotect99Sd.head
+  MPROTECT99_SD_CHAIN.times { p = p.as(Void**)[0] }
+  holder = p.as(Void**)
+  target[0] = holder[0]
+  holder[0] = Pointer(Void).null
+end
+
+private def mprotect99_softdirty(arm : String) : Nil
+  {% if flag?(:linux) %}
+    heap = Gcry.default_heap
+    heap.disable
+    heap.inc_scan_false_is_lost = arm == "fixed"
+    heap.soft_dirty_max_pct = 1
+    x_inv = mprotect99_sd_graph
+    mprotect99_scrub_stack
+    heap.collect_a_little(1)
+    unless heap.@inc_active && heap.barrier_backend_name == "soft_dirty"
+      return mprotect99_say("#{MPROTECT99_SKIP_MARK}: no incremental cycle on soft-dirty (backend #{heap.barrier_backend_name})")
+    end
+    target = GC.malloc(16).as(Void**)
+    Mprotect99Sd.moved = target
+    mprotect99_sd_move(target)
+    target = Pointer(Void*).null
+    fallbacks = heap.@soft_dirty_fallbacks
+    mprotect99_finish_cycle(heap)
+    if heap.@soft_dirty_fallbacks == fallbacks
+      return mprotect99_say("#{MPROTECT99_SKIP_MARK}: the termination scan did not fall back")
+    end
+    x = Pointer(UInt8).new(~x_inv)
+    alive = !heap.find_object(x.as(Void*)).nil?
+    mprotect99_say("mprotect99 softdirty: the object only a dirty page held is alive: #{alive}")
+    if arm == "control"
+      alive.should be_false
+      mprotect99_say("mprotect99 softdirty: control swept an object only the unread dirty set held")
+      return
+    end
+    heap.inc_barrier_lost_collections.should eq(1)
+    alive.should be_true
+    64.times { |i| x[i].should eq(0x5A_u8) }
+    mprotect99_say(MPROTECT99_FIXED_MARK)
+  {% else %}
+    mprotect99_say("#{MPROTECT99_SKIP_MARK}: Linux only")
+  {% end %}
+end
+
 # Runs one child; kills it past *seconds*. Returns its status and output.
 private def mprotect99_child(arm : String, seconds : Int32 = 90) : {Process::Status, String}
   captured = IO::Memory.new
@@ -534,6 +623,14 @@ describe "Regression: the mprotect dirty-page scan against a chunk set that move
     mprotect99_expect_mark("race-control", "mprotect99 race: control finished the cycle on the blind marks")
   end
 
+  it "softdirty: fixed arm in a process of its own" do
+    mprotect99_expect_mark("softdirty-fixed", MPROTECT99_FIXED_MARK)
+  end
+
+  it "softdirty: control arm sweeps what only the dirty set held" do
+    mprotect99_expect_mark("softdirty-control", "mprotect99 softdirty: control swept an object only the unread dirty set held")
+  end
+
   it "mprotect-outside-cards child outside-fixed" do
     next unless ENV["GCRY_MPROTECT99_CHILD"]? == "outside-fixed"
     mprotect99_outside
@@ -594,5 +691,15 @@ describe "Regression: the mprotect dirty-page scan against a chunk set that move
   it "mprotect-outside-cards child race-control" do
     next unless ENV["GCRY_MPROTECT99_CHILD"]? == "race-control"
     mprotect99_race("control")
+  end
+
+  it "mprotect-outside-cards child softdirty-fixed" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "softdirty-fixed"
+    mprotect99_softdirty("fixed")
+  end
+
+  it "mprotect-outside-cards child softdirty-control" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "softdirty-control"
+    mprotect99_softdirty("control")
   end
 end

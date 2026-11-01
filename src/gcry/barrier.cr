@@ -16,8 +16,9 @@ module Gcry
     property allow_mprotect_barrier : Bool = false
     getter barrier_dirty_rescans : UInt64 = 0_u64
     getter barrier_full_fallbacks : UInt64 = 0_u64
-    # Incremental cycles whose termination scan took the barrier down and
-    # that finished in a full collection (`collect_a_little`).
+    # Incremental cycles whose termination scan failed (returned false, or
+    # took the barrier down) and that finished in a full collection
+    # (`collect_a_little`).
     getter inc_barrier_lost_collections : UInt64 = 0_u64
 
     def barrier_backend_name : String

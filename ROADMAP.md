@@ -3158,7 +3158,16 @@ kept finding the rest.
       losing slice now drops the cycle inside its stop and a slice re-reads
       `@inc_active` under the section; regression 99 *race* (two threads,
       `inc_slice_locked_hook` queues the second; control's slice finishes
-      the cycle).
+      the cycle). Soft-dirty (found by IncStack): the termination scan's
+      too-dirty fallback returned false with the backend up, and the slice
+      swept on an unread dirty set (an object moved into a black block,
+      swept 4 of 4). Any failed termination scan now ends the cycle in a
+      full collection; regression 99 *softdirty*. Fallback rate with
+      `GCRY_INCREMENTAL=1` on the x86 host: JSON benches 2–3 of 23–28
+      majors, Primes 9 of 16, Binarytrees 4 of 198, `pattern_fuzz` 0 of
+      2 813 — not every cycle; Primes' rate is open (its dirty set is
+      70% of pages, 88 870 of 126 413). 0.38.0 and 0.39.0 have the same
+      termination code [INFERENCE: affected, not run].
       The overnight stress had no nursery or mprotect loop and now has
       both. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
 

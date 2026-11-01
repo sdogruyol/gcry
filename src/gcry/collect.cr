@@ -993,6 +993,12 @@ module Gcry
     # `@inc_active` after queueing for the section — the code before
     # 2026-11-02, the control arm of regression 99's *race* window.
     property inc_lost_cycle_ends_in_stop : Bool = true
+    # Research only. False: only a termination scan that took the backend
+    # down to `None` ends the cycle in a full collection; one that returned
+    # false with the backend still up (soft-dirty's too-dirty fallback) lets
+    # the slice finish on the mark — the code before 2026-11-02, the control
+    # arm of regression 99's *softdirty* window.
+    property inc_scan_false_is_lost : Bool = true
     # Research only: called by `collect_a_little` on the slicing thread just
     # after it takes the collection section, before anything else; must not
     # allocate (regression 99's *race* queues a second slice there).
@@ -2254,22 +2260,28 @@ module Gcry
           if @mark_stack.empty?
             # Sound termination: rematerialize edges from dirty pages, then continue.
             armed = !@barrier_backend.none?
-            if scan_dirty_pages_for_pointers(nursery_only: false)
-              mark_loop_budget(work_units)
-            end
-            # The scan can take the barrier down: too many dirty pages, or
-            # cards it had to rebuild and could not (`scan_mprotect_pages`).
-            # The pages it did read are traced, but every store from here on
-            # goes unrecorded; finishing on this mark — the code before
-            # 2026-11-02 — swept objects whose only reference was stored
-            # after the scan. The cycle ends in a full collection instead,
-            # below, once this stop is over — and it is dropped here, inside
-            # the stop, so that no slice queued behind this one finds it
-            # still open and finishes it on these marks first (the re-check
-            # after `lock_post_stw`). The backend is `None` already, so the
-            # drop unprotects nothing.
+            scanned = scan_dirty_pages_for_pointers(nursery_only: false)
+            mark_loop_budget(work_units) if scanned
+            # A scan that returns false read no dirty set, or not all of it:
+            # soft-dirty found too many dirty pages, none at all (which it
+            # does not trust), or no pagemap; mprotect found too many, or had
+            # to rebuild its cards and could not, and took the backend down.
+            # Either way stores into objects already scanned went unseen —
+            # every one since the arm, or every one from here on — and
+            # finishing on this mark (the code before 2026-11-02) swept
+            # objects only such a store kept. The cycle ends in a full
+            # collection instead, below, once this stop is over, and it is
+            # dropped here, inside the stop, so that no slice queued behind
+            # this one finds it still open and finishes it on these marks
+            # first (the re-check after `lock_post_stw`). An unarmed heap (a
+            # library heap running incremental without a barrier) is not
+            # covered: its scans always return false.
             # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
-            barrier_lost = armed && @barrier_backend.none?
+            barrier_lost = if @inc_scan_false_is_lost
+                             armed && (!scanned || @barrier_backend.none?)
+                           else
+                             armed && @barrier_backend.none?
+                           end
             abort_incremental if barrier_lost && @inc_lost_cycle_ends_in_stop
           end
           if @mark_stack.empty? && !barrier_lost
