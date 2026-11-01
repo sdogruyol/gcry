@@ -4680,6 +4680,27 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       41207501220), and gathering in-span words branch-free into a buffer
       (+46% instructions, +28–31% ns per object). What is left needs fewer
       instructions per word or per object, not a different branch shape.
+- [ ] **The pace prices the next cycle at the last one's cost (2026-11-01,
+      `bench/log/macos/2026-11-01-primes-collections/`).** Primes' 9-or-10
+      collections on Intel and Windows are one step of the pacing:
+      the run collects a tenth time when the seventh major lands under
+      about 300.5 MiB live (half of Primes' allocation). Where it lands is
+      set mostly by the fifth cycle's pace, from a 11–34 ms mark against a
+      39–112 ms stretch. Code placement and the runner session move that
+      ratio past the step. 0.39.0 has the step too (same session: Intel 25/60
+      against 0.40's 28/60, Windows 14/20 against 15/20; padded, 17/20 and
+      19/20). The extra major marks the whole ~545 MiB live set. The realized
+      cost is 18–36% of the mutator time in every stretch against the
+      pace's 10% target, because a growing heap's next cycle reads more than
+      the last. Pricing that growth (`pace-growth.patch`, `T = P / (1 − P ×
+      survived / (allocated × scanned))`) gave 9 in every traced and A/B
+      run (Windows Primes −6.2% wall, Perf A/B 41265551528). It also took
+      5.6–20% of the collections off the four JSON rows (wall +0.2% to −4.4%,
+      JsonParsePure 1.07× → 1.10× Boehm's peak on arm64 and Windows) and
+      put Knuckeotide's peak up 17–28% on Linux, where its 80 KiB scanned
+      set jumps to megabytes on a rehash. Not taken. Next: weight the growth
+      by the mark's share of the cycle, or floor the scanned bytes it
+      divides by, then a budget run.
 - [x] **Decide what to do with `Gcry::Layout` registration — removed in
       0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
       collided with registered maps
