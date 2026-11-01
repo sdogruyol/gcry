@@ -235,8 +235,12 @@ module Gcry
       # of the warm budget. Keeping the pace across it carried a setup phase's
       # 3× into JsonParseSerializable's timed run, which then went 0.3 s
       # without collecting what the setup left: peak RSS +26%, wall unchanged.
-      # The next automatic cycle measures the pace afresh.
-      return @threshold_pace_pct = 100_u64 if @release_warm_this_collect
+      # The next automatic cycle measures the pace afresh, and its growth is
+      # not a trend yet: the release's stretch is not the program's.
+      if @release_warm_this_collect
+        @pace_survived_bytes = 0_u64
+        return @threshold_pace_pct = 100_u64
+      end
       # Unmeasurable: the first major, an incremental cycle (its start is the
       # last slice's), a clock step, or a cycle that did not follow a
       # threshold's worth of allocation, whose rate says little.

@@ -290,3 +290,24 @@ major (the first growing stretch, M1 156% and Windows 234% from cost
 alone), and Intel's seventh major read 186% after landing at 320.6 MiB. The
 traced JsonParsePure times are one session each. The untraced A/B against
 the tip (§3) read −1.8% on Windows and −1.0% on `ubuntu-latest`.
+
+## 9. Review: a releasing collection does not start a trend
+
+A releasing collection (`GC.collect`, the idle collector) recorded its own
+stretch's growth, and the first automatic major after it then priced its
+growth at that rate. A release now records no growth (`@pace_survived_bytes
+= 0`), so the next stretch's growth is a step, as the pace's "measure
+afresh" intends. Specs on a real heap cover what each major records: growth
+on a growing set, none on a shrinking one, none on a release, and the same
+on unmeasured majors (under half the threshold, and an incremental cycle
+under block headers on Linux).
+
+crystal-metric calls `GC.collect` before and after every timed section.
+To see which rows this changes, a temporary trace field gave, at the first
+measured major after each release, the survival the old code priced
+(nine benches, 3 runs each, dev host). Only two rows priced any:
+Primes' second major (a few KiB, pace 100: its cycle is 0.1% of the
+stretch) and Binarytrees' second major (2.53 MiB of 8.03 MiB scanned). In
+the variant probe, Binarytrees' second major reads 300% in all 60 runs
+on the five runners, and its cost alone prices 385–709%. Both rows keep
+their schedules, so there is no A/B of this change.
