@@ -2,10 +2,11 @@ name: Probe win rows
 
 # Probe only, deleted afterwards. Windows rows of 0.40 against 0.39.0: one
 # session of four prepad phases of each tree, and one session per default-path
-# commit with the tip and the tip less that commit at four phases each.
+# commit with the tip and the tip less that commit at four phases each;
+# probe/win-rows-3: three more placement sessions, on whatever runner CPUs come.
 on:
   push:
-    branches: [probe/win-rows]
+    branches: [probe/win-rows-3]
 
 jobs:
   ab:
@@ -13,22 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - session: placement
+          - session: placement2
             benches: "Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Revcomp Fannkuchredux"
             pads: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
             revs: ""
-          - session: unroll
-            rev: e9e9f0a99dd66fa9be6987699c9848ffd50873fe
-          - session: freeing
-            rev: a77c15ab069059e945d01bc7e635675417a89e07
-          - session: counters
-            rev: 716d84d070800eedb410ddc4501ddc39a2dfb333
-          - session: idle
-            rev: 6f91e0cc744dc5ef3d99d9a7c4b4fcb165b010db
-          - session: reserve
-            rev: 7df8c19738246fe3fff01df4ff2e76fe8ac46fb0
-          - session: staging
-            rev: a8b81560a16342e3eb96bb53d684bde1aff0cba3
+          - session: placement3
+            benches: "Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Revcomp Fannkuchredux"
+            pads: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
+            revs: ""
+          - session: placement4
+            benches: "Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Revcomp Fannkuchredux"
+            pads: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
+            revs: ""
     runs-on: windows-latest
     timeout-minutes: 330
     defaults:
