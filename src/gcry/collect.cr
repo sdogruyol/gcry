@@ -304,7 +304,7 @@ module Gcry
     end
 
     getter? enabled : Bool = true
-    property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
+    # (`gc_threshold`, declared in `heap_hot.cr`.)
     # Library tests free manually — auto minor is opt-in (process GC enables it).
     property nursery_threshold : UInt64 = UInt64::MAX
     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
@@ -952,7 +952,7 @@ module Gcry
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
-    @collecting = false
+    # `@collecting`, `@incremental_marking`, `@lazy_sweep_pending`: `heap_hot.cr`.
     # Who is inside a collection, while `@collecting` says one is happening.
     #
     # The two are read together and neither is enough alone: `@collecting` says
@@ -974,7 +974,6 @@ module Gcry
     # the guard learned to tell a peer from itself. `make explicit-collect-barrier`
     # needs this arm to lose the guarantee.
     property collect_skip_when_busy : Bool = false
-    @incremental_marking = false
     @inc_active = false
     # Research only: false leaves TLABs and allocation-batch stashes
     # unflushed in the incremental finishing slice (`collect_a_little`), the
@@ -1821,8 +1820,6 @@ module Gcry
     getter live_walk_spans : UInt64 = 0_u64
     getter live_walk_queued : UInt64 = 0_u64
     getter live_walk_direct : UInt64 = 0_u64
-    # Set during STW when sweep will run after start_world (see sweep_after_world?).
-    @lazy_sweep_pending = false
     getter? soft_dirty_armed : Bool = false
     @soft_dirty_probed = false
     @soft_dirty_works = false

@@ -300,8 +300,8 @@ module Gcry
     # sees it nonzero sees the whole key, never a key written apart from its
     # "ready" flag. `@cursor_tsd_refused` is set if the check ever fails, and
     # the hit path then stays on the Crystal thread-local for good.
+    # `@cursor_tsd_slot` is declared in `heap_hot.cr`.
     {% if flag?(:darwin) %}
-      @cursor_tsd_slot = 0_u64
       @cursor_tsd_refused = false
     {% end %}
 
@@ -313,11 +313,6 @@ module Gcry
     # the locked one. Plain increments, best-effort across threads, exact for
     # one mutator — the same standing as `bitmap_locked_allocations`.
     getter cursor_word_advances : UInt64 = 0_u64
-    getter fast_miss_collecting : UInt64 = 0_u64
-    getter fast_miss_size : UInt64 = 0_u64
-    getter fast_miss_no_set : UInt64 = 0_u64
-    getter fast_miss_refill : UInt64 = 0_u64
-    getter fast_miss_threshold : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
     getter bitmap_dormant_revives : UInt64 = 0_u64
     # Claimed blocks a retiring cursor gave back unused (`cursor_release_claim`):
@@ -1249,7 +1244,14 @@ module Gcry
     # Measured before this: 96% of locked refills (`bitmap_alloc_refills`
     # 705 k against `bitmap_alloc_chunk_advances` 29 k per 15 s of Kemal
     # `/json`) were exactly this word advance, taken under the class lock.
-    @[AlwaysInline]
+    #
+    # Out of line: it runs once per word, up to 64 hand-outs, and inlined its
+    # loop shared registers with the hit path (`Heap#fast_alloc`). With
+    # FREEING added, macos-15-intel's `Heap#malloc` spilled the hit path's
+    # `bytes_local` and size-class index to the stack and back on every
+    # allocation (frame 0x88 → 0x98); out of line, 5 stack stores in place of
+    # 19 and a 0x28 frame (`bench/log/macos/2026-11-02-intel-binarytrees/`).
+    @[NoInline]
     protected def cursor_advance_word(s : CursorSlot*, index : Int32) : UInt64
       chunk = s.value.chunk
       return 0_u64 if chunk.null?

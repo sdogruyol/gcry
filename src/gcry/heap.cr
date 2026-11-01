@@ -1,3 +1,4 @@
+require "./heap_hot"
 require "./block"
 require "./os_memory"
 require "./crystal_trace"
@@ -67,7 +68,6 @@ module Gcry
     # still serialise on SpinLock.
     @free_bytes = Atomic(UInt64).new(0_u64)
     @total_bytes = Atomic(UInt64).new(0_u64)
-    @bytes_since_gc = Atomic(UInt64).new(0_u64)
     @live_objects = Atomic(UInt64).new(0_u64)
     getter large_free_bytes : UInt64 = 0_u64
 
@@ -196,10 +196,7 @@ module Gcry
     # Mark-loop prefetch pipeline (`GCRY_PREFETCH`, default on). See
     # `serial_mark_drain`.
     property mark_prefetch : Bool = true
-    # Bytes ahead of the allocation cursor to prefetch-for-write
-    # (`GCRY_ALLOC_PFW`, default 2 KiB, 0 = off). simdgc measured 7.1 -> 4.2 ns
-    # on fresh memory; the sweet spot is machine-dependent, so it is a knob.
-    property alloc_pfw : UInt64 = 2048_u64
+    # `alloc_pfw` (prefetch-for-write distance) is in `heap_hot.cr`.
     # Ask the kernel for transparent huge pages on GC chunks instead of the
     # default MADV_NOHUGEPAGE (`GCRY_HUGEPAGES=1`).
     #
@@ -226,7 +223,6 @@ module Gcry
     @freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
     @nursery_freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
     @large_freelists = uninitialized StaticArray(Void*, LARGE_FREE_BUCKETS)
-    @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     # Magic reciprocals for `offset / block_bytes` — see `Heap.block_magic`.
     @block_magic = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     @destroyed = false
@@ -1726,9 +1722,8 @@ module Gcry
     end
 
     FAST_PATH_MAX = 32768_u64
-    @fast_path = false
-    @fit_index = uninitialized StaticArray(UInt8, 257)
-    @fit_payload = uninitialized StaticArray(UInt32, 257)
+
+    # `@fast_path`, `@fit_index`, `@fit_payload`: `heap_hot.cr`.
 
     private def refresh_fast_path : Nil
       @fast_path = @bitmap_alloc && !@nursery_enabled && !@destroyed &&
