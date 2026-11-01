@@ -3132,9 +3132,19 @@ kept finding the rest.
       chunk's first page that `detach_large_cache` had dirtied and
       `release_large_chain` unmapped on the allocation path, a
       `SEGV_MAPERR`. Fixed: the scan walks the dirty pages chunk by chunk,
-      the re-protect replaces outgrown cards as the arm does, and
-      `mprotect_protect_range` never protects outside the cards. Regression
-      99, two constructions, each control dying in the second minor.
+      `mprotect_protect_range` never protects outside the cards, and an
+      incremental slice's scan replaces outgrown cards as the arm does (a
+      minor's does not: its end-of-collection arm replaces them anyway).
+      Where no cards can be had (span past 16 Mi pages, `malloc` refused)
+      the backend goes to `None`: `incremental_barrier_possible?` declines
+      the cycle, and a slice whose scan lost the barrier (no cards, or the
+      too-dirty fallback) ends the cycle in a full collection instead of
+      finishing on a mark that missed stores (`inc_barrier_lost_collections`).
+      Regression 99, four constructions: *outside* and *stale* (controls die
+      in the second minor), *rebuild* (control leaves the new chunk
+      untracked after an unfinished slice), *nocards* (control sweeps an
+      object stored after the cards were lost; cards refused through
+      `mprotect_refuse_cards`).
       Reached with `GCRY_NURSERY` (headers) or `GCRY_INCREMENTAL=1` on the
       mprotect backend: `GCRY_MPROTECT_BARRIER=1`, from the start on aarch64
       Linux (no soft-dirty), and on x86-64 after a minor's soft-dirty
@@ -3144,6 +3154,19 @@ kept finding the rest.
       0.38.0 and 0.39.0 reproduce. Opt-in paths only; no perf-ab.
       The overnight stress had no nursery or mprotect loop and now has
       both. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
+
+- [ ] **The incremental cycle never scans a stack after its first stop —
+      found 2026-11-02, not reproduced.** [INFERENCE, code reading]
+      `begin_incremental` scans the stacks and registers once; no later
+      slice does, and the finishing slice sweeps on that. A mutator that
+      loads a pointer to a not-yet-marked object onto its stack and then
+      clears the heap field it came from leaves the object reachable only
+      from the stack: the page barrier rescans the cleared field and finds
+      nothing. Boehm's incremental mode rescans roots at the end. Opt-in
+      (`GCRY_INCREMENTAL=1`). Seen while building regression 99's *nocards*
+      arm, whose object is held on the stack after the root scan and is
+      swept by the finishing slice for exactly this reason when no store
+      reports it. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**

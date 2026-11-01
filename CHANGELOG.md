@@ -124,9 +124,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mapping), so the same collection's sweep faulted on its header, live or
   freed, with no card to claim the fault. Either way the handler passed the
   fault on and the program died with "Invalid memory access". The scan now
-  reads the dirty pages of the chunks the heap holds, replaces cards the
-  heap has outgrown before it protects again, and nothing protects a page
-  outside the cards. `GCRY_NURSERY` alone (header layout) reaches it on
+  reads the dirty pages of the chunks the heap holds, nothing protects a
+  page outside the cards, and an incremental slice's scan replaces cards
+  the heap has outgrown. Where no cards can be had (a span past 64 GiB, or
+  a refused `malloc`) the barrier is taken down instead of left blind: no
+  incremental cycle starts, and one that loses its barrier in a slice ends
+  in a full collection rather than finishing on a mark that missed stores.
+  `GCRY_NURSERY` alone (header layout) reaches it on
   Linux: aarch64 has no soft-dirty, so the barrier is mprotect from the
   start, and on x86-64 a minor that finds too many soft-dirty pages hands
   it to mprotect until the next major. With only `GCRY_NURSERY=262144`, a

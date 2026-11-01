@@ -18,8 +18,9 @@ require "spec"
 #   header (the chunk-list rebuild, `ChunkHeader.link`; under an
 #   incremental cycle's last slice, a new small chunk's occupancy bitmap),
 #   the fault had no card to claim it, and the handler handed it to
-#   Crystal's. Now the re-protect replaces cards the heap has outgrown, and
-#   `mprotect_protect_range` never protects outside the cards.
+#   Crystal's. Now `mprotect_protect_range` never protects outside the
+#   cards, and an incremental slice's scan replaces cards the heap has
+#   outgrown.
 # - *stale*: the scan read every dirty page in the cards. A page of a
 #   cached large chunk is dirtied when the chunk is unlinked from the cache
 #   and stays dirty after the chunk is unmapped (`trim_large_cache`, which
@@ -27,21 +28,41 @@ require "spec"
 #   with nothing mapped. Now it reads the dirty pages of the chunks the heap
 #   holds.
 #
-# Each construction runs the nursery with the mprotect barrier and a minor
-# to arm it. *outside*: a large block big enough that no hole inside the
-# cards holds it, freed into the large cache, then a second minor.
+# The fix brought two more:
+#
+# - *rebuild*: an incremental slice that does not finish lets the mutators
+#   run under the protection its scan left, so the chunk mapped outside the
+#   cards must be covered by new ones after that scan, and a write to it
+#   recorded (`mprotect_rebuild_outgrown_cards = false`, the clip alone,
+#   leaves it untracked).
+# - *nocards*: when no cards can be had — a span past 16 Mi pages, or a
+#   refused `malloc`, forced here through `mprotect_refuse_cards` — the
+#   backend goes to `None`, and an incremental cycle that lost its barrier
+#   in a scan ends in a full collection. Kept `Mprotect`
+#   (`mprotect_drop_without_cards = false`, the code before), the barrier
+#   is blind: the cycle finishes and sweeps an object whose only heap
+#   reference was stored after the cards were lost. (Before the clip, the
+#   pages were protected anyway and the first write died.)
+#
+# *outside* and *stale* run the nursery with the mprotect barrier and a
+# minor to arm it. *outside*: a large block big enough that no hole inside
+# the cards holds it, freed into the large cache, then a second minor.
 # *stale*: a large block held across the arm, freed (its first page
 # dirtied), the cache trimmed to nothing (unmapped), then a second minor.
-# Each control arm (`Gcry::Platform.mprotect_cards_cover_protection`,
+# Their control arms (`Gcry::Platform.mprotect_cards_cover_protection`,
 # `mprotect_dirty_scan_by_chunk` = false, the code before) must die in that
-# minor, or the fixed arm passes on nothing. Every arm runs in a process of
-# its own. A child that cannot build its construction — no nursery (the
-# headerless layout), no mprotect barrier (Linux only), the block inside the
-# cards after all, the free not cached or not dirtying — says so and the
-# parent accepts it. `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
+# minor. *rebuild* and *nocards* begin an incremental cycle with automatic
+# collection off and drive its slices (`mprotect99_incremental_window`);
+# their controls must report the untracked chunk and the swept object. A
+# fixed arm passes on nothing without its control. Every arm runs in a
+# process of its own. A child that cannot build its construction — no
+# nursery (the headerless layout), no mprotect barrier (Linux only), the
+# block inside the cards after all, the free not cached or not dirtying —
+# says so and the parent accepts it.
+# `bench/log/linux/2026-11-02-nursery-mprotect/FINDINGS.md`.
 
 private MPROTECT99_SKIP_MARK  = "mprotect99: this heap cannot reach the window, skipped"
-private MPROTECT99_FIXED_MARK = "mprotect99: the second minor returned"
+private MPROTECT99_FIXED_MARK = "mprotect99: the fixed arm ran to its end"
 # Larger than any hole the spec runner's heap has when the child starts.
 private MPROTECT99_OUTSIDE_BYTES = 16 * 1024 * 1024
 private MPROTECT99_STALE_BYTES   = 1 * 1024 * 1024
@@ -127,6 +148,212 @@ private def mprotect99_stale : Nil
   {% end %}
 end
 
+# Incremental slices of this many marks. The chain is longer, so a
+# termination scan that finds it leaves the slice unfinished.
+private MPROTECT99_WORK  =  4096
+private MPROTECT99_CHAIN = 20000
+
+# Hidden while a cycle begins: kept complemented, so no root holds them and
+# the cycle starts with them white.
+private class Mprotect99Inc
+  class_property chain_inv = 0_u64
+  class_property x_inv = 0_u64
+  class_property holder1 = Pointer(Void*).null
+  class_property holder2 = Pointer(Void*).null
+  class_property block = Pointer(Void).null
+  class_property sink = 0_u64
+end
+
+@[NoInline]
+private def mprotect99_hide_white : Nil
+  head = Pointer(Void).null
+  MPROTECT99_CHAIN.times do
+    node = GC.malloc(16).as(Void**)
+    node[0] = head
+    head = node.as(Void*)
+  end
+  Mprotect99Inc.chain_inv = ~head.address
+  x = GC.malloc_atomic(64).as(UInt8*)
+  64.times { |i| x[i] = 0x99_u8 }
+  Mprotect99Inc.x_inv = ~x.address
+end
+
+@[NoInline]
+private def mprotect99_consume(words : UInt64*) : Nil
+  Mprotect99Inc.sink = words[0] &+ words[4095]
+end
+
+# The cycle's first stop scans this thread's stack from the collector's
+# frames up, and their unused slots can still hold what
+# `mprotect99_hide_white`'s frames left there: zeroed first, so the chain
+# and the object begin white.
+@[NoInline]
+private def mprotect99_scrub_stack : Nil
+  buf = uninitialized StaticArray(UInt64, 8192)
+  words = buf.to_unsafe
+  8192.times { |i| words[i] = 0_u64 }
+  mprotect99_consume(words)
+end
+
+# Stores *value* through *slot*, so the pointer sits in the caller's frame
+# as it is, not as the complement it was computed from, and a full
+# collection's stack scan finds it.
+@[NoInline]
+private def mprotect99_pin(slot : Void**, value : Void*) : Nil
+  slot.value = value
+end
+
+{% if flag?(:linux) %}
+  private def mprotect99_dirty?(low : UInt64, high : UInt64) : Bool
+    dirty = false
+    Gcry::Platform.each_mprotect_dirty_page(low, high) { dirty = true }
+    dirty
+  end
+{% end %}
+
+# Begins an incremental cycle on the mprotect barrier with automatic
+# collection off, then, inside it: a small block in an old, protected chunk
+# (allocated black, so never scanned) given the white chain — a dirty page
+# the termination scan will find — and a 16 MiB block mapped outside the
+# cards. Then drives slices until the termination scan has run (or the
+# cycle has ended). Returns nil after saying why it skipped, else whether
+# the cycle finished.
+private def mprotect99_incremental_window(heap : Gcry::Heap, refuse : Bool, pin : Void** = Pointer(Void*).null) : Bool?
+  {% if flag?(:linux) %}
+    heap.disable
+    heap.prefer_mprotect_barrier = true
+    mprotect99_hide_white
+    mprotect99_scrub_stack
+    heap.collect_a_little(1)
+    unless heap.@inc_active && heap.barrier_backend_name == "mprotect"
+      mprotect99_say("#{MPROTECT99_SKIP_MARK}: no incremental cycle on the mprotect barrier")
+      return nil
+    end
+    # After the cycle's root scan: the slices never scan a stack again.
+    mprotect99_pin(pin, Pointer(Void).new(~Mprotect99Inc.x_inv)) unless pin.null?
+    holder1 = GC.malloc(64).as(Void**)
+    Mprotect99Inc.holder1 = holder1
+    page1 = mprotect99_page(holder1.address)
+    unless Gcry::Platform.mprotect_cards_cover?(page1, page1 + Gcry::Platform::PAGE)
+      mprotect99_say("#{MPROTECT99_SKIP_MARK}: the holder is in no card")
+      return nil
+    end
+    block = GC.malloc(MPROTECT99_OUTSIDE_BYTES)
+    Mprotect99Inc.block = block
+    if Gcry::Platform.mprotect_cards_cover?(block.address, block.address + MPROTECT99_OUTSIDE_BYTES.to_u64)
+      mprotect99_say("#{MPROTECT99_SKIP_MARK}: the block landed inside the cards")
+      return nil
+    end
+    holder1[0] = Pointer(Void).new(~Mprotect99Inc.chain_inv)
+    unless mprotect99_dirty?(page1, page1 + Gcry::Platform::PAGE)
+      mprotect99_say("#{MPROTECT99_SKIP_MARK}: the holder's write left no dirty bit")
+      return nil
+    end
+    Gcry::Platform.mprotect_refuse_cards = true if refuse
+    rescans = heap.barrier_dirty_rescans
+    lost = heap.inc_barrier_lost_collections
+    slices = 0
+    until heap.barrier_dirty_rescans > rescans || heap.inc_barrier_lost_collections > lost
+      return true if heap.collect_a_little(MPROTECT99_WORK)
+      slices += 1
+      fail "no termination scan in #{slices} slices" if slices > 100_000
+    end
+    false
+  {% else %}
+    mprotect99_say("#{MPROTECT99_SKIP_MARK}: Linux only")
+    nil
+  {% end %}
+end
+
+private def mprotect99_finish_cycle(heap : Gcry::Heap) : Nil
+  slices = 0
+  until heap.collect_a_little(MPROTECT99_WORK)
+    slices += 1
+    fail "the cycle did not finish in #{slices} slices" if slices > 100_000
+  end
+end
+
+# *rebuild*: after the termination scan of a slice that does not finish,
+# the chunk mapped outside the arm's cards must be covered by new ones and
+# a write to it recorded — the mutators run under this protection until
+# the next slice.
+private def mprotect99_rebuild(arm : String) : Nil
+  {% if flag?(:linux) %}
+    heap = Gcry.default_heap
+    finished = mprotect99_incremental_window(heap, refuse: false)
+    return if finished.nil?
+    if finished
+      return mprotect99_say("#{MPROTECT99_SKIP_MARK}: the termination scan found nothing and finished the cycle")
+    end
+    block = Mprotect99Inc.block
+    covered = Gcry::Platform.mprotect_cards_cover?(block.address, block.address + MPROTECT99_OUTSIDE_BYTES.to_u64)
+    page = mprotect99_page(block.address + Gcry::Platform::PAGE)
+    Pointer(UInt8).new(page).value = 0x99_u8
+    recorded = mprotect99_dirty?(page, page + Gcry::Platform::PAGE)
+    mprotect99_say("mprotect99 rebuild: after an unfinished slice the new chunk is covered: #{covered}, its write recorded: #{recorded}")
+    if arm == "control"
+      covered.should be_false
+      recorded.should be_false
+      mprotect99_say("mprotect99 rebuild: control left the new chunk untracked")
+    else
+      covered.should be_true
+      recorded.should be_true
+    end
+    mprotect99_finish_cycle(heap)
+    mprotect99_say(MPROTECT99_FIXED_MARK) unless arm == "control"
+  {% else %}
+    mprotect99_say("#{MPROTECT99_SKIP_MARK}: Linux only")
+  {% end %}
+end
+
+# *nocards*: the termination scan's rebuild gets no cards (refused through
+# the research hook, as a span past the limit or a failed `malloc` would).
+# Then an object the cycle has not reached is stored into a block allocated
+# black — the store the barrier exists to report — and the cycle runs out.
+# Fixed: the cycle ends in a full collection at that slice, which finds the
+# object on this stack, and it lives. Control (`mprotect_drop_without_cards
+# = false`): the cycle finishes on its blind barrier and sweeps the object.
+private def mprotect99_nocards(arm : String) : Nil
+  {% if flag?(:linux) %}
+    heap = Gcry.default_heap
+    slot = uninitialized StaticArray(Void*, 1)
+    slot[0] = Pointer(Void).null
+    finished = mprotect99_incremental_window(heap, refuse: true, pin: slot.to_unsafe)
+    return if finished.nil?
+    x = slot[0].as(UInt8*)
+    if arm == "control"
+      if finished
+        return mprotect99_say("#{MPROTECT99_SKIP_MARK}: the termination scan found nothing and finished the cycle")
+      end
+      heap.barrier_backend_name.should eq("mprotect")
+      page1 = mprotect99_page(Mprotect99Inc.holder1.address)
+      Gcry::Platform.mprotect_cards_cover?(page1, page1 + Gcry::Platform::PAGE).should be_false
+    else
+      finished.should be_true
+      heap.inc_barrier_lost_collections.should eq(1)
+      heap.barrier_backend_name.should eq("none")
+    end
+    holder2 = GC.malloc(64).as(Void**)
+    holder2[0] = x.as(Void*)
+    Mprotect99Inc.holder2 = holder2
+    mprotect99_finish_cycle(heap) if heap.@inc_active
+    alive = !heap.find_object(x.as(Void*)).nil?
+    mprotect99_say("mprotect99 nocards: the object stored after the cards were lost is alive: #{alive}")
+    if arm == "control"
+      alive.should be_false
+      mprotect99_say("mprotect99 nocards: control swept an object stored after the cards were lost")
+      return
+    end
+    alive.should be_true
+    heap.collect
+    heap.find_object(x.as(Void*)).should_not be_nil
+    64.times { |i| x[i].should eq(0x99_u8) }
+    mprotect99_say(MPROTECT99_FIXED_MARK)
+  {% else %}
+    mprotect99_say("#{MPROTECT99_SKIP_MARK}: Linux only")
+  {% end %}
+end
+
 # Runs one child; kills it past *seconds*. Returns its status and output.
 private def mprotect99_child(arm : String, seconds : Int32 = 90) : {Process::Status, String}
   captured = IO::Memory.new
@@ -159,6 +386,14 @@ private def mprotect99_expect_death(arm : String, reached : String) : Nil
   text.should_not contain(MPROTECT99_FIXED_MARK)
 end
 
+# Passes with *mark* in the output unless the child skipped.
+private def mprotect99_expect_mark(arm : String, mark : String) : Nil
+  status, text = mprotect99_child(arm)
+  fail "child #{arm} #{status.inspect}:\n#{text}" unless status.success?
+  text.should contain("1 examples, 0 failures")
+  text.should contain(mark) unless text.includes?(MPROTECT99_SKIP_MARK)
+end
+
 describe "Regression: the mprotect dirty-page scan against a chunk set that moved since the arm" do
   it "outside: fixed arm in a process of its own" do
     mprotect99_expect_fixed("outside-fixed")
@@ -174,6 +409,22 @@ describe "Regression: the mprotect dirty-page scan against a chunk set that move
 
   it "stale: control arm reads an unmapped dirty page and dies" do
     mprotect99_expect_death("stale-control", "mprotect99 stale: a dirtied large chunk is unmapped")
+  end
+
+  it "rebuild: fixed arm in a process of its own" do
+    mprotect99_expect_mark("rebuild-fixed", MPROTECT99_FIXED_MARK)
+  end
+
+  it "rebuild: control arm leaves the new chunk untracked" do
+    mprotect99_expect_mark("rebuild-control", "mprotect99 rebuild: control left the new chunk untracked")
+  end
+
+  it "nocards: fixed arm in a process of its own" do
+    mprotect99_expect_mark("nocards-fixed", MPROTECT99_FIXED_MARK)
+  end
+
+  it "nocards: control arm sweeps an object stored after the cards were lost" do
+    mprotect99_expect_mark("nocards-control", "mprotect99 nocards: control swept an object stored after the cards were lost")
   end
 
   it "mprotect-outside-cards child outside-fixed" do
@@ -200,5 +451,31 @@ describe "Regression: the mprotect dirty-page scan against a chunk set that move
       Gcry::Platform.mprotect_dirty_scan_by_chunk = false
     {% end %}
     mprotect99_stale
+  end
+
+  it "mprotect-outside-cards child rebuild-fixed" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "rebuild-fixed"
+    mprotect99_rebuild("fixed")
+  end
+
+  it "mprotect-outside-cards child rebuild-control" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "rebuild-control"
+    {% if flag?(:linux) %}
+      Gcry::Platform.mprotect_rebuild_outgrown_cards = false
+    {% end %}
+    mprotect99_rebuild("control")
+  end
+
+  it "mprotect-outside-cards child nocards-fixed" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "nocards-fixed"
+    mprotect99_nocards("fixed")
+  end
+
+  it "mprotect-outside-cards child nocards-control" do
+    next unless ENV["GCRY_MPROTECT99_CHILD"]? == "nocards-control"
+    {% if flag?(:linux) %}
+      Gcry::Platform.mprotect_drop_without_cards = false
+    {% end %}
+    mprotect99_nocards("control")
   end
 end

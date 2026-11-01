@@ -2193,6 +2193,7 @@ module Gcry
       # and we bail out so the alloc path falls through to a full STW collect.
       return false unless @inc_active
 
+      barrier_lost = false
       lock_post_stw
       finished = false
       begin
@@ -2232,11 +2233,21 @@ module Gcry
           mark_loop_budget(work_units)
           if @mark_stack.empty?
             # Sound termination: rematerialize edges from dirty pages, then continue.
+            armed = !@barrier_backend.none?
             if scan_dirty_pages_for_pointers(nursery_only: false)
               mark_loop_budget(work_units)
             end
+            # The scan can take the barrier down: too many dirty pages, or
+            # cards it had to rebuild and could not (`scan_mprotect_pages`).
+            # The pages it did read are traced, but every store from here on
+            # goes unrecorded; finishing on this mark — the code before
+            # 2026-11-02 — swept objects whose only reference was stored
+            # after the scan. The cycle ends in a full collection instead,
+            # below, once this stop is over.
+            # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
+            barrier_lost = armed && @barrier_backend.none?
           end
-          if @mark_stack.empty?
+          if @mark_stack.empty? && !barrier_lost
             collection_event(CollectionEvent::MarkEnd)
             enqueue_unreachable_finalizers
             collection_event(CollectionEvent::ReclaimStart)
@@ -2328,6 +2339,13 @@ module Gcry
         unlock_post_stw
       end
 
+      if barrier_lost
+        # `collect` drops the cycle (`abort_incremental`) and runs a full
+        # stop-the-world collection, which marks from every root again.
+        @inc_barrier_lost_collections &+= 1
+        collect
+        return true
+      end
       @finalizers.run_pending if finished
       finished
     end
@@ -2646,6 +2664,7 @@ module Gcry
       @barrier_backend = Platform::BarrierBackend::None
       @barrier_dirty_rescans = 0_u64
       @barrier_full_fallbacks = 0_u64
+      @inc_barrier_lost_collections = 0_u64
       destroy_blacklist
       reset_pause_stats
     end
@@ -3657,7 +3676,18 @@ module Gcry
     # Incremental mark is unsound without barrier re-scan — live objects
     # written into already-scanned pages between slices would be swept.
     private def incremental_barrier_possible? : Bool
-      !select_barrier_backend.none?
+      backend = select_barrier_backend
+      return false if backend.none?
+      {% if flag?(:linux) %}
+        # An mprotect arm over a span no cards can hold would leave no
+        # barrier (`drop_mprotect_without_cards`); answered here, without
+        # the stop `begin_incremental` would make to find out. A refused
+        # `malloc` is still found by the arm itself.
+        if backend.mprotect? && Platform.mprotect_drop_without_cards
+          return false unless Platform.mprotect_span_pages(@heap_min, @heap_max)
+        end
+      {% end %}
+      true
     end
 
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
@@ -3710,6 +3740,15 @@ module Gcry
         scan_other_thread_stacks if other_stacks
         # Arm page-dirty barrier for mutator writes between incremental slices.
         arm_page_barrier_after_collect
+        # The check above chose a backend; the arm can still leave none
+        # (mprotect with no cards, `drop_mprotect_without_cards`). Then the
+        # cycle is dropped as if it had never begun, under the same rule:
+        # the caller falls through to a full collection.
+        if @stop_the_world && @barrier_backend.none?
+          @inc_active = false
+          @incremental_marking = false
+          @mark_stack.clear
+        end
       ensure
         collection_event(CollectionEvent::PreStartWorld) if stw_reported
         start_world

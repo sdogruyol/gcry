@@ -201,6 +201,16 @@ module Gcry
     # False: the scan reads every dirty page in the cards, chunk under it
     # or not.
     class_property mprotect_dirty_scan_by_chunk : Bool = true
+    # False: an arm or a rebuild that leaves no cards keeps the backend
+    # `Mprotect` (`Heap#drop_mprotect_without_cards`), the code before.
+    class_property mprotect_drop_without_cards : Bool = true
+    # False: an incremental slice's scan keeps cards the heap has outgrown,
+    # and only the clip in `mprotect_protect_range` stands; a chunk mapped
+    # outside them goes untracked until the cycle ends.
+    class_property mprotect_rebuild_outgrown_cards : Bool = true
+    # Research only: true makes `mprotect_set_heap_range` give up as on a
+    # span past its page limit or a refused `malloc`, leaving no cards.
+    class_property mprotect_refuse_cards : Bool = false
 
     # Install SEGV handler that re-enables write + marks page dirty.
     # Faults the barrier did not cause are forwarded to the previous handler.
@@ -269,11 +279,9 @@ module Gcry
     # that no longer covers it faults with nothing to claim it.
     def self.mprotect_set_heap_range(low : UInt64, high : UInt64) : Nil
       clear_mprotect_cards
-      return if high <= low
+      pages = mprotect_span_pages(low, high)
+      return unless pages
       page_lo = low & ~(PAGE - 1)
-      page_hi = (high + PAGE - 1) & ~(PAGE - 1)
-      pages = ((page_hi - page_lo) // PAGE).to_i32
-      return if pages <= 0 || pages > 16_777_216 # sanity
 
       nwords = (pages + 63) // 64
       bytes = sizeof(MprotectCards).to_u64 + (nwords * 2 * 8).to_u64
@@ -282,6 +290,23 @@ module Gcry
       ptr.as(UInt8*).clear(bytes)
       ptr.value = MprotectCards.new(page_lo, pages, nwords)
       @@mp_state.set(ptr)
+    end
+
+    # The pages cards for [low, high) would hold, or nil where
+    # `mprotect_set_heap_range` gives up before asking `malloc`: an empty
+    # range, a span over 16 Mi pages (64 GiB at 4 KiB), or the research
+    # refusal. `Heap#incremental_barrier_possible?` asks it before starting a
+    # cycle, so a heap that cannot have cards is told so without a stop.
+    def self.mprotect_span_pages(low : UInt64, high : UInt64) : Int32?
+      return nil if high <= low
+      return nil if @@mprotect_refuse_cards
+      page_lo = low & ~(PAGE - 1)
+      page_hi = (high + PAGE - 1) & ~(PAGE - 1)
+      # Compared before it is narrowed: `to_i32` of a span past 2^31 pages
+      # would raise, inside the stop.
+      span = (page_hi - page_lo) // PAGE
+      return nil if span == 0 || span > 16_777_216 # sanity
+      span.to_i32
     end
 
     # Whether the current cards cover every page of [low, high). Collector

@@ -93,29 +93,52 @@ found.
   (`Platform.each_mprotect_dirty_page(low, high)`, now ranged: whole pages
   inside the range and the cards, the rounding `mprotect_protect_range`
   uses, zero words skipped whole). Dormant chunks are skipped: no objects.
-- Its re-protect checks `Platform.mprotect_cards_cover?(@heap_min,
-  @heap_max)`. When the heap has outgrown the cards it does what the arm
-  does — `disarm_mprotect_barrier` (unprotect every chunk, retire the
-  cards), then `arm_mprotect_on_old_chunks` (cards sized to the heap now,
-  dirty bits clear, old chunks protected). Both callers run inside a stop,
-  and the dirty bits were consumed just before. The chunk mapped since the
-  arm is then covered for the rest of the cycle, which matters on the
-  incremental path, where a slice that does not finish lets the mutators
-  run under this protection.
+- On an incremental slice (`nursery_only: false`) its re-protect checks
+  `Platform.mprotect_cards_cover?(@heap_min, @heap_max)`. When the heap
+  has outgrown the cards it does what the arm does —
+  `disarm_mprotect_barrier` (unprotect every chunk, retire the cards), then
+  `arm_mprotect_on_old_chunks` (cards sized to the heap now, dirty bits
+  clear, old chunks protected), inside the stop, after the dirty bits were
+  consumed. A slice that does not finish lets the mutators run under this
+  protection, so the chunk mapped since the arm must be tracked from here.
+  A minor skips the rebuild (review, finding 2): it ends in
+  `arm_page_barrier_after_collect`, which replaces the cards before any
+  mutator write matters, so the rebuild only added a per-chunk `mprotect`
+  and a `malloc` to the pause.
 - `mprotect_protect_range` protects only what the current cards cover, and
-  nothing when there are none (`mprotect_set_heap_range` gives up on a span
-  over 16 Mi pages or a refused `malloc`). Before, either left every
-  protected page unclaimable.
+  nothing when there are none. Before, either left every protected page
+  unclaimable.
+- No cards, no barrier (review, finding 1). `mprotect_set_heap_range`
+  gives up on a span over 16 Mi pages or a refused `malloc` (and its page
+  count is now compared before `to_i32`, which raised on a span past 2^31
+  pages). With the clip, an arm or rebuild that got no cards used to leave
+  the backend `Mprotect` and blind: the scans saw no bits and returned
+  true, and an incremental cycle finished on a mark that missed every store
+  after it. Now `arm_mprotect_on_old_chunks` returns whether it got cards,
+  and `drop_mprotect_without_cards` sets the backend to `None`.
+  `incremental_barrier_possible?` declines a cycle up front when the span
+  cannot have cards (`Platform.mprotect_span_pages`), and `begin_incremental`
+  drops one whose arm left no barrier. In `collect_a_little` a termination
+  scan that takes the barrier down — no cards on the rebuild, or the
+  existing too-dirty fallback, which said "let caller full-scan" and never
+  did — ends the cycle in a full collection (`collect`, after the slice's
+  stop) instead of finishing on that mark; counted in
+  `inc_barrier_lost_collections`. The soft-dirty paths that return false
+  keep finishing as before [noted, not changed: a soft-dirty scan that
+  returns false in the termination finishes the cycle the same way].
 
 Research toggles restore each piece for the control arms:
 `Platform.mprotect_cards_cover_protection` (the clip and the card
-replacement) and `Platform.mprotect_dirty_scan_by_chunk`.
+replacement), `mprotect_dirty_scan_by_chunk`, `mprotect_rebuild_outgrown_cards`
+(the replacement only) and `mprotect_drop_without_cards`;
+`mprotect_refuse_cards` makes `mprotect_set_heap_range` give up.
 
 ## Regression 99
 
-`process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`, header
-layout, Linux; every arm in its own process, a skip marker (with its
-reason) where the construction cannot be built.
+`process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`, Linux;
+every arm in its own process, a skip marker (with its reason) where the
+construction cannot be built. *outside* and *stale* need the header layout
+(nursery); *rebuild* and *nocards* run on both.
 
 - *outside*: arm with a minor; `GC.malloc` 16 MiB (bigger than any hole in
   the spec runner's heap; the child checks with `mprotect_cards_cover?` and
@@ -127,13 +150,43 @@ reason) where the construction cannot be built.
 - *stale*: a 1 MiB block held across the arm in a class variable; `GC.free`
   (its first page dirtied, checked); `trim_large_cache(0, defer: false)`
   (unmapped, checked); second minor.
+- *rebuild* and *nocards* share a window: automatic collection off, a white
+  20 000-node chain and a white 64-byte object hidden as complements, the
+  stack below zeroed, `collect_a_little(1)` to begin; then, inside the
+  cycle, a 64-byte holder allocated black in a protected chunk is given the
+  chain (a dirty page the termination scan will find, leaving that slice
+  unfinished) and a 16 MiB block is mapped outside the cards; slices of
+  4096 marks run until the termination scan has run.
+  - *rebuild*: after that slice the block must be covered by the cards and
+    a write to it must set a dirty bit.
+  - *nocards*: `mprotect_refuse_cards` before the slices; the object is
+    pinned on this stack after the root scan and, after the slice, stored
+    into a second black holder. Fixed: that slice ended the cycle in a full
+    collection (`inc_barrier_lost_collections` 1, backend `none`), which
+    found the object on the stack; it is alive, and alive after one more
+    collection. Control: the cycle runs out on the blind barrier and the
+    object is free afterwards (slices never scan a stack after the first
+    stop, so only the unrecorded store held it).
 
-| arm | second minor returned | died (exit 11, "Invalid memory access") | skipped |
-|---|---|---|---|
-| outside fixed | 30 / 30 | 0 | 0 |
-| outside control | 0 | 30 / 30 (`ChunkHeader.link` ← `sweep`) | 0 |
-| stale fixed | 30 / 30 | 0 | 0 |
-| stale control | 0 | 30 / 30 (`scan_range_for_barrier_pointers` ← `scan_mprotect_pages`) | 0 |
+30 runs per arm (header layout; headerless where it runs):
+
+| arm | fixed ran to its end | control's mark | died (exit 11, "Invalid memory access") | skipped |
+|---|---|---|---|---|
+| outside fixed | 30 | — | 0 | 0 (headerless: 30, no nursery) |
+| outside control | 0 | — | 30 (`ChunkHeader.link` ← `sweep`) | 0 |
+| stale fixed | 30 | — | 0 | 0 |
+| stale control | 0 | — | 30 (`scan_range_for_barrier_pointers` ← `scan_mprotect_pages`) | 0 |
+| rebuild fixed | 30 / headerless 30 | — | 0 | 0 |
+| rebuild control | 0 | 30 / headerless 30 ("covered: false, its write recorded: false") | 0 | 0 |
+| nocards fixed | 30 / headerless 30 | — | 0 | 0 |
+| nocards control | 0 | 30 / headerless 30 ("alive: false") | 0 | 0 |
+
+The first *nocards* build had both arms backwards (fixed swept the object,
+control kept it): the object was marked at the cycle's begin from stale
+slots in the collector's own frames, and in the fixed arm it was held on
+the stack only as the complement it was computed from. The window now
+zeroes 64 KiB of stack below it first, and pins the pointer through a
+non-inlined store.
 
 `each_mprotect_dirty_page` takes a range now; regressions 83 and 87 pass
 the page they ask about.
@@ -250,3 +303,14 @@ After the last edits (regression 99's text and comments only): format and
 lint clean; regression 99 headerless 8/8 (children skip), headers 8 plus 83
 and 87 (26 examples, 0 failures), headers on Crystal 1.22.2 8/8; both
 typechecks ok; the four arms 30 of 30 each as in the table above.
+
+After the review's three changes (no cards → no barrier and a full
+collection, rebuild on incremental slices only, the *rebuild* and *nocards*
+constructions), on the full tree: format and lint clean (248 inspected);
+`spec/all_specs.cr` 303 / 325 / 303 (headerless, headers, invariants), 0
+failures; `process_spec` 346 / 347 / 347 (headerless, headers, headers with
+`GCRY_BITMAP_ALLOC=0`), 0 failures, 2 pending; `process_spec` on Crystal
+1.22.2 346 / 347, 0 failures; windows and darwin typechecks ok;
+`make alloc-entry-frame` 5 examples, 0 failures. `pattern_fuzz --phases=40`
+seeds 1–3 with `GCRY_NURSERY=262144 GCRY_MPROTECT_BARRIER=1` (headers) and
+`GCRY_INCREMENTAL=1 GCRY_MPROTECT_BARRIER=1` (headerless): 6 of 6 pass.
