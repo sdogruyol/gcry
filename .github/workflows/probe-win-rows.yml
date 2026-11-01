@@ -1,0 +1,62 @@
+name: Probe win rows
+
+# Probe only, deleted afterwards. Windows rows of 0.40 against 0.39.0: one
+# session of four prepad phases of each tree, and one session per default-path
+# commit with the tip and the tip less that commit at four phases each.
+on:
+  push:
+    branches: [probe/win-rows]
+
+jobs:
+  ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - session: placement
+            benches: "Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Revcomp Fannkuchredux"
+            pads: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
+            revs: ""
+          - session: unroll
+            rev: e9e9f0a99dd66fa9be6987699c9848ffd50873fe
+          - session: freeing
+            rev: a77c15ab069059e945d01bc7e635675417a89e07
+          - session: counters
+            rev: 716d84d070800eedb410ddc4501ddc39a2dfb333
+          - session: idle
+            rev: 6f91e0cc744dc5ef3d99d9a7c4b4fcb165b010db
+          - session: reserve
+            rev: 7df8c19738246fe3fff01df4ff2e76fe8ac46fb0
+          - session: staging
+            rev: a8b81560a16342e3eb96bb53d684bde1aff0cba3
+    runs-on: windows-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Machine
+        run: |
+          echo "$NUMBER_OF_PROCESSORS cpus"; pwsh -c '(Get-CimInstance Win32_Processor).Name'
+      - env:
+          AB_BASE: c0d570c52793cfa144d88f3f4b600c839f7a40ce
+          AB_REPS: "21"
+          AB_BENCHES: ${{ matrix.benches || 'Primes JsonParsePure JsonParseSerializable JsonParsePull JsonGenerate Fannkuchredux' }}
+          AB_BOEHM: "0"
+          AB_PADS: ${{ matrix.pads || 'p16 p32 p48' }}
+          AB_REVS: ${{ matrix.rev && format('rev={0} revp16={0}:p16 revp32={0}:p32 revp48={0}:p48', matrix.rev) || '' }}
+          AB_OUT: bench/log/_ab
+        run: bench/runner_ab/ab.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-win-rows-${{ matrix.session }}
+          path: bench/log/_ab/
+          if-no-files-found: ignore
+          retention-days: 30

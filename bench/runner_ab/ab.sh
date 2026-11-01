@@ -142,6 +142,19 @@ if [ "$AB_BENCHES" != - ]; then
     padded build "$psrc" "ab-$pname" -Dgc_none
     arms+=(--arm "$pname=$root/bin/ab-$pname$exe")
   done
+  # Probe only (probe/win-rows): AB_REVS="name=sha name=sha:p16" adds an arm
+  # per entry, crystal-metric with SHA's src, prepadded when `:pN` is given.
+  for spec in ${AB_REVS:-}; do
+    rname=${spec%%=*} rsha=${spec#*=} rpad=""
+    case "$rsha" in *:*) rpad=${rsha#*:} rsha=${rsha%%:*} ;; esac
+    [ -d "../ab-rev-$rsha" ] || git worktree add -q --detach "../ab-rev-$rsha" "$rsha"
+    if [ -n "$rpad" ]; then
+      PREPAD=${rpad#p} build "../ab-rev-$rsha" "ab-$rname" -Dgc_none
+    else
+      build "../ab-rev-$rsha" "ab-$rname" -Dgc_none
+    fi
+    arms+=(--arm "$rname=$root/bin/ab-$rname$exe")
+  done
   crystal --version
   # shellcheck disable=SC2086 # AB_BENCHES is a space-separated list
   "$py" bench/runner_ab/ab.py --out "$out" --reps "${AB_REPS:-10}" "${arms[@]}" $AB_BENCHES
