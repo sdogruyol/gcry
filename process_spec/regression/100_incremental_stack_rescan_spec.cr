@@ -43,7 +43,9 @@ require "spec"
 #   call its pages protected and clean (checked); the termination reads
 #   such a chunk whole, the barrier never having protected it
 #   (`ChunkHeader::Flags::BARRIER_ARMED`). It prints X's mark state at each
-#   stop.
+#   stop, read by a collection event hook that zeroes the stack its reads
+#   used: the hook runs inside each stop just before the root scan, and a
+#   copy of X's address left in that band is a root to it.
 #
 # The fixed arm must find X allocated, its pattern intact after 4 096 more
 # allocations of its size, and none of them X, and the cycle must not end
@@ -189,19 +191,34 @@ private def rescan100_trace(heap : Gcry::Heap) : Nil
   Rescan100Roots.stops = 0
   Rescan100Roots.x_first_marked_stop = -1
   heap.collection_event_hook = ->(event : Gcry::Heap::CollectionEvent) do
-    x = Pointer(Void).new(~Rescan100Roots.x_inv)
-    if event.post_stop_world?
-      stop = Rescan100Roots.stops
-      Rescan100Roots.stops = stop + 1
-      marked = heap.rescan100_marked?(x) || false
-      Rescan100Roots.x_first_marked_stop = stop if marked && Rescan100Roots.x_first_marked_stop < 0
-    elsif event.pre_start_world? && Rescan100Roots.stops == 1
-      Rescan100Roots.x_marked_begin = heap.rescan100_marked?(x) || false
-      Rescan100Roots.big_marked_begin = heap.rescan100_marked?(Pointer(Void).new(~Rescan100Roots.big_inv)) || false
-    elsif event.mark_end?
-      Rescan100Roots.x_marked_mark_end = heap.rescan100_marked?(x) || false
-    end
+    rescan100_trace_event(heap, event)
+    # The hook runs inside the stop, `PostStopWorld` just before the root
+    # scan, at about the depth of the scan's own frames: the reads' frames
+    # below this one leave X's address in slots the scan then reads, and
+    # the stop marks X through its own trace (every run of both arms on
+    # aarch64 with the freelist allocator). Zeroed here, as
+    # `rescan100_scrub_stack` zeroes the window's dead frames.
+    rescan100_scrub_stack
     nil
+  end
+end
+
+# The hook's reads, in a frame of their own below the hook's, so X's and the
+# old block's addresses exist only in it and the lookups it calls, all of
+# which the hook's scrub then zeroes. Allocates nothing.
+@[NoInline]
+private def rescan100_trace_event(heap : Gcry::Heap, event : Gcry::Heap::CollectionEvent) : Nil
+  x = Pointer(Void).new(~Rescan100Roots.x_inv)
+  if event.post_stop_world?
+    stop = Rescan100Roots.stops
+    Rescan100Roots.stops = stop + 1
+    marked = heap.rescan100_marked?(x) || false
+    Rescan100Roots.x_first_marked_stop = stop if marked && Rescan100Roots.x_first_marked_stop < 0
+  elsif event.pre_start_world? && Rescan100Roots.stops == 1
+    Rescan100Roots.x_marked_begin = heap.rescan100_marked?(x) || false
+    Rescan100Roots.big_marked_begin = heap.rescan100_marked?(Pointer(Void).new(~Rescan100Roots.big_inv)) || false
+  elsif event.mark_end?
+    Rescan100Roots.x_marked_mark_end = heap.rescan100_marked?(x) || false
   end
 end
 
