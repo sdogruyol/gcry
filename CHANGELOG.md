@@ -112,6 +112,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows Binarytrees no longer runs 3–5% slower than 0.39.0 on the
+  EPYC 9V74 runners.** The keep rule on the 0.40 tip (Perf A/B
+  41409560598) left the row unexcused, +3.4% timed and +4.8% wall, on that
+  run's 9V74; the earlier keep runs had drawn EPYC 7763s and Xeon 8573Cs.
+  It was the hit path's word advance (`cursor_advance_word`) going out of
+  line in the Intel Binarytrees fix: on the 9V74 every placement of the tip
+  read 3–5% over 0.39.0, 0.40's `src/` history steps up at that commit
+  alone, and the advance inline again (hot fields still first) reads level
+  with 0.39.0. Not the pre-scan scrub, the band wipe or the pthread scan
+  clamp: reverted or off they move nothing, Σ pause is the same in every
+  arm, and the pre-scan scrub costs ~1.5 µs a collection there. The
+  advance is inline on x86-64 Windows only; ubuntu-latest on the same CPU
+  shows no cost and keeps it out of line, as do arm64 and macOS. On the
+  EPYC 7763 out of line had read 1.8–2.7% under 0.39.0 and inline reads
+  level with it (`bench/log/windows/2026-11-03-binarytrees/`).
+
 - **The root scan no longer reads words nothing wrote in three frames, and
   `make parallel-dormant` no longer keeps its dropped burst 1 run in 200.**
   CI failed the gate once (job 125102880486, "seeded by … parked 3714

@@ -4804,6 +4804,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       Windows hit path adds one flags load and one test per 64 blocks; the
       FREEING RMWs are on explicit `GC.free` only. No change
       (`bench/log/windows/2026-11-02-0.40-win-rows/`).
+- [x] **Windows Binarytrees 3–5% over 0.39.0 on EPYC 9V74 runners
+      (2026-11-02, fixed 2026-11-03).** Perf A/B 41409560598, the 0.40 tip
+      against 0.39.0, left it unexcused (+3.4%, var-code 1.075–1.086 s
+      against base-code 1.042–1.046). Same-session arms on the 9V74: the
+      pre-scan scrub reverted or off, the band wipe off, every collector
+      scrub off, the pthread scan clamp reverted, none moves it, nor Σ
+      pause. A walk of 0.40's `src/` history steps up at `19cf3a60` only,
+      and of its two halves the word advance out of line is the cost.
+      Inline on x86-64 Windows now; Linux on the same CPU has no such cost.
+      Mechanism open: ~40 ns per advance, far more than the Win64 call's
+      eight pushes (`bench/log/windows/2026-11-03-binarytrees/`).
 - [x] **The band under the collector scrub's own call (2026-11-02).**
       `run_collection`'s scrubs skipped the 192 bytes below their own SP,
       and a chunk's data start the slow path left there kept the chunk's
