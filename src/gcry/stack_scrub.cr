@@ -208,8 +208,10 @@ module Gcry
     # 3.6 MiB outer-array buffer and kept 36 MB through every collection,
     # "seeded by stack 3715 KiB": 5 of 5 000 runs with the register buffer
     # cleared (`Roots.capture_registers`), 0 of 5 000 with this
-    # (`bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`). Not counted in
-    # `collect_scrub_runs`, which stays two a collection.
+    # `bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`). Not counted in
+    # `collect_scrub_runs`, which stays two a collection. It runs inside the
+    # pause, so it takes the running fiber's bounds or nothing: never the
+    # libc lookup, which on the initial thread is a `/proc/self/maps` parse.
     #
     # `false` is the control arm of
     # `process_spec/regression/104_unwritten_root_words_spec.cr`.
@@ -218,23 +220,23 @@ module Gcry
     @[AlwaysInline]
     protected def pre_mutator_scan_scrub : Nil
       return unless @mutator_scan_scrub
-      clear_stack_guarded(@collect_scrub_bytes, fiber_bounds: true)
+      clear_stack_guarded(@collect_scrub_bytes, fiber_bounds: true, libc_fallback: false)
       collect_band_wipe_here
     end
 
     # Bytes zeroed, 0 when nothing was (disabled, re-entered, or no room).
-    private def clear_stack_guarded(bytes : UInt64, fiber_bounds : Bool) : UInt64
+    private def clear_stack_guarded(bytes : UInt64, fiber_bounds : Bool, libc_fallback : Bool = true) : UInt64
       return 0_u64 if bytes == 0
       return 0_u64 if @@clear_stack_active
       @@clear_stack_active = true
       begin
-        clear_stack_body(bytes, fiber_bounds)
+        clear_stack_body(bytes, fiber_bounds, libc_fallback)
       ensure
         @@clear_stack_active = false
       end
     end
 
-    private def clear_stack_body(bytes : UInt64, fiber_bounds : Bool) : UInt64
+    private def clear_stack_body(bytes : UInt64, fiber_bounds : Bool, libc_fallback : Bool) : UInt64
       {% if flag?(:win32) %}
         # Windows commits a stack incrementally. Do not touch its guard page
         # or call memset on memory below SP that memset itself could occupy.
@@ -259,8 +261,9 @@ module Gcry
       # free on the thread that matters: for the *initial* thread glibc
       # answers `pthread_getattr_np` by parsing `/proc/self/maps`, which
       # `linux_stack.cr` already documents and snapshots its way around to
-      # keep out of the pause. The collector's scrub runs twice per collection
-      # and outside the pause, so the cost was real and invisible to
+      # keep out of the pause. The collector's entry and exit scrubs run
+      # outside the pause (the pre-scan scrub, inside it, never asks), so
+      # the cost was real and invisible to
       # `pause_p50`/`p99`: measured on this box, 15.7 µs a call at 48 maps
       # lines, **2.1 ms** at 4 000 parked fibers (8 049 lines) and **24.7 ms**
       # at 20 000 (40 047 lines) — per call, twice a collection, on exactly
@@ -280,6 +283,7 @@ module Gcry
       end
 
       unless bounds_known
+        return 0_u64 unless libc_fallback
         # Counted on *asking*, not on the answer. The counter's whole job is
         # the structural claim "the collector never asks libc" — which
         # `make collect-scrub-cost` gates on — and a lookup that fails, or
