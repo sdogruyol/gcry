@@ -108,6 +108,14 @@ class Gcry::Heap
   end
 end
 
+# Whether an allocated block begins at *pointer*. Allocates nothing.
+private def rescan100_block_at?(heap : Gcry::Heap, pointer : Void*) : Bool
+  found = heap.find_object_with_chunk(pointer)
+  return false unless found
+  header, chunk = found
+  heap.user_of(chunk, header) == pointer
+end
+
 private def rescan100_say(text : String) : Nil
   STDOUT.puts text
   STDOUT.flush
@@ -360,6 +368,16 @@ private def rescan100_window(heap : Gcry::Heap, window : String) : {Bool, Bool, 
   holder = Pointer(Void*).null
 
   rescan100_finish(heap)
+  # X's state first, before this frame allocates anything: the sweep that
+  # just ran put a swept X on its class's free list, and the next
+  # allocation of that class takes it. The *remap* trace's print did, in
+  # the control after a retry with the freelist allocator
+  # (`GCRY_BITMAP_ALLOC=0`, headers): X then read as an allocated block, its
+  # pattern overwritten, every such run (CI, ubuntu-latest, and locally with
+  # the retry forced). Allocated means a block that begins at X, not one
+  # that merely covers its address.
+  x = Pointer(UInt8).new(~x_inv)
+  alive = rescan100_block_at?(heap, x.as(Void*))
   if window == "remap"
     heap.collection_event_hook = nil
     rescan100_say_trace
@@ -367,8 +385,6 @@ private def rescan100_window(heap : Gcry::Heap, window : String) : {Bool, Bool, 
   done.set(1)
   thread.try &.join
 
-  x = Pointer(UInt8).new(~x_inv)
-  alive = !heap.find_object(x.as(Void*)).nil?
   again = [] of UInt8*
   reused = false
   4096.times do
