@@ -229,7 +229,9 @@ nothing mapped at the address when it is popped, [INFERENCE, code reading]
 the headerless layout finds no chunk and skips it (`scan_object` resolves
 the chunk first), while the header layout reads the entry's header
 (`BlockHeader.atomic?`) before the lookup — a read of unmapped memory. Not
-probed here.
+probed here; probed, confirmed (SIGSEGV on the header layout, and dead
+contents traced on both) and fixed in
+`../2026-11-03-incremental-free-grey/FINDINGS.md` (regression 102).
 
 ## Cost
 

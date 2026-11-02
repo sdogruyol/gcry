@@ -3233,19 +3233,35 @@ kept finding the rest.
       cycle out and builds the window again.
       `bench/log/linux/2026-11-02-incremental-stack-rescan/FINDINGS.md`.
 
-- [ ] **`free` of a grey large block mid-cycle leaves its mark-stack entry
-      behind — found 2026-11-02 in review, not probed for a crash.**
-      An incremental cycle pushes a large block, the program frees it before
-      a slice pops it, and the cache trim unmaps it. The pop then scans
-      whatever is mapped at that address (seen: regression 100's first
-      *remap* construction kept X alive through it, conservative only).
-      With nothing mapped there, [INFERENCE, code reading] the headerless
-      layout is safe — `scan_object` resolves the chunk first and finds
-      none — but the header layout reads `BlockHeader.atomic?(entry)` before
-      the chunk lookup, a read of unmapped memory. Needs a probe on
-      `-Dgcry_block_headers` (free and trim between two slices, nothing
-      allocated after) before any fix; opt-in incremental only.
-      `bench/log/linux/2026-11-02-incremental-stack-rescan/FINDINGS.md`.
+- [x] **`free` of a grey block mid-cycle leaves its mark-stack entry
+      behind — found 2026-11-02 in review, confirmed and fixed 2026-11-03.**
+      An incremental cycle pushes a block, the program frees it before a
+      slice pops it, and the pop scans whatever is at that address. Probed
+      (out-of-tree `probe.cr`, both layouts, `b1cfbba0`): a 4 MiB block's
+      free unmaps its chunk (the cache trim) and the header layout dies of
+      SIGSEGV in `scan_object` at the freed header — the read ahead of the
+      chunk lookup — while headerless finds no chunk and skips it; a freed
+      40 000-byte (still cached) or 16 000-byte block has its dead payload
+      traced and keeps what only it pointed to through the cycle, both
+      layouts. 0.38.0 and 0.39.0 reproduce (soft-dirty, where their
+      mprotect card defects do not crash first); every tag's
+      `mark_loop_budget` scanned entries unchecked. `GC.realloc` is not a
+      source (it leaves the old block to the sweep). Fixed in the drain
+      itself: each popped entry is resolved before anything at its address
+      is read (inline for a tagged entry on a bitmap chunk, else
+      `find_object_with_chunk`) and skipped unless it still names an
+      allocated block's start in a chunk of its kind; 5–8% of a slice's
+      marking (27% through `find_object_with_chunk` alone), the
+      stop-the-world machine code unchanged (one function differs,
+      `mark_loop_budget`). Not taken: dropping the entry at `free` (a stack
+      search per free on a hot path), deferring the chunk's release (no
+      help for dead contents), gating on the explicit-free count (a free's
+      count and deallocation are separate steps a stop can split). A block
+      handed out again at the address is allocated black and still scanned:
+      one cycle's floating garbage, swept by the next (probe). Regression
+      102 *unmapped* / *cached* / *small*, control
+      `inc_scan_checks_entries = false`.
+      `bench/log/linux/2026-11-03-incremental-free-grey/FINDINGS.md`.
 
 - [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — closed 2026-09-22 on 891 quiet samples.**

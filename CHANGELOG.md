@@ -205,6 +205,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root and the whole heap in every collection and is unaffected
   (`bench/log/linux/2026-11-02-incremental-stack-rescan/`).
 
+- **An incremental cycle no longer reads a block the program freed while
+  it waited to be scanned.** Under `GCRY_INCREMENTAL=1` (or
+  `collect_a_little`) a block the cycle had marked and not yet scanned kept
+  its mark-stack entry when `GC.free` released it, and the slice that
+  reached the entry scanned whatever was at that address by then. Freeing a
+  large block unmaps its chunk once the cache is over its retention (4 MiB
+  is), and on the header layout (`-Dgcry_block_headers`) the slice read the
+  freed block's header there and died of SIGSEGV; headerless looked the
+  chunk up first and skipped it. On both layouts a freed block still mapped
+  had its dead contents traced, keeping whatever only it pointed to through
+  the cycle. The incremental mark now checks each entry against the heap
+  before it reads anything there and skips one whose block is no longer
+  allocated, for 5–8% of a slice's marking on a heap of small blocks.
+  Regression 102 frees a 4 MiB, a 40 000-byte and a 16 000-byte block
+  grey: the code before died at the freed header in 6 000 of 6 000
+  header-layout runs and kept the object in 500 of 500 of each of the
+  others, on both layouts. 0.38.0 and 0.39.0 reproduce both; every release
+  since 0.1.0 scanned the entries unchecked. Opt-in only: the
+  stop-the-world collector's machine code is unchanged
+  (`bench/log/linux/2026-11-03-incremental-free-grey/`).
+
 - **`thread_staged_total` no longer loses births to concurrent thread
   creation.** Every creating thread bumped it with a plain `&+= 1`, and a
   parallel context's schedulers start each other's threads, so two births at
