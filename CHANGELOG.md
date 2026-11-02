@@ -112,6 +112,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A collection no longer keeps blocks named only by its own frames once
+  the main fiber has moved to another thread.** Crystal 1.21+'s
+  execution-context monitor hands the scheduler of a thread it catches in a
+  `Fiber.syscall` (stdlib's blocking `open(2)`, `getaddrinfo`) to another
+  thread, and the main fiber carries on there. The initial thread's stack
+  mapping is then the main fiber's stack, and the stop-the-world scan read
+  it whole as that thread's — from the collector itself when the collection
+  ran on the main fiber, frames below its SP and the mark chain under the
+  scan included, whose locals hold each looked-up chunk's data start and
+  block header. The first block of a chunk the mark had looked into, and
+  whatever such a word named, were kept through every collection
+  (regression 21's two control blocks, failing CI's 1.22.2 step about half
+  the times the main fiber had moved). A thread running on a mapping now
+  bounds its scan the way the owner's own SP would: the collector at its
+  SP, a stopped thread at its suspend SP less the usual slack; with no
+  thread on it the mapping is read as before. Over-retention only, never a
+  premature free; v0.36.0–v0.39.0 have the same scan. Regression 103 plants
+  eight blocks' addresses below the collector on the moved main fiber: the
+  code before keeps all eight (0.39.0 too), the fix frees them
+  (`bench/log/linux/2026-11-03-reg21-marked-unmarked/`).
+
 - **A collection no longer leaves the 192 bytes under its own stack scrub
   as they were.** `run_collection`'s scrubs zero 16 KiB below the scrub's
   SP but skip the red zone and leaf margin where their `memset` runs. The

@@ -4813,13 +4813,24 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       a pointer into its block in the headers layout (tradeoff in the
       findings; no help to the default layout)
       (`bench/log/linux/2026-11-02-scrub-band/`).
-- [ ] **Regression 21's "controls kept 8 > 1" (one sighting, 2026-11-01).**
-      All eight control blocks were live after three collections, in a run
-      where the monitor had moved the main fiber off the initial thread.
-      0 in 200 suite-order runs since, across five trees; forcing the move
-      (before and inside the example) or allocating the controls on another
-      thread did not reproduce it. Class (stale roots or blocks not
-      reclaimed) open (`bench/log/linux/2026-11-02-scrub-band/`, section 3).
+- [x] **Regression 21's "controls kept 8 > 1" (first seen 2026-11-01,
+      found and fixed 2026-11-03).** Reproduced in CI's 1.22.2 step (21 at
+      position 94 of 97): 9 of 19 probe runs with the main fiber moved off
+      the initial thread, 0 of 141 without; locally every run with the move
+      forced before the first example. Not stale roots nor unreclaimed
+      blocks, and not the write barrier (`None` at the example; the
+      chunk's `BARRIER_ARMED` bit is stale metadata nothing reads outside an
+      mprotect scan): the two controls are marked by the initial thread's
+      pthread-stack scan, which read the main fiber's stack — the
+      collector's own, after the move — whole from its low-water mark, the
+      mark chain's locals under the scan included (a chunk's data start
+      names its first block). Fixed: a mapping another thread runs on is
+      scanned from that thread's SP (`pthread_scan_low_off_sp`).
+      Over-retention in any program whose main fiber the monitor moved;
+      v0.36.0–v0.39.0 alike. Regression 103 (plant below the collector on
+      the moved main fiber; control `pthread_scan_running_sp_clamp = false`,
+      plus an unplanted arm).
+      `bench/log/linux/2026-11-03-reg21-marked-unmarked/FINDINGS.md`.
 - [ ] **Per-object mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-23).** Per collection at the same (full) live set,
       gcry's one marker took 0.39× / 0.43× / 0.67× of Boehm's one marker on

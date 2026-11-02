@@ -1,0 +1,2 @@
+v4 1 rc=1 f21=1 moved=1 390 examples, 1 failures, 0 errors, 3 pending fails=[21_boehm_c_abi_spec.cr:116 ]
+v4 2 rc=0 f21=0 moved=0 390 examples, 0 failures, 0 errors, 2 pending fails=[]

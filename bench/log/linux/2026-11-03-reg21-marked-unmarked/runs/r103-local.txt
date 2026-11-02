@@ -1,0 +1,12 @@
+# process_spec/regression/103_pthread_stack_running_sp_spec.cr built alone on 823ca9ed, Crystal 1.22.2,
+# three runs each of -Dgc_none -Dgcry_block_headers and -Dgc_none under GCRY_BITMAP_ALLOC=0, and two of -Dgc_none
+# with the default allocator; every run identical:
+fixed: pstack103: fixed: 0 of 8 planted blocks kept
+control: pstack103: control: 8 of 8 planted blocks kept
+unplanted: pstack103: unplanted: 0 of 8 planted blocks kept
+6 examples, 0 failures, 0 errors, 0 pending
+# The same file on v0.39.0 (the knob line removed, so every arm runs the code before), header layout,
+# GCRY_BITMAP_ALLOC=0, three runs, every run identical:
+fixed: pstack103: fixed: 8 of 8 planted blocks kept
+control: pstack103: control: 8 of 8 planted blocks kept
+unplanted: pstack103: unplanted: 0 of 8 planted blocks kept
