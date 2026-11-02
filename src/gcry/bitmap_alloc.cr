@@ -1251,7 +1251,20 @@ module Gcry
     # `bytes_local` and size-class index to the stack and back on every
     # allocation (frame 0x88 → 0x98); out of line, 5 stack stores in place of
     # 19 and a 0x28 frame (`bench/log/macos/2026-11-02-intel-binarytrees/`).
-    @[NoInline]
+    #
+    # Inline on x86-64 Windows. There the out-of-line advance made
+    # Binarytrees 3–5% slower than 0.39.0 on the EPYC 9V74 runners, in every
+    # placement and in every session, and inline it reads level with 0.39.0.
+    # On the EPYC 7763 runners out of line reads 1–2% faster than 0.39.0 and
+    # inline level with it, placement averaged out. ubuntu-latest on the same
+    # 9V74 shows no such cost, so the other targets keep it out of line. The
+    # Win64 copy saves eight registers and takes a 0xa8 frame, the SysV one
+    # six and 0x58 (`bench/log/windows/2026-11-03-binarytrees/`).
+    {% if flag?(:win32) && flag?(:x86_64) %}
+      @[AlwaysInline]
+    {% else %}
+      @[NoInline]
+    {% end %}
     protected def cursor_advance_word(s : CursorSlot*, index : Int32) : UInt64
       chunk = s.value.chunk
       return 0_u64 if chunk.null?
