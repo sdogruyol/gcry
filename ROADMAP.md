@@ -3230,7 +3230,10 @@ kept finding the rest.
       (stop trace in the findings); a false root in static data marks the
       old chunk now and then (first-mark attribution; 3 of about 530
       header-layout runs, none headerless), and the arm then runs that
-      cycle out and builds the window again.
+      cycle out and builds the window again. 2026-11-03: after such a retry
+      on the freelist allocator the control read X after its trace's print,
+      which took swept X's slot (CI twice, forced locally 200 of 200); X
+      is now read before the window allocates anything.
       `bench/log/linux/2026-11-02-incremental-stack-rescan/FINDINGS.md`.
 
 - [x] **`free` of a grey block mid-cycle leaves its mark-stack entry

@@ -316,6 +316,83 @@ block after the cards were lost) turns off both the rescan and the
 untracked scan, each of which would find it. Their fixed arms are as they
 were.
 
+### The *remap* control after a retry, freelist allocator (2026-11-03)
+
+Two sightings of the *remap* control failing as `alive=true pattern
+intact=false handed out again=false`, both in test-crystal-next's step
+(`GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers
+process_spec`, Crystal 1.22.2, ubuntu-latest): CI21's probe on `c92dcef9`
+and CI21b's run 41378713692 (shard `fix-7`, run 1). Both children printed
+the retry ("a false root marked the old block, attempt 1 run out and built
+again") and then a trace with X unmarked at the finishing mark's end — X
+was swept — and 5 stops (the held first old block, 4 MiB of pointer
+words, costs the second cycle one more slice).
+
+The window read X's state (`find_object(x)`) after the *remap* trace's
+print, and the print allocates. The finishing sweep had put X on its
+class's free list, and after a retry, on the freelist allocator, X's slot
+was where the print's allocation came from: X then read as an allocated
+block (payload 80, beginning at X), its pattern overwritten, and never
+among the 4 096 later allocations. A diagnostic copy (out of the tree) read
+X right after the finish and again after the print, with the retry forced
+by a static word planted into the first old block, 200 control runs each,
+Crystal 1.22.2:
+
+| layout, allocator | retry | after the finish | after the print | arm |
+|---|---|---|---|---|
+| headers, freelist | forced | free 200 | allocated at X 200 | failed 200 |
+| headers, freelist | natural (none) | free 200 | free 200 | passed 200 |
+| headers, bitmap | forced / natural | free 200 / 200 | free 200 / 200 | passed 200 / 200 |
+| headerless | forced / natural | free 200 / 200 | free 200 / 200 | passed 200 / 200 |
+
+No local loop had run the arm with `GCRY_BITMAP_ALLOC=0`, and no local run
+had retried naturally on that allocator.
+
+**Fix (`137152d1`, spec only; `137e5863` on `96956b42` before the rebase
+onto `fb735222`, where the loops and the probe below ran first).** The
+window reads X's state right after
+the cycle finishes, before it allocates anything — the trace's print, the
+thread join and the 4 096 allocations all come after — and counts X
+alive only if an allocated block *begins* at X (`find_object_with_chunk`,
+`user_of`), not merely covers its address. The control's claim is
+unchanged: X is swept by the finish.
+
+Local loops on `137e5863`, Crystal 1.22.2, 200 runs of each arm, parent and
+child each a process:
+
+| tree / copy | layout, allocator | windows | fixed | control |
+|---|---|---|---|---|
+| `137e5863` | headerless | each of the five | 200/200 | 200/200 |
+| `137e5863` | headers, bitmap | each of the five | 200/200 | 200/200 |
+| `137e5863` | headers, freelist | each of the five | 200/200 | 200/200 |
+| planted retry, `137e5863` | headerless; headers bitmap; headers freelist | *remap* | 200/200 each | 200/200 each |
+| planted retry, `96956b42` (the read after the print) | headers, freelist | *remap* | 200/200 | 0/200, each `alive=true pattern intact=false` |
+
+So the planted copy reproduces both sightings on every run of the code
+before, and on the new read the control (the remap fix turned off,
+`mprotect_scan_unarmed_chunks = false`) still finds X swept every run.
+
+The same on ubuntu-latest, Crystal 1.22.2 (probe run 41391302397, branch
+`probe/reg100-remap`, `137e5863` plus the two planted copies): every row of
+the table above alike — each arm of each window 200/200 on headerless,
+headers and headers with the freelist allocator, the planted copies 200/200
+on `137e5863` and the old read's control 0/200 (`alive=true pattern
+intact=false` after the retry), its fixed arm 200/200. Test-crystal-next's
+step itself, 20 runs over 5 jobs: 401 examples, 0 failures each (2
+pending, 3 in two runs).
+
+Checks on `137e5863` (this host, under the shared lock): format clean;
+`make lint` 254 inspected, 0 failures; `process_spec` headerless / headers
+/ headers with `GCRY_BITMAP_ALLOC=0` 400 / 401 / 401 examples, 0 failures,
+2 pending, on Crystal 1.21.0 and again on 1.22.2.
+
+Again after the rebase onto `fb735222` (regression 103's pthread scan
+fix), on `137152d1`: the local loops, every row 200/200 as above except the
+old read's planted control, 1/200 (199 failed as before; once the print's
+allocation came from elsewhere); format clean, `make lint` 0 failures;
+`process_spec` 406 / 407 / 407 examples, 0 failures, 2 pending, on 1.21.0
+and on 1.22.2.
+
 ## Releases and the default configuration
 
 0.38.0 and 0.39.0 reproduce the root hole (table above); no release since

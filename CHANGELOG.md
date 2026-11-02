@@ -133,6 +133,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code before keeps all eight (0.39.0 too), the fix frees them
   (`bench/log/linux/2026-11-03-reg21-marked-unmarked/`).
 
+- **Regression 100's *remap* control no longer finds a swept object
+  allocated again after a retry.** The window read the object's state after
+  printing its stop trace, and the print allocates: after the arm's retry
+  (a false root had marked the old block), on the freelist allocator, the
+  sweep had left the swept object's slot first in its class, and the print
+  took it. The control then read the object as alive with its pattern
+  overwritten — twice in test-crystal-next's step on ubuntu-latest, and on
+  every run locally with the retry forced (200 of 200). The window now
+  reads the object before it allocates anything, and counts it alive only
+  if a block begins at it: 0 failures in 200 runs of every arm on each
+  layout and allocator, with and without the forced retry; the control
+  still finds it swept every time
+  (`bench/log/linux/2026-11-02-incremental-stack-rescan/`).
+
 - **A collection no longer leaves the 192 bytes under its own stack scrub
   as they were.** `run_collection`'s scrubs zero 16 KiB below the scrub's
   SP but skip the red zone and leaf margin where their `memset` runs. The
