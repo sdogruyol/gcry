@@ -38,9 +38,14 @@ private MONITOR105_FREED     = "monitor105: planted block freed"
 private MONITOR105_BYTES = 20_000
 
 # The block's one reference until the Monitor has planted: static data, a
-# root no stack scan involves.
+# root no stack scan involves. Atomic, because a `--release` build dropped
+# the plain store that cleared it, and the slot kept the block in every arm.
 private module Monitor105Hold
-  class_property block : Void* = Pointer(Void).null
+  @@block = Atomic(UInt64).new(0_u64)
+
+  def self.block=(p : Void*) : Nil
+    @@block.set(p.address)
+  end
 end
 
 @[NoInline]
@@ -50,15 +55,22 @@ private def monitor105_scrub_frames : Nil
   asm("" :: "r"(buf.to_unsafe) : "memory" : "volatile")
 end
 
-# The block, made on a fiber of its own that scrubs its frames; its address
-# masked with the plant's key in *masked*, and held in `Monitor105Hold`.
+# The block, in a frame of its own below the spawned fiber's entry, which the
+# scrub after it then zeroes (regression 101's target, made in the spawned
+# block itself, was kept by that fiber's top frame in a `--release` build).
+# Its address masked with the plant's key in *masked*, and held in
+# `Monitor105Hold`.
+@[NoInline]
+private def monitor105_alloc(masked : UInt64*) : Nil
+  p = GC.malloc_atomic(MONITOR105_BYTES)
+  masked.value = p.address ^ Gcry::MonitorGate::PLANT_KEY
+  Monitor105Hold.block = p
+end
+
 private def monitor105_make(masked : UInt64*) : Nil
   done = Channel(Nil).new
   spawn do
-    p = GC.malloc_atomic(MONITOR105_BYTES)
-    masked.value = p.address ^ Gcry::MonitorGate::PLANT_KEY
-    Monitor105Hold.block = p
-    p = Pointer(Void).null
+    monitor105_alloc(masked)
     monitor105_scrub_frames
     done.send(nil)
   end
