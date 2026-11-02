@@ -192,7 +192,10 @@ module Gcry
       @@site.set(site)
       loop do
         @@busy.set(1)
-        return if @@stopped.get == 0
+        if @@stopped.get == 0
+          plant_for_test if @@test_plant != 0
+          return
+        end
 
         # Back off first: holding `busy` while waiting for the world to restart
         # would deadlock against a collector waiting for `busy` to clear.
@@ -249,8 +252,74 @@ module Gcry
     end
 
     def self.leave : Nil
+      {% if flag?(:linux) %}
+        unless @@residue_kept
+          scrub_dead_stack
+          # The band under `scrub_dead_stack`'s SP and the frame it ran on,
+          # with the allocation slow path's frameless wipe from this one.
+          Roots.wipe_below_sp(Roots.wipe_limit(Roots.hardware_stack_pointer.address))
+        end
+      {% end %}
       @@busy.set(0)
       @@site.set(SITE_NONE)
+    end
+
+    # Dead stack zeroed below the Monitor's SP as each piece of gated work
+    # ends, before `busy` clears, so a stop never reads it half done. On
+    # Linux the Monitor is never signalled and publishes no SP, so a stop
+    # reads its stack whole from the low-water mark
+    # (`Heap#scan_other_thread_fiber_ec1`, and `scan_all_fiber_roots` with
+    # more than one mutator), and every word its earlier, deeper calls left
+    # below where it sleeps was a root. The gated calls are the deep ones and
+    # the ones that handle schedulers, thread pools and fiber stacks. In
+    # regression 1's suite order such a word, about 650 bytes below the
+    # Monitor's sleeping SP, named a word inside a large block, and kept the
+    # block and the 16–50 thousand objects it reached until a later Monitor
+    # pass wrote over it, inside the spec's measured window
+    # (`bench/log/linux/2026-11-04-reg1-drift/`). The idle thread does the
+    # same before every park (`IdleRelease.scrub_dead_stack`, whose shape
+    # this keeps). Measured in that suite order, the Monitor's touched stack
+    # ended 1 072 bytes below its sleeping SP. Darwin and Windows suspend the
+    # Monitor and scan it from its SP.
+    SCRUB_BYTES = 16_384_u64
+    # Below the SP captured here, so the `memset` frame the clear itself pushes
+    # sits in the gap and is not zeroed under it (as `clear_stack_body`).
+    SCRUB_SKIP = 256_u64
+
+    # Research only, the control arm of
+    # `process_spec/regression/105_monitor_dead_stack_spec.cr`: `true` leaves
+    # the Monitor's dead stack as its calls left it, as before 2026-11-04.
+    class_property? residue_kept : Bool = false
+
+    @[NoInline]
+    private def self.scrub_dead_stack : Nil
+      stack = Fiber.current.@stack
+      floor = stack.pointer.address + Platform.host_page_size
+      sp = Roots.hardware_stack_pointer.address
+      return if sp <= floor + SCRUB_SKIP
+      high = sp - SCRUB_SKIP
+      low = high > floor + SCRUB_BYTES ? high - SCRUB_BYTES : floor
+      return if low >= high
+      Pointer(UInt8).new(low).clear(high - low)
+    end
+
+    # Research only, for regression 105: when not 0, each gated call writes
+    # `test_plant ^ PLANT_KEY` over `PLANT_WORDS` words of the Monitor's stack
+    # below `enter`, standing in for a deeper call that left a heap address
+    # there, and counts it in `test_plants`. Stored masked so the field is no
+    # root.
+    class_property test_plant : UInt64 = 0_u64
+    class_getter test_plants : UInt64 = 0_u64
+    PLANT_KEY   = 0x0105_a5a5_5a5a_0105_u64
+    PLANT_WORDS =                      1024
+
+    @[NoInline]
+    private def self.plant_for_test : Nil
+      pad = uninitialized StaticArray(UInt64, PLANT_WORDS)
+      word = @@test_plant ^ PLANT_KEY
+      PLANT_WORDS.times { |i| pad[i] = word }
+      asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
+      @@test_plants &+= 1
     end
 
     private def self.now_ns : UInt64
