@@ -1,0 +1,20 @@
+runs/d1ba0/2.log:D1 c1 pre1 live=1408767 cols=201 fin=147
+runs/d1ba0/2.log:D1 c1 pre2 live=1408767 cols=202 fin=147
+runs/d1ba0/2.log:D1 c1 pre3 live=1408767 cols=203 fin=147
+runs/d1ba0/2.log:D1 c1 freed live=1408767 cols=203 fin=147
+runs/d1ba0/2.log:D1 c1 post0 live=1408767 cols=204 fin=147
+runs/d1ba0/2.log:D1 c1 post1 live=1408767 cols=205 fin=147
+runs/d1ba0/2.log:D1 c1 post2 live=1388594 cols=206 fin=147
+runs/d1ba0/2.log:D1 c1 post3 live=1388594 cols=207 fin=147
+runs/d1ba0/2.log:D1 c1 report drift=-20173 words=884 frame=0x7ffe2b169358 lo=0x7ffe2b168490
+runs/d1ba0/2.log:D1 c1 summary gone_words=0 gone_fin=0
+runs/d1ba0/12.log:D1 c1 pre1 live=1500050 cols=201 fin=145
+runs/d1ba0/12.log:D1 c1 pre2 live=1500050 cols=202 fin=145
+runs/d1ba0/12.log:D1 c1 pre3 live=1500050 cols=203 fin=145
+runs/d1ba0/12.log:D1 c1 freed live=1500050 cols=203 fin=145
+runs/d1ba0/12.log:D1 c1 post0 live=1500050 cols=204 fin=145
+runs/d1ba0/12.log:D1 c1 post1 live=1479877 cols=205 fin=145
+runs/d1ba0/12.log:D1 c1 post2 live=1479877 cols=206 fin=145
+runs/d1ba0/12.log:D1 c1 post3 live=1479877 cols=207 fin=145
+runs/d1ba0/12.log:D1 c1 report drift=-20173 words=1170 frame=0x7ffc711dba68 lo=0x7ffc711daba0
+runs/d1ba0/12.log:D1 c1 summary gone_words=0 gone_fin=0

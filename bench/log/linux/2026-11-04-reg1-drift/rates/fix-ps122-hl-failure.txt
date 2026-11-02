@@ -1,0 +1,15 @@
+Failures:
+
+  1) Regression: live_objects counter drift on dormant chunks returns live_objects to its baseline after full free + collect
+     Failure/Error: big.drift.abs.should(be < 500, detail)
+
+       count=10000 drift=-2444 | count=1000 drift=0
+
+     # process_spec/regression/1_live_objects_dormant_spec.cr:137
+
+Finished in 1:48 minutes
+428 examples, 1 failures, 0 errors, 2 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/1_live_objects_dormant_spec.cr:97 # Regression: live_objects counter drift on dormant chunks returns live_objects to its baseline after full free + collect

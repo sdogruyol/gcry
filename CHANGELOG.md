@@ -148,6 +148,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   EPYC 7763 out of line had read 1.8–2.7% under 0.39.0 and inline reads
   level with it (`bench/log/windows/2026-11-03-binarytrees/`).
 
+- **On Linux a word the execution-context Monitor's calls left below its SP
+  no longer keeps a block.** The Monitor is never signalled, so a stop reads
+  its stack whole from the low-water mark. `collect_stacks` leaves the base
+  and top of the fiber stack it frees 648 bytes below where the Monitor
+  sleeps. Once gcry mapped chunks over that range, both words were interior
+  pointers into large blocks: in regression 1's suite order they kept
+  16–70 thousand objects until the next `collect_stacks` wrote over them,
+  inside the spec's window (−15 985 to −70 174 with block headers, 4 of 113
+  tip runs). The Monitor now zeroes 16 KiB below its SP as each gated call
+  ends (`MonitorGate.leave`), before a stop may read it. Over-retention
+  only. Regression 105 plants a block's address there: the code before
+  keeps it, the fix frees it. Regression 1 also zeroes `drift_cycle`'s own
+  frame before each cycle; a planted address in that frame's slots read
+  −4 003. One −2 444 on 1.22.2 headerless after the fix is open
+  (`bench/log/linux/2026-11-04-reg1-drift/`).
+
 - **The root scan no longer reads words nothing wrote in three frames, and
   `make parallel-dormant` no longer keeps its dropped burst 1 run in 200.**
   CI failed the gate once (job 125102880486, "seeded by … parked 3714

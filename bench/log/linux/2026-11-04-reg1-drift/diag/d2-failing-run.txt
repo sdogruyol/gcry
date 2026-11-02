@@ -1,0 +1,23 @@
+D1 c1 pre1 live=1401937 cols=200 fin=148
+D1 c1 pre2 live=1401937 cols=201 fin=148
+D1 c1 pre3 live=1401937 cols=202 fin=148
+D1 c1 freed live=1401937 cols=202 fin=148
+D1 c1 post0 live=1401937 cols=203 fin=148
+D1 c1 post1 live=1401937 cols=204 fin=148
+D1 c1 post2 live=1401937 cols=205 fin=148
+D1 c1 post3 live=1385952 cols=206 fin=148
+D1 c1 ROOTS records=2648 dropped=0
+D1 c1 ROOT col=198 src=5 slot=0x7dc1cfffe850 (other, bottom-2451953047472) val=0x7dc178a00000 hdr=0x7dc1789fc030 cur=0x0 tid=0
+D1 c1 ROOT col=199 src=5 slot=0x7dc1cfffe850 (other, bottom-2451953047472) val=0x7dc178a00000 hdr=0x7dc1789fc030 cur=0x0 tid=0
+D1 c1 ROOT col=200 src=5 slot=0x7dc1cfffe850 (other, bottom-2451953047472) val=0x7dc178a00000 hdr=0x7dc1789fc030 cur=0x0 tid=0
+D1 c1 ROOT col=201 src=5 slot=0x7dc1cfffe850 (other, bottom-2451953047472) val=0x7dc178a00000 hdr=0x7dc1789fc030 cur=0x0 tid=0
+D1 c1 ROOT col=202 src=5 slot=0x7dc1cfffe850 (other, bottom-2451953047472) val=0x7dc178a00000 hdr=0x7dc1789fc030 cur=0x0 tid=0
+D1 c1 ROOT col=203 src=5 slot=0x7dc1cfffe850 (other, bottom-2451953047472) val=0x7dc178a00000 hdr=0x7dc1789fc030 cur=0x0 tid=0
+D1 c1 ROOT col=204 src=5 slot=0x7dc1cfffe850 (other, bottom-2451953047472) val=0x7dc178a00000 hdr=0x7dc1789fc030 cur=0x0 tid=0
+D1 c1 ROOTS gone=7 main stack [0x7ffcb34a6000,0x7ffcb3ca4000)
+D1 THREAD DEFAULT-0 main=[0x7ffcb34a6000,0x7ffcb3ca4000) current=[0x7ffcb34a6000,0x7ffcb3ca4000)
+D1 THREAD SYSMON main=[0x7dc1cf800000,0x7dc1d0000000) current=[0x7dc1cf800000,0x7dc1d0000000)
+D1 THREAD gc-idle main=[0x7dc1cc3fd000,0x7dc1ccbfd000) current=[0x7dc1cc3fd000,0x7dc1ccbfd000)
+D1 THREAD staging-spec-0 main=[0x7dc1c6600000,0x7dc1c6e00000) current=[0x7dc1c7800000,0x7dc1c8000000)
+D1 THREAD staging-spec-1 main=[0x7dc1c6ed8000,0x7dc1c76d8000) current=[0x7dc1c5c00000,0x7dc1c6400000)
+D1 c1 report drift=-15985 words=1194 frame=0x7ffcb3ca29a8 lo=0x7ffcb3ca1ae0

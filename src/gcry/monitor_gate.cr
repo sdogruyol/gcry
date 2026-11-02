@@ -274,7 +274,7 @@ module Gcry
     # the ones that handle schedulers, thread pools and fiber stacks. In
     # regression 1's suite order such a word, about 650 bytes below the
     # Monitor's sleeping SP, named a word inside a large block, and kept the
-    # block and the 16–50 thousand objects it reached until a later Monitor
+    # block and the 16–70 thousand objects it reached until a later Monitor
     # pass wrote over it, inside the spec's measured window
     # (`bench/log/linux/2026-11-04-reg1-drift/`). The idle thread does the
     # same before every park (`IdleRelease.scrub_dead_stack`, whose shape

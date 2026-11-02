@@ -56,8 +56,8 @@ private def drift_cycle(heap, count : Int32) : Cycle
   # objects (`bench/log/linux/2026-11-02-scrub-band/`). Scrubbed first, the
   # four collections run the finalizer and reclaim before the baseline. The
   # same thing happened from the execution-context Monitor's dead stack, which
-  # gcry scanned whole on Linux: -15 985 to -50 002 under
-  # `GCRY_BITMAP_ALLOC=0` until the Monitor zeroed it after each call
+  # gcry scanned whole on Linux: -15 985 to -70 174 with block headers, with
+  # either allocator, until the Monitor zeroed it after each call
   # (regression 105, `bench/log/linux/2026-11-04-reg1-drift/`).
   drift_scrub
   4.times { GC.collect }

@@ -6,10 +6,10 @@ require "spec"
 # whole from the low-water mark, and every word its earlier, deeper calls had
 # left below where it sleeps was scanned as a root. In regression 1's suite
 # order one such word, about 650 bytes below the Monitor's sleeping SP, named
-# a word inside a large block, and kept that block and the 16–50 thousand
+# a word inside a large block, and kept that block and the 16–70 thousand
 # objects it reached until a later Monitor pass wrote over it, inside the
-# spec's measured window: `drift=-15985`, `-20173`, `-50002` under
-# `GCRY_BITMAP_ALLOC=0` (`bench/log/linux/2026-11-04-reg1-drift/`). The
+# spec's measured window: `drift=-15985` to `-70174` with block headers
+# (`bench/log/linux/2026-11-04-reg1-drift/`). The
 # Monitor now zeroes its stack below each gated call as the call ends
 # (`MonitorGate.leave`), as the idle thread does before every park.
 #

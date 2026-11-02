@@ -1,0 +1,28 @@
+hdr 1 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 2 rc=1 fail=[21_boehm_c_abi_spec.cr:115 ] {} 275 examples, 1 failures, 0 errors, 3 pending
+hdr 3 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 4 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 5 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 6 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 7 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 8 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 9 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 10 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 11 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 12 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 13 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 14 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 15 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 16 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 17 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 18 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 19 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 20 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 21 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 22 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 23 rc=1 fail=[1_live_objects_dormant_spec.cr:91 ] {count=10000 drift=-50005 | count=1000 drift=-2} 275 examples, 1 failures, 0 errors, 2 pending
+hdr 24 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 25 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 26 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 27 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdr 28 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
