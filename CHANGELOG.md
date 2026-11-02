@@ -112,6 +112,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The root scan no longer reads words nothing wrote in three frames, and
+  `make parallel-dormant` no longer keeps its dropped burst 1 run in 200.**
+  CI failed the gate once (job 125102880486, "seeded by … parked 3714
+  KiB", 36 MB live across 7 majors); the same failure was 25 in 5 000 local
+  runs on the tip and 5 in 5 000 after this. Not the change to
+  `scan_pthread_stack` (`21462240`): 15 in 3 500 on the tree before it and
+  15 in 3 500 with its clamp off, against 22 on the tip (p = 0.32). Each
+  holder was a stack slot no code had written, keeping a word an earlier
+  call had left at that depth, which named a word inside the burst's
+  3.6 MiB outer-array buffer whenever that buffer was mapped there. (1) The
+  idle collector's `loop_forever` frame never returns, and a slot of it held
+  an address left from the thread's birth at every collection; the thread
+  now zeroes its stack below the block that starts it before that frame is
+  built. (2) The mutator scan reads its own frames, and a slot of them held
+  what this cycle's earlier phases had left there; the collector scrubs
+  below its frame once more just before that scan. (3)
+  `Roots.capture_registers` scanned all 256 bytes of a buffer `setjmp`
+  writes 80 of on x86_64 glibc, 21 words read as registers; it is cleared
+  first. Over-retention only: every word cleared is one nothing wrote after
+  the clear. The 5 left are the execution-context monitor's own frames,
+  which gcry reads whole for want of its SP: a word whose low half is a
+  ~10 ms nanosecond count and whose high half matches the heap's
+  (`bench/log/linux/2026-11-03-parked-seed/`). Regression 104, with a
+  control arm for each.
+
 - **A collection no longer keeps blocks named only by its own frames once
   the main fiber has moved to another thread.** Crystal 1.21+'s
   execution-context monitor hands the scheduler of a thread it catches in a

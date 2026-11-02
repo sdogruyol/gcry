@@ -1,0 +1,126 @@
+DBG burst thread stack base=0x750f02fff000 bottom=0x750f037ff000
+DBG watch enter collections=1 collector=(nil) slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch exit collections=2 collector=(nil) slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=2 collector=(nil) slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch exit collections=3 collector=(nil) slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=3 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG big parked seed user=0x750f008b9040 bytes=3802600 fiber=0x750f0ab000d0 name=main running=1 base=0x750f09a00000 bottom=0x750f0a200000 stack_top=0x750f0a1fec64 scan_top=0x750f0a1fe000 scanned=8192 stw_multi=1 own_sp=0x7ffef5dcb7e8
+DBG   thread=0x750f0b8680d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x750f0b868190
+DBG   thread=0x750f0b868310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x750f0ab000d0
+DBG   thread=0x750f0b868490 name=(nil) current_is=0 main_is=0 sp=0x750f08ffecb8 exempt=0 current_fiber=0x750f0aae00d0
+DBG   thread=0x750f0b868550 name=(nil) current_is=0 main_is=0 sp=0x750f03ffecb8 exempt=0 current_fiber=0x750f0aaa00d0
+DBG   thread=0x750f0aa80190 name=gc-idle current_is=0 main_is=0 sp=0x750f016f9c68 exempt=1 current_fiber=0x750f0aaa0190
+DBG   holder slot=0x750f0a1feb70 below_bottom=5264 above_stack_top=-244 value=user+849827
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec50 below_bottom=5040 above_stack_top=-20 value=user+849827
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec60 below_bottom=5024 above_stack_top=-4 value=user+849827
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec98 below_bottom=4968 above_stack_top=52 value=user+849827
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG watch exit collections=4 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=4 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG big parked seed user=0x750f008b9040 bytes=3802600 fiber=0x750f0ab000d0 name=main running=1 base=0x750f09a00000 bottom=0x750f0a200000 stack_top=0x750f0a1fec64 scan_top=0x750f0a1fe000 scanned=8192 stw_multi=1 own_sp=0x7ffef5dcb7e8
+DBG   thread=0x750f0b8680d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x750f0b868190
+DBG   thread=0x750f0b868310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x750f0ab000d0
+DBG   thread=0x750f0b868490 name=(nil) current_is=0 main_is=0 sp=0x750f08ffecb8 exempt=0 current_fiber=0x750f0aae00d0
+DBG   thread=0x750f0b868550 name=(nil) current_is=0 main_is=0 sp=0x750f03ffecb8 exempt=0 current_fiber=0x750f0aaa00d0
+DBG   thread=0x750f0aa80190 name=gc-idle current_is=0 main_is=0 sp=0x750f016f9c68 exempt=1 current_fiber=0x750f0aaa0190
+DBG   holder slot=0x750f0a1feb70 below_bottom=5264 above_stack_top=-244 value=user+851118
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec50 below_bottom=5040 above_stack_top=-20 value=user+851118
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec60 below_bottom=5024 above_stack_top=-4 value=user+851118
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec98 below_bottom=4968 above_stack_top=52 value=user+851118
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG watch exit collections=5 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=5 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG big parked seed user=0x750f008b9040 bytes=3802600 fiber=0x750f0ab000d0 name=main running=1 base=0x750f09a00000 bottom=0x750f0a200000 stack_top=0x750f0a1fec64 scan_top=0x750f0a1fe000 scanned=8192 stw_multi=1 own_sp=0x7ffef5dcb7e8
+DBG   thread=0x750f0b8680d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x750f0b868190
+DBG   thread=0x750f0b868310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x750f0ab000d0
+DBG   thread=0x750f0b868490 name=(nil) current_is=0 main_is=0 sp=0x750f08ffecb8 exempt=0 current_fiber=0x750f0aae00d0
+DBG   thread=0x750f0b868550 name=(nil) current_is=0 main_is=0 sp=0x750f03ffecb8 exempt=0 current_fiber=0x750f0aaa00d0
+DBG   thread=0x750f0aa80190 name=gc-idle current_is=0 main_is=0 sp=0x750f016f9c68 exempt=1 current_fiber=0x750f0aaa0190
+DBG   holder slot=0x750f0a1feb70 below_bottom=5264 above_stack_top=-244 value=user+851859
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec50 below_bottom=5040 above_stack_top=-20 value=user+851859
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec60 below_bottom=5024 above_stack_top=-4 value=user+851859
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec98 below_bottom=4968 above_stack_top=52 value=user+851859
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG watch exit collections=6 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=6 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG big parked seed user=0x750f008b9040 bytes=3802600 fiber=0x750f0ab000d0 name=main running=1 base=0x750f09a00000 bottom=0x750f0a200000 stack_top=0x750f0a1fec64 scan_top=0x750f0a1fe000 scanned=8192 stw_multi=1 own_sp=0x7ffef5dcb7e8
+DBG   thread=0x750f0b8680d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x750f0b868190
+DBG   thread=0x750f0b868310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x750f0ab000d0
+DBG   thread=0x750f0b868490 name=(nil) current_is=0 main_is=0 sp=0x750f08ffecb8 exempt=0 current_fiber=0x750f0aae00d0
+DBG   thread=0x750f0b868550 name=(nil) current_is=0 main_is=0 sp=0x750f03ffecb8 exempt=0 current_fiber=0x750f0aaa00d0
+DBG   thread=0x750f0aa80190 name=gc-idle current_is=0 main_is=0 sp=0x750f016f9c68 exempt=1 current_fiber=0x750f0aaa0190
+DBG   holder slot=0x750f0a1feb70 below_bottom=5264 above_stack_top=-244 value=user+851128
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec50 below_bottom=5040 above_stack_top=-20 value=user+851128
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec60 below_bottom=5024 above_stack_top=-4 value=user+851128
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec98 below_bottom=4968 above_stack_top=52 value=user+851128
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG watch exit collections=7 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=7 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG big parked seed user=0x750f008b9040 bytes=3802600 fiber=0x750f0ab000d0 name=main running=1 base=0x750f09a00000 bottom=0x750f0a200000 stack_top=0x750f0a1fec64 scan_top=0x750f0a1fe000 scanned=8192 stw_multi=1 own_sp=0x7ffef5dcb7e8
+DBG   thread=0x750f0b8680d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x750f0b868190
+DBG   thread=0x750f0b868310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x750f0ab000d0
+DBG   thread=0x750f0b868490 name=(nil) current_is=0 main_is=0 sp=0x750f08ffecb8 exempt=0 current_fiber=0x750f0aae00d0
+DBG   thread=0x750f0b868550 name=(nil) current_is=0 main_is=0 sp=0x750f03ffecb8 exempt=0 current_fiber=0x750f0aaa00d0
+DBG   thread=0x750f0aa80190 name=gc-idle current_is=0 main_is=0 sp=0x750f016f9c68 exempt=1 current_fiber=0x750f0aaa0190
+DBG   holder slot=0x750f0a1feb70 below_bottom=5264 above_stack_top=-244 value=user+851748
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec50 below_bottom=5040 above_stack_top=-20 value=user+851748
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec60 below_bottom=5024 above_stack_top=-4 value=user+851748
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec98 below_bottom=4968 above_stack_top=52 value=user+851748
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG watch exit collections=8 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=8 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG big parked seed user=0x750f008b9040 bytes=3802600 fiber=0x750f0ab000d0 name=main running=1 base=0x750f09a00000 bottom=0x750f0a200000 stack_top=0x750f0a1fec64 scan_top=0x750f0a1fe000 scanned=8192 stw_multi=1 own_sp=0x7ffef5dcb7e8
+DBG   thread=0x750f0b8680d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x750f0b868190
+DBG   thread=0x750f0b868310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x750f0ab000d0
+DBG   thread=0x750f0b868490 name=(nil) current_is=0 main_is=0 sp=0x750f08ffecb8 exempt=0 current_fiber=0x750f0aae00d0
+DBG   thread=0x750f0b868550 name=(nil) current_is=0 main_is=0 sp=0x750f03ffecb8 exempt=0 current_fiber=0x750f0aaa00d0
+DBG   thread=0x750f0aa80190 name=gc-idle current_is=0 main_is=0 sp=0x750f016f9c68 exempt=1 current_fiber=0x750f0aaa0190
+DBG   holder slot=0x750f0a1feb70 below_bottom=5264 above_stack_top=-244 value=user+850877
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec50 below_bottom=5040 above_stack_top=-20 value=user+850877
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec60 below_bottom=5024 above_stack_top=-4 value=user+850877
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec98 below_bottom=4968 above_stack_top=52 value=user+850877
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG watch exit collections=9 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG watch enter collections=9 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+DBG big parked seed user=0x750f008b9040 bytes=3802600 fiber=0x750f0ab000d0 name=main running=1 base=0x750f09a00000 bottom=0x750f0a200000 stack_top=0x750f0a1fec64 scan_top=0x750f0a1fe000 scanned=8192 stw_multi=1 own_sp=0x7ffef5dcb7e8
+DBG   thread=0x750f0b8680d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x750f0b868190
+DBG   thread=0x750f0b868310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x750f0ab000d0
+DBG   thread=0x750f0b868490 name=(nil) current_is=0 main_is=0 sp=0x750f08ffecb8 exempt=0 current_fiber=0x750f0aae00d0
+DBG   thread=0x750f0b868550 name=(nil) current_is=0 main_is=0 sp=0x750f03ffecb8 exempt=0 current_fiber=0x750f0aaa00d0
+DBG   thread=0x750f0aa80190 name=gc-idle current_is=0 main_is=0 sp=0x750f016f9c68 exempt=1 current_fiber=0x750f0aaa0190
+DBG   holder slot=0x750f0a1feb70 below_bottom=5264 above_stack_top=-244 value=user+851088
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec50 below_bottom=5040 above_stack_top=-20 value=user+851088
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec60 below_bottom=5024 above_stack_top=-4 value=user+851088
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x750f0a1fec98 below_bottom=4968 above_stack_top=52 value=user+851088
+DBG     chunk base=0x750f008b9000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG watch exit collections=10 collector=DEFAULT-0 slot=0x750f016f9c88 value=0 parked_sp=0x750f016f9c68
+parallel_dormant: threads=3 retain=65536KiB ordinary collect
+  RSS peak 72 MB, after collect 68 MB; empty chunks 18 MB, dormant 0 MB
+  seeded by stack 2 KiB, parked 3713 KiB, thread 3 KiB, static 3 KiB
+  the collects: 7 major, 0 minor; last major sweep: after the world, multi-mutator, release on; empties warm 18 MB, grace 0 MB, dormant 0 MB, unmapped 0 MB, kept 0 MB, header-blocked 0 MB
+  warm budget / threshold, MB: 69/69 -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36)
+DBG gc-idle stack base=0x750f00efb000 bottom=0x750f016fb000
+DBG grow 24 buffer=0x750f008b9040 bytes=1241912
+DBG grow 25 buffer=0x750ef0fff040 bytes=4754784
+FAIL: no empty chunk went dormant (18 MB of them kept mapped) — the opt-in is inert

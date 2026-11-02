@@ -4834,6 +4834,23 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the moved main fiber; control `pthread_scan_running_sp_clamp = false`,
       plus an unplanted arm).
       `bench/log/linux/2026-11-03-reg21-marked-unmarked/FINDINGS.md`.
+- [x] **`make parallel-dormant`'s "seeded by … parked 3714 KiB" (CI job
+      125102880486, found and fixed 2026-11-03).** 36 MB of the dropped
+      burst kept across 7 majors, so no empty chunk went dormant. Not
+      `21462240`: the tree before it and its clamp turned off fail at the
+      tip's rate. Three stack slots no code had written, each holding a word
+      an earlier call left at that depth and naming the burst's old 3.6 MiB
+      outer-array buffer when it lay there: in the idle collector's
+      never-returning loop frame (residue of the thread's birth), in the
+      mutator scan's own frames (residue of the cycle's earlier phases), and
+      the 168 bytes of the register-capture buffer `setjmp` does not write.
+      Fixed by a birth scrub on the idle thread, a scrub before the mutator
+      scan, and clearing the buffer; regression 104 (a control arm each).
+      Local rate 25 → 5 in 5 000. The 5 left: the execution-context
+      monitor's frames, which gcry scans whole for want of its SP, hold a
+      word whose low half is a ~10 ms nanosecond count and whose high half
+      matches the heap's. Open; not gcry's frame.
+      `bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`.
 - [ ] **Per-object mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-23).** Per collection at the same (full) live set,
       gcry's one marker took 0.39× / 0.43× / 0.67× of Boehm's one marker on
