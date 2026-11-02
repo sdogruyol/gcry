@@ -1,0 +1,25 @@
+require "../../src/gcry"
+require "spec"
+
+# Probe only: what an earlier example left on Darwin, a cached large chunk of
+# regression 71's target size, mapped before (so behind) a few others. The
+# retain is raised so that the collections in between keep it, as the
+# adaptive retain did in the failing runs (7 593 984 cached bytes at entry).
+describe "probe71 seed" do
+  it "leaves a cached chunk of the target's size deep in the list" do
+    heap = Gcry.default_heap.not_nil!
+    heap.large_cache_retain = 16_u64 * 1024 * 1024
+    keep = [] of Void*
+    GC.disable
+    begin
+      seed = GC.malloc_atomic(4 * 1024 * 1024)
+      64.times { keep << GC.malloc_atomic(64 * 1024) }
+      GC.free(seed)
+    ensure
+      GC.enable
+    end
+    GC.collect
+    STDERR.puts "probe71 seed: large_free=#{heap.large_free_bytes} kept=#{keep.size}"
+    heap.large_free_bytes.should be >= 4_u64 * 1024 * 1024
+  end
+end

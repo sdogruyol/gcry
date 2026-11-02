@@ -18,6 +18,17 @@ require "spec"
 # below is the rebuild the links have to survive, and the depth is checked
 # so the test cannot pass on a shallow target. Before the fix (6dc6e7d, with
 # the two counters added) the free walked 283 steps here; after it, none.
+#
+# That order needs every block of the construction mapped fresh, which
+# `map_chunk` does at the head of the list. A chunk taken from the large
+# cache stays where it was mapped, deep in the list, and the examples run
+# ahead of this one in the same process leave chunks there. Darwin takes any
+# cached chunk of the exact size in place (Linux, recycling, only one the
+# program freed itself: `Heap#alloc_large`), and from the nursery-mprotect
+# commits on, which put 24 more examples ahead of this one there, the target
+# took a cached 4 MiB chunk behind both runs; the collection reversed it to
+# depth 56-59. So the cache is emptied first, with collection already off,
+# and checked empty (`bench/log/macos/2026-11-03-reg71-cached-target/`).
 
 private UNLINK_SIDE   = 256
 private UNLINK_BLOCK  = 64 * 1024
@@ -39,6 +50,8 @@ describe "Regression: a large free takes its chunk off the list without a walk" 
     heap = Gcry.default_heap.not_nil!
     GC.disable
     begin
+      heap.trim_large_cache(0_u64)
+      heap.large_free_bytes.should eq(0)
       front = Array(Void*).new(UNLINK_SIDE) { GC.malloc_atomic(UNLINK_BLOCK) }
       target = GC.malloc_atomic(UNLINK_TARGET)
       back = Array(Void*).new(UNLINK_SIDE) { GC.malloc_atomic(UNLINK_BLOCK) }

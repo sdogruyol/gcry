@@ -1,0 +1,70 @@
+### 125042932920
+Default target: x86_64-apple-macosx11.0
+[36;1mcp ../probe/.github/probe71/70z_seed_spec.cr $R/70z_seed_spec.cr[0m
+[36;1mcp ../probe/.github/probe71/71c_control_spec.cr $R/71c_control_spec.cr[0m
+ProductVersion:		15.7.9
+x86_64
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4198400 kept=64        Expected 65 to be GreaterOrEqual 256 
+control failed 20/20, fixed failed 0/20, alone failed 0/20
+== run 1
+344 examples, 0 failures, 0 errors, 0 pending
+== run 2
+344 examples, 0 failures, 0 errors, 0 pending
+== run 3
+344 examples, 0 failures, 0 errors, 0 pending
+full process_spec failed 0/3
+### 125042933367
+Image: macos-26-arm64
+Included Software: https://github.com/actions/runner-images/blob/macos-26-arm64/20261026.0455/images/macos/macos-26-arm64-Readme.md
+Image Release: https://github.com/actions/runner-images/releases/tag/macos-26-arm64%2F20261026.0455
+[36;1mcp ../probe/.github/probe71/70z_seed_spec.cr $R/70z_seed_spec.cr[0m
+[36;1mcp ../probe/.github/probe71/71c_control_spec.cr $R/71c_control_spec.cr[0m
+ProductVersion:		26.6.2
+arm64
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+probe71 seed: large_free=4210688 kept=64        Expected 65 to be GreaterOrEqual 256 
+control failed 20/20, fixed failed 0/20, alone failed 0/20
+== run 1
+344 examples, 0 failures, 0 errors, 0 pending
+== run 2
+344 examples, 0 failures, 0 errors, 1 pending
+== run 3
+344 examples, 0 failures, 0 errors, 0 pending
+full process_spec failed 0/3

@@ -1,0 +1,106 @@
+require "../../src/gcry"
+require "spec"
+
+private UNLINK_SIDE   = 256
+private UNLINK_BLOCK  = 64 * 1024
+private UNLINK_TARGET = 4 * 1024 * 1024
+
+private def unlink_depth(heap : Gcry::Heap, user : Void*) : Int32
+  depth = -1
+  i = 0
+  heap.each_chunk do |c|
+    depth = i if depth < 0 && c.address <= user.address && user.address < c.address + c.value.mapped_bytes
+    i += 1
+  end
+  depth
+end
+
+private def probe71_in?(c : Gcry::ChunkHeader*, set : Array(Void*)) : Bool
+  set.each do |p|
+    return true if c.address <= p.address && p.address < c.address + c.value.mapped_bytes
+  end
+  false
+end
+
+# No allocation: {chunks, target_pos, front_before, back_before}.
+private def probe71_shape(heap : Gcry::Heap, front : Array(Void*), back : Array(Void*), target : Void*) : {Int32, Int32, Int32, Int32}
+  i = 0
+  tpos = -1
+  fb = 0
+  bb = 0
+  heap.each_chunk do |c|
+    if tpos < 0
+      if c.address <= target.address && target.address < c.address + c.value.mapped_bytes
+        tpos = i
+      elsif probe71_in?(c, front)
+        fb += 1
+      elsif probe71_in?(c, back)
+        bb += 1
+      end
+    end
+    i += 1
+  end
+  {i, tpos, fb, bb}
+end
+
+private def probe71_threads : Int32
+  n = 0
+  Thread.unsafe_each { |_| n += 1 }
+  n
+end
+
+describe "Regression: a large free takes its chunk off the list without a walk" do
+  it "unlinks a deep large chunk by its back-link" do
+    heap = Gcry.default_heap.not_nil!
+    e_coll = heap.collections
+    e_free = heap.large_free_bytes
+    e_hits = heap.large_cache_hits
+    e_miss = heap.large_cache_misses
+    e_thr = probe71_threads
+    GC.disable
+    begin
+      front = Array(Void*).new(UNLINK_SIDE) { GC.malloc_atomic(UNLINK_BLOCK) }
+      target = GC.malloc_atomic(UNLINK_TARGET)
+      back = Array(Void*).new(UNLINK_SIDE) { GC.malloc_atomic(UNLINK_BLOCK) }
+    ensure
+      GC.enable
+    end
+    b_coll = heap.collections
+    b_free = heap.large_free_bytes
+    b_hits = heap.large_cache_hits
+    b_miss = heap.large_cache_misses
+    b_thr = probe71_threads
+    b_dec = heap.stop_sweep_relinks_declined
+    b_shape = probe71_shape(heap, front, back, target)
+    GC.collect
+    c_coll = heap.collections
+    c_dec = heap.stop_sweep_relinks_declined
+    c_shape = probe71_shape(heap, front, back, target)
+    names = [] of String
+    Thread.unsafe_each { |t| names << (t.name || "?") }
+    STDERR.puts "probe71 entry: coll=#{e_coll} large_free=#{e_free} hits=#{e_hits} misses=#{e_miss} threads=#{e_thr}"
+    STDERR.puts "probe71 built: coll=#{b_coll} large_free=#{b_free} hits=#{b_hits} misses=#{b_miss} threads=#{b_thr} declined=#{b_dec} shape(chunks,tpos,front_before,back_before)=#{b_shape}"
+    STDERR.puts "probe71 collected: coll=#{c_coll} declined=#{c_dec} shape=#{c_shape} lazy=#{heap.lazy_sweep} threads=#{names.join(",")}"
+    STDERR.puts "probe71 addrs: target=0x#{target.address.to_s(16)} front=0x#{front.min_of(&.address).to_s(16)}..0x#{front.max_of(&.address).to_s(16)} back=0x#{back.min_of(&.address).to_s(16)}..0x#{back.max_of(&.address).to_s(16)}"
+    heap.is_heap_ptr(target).should be_true
+    unlink_depth(heap, target).should be >= UNLINK_SIDE
+    heap.chunk_back_link_faults.should eq(0)
+
+    heap.trim_large_cache(0_u64)
+    unlinks = heap.chunk_unlinks
+    steps = heap.unlink_walk_steps
+    GC.free(target)
+    heap.trim_large_cache(0_u64)
+    heap.is_heap_ptr(target).should be_false
+    heap.chunk_unlinks.should be > unlinks
+    (heap.unlink_walk_steps - steps).should be < 16
+    heap.chunk_back_link_faults.should eq(0)
+
+    heap.is_heap_ptr(front.first).should be_true
+    heap.is_heap_ptr(back.last).should be_true
+    front.each { |p| GC.free(p) }
+    back.each { |p| GC.free(p) }
+    heap.trim_large_cache(0_u64)
+    heap.chunk_back_link_faults.should eq(0)
+  end
+end
