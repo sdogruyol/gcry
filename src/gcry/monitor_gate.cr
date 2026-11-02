@@ -325,21 +325,129 @@ module Gcry
     private def self.now_ns : UInt64
       Clock.monotonic_ns
     end
+
+    # The Monitor zeroes its stack below its loop's entry before `run_loop`
+    # builds its frame there. That frame never returns, and every stop reads
+    # it: whole on Linux, where the Monitor publishes no SP, and above the
+    # suspend SP elsewhere. Bytes of it the loop never writes keep whatever the
+    # thread's birth left at that depth. Crystal's `every` keeps its
+    # `Time::Instant`s and `Time::Span`s there, an `Int64` and an `Int32` in
+    # 16 bytes, and stores 4 of the second word's 8 every pass: the word was a
+    # nanosecond count under the high half of an address the birth left, i.e.
+    # a fresh address in the heap's 4 GiB every 10 ms. In regression 1's full
+    # suite order on Crystal 1.22.2 it was the one root word that first marked
+    # a block before the baseline and held something else after the check, in
+    # every run instrumented; a dead graph it named at the baseline is let go
+    # inside the window, the shape of the one `drift=-2444` after regression 105
+    # (`bench/log/linux/2026-11-04-reg1-drift/`). With the birth's residue
+    # zeroed first the high half is 0, and a count under 10^9 names no heap.
+    # The shape of `IdleRelease.ensure_started`'s birth scrub: everything the
+    # birth touched below this call's SP, less `SCRUB_SKIP` for the `memset`
+    # frame, from the lowest faulted page, or `LOOP_SCRUB_BYTES` when the
+    # probe cannot say. The caller wipes the skipped band and this call's own
+    # frame.
+    LOOP_SCRUB_BYTES = 65_536_u64
+
+    @[NoInline]
+    def self.scrub_loop_stack : Nil
+      stack = Fiber.current.@stack
+      floor = stack.pointer.address + Platform.host_page_size
+      sp = Roots.hardware_stack_pointer.address
+      return if sp <= floor + SCRUB_SKIP
+      high = sp - SCRUB_SKIP
+      low = Platform.stack_low_water(floor, high)
+      low = high > floor + LOOP_SCRUB_BYTES ? high - LOOP_SCRUB_BYTES : floor if low <= floor
+      return if low >= high
+      Pointer(UInt8).new(low).clear(high - low)
+    end
+
+    # Research only, regression 107 (`GCRY_MONITOR_LOOP_TEST`, read in
+    # `GC.init`, before the Monitor starts): at the top of its loop, while
+    # still a mutator, the Monitor makes a block of `LOOP_TEST_BYTES` and
+    # keeps its address masked with `PLANT_KEY` in `loop_test_block`. 1 then
+    # writes the address over 8 KiB below the loop's entry before the scrub,
+    # standing in for a birth that left it there; 2 does the same and leaves
+    # the scrub out (`loop_residue_kept?`, the code before, the control arm);
+    # 3 makes the block and plants nothing. 4 and 5 are 1 and 2 with
+    # `LOOP_MARKER` planted instead, whose high half no address has, so a
+    # word the loop wrote only the low half of shows. `loop_test_sp` is the
+    # entry's SP and `loop_test_ready?` turns true once the loop is about to
+    # start.
+    class_property loop_test : Int32 = 0
+    class_getter loop_test_block : UInt64 = 0_u64
+    class_getter loop_test_sp : UInt64 = 0_u64
+    @@loop_test_ready = Atomic(Int32).new(0)
+    # Large, so in a chunk of its own: a 24 000-byte block, in a chunk the
+    # Monitor's allocation cursor still held, read allocated after the
+    # collections in every arm, the unplanted one included, with nothing
+    # found pointing at it ([INFERENCE] a cursor's claim, regression 106).
+    LOOP_TEST_BYTES =                    40_000
+    LOOP_MARKER     = 0x5eed_5eed_5eed_5eed_u64
+
+    def self.loop_residue_kept? : Bool
+      @@loop_test == 2 || @@loop_test == 5
+    end
+
+    def self.loop_test_ready? : Bool
+      @@loop_test_ready.get != 0
+    end
+
+    def self.loop_test_ready : Nil
+      @@loop_test_ready.set(1)
+    end
+
+    @[NoInline]
+    def self.loop_test_alloc : Nil
+      @@loop_test_block = GC.malloc_atomic(LOOP_TEST_BYTES).address ^ PLANT_KEY
+    end
+
+    @[NoInline]
+    def self.loop_test_plant(entry_sp : UInt64) : Nil
+      @@loop_test_sp = entry_sp
+      return if @@loop_test == 3
+      pad = uninitialized StaticArray(UInt64, PLANT_WORDS)
+      word = @@loop_test >= 4 ? LOOP_MARKER : @@loop_test_block ^ PLANT_KEY
+      PLANT_WORDS.times { |i| pad[i] = word }
+      asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
+    end
   end
 end
 
 # The three things `Monitor#run_loop` calls every ~10 ms are each wrapped in the
 # gate: `run_loop` never returns, so a wrapper around the loop has no point at
 # which to check anything per pass. The loop itself gets a prologue only, which
-# ends the thread's birth as far as a stop is concerned (`MonitorGate.settle`).
+# ends the thread's birth as far as a stop is concerned (`MonitorGate.settle`)
+# and zeroes the stack the loop's frame is then built on
+# (`MonitorGate.scrub_loop_stack`).
 # No compiler fork — reopening the class and calling `previous_def` is ordinary
 # Crystal, verified to take effect.
 # Only for the process GC: a library heap never stops the world, so there is
 # nothing to shut the Monitor out of and no reason to reach into the stdlib.
 {% if flag?(:gc_none) && @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
   class Fiber::ExecutionContext::Monitor
+    # Crystal's loop in a frame of its own, never inlined into the prologue
+    # below: the frame must be built after the scrub, not as part of the
+    # prologue's.
+    @[NoInline]
     private def run_loop : Nil
+      previous_def
+    end
+
+    private def run_loop : Nil
+      # While still a mutator: a block allocated once settled would run on
+      # through a stop.
+      Gcry::MonitorGate.loop_test_alloc if Gcry::MonitorGate.loop_test != 0
       Gcry::MonitorGate.settle
+      if Gcry::MonitorGate.loop_test != 0
+        Gcry::MonitorGate.loop_test_plant(Gcry::Roots.hardware_stack_pointer.address)
+      end
+      unless Gcry::MonitorGate.loop_residue_kept?
+        Gcry::MonitorGate.scrub_loop_stack
+        # The band that left under this frame, and the frame it ran on: the
+        # allocation slow path's frameless wipe, 1 KiB down from this SP.
+        Gcry::Roots.wipe_below_sp(Gcry::Roots.wipe_limit(Gcry::Roots.hardware_stack_pointer.address))
+      end
+      Gcry::MonitorGate.loop_test_ready if Gcry::MonitorGate.loop_test != 0
       previous_def
     end
 

@@ -1201,6 +1201,11 @@ module GC
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
+    # Research only: regression 107's arms (`MonitorGate.loop_test`). Read
+    # here because the Monitor starts after `GC.init` and before any spec.
+    if arm = env_digit("GCRY_MONITOR_LOOP_TEST")
+      Gcry::MonitorGate.loop_test = arm
+    end
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: let the Darwin free-page walk visit bitmap-allocated
     # chunks, which is the stand-down in `flush_pending_page_release_chunks`
