@@ -17,7 +17,9 @@ private record Cycle, count : Int32, drift : Int64 do
   end
 end
 
-# Zeroes 64 KiB of dead stack below the caller's frame.
+# Zeroes 64 KiB of dead stack below the caller's frame. Called before each
+# `drift_cycle`, it zeroes the frame that call builds; called inside, the
+# frames below it.
 @[NoInline]
 private def drift_scrub : Nil
   buf = uninitialized StaticArray(UInt8, 65536)
@@ -52,7 +54,11 @@ private def drift_cycle(heap, count : Int32) : Cycle
   # collections showed it in 1 run of 30: a fifth collection changed nothing,
   # the scrub's collection ran one finalizer and the next reclaimed 1 686
   # objects (`bench/log/linux/2026-11-02-scrub-band/`). Scrubbed first, the
-  # four collections run the finalizer and reclaim before the baseline.
+  # four collections run the finalizer and reclaim before the baseline. The
+  # same thing happened from the execution-context Monitor's dead stack, which
+  # gcry scanned whole on Linux: -15 985 to -50 002 under
+  # `GCRY_BITMAP_ALLOC=0` until the Monitor zeroed it after each call
+  # (regression 105, `bench/log/linux/2026-11-04-reg1-drift/`).
   drift_scrub
   4.times { GC.collect }
   # No collection between the baseline and the check: the arithmetic below
@@ -109,7 +115,20 @@ describe "Regression: live_objects counter drift on dormant chunks" do
     #
     #   drift scales with count        → stranded per allocation
     #   drift flat across counts       → a fixed strand, one chunk's worth
+    #
+    # `drift_cycle`'s own frame (3.4 KiB in a debug build) is built over
+    # whatever earlier examples left at that depth, and the scrub inside it
+    # starts below it. In a copy of it with two probes, built the same way,
+    # 552 of the frame's words were still unwritten when the pre-baseline
+    # collections ran, and 292 of those were written between the baseline and
+    # the first collection after it: a word there that names a dead object
+    # keeps it through the pre-baseline collections and lets it go inside the
+    # window. With a dead finalizable graph's address planted in those 292
+    # slots the copy read `drift=-4003`; with this scrub first, 0
+    # (`bench/log/linux/2026-11-04-reg1-drift/`).
+    drift_scrub
     big = drift_cycle(heap, 10_000)
+    drift_scrub
     small = drift_cycle(heap, 1_000)
     detail = "#{big} | #{small}"
 
