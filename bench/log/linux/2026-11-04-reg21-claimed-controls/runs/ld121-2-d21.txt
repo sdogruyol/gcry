@@ -1,0 +1,59 @@
+# ld121 run 2 (diag v2, base 2b3626b9, -Dgcry_block_headers, Crystal 1.21.0, local order + mover): D21 lines
+D21 live=0 cols=3 moved=true threads=5 records=0 roots_seen=110865 marks_seen=1040 base=0x588b089cd000 own_thread=130323794884288 initial=130323929225152 main_stackbottom=0x7ffc4410e0c0
+D21 control 0 user=0x7687147991f0 live=false
+D21 control 1 user=0x768714799340 live=true
+D21 control 2 user=0x768714799490 live=true
+D21 control 3 user=0x7687147995e0 live=true
+D21 control 4 user=0x768714799730 live=true
+D21 control 5 user=0x768714799880 live=true
+D21 control 6 user=0x7687147999d0 live=true
+D21 control 7 user=0x768714799b20 live=true
+D21 thread 0 name="DEFAULT-0" map=0x7ffc43911000..0x7ffc4410f000 cur_fiber="staging-spec-0:loop" 0x76876426ed00 stack=0x768756e00000..0x768757600000
+D21 thread 1 name="SYSMON" map=0x768764e00000..0x768765600000 cur_fiber="main" 0x768765ead0d0 stack=0x768764e00000..0x768765600000
+D21 thread 2 name="DEFAULT-0" map=0x76875f000000..0x76875f800000 cur_fiber="main" 0x768766d201a0 stack=0x7ffc43911000..0x7ffc4410f000
+D21 thread 3 name="gc-idle" map=0x768757800000..0x768758000000 cur_fiber="main" 0x768766d204e0 stack=0x768757800000..0x768758000000
+D21 thread 4 name="staging-spec-1" map=0x768754e00000..0x768755600000 cur_fiber="staging-spec-1:loop" 0x76876426edd0 stack=0x768756600000..0x768756e00000
+D21 fiber "main" 0x768766d201a0 stack=0x7ffc43911000..0x7ffc4410f000 top=0x7ffc4410d430 running=true dead=false
+D21 fiber "DEFAULT-0:loop" 0x768766d20270 stack=0x768765600000..0x768765e00000 top=0x768765dffd30 running=false dead=false
+D21 fiber "signal-loop" 0x768766d20410 stack=0x768764400000..0x768764c00000 top=0x768764bff430 running=false dead=false
+D21 fiber "main" 0x768765ead0d0 stack=0x768764e00000..0x768765600000 top=0x7687655fec64 running=true dead=false
+D21 fiber nil 0x768766d20b60 stack=0x76875f800000..0x768760000000 top=0x76875ffff6c0 running=false dead=false
+D21 fiber "main" 0x76876426e0d0 stack=0x76875f000000..0x76875f800000 top=0x76875f7fe9f0 running=false dead=false
+D21 fiber nil 0x768766d20c30 stack=0x76875de00000..0x76875e600000 top=0x76875e5ffac0 running=false dead=false
+D21 fiber "main" 0x768766d204e0 stack=0x768757800000..0x768758000000 top=0x768757ffec64 running=true dead=false
+D21 fiber "staging-spec-0:loop" 0x76876426ed00 stack=0x768756e00000..0x768757600000 top=0x7687575ffd30 running=true dead=false
+D21 fiber "staging-spec-1:loop" 0x76876426edd0 stack=0x768756600000..0x768756e00000 top=0x768756dfffb8 running=true dead=false
+D21 fiber "main" 0x768766d205b0 stack=0x768754e00000..0x768755600000 top=0x7687555fe9f0 running=false dead=false
+D21 ctl 0 after_collect=0b0 at_report=0b0
+D21 ctl 1 after_collect=0b0 at_report=0b0
+D21 ctl 2 after_collect=0b0 at_report=0b0
+D21 ctl 3 after_collect=0b0 at_report=0b0
+D21 ctl 4 after_collect=0b0 at_report=0b0
+D21 ctl 5 after_collect=0b0 at_report=0b0
+D21 ctl 6 after_collect=0b0 at_report=0b0
+D21 ctl 7 after_collect=0b0 at_report=0b0
+D21 claims_seen=20 claims_on_controls=1
+
+# claim 0 symbolised (addr2line -f -i -e bin/ld121)
+claim_hit	diag/d21.cr:321
+cursor_claim_word	diag/d21.cr:369
+bitmap_refill_pool	wt/src/gcry/bitmap_alloc.cr:1318
+bitmap_alloc_locked	wt/src/gcry/bitmap_alloc.cr:1161
+alloc_old_small_locked	wt/src/gcry/heap.cr:2107
+alloc_old_small	wt/src/gcry/heap.cr:2072
+allocate:atomic:clear	wt/src/gcry/heap.cr:1852
+allocate_traced	wt/src/gcry/heap.cr:767
+allocate_wipe	wt/src/gcry/heap.cr:746
+allocate_entry	wt/src/gcry/heap.cr:735
+malloc_atomic	wt/src/gcry/heap.cr:687
+malloc_atomic	wt/src/gcry/gc_override.cr:1499
+malloc_atomic	crystal:gc.cr:121
+initialize	crystal:string/builder.cr:18
+new	crystal:string/builder.cr:11
+interpolation	crystal:string/builder.cr:25
+report	diag/d21.cr:208
+->	diag/21_boehm_c_abi_spec.cr:130
+internal_run	crystal:spec/example.cr:50
+run	crystal:spec/example.cr:38
+internal_run	crystal:spec/context.cr:20
+run	crystal:spec/context.cr:364

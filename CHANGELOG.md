@@ -112,6 +112,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`GC_base`, `GC_size` and `GC_register_finalizer` no longer answer a
+  freed block as live once a cursor has claimed its word, and regression 21
+  no longer fails "controls kept 8 > 1".** The bitmap allocator claims all
+  of a word's free blocks at once, setting them in `occ` before it hands
+  them out, and these three looked blocks up by `occ` alone. So after a
+  sweep, the first allocation in a freed block's class, on any thread,
+  made every freed block of its word read allocated again, its bytes
+  intact; a pointer kept past the free got a base, a size, or a finalizer
+  registered on a block nobody held. Regression 21's eight control blocks
+  were freed by its three collections and counted live that way: seen
+  twice, both times with the main fiber moved; under a diagnostic no root
+  reached them and they read free until a claim, and one allocation forced
+  after the collections fails the example on every run, moved or not. The
+  three now leave out a block its cursor has claimed and not handed out
+  (`Heap#find_live_object_with_chunk`), as `free` and `Heap#live?` already
+  did; the mark, the sweep and `find_object` are unchanged. Since the claim
+  (`20cbb8f2`); never under `GCRY_BITMAP_ALLOC=0`
+  (`bench/log/linux/2026-11-04-reg21-claimed-controls/`). Regression 106,
+  with a control arm.
+
 - **Windows Binarytrees no longer runs 3–5% slower than 0.39.0 on the
   EPYC 9V74 runners.** The keep rule on the 0.40 tip (Perf A/B
   41409560598) left the row unexcused, +3.4% timed and +4.8% wall, on that

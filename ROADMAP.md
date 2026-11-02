@@ -4845,6 +4845,22 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the moved main fiber; control `pthread_scan_running_sp_clamp = false`,
       plus an unplanted arm).
       `bench/log/linux/2026-11-03-reg21-marked-unmarked/FINDINGS.md`.
+- [x] **Regression 21's "controls kept 8 > 1" on the tip with regression
+      103 in it (Reg1, `2b3626b9`, headers, 1.21.0, main fiber moved;
+      found and fixed 2026-11-04).** Not retention: no root candidate or
+      mark reached a control, and all eight read free after the three
+      collections. Then an atomic allocation of their class, on any thread,
+      claimed their bitmap word, which sets every free block of it in
+      `occ`, and `GC_base` (with `GC_size` and `GC_register_finalizer`)
+      read `occ` raw, so the freed controls answered live with their bytes
+      intact. The 2026-11-01 sighting had the same eight; CI's
+      `GCRY_BITMAP_ALLOC=0` step, which makes no claims, kept two (the
+      103 class). Fixed: those lookups leave out a claimed block
+      (`find_live_object_with_chunk`). Regression 106 (control
+      `live_lookup_exact = false`). One allocation forced after 21's
+      collections fails it on the tip every run, moved or not. What made the
+      claim in the natural runs is not identified.
+      `bench/log/linux/2026-11-04-reg21-claimed-controls/FINDINGS.md`.
 - [x] **`make parallel-dormant`'s "seeded by … parked 3714 KiB" (CI job
       125102880486, found and fixed 2026-11-03).** 36 MB of the dropped
       burst kept across 7 majors, so no empty chunk went dormant. Not
