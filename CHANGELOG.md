@@ -137,6 +137,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0 of 40 against 2 of 160. Regression 21's one sighting ("controls kept
   8 > 1") did not recur in 200 runs, and no probe reproduced it.
 
+- **Regression 86 no longer misses its third arm's collection on Windows.**
+  The idle collector is born at the end of the process's first collection,
+  the first arm's, and allocates on its own thread until it exempts itself.
+  On windows-latest that birth landed inside a later arm's window, where the
+  threshold is 1, and collected; the arm's own allocation found that
+  collection still running and returned without one (5 of 200 freelist
+  runs). The spec now runs the first collection itself and waits until the
+  idle thread is exempt before any arm: 0 of 800, one collection per arm
+  (`bench/log/windows/2026-11-03-reg86-idle-birth/`).
+
 - **The nursery and incremental marking no longer crash on the mprotect
   page barrier when the heap's chunks change between collections.** The
   barrier's cards are sized to the heap at the arm, and the dirty-page scan
