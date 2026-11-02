@@ -384,12 +384,31 @@ module Gcry
     # the same for x29, which glibc stores plain today but Darwin's libplatform
     # munges along with lr and sp. Windows `RtlCaptureContext` stores Rbp/Fp
     # unmangled. rbx, r12-r15 and x19-x28 are stored plain by every `setjmp`.
+    #
+    # The buffer is cleared first. Every caller scans all of it, and `setjmp`
+    # writes 80 of its 256 bytes on x86_64 glibc: until 2026-11-03 the other
+    # 168, 21 words, were whatever earlier calls had left at that depth, read
+    # as registers by the mutator scan, `each_spilled_register` and the
+    # Monitor's spill (`MonitorGate`). Regression 104 plants a pattern there
+    # and reads all 21 back uncleared. Found while chasing `make
+    # parallel-dormant`'s "seeded by stack 3715 KiB" retention
+    # (`bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`), whose slot the
+    # mutator scan's own frames hold as well (`Heap#pre_mutator_scan_scrub`).
+    # Windows' buffer was cleared already: `RtlCaptureContext` writes a
+    # `CONTEXT`.
+    #
+    # Research only, the control arm of
+    # `process_spec/regression/104_unwritten_root_words_spec.cr`: `true`
+    # leaves the POSIX buffer uncleared, as before.
+    class_property? register_residue_kept : Bool = false
+
     @[AlwaysInline]
     def self.capture_registers(buffer : UInt8*) : Nil
       {% if flag?(:win32) %}
         buffer.clear(1248)
         LibC.RtlCaptureContext(buffer.align_up(16).as(LibC::CONTEXT*))
       {% else %}
+        buffer.clear(REGISTER_BUFFER_SIZE) unless @@register_residue_kept
         LibSetjmp.setjmp(buffer.as(Void*))
         {% if flag?(:x86_64) || flag?(:aarch64) %}
           fp = uninitialized UInt64

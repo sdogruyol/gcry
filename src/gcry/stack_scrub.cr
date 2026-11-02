@@ -196,6 +196,32 @@ module Gcry
       Roots.wipe_below_sp(Roots.wipe_limit(Roots.hardware_stack_pointer.address))
     end
 
+    # The same scrub and band wipe again from `run_collection_body`, just
+    # before `scan_mutator_stack` builds its frames there. The entry scrub
+    # takes the last cycle's residue; this one takes what this cycle's own
+    # earlier phases (stop, clear, the fiber, thread and static scans, the
+    # timers) left at the depth the mutator scan's frames take, which the
+    # scan reads as the collecting thread's stack: a slot of those frames
+    # that is not written before it is scanned is a root of whatever was
+    # there. In `make parallel-dormant` one such slot, 1 200 bytes below the
+    # entry SP in every build measured, named a word inside the burst's
+    # 3.6 MiB outer-array buffer and kept 36 MB through every collection,
+    # "seeded by stack 3715 KiB": 5 of 5 000 runs with the register buffer
+    # cleared (`Roots.capture_registers`), 0 of 5 000 with this
+    # (`bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`). Not counted in
+    # `collect_scrub_runs`, which stays two a collection.
+    #
+    # `false` is the control arm of
+    # `process_spec/regression/104_unwritten_root_words_spec.cr`.
+    property mutator_scan_scrub : Bool = true
+
+    @[AlwaysInline]
+    protected def pre_mutator_scan_scrub : Nil
+      return unless @mutator_scan_scrub
+      clear_stack_guarded(@collect_scrub_bytes, fiber_bounds: true)
+      collect_band_wipe_here
+    end
+
     # Bytes zeroed, 0 when nothing was (disabled, re-entered, or no room).
     private def clear_stack_guarded(bytes : UInt64, fiber_bounds : Bool) : UInt64
       return 0_u64 if bytes == 0

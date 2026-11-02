@@ -3242,7 +3242,10 @@ module Gcry
           end
 
           t0 = monotonic_ns
-          scan_mutator_stack if scan_stack
+          if scan_stack
+            pre_mutator_scan_scrub
+            scan_mutator_stack
+          end
           scan_other_thread_stacks if other_stacks
           @last_phase_stacks_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_MARK)
