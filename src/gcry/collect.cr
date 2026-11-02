@@ -2624,6 +2624,31 @@ module Gcry
       {header, chunk}
     end
 
+    # `find_object_with_chunk` less a block a cursor has claimed and not
+    # handed out (`block_allocated_exact?`): the live block a pointer names,
+    # for the lookups that answer "live" to a program — `GC_base`, `GC_size`,
+    # a finalizer's registration. The raw lookup is right for the pointers a
+    # program holds, which a claim never covers; a pointer it keeps after the
+    # block was freed is another matter. A claim takes every free block of a
+    # bitmap word at once, so the first allocation after a sweep in that
+    # block's class, on any thread, made every freed block of the word read
+    # live again, with its old bytes intact: regression 21's eight control
+    # blocks, freed by its three collections, were all answered by `GC_base`
+    # once one 256-byte atomic allocation had claimed their word
+    # (`bench/log/linux/2026-11-04-reg21-claimed-controls/FINDINGS.md`).
+    # `process_spec/regression/106_claimed_block_not_live_spec.cr`.
+    def find_live_object_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
+      found = find_object_with_chunk(pointer)
+      return nil unless found
+      return found unless @live_lookup_exact
+      header, chunk = found
+      block_allocated_exact?(chunk, header) ? found : nil
+    end
+
+    # Off only for regression 106's control arm: the live lookups answer a
+    # claimed block as live again, as before (`find_live_object_with_chunk`).
+    property live_lookup_exact : Bool = true
+
     protected def maybe_collect : Nil
       return unless @enabled
       return if @collecting

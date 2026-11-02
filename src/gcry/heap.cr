@@ -803,10 +803,11 @@ module Gcry
     # Boehm's `GC_size`: the usable size of the live block containing
     # `pointer` — its base or any byte inside it, as Boehm accepts — at least
     # what was requested for it. 0 when no live block of this heap contains
-    # `pointer` (null, freed, LibC, another heap). Crystal's std_spec asks it
-    # about a `String`'s data, which starts inside the block.
+    # `pointer` (null, freed — a cursor's claim included — LibC, another
+    # heap). Crystal's std_spec asks it about a `String`'s data, which starts
+    # inside the block.
     def usable_size(pointer : Void*) : UInt64
-      found = find_object_with_chunk(pointer)
+      found = find_live_object_with_chunk(pointer)
       return 0_u64 unless found
       header, chunk = found
       owned_size(chunk, header)
