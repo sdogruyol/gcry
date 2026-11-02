@@ -462,12 +462,77 @@ module Gcry
       end
     end
 
+    # The incremental drain, `collect_a_little`'s only one. Its entries can
+    # be older than the stop that pops them: the begin stop pushes the roots'
+    # blocks and a slice leaves what its budget did not reach, and between
+    # stops the program runs. A block it frees meanwhile keeps its entry —
+    # nothing searches the stack — and the free can hand the block out
+    # again, or unmap its chunk (a large free trims the cache), or a new
+    # mapping can take the address. `scan_object` trusts an entry: a tagged
+    # one is read with no chunk at all, and on the header layout an untagged
+    # one's header is read before the chunk lookup, so a large block freed
+    # grey and unmapped was a read of unmapped memory in the slice that
+    # popped it, and a freed block left mapped had its dead payload traced,
+    # keeping what only it had pointed to through the cycle. Here each entry
+    # is resolved before anything at its address is read and scanned only if
+    # it still names an allocated block's start in a chunk of its kind (a
+    # tagged entry's class; the large payload a rest entry resumes in). A
+    # block handed out again at the address is allocated black and passes:
+    # its scan marks what it holds when popped, floating garbage of the
+    # cycle like any live block's, swept by the next. The check costs 5–8%
+    # of a slice's marking on a heap of small blocks; resolving every entry
+    # through `find_object_with_chunk` cost 27%, hence the inline path for
+    # the common one. The stop-the-world mark pushes and pops within one
+    # stop and keeps `mark_loop`.
+    # `process_spec/regression/102_incremental_free_grey_spec.cr`.
     private def mark_loop_budget(work_units : Int32) : Nil
+      check = @@inc_scan_checks_entries
       units = 0
       while units < work_units && !@mark_stack.empty?
-        scan_object(@mark_stack.pop)
+        entry = @mark_stack.pop
+        if !check || incremental_entry_current?(entry)
+          scan_object(entry)
+        else
+          @@inc_stale_entries_skipped &+= 1
+        end
         units += 1
       end
+    end
+
+    # Whether a mark-stack entry still names the block it was pushed for.
+    private def incremental_entry_current?(entry : BlockHeader*) : Bool
+      header = mark_entry_header(entry)
+      addr = header.address
+      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+      # A tagged entry on a bitmap chunk, the common case, inline: the
+      # radix entry, the chunk's class and data range, the block's start and
+      # its `occ` bit, as `resolve_candidate` reads them.
+      l1 = @radix_l1
+      if tag &- 1 < SIZE_CLASS_COUNT && @bitmap_alloc && !l1.null? && addr >= @heap_min && addr < @heap_max
+        chunk = Heap.radix_entry(l1, @radix_granule_shift, @radix_l2_mask, addr)
+        unless chunk.null?
+          cls = chunk.value.size_class
+          bitmap_words = chunk.value.bitmap_words.to_u64
+          data_start = chunk.address &+ chunk.value.data_offset
+          chunk_end = chunk.address &+ chunk.value.mapped_bytes
+          if cls &+ 1 == tag && bitmap_words != 0 && (chunk.value.flags & ChunkHeader::Flags::NURSERY) == 0 &&
+             addr >= data_start && addr < chunk_end
+            index = cls.to_i32
+            ordinal = Heap.block_ordinal(addr &- data_start, @block_magic.unsafe_fetch(index))
+            block_bytes = @block_bytes.unsafe_fetch(index)
+            start = data_start &+ ordinal &* block_bytes
+            return false unless start == addr && start &+ block_bytes <= chunk_end
+            occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+            return (occ.value & (1_u64 << (ordinal & 63))) != 0
+          end
+        end
+      end
+      found = find_object_with_chunk(header.as(Void*))
+      return false unless found
+      block, chunk = found
+      return ChunkHeader.large?(chunk) if tag == MARK_ENTRY_TAG_REST
+      return false unless block == header
+      tag == 0 || chunk.value.size_class.to_u64 &+ 1 == tag
     end
 
     private def scan_object(entry : BlockHeader*, shard : MarkShard? = nil) : Nil

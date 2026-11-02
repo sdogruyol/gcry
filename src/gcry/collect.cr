@@ -1010,6 +1010,15 @@ module Gcry
     # A class property, not a field: a `Heap` field here would move every
     # field after it.
     class_property inc_finish_rescan_roots : Bool = true
+    # Research only: false scans every incremental mark-stack entry as it is
+    # popped, unresolved — the code before 2026-11-03, which read a block
+    # freed while grey, unmapped or not (`mark_loop_budget`). The control arm
+    # of `process_spec/regression/102_incremental_free_grey_spec.cr`. A
+    # class property, as the knob above.
+    class_property inc_scan_checks_entries : Bool = true
+    # Incremental mark-stack entries popped and not scanned because their
+    # block was freed after the push (`mark_loop_budget`), process-wide.
+    class_getter inc_stale_entries_skipped : UInt64 = 0_u64
     @world_stopped = false
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
