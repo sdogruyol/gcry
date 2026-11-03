@@ -4884,11 +4884,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       and top of a fiber stack `collect_stacks` had freed and gcry had
       mapped large blocks over. Fixed: the Monitor zeroes its dead stack
       after each gated call (regression 105); the spec zeroes
-      `drift_cycle`'s own frame first (a frame probe read −4 003). Open: one
-      −2 444 on the fixed tree, full `process_spec`, 1.22.2 headerless,
-      untraced; after-fix rate measured over 13 runs only. Possibly the
-      Monitor word left in `make parallel-dormant` above [INFERENCE].
-      `bench/log/linux/2026-11-04-reg1-drift/FINDINGS.md`.
+      `drift_cycle`'s own frame first (a frame probe read −4 003). Also
+      fixed: the Monitor's loop frame kept its birth's high half under the
+      `Int32` nanoseconds of `every`'s `Time::Instant`s, a new heap address
+      each pass; the loop now starts on zeroed stack (regression 107; this
+      is the Monitor word the item above left open). Open: 1.22.2
+      headerless still fails, −2 151 (instrumented, no root word changed
+      in the window, so held by a heap object, a pending finalizer or a
+      closure [INFERENCE]) and −1 849 on the final tree, 1 in 9 prefix
+      runs; 0 in 25 full-suite runs. The ≥100-run zero-rate target is not
+      met. `bench/log/linux/2026-11-04-reg1-drift/FINDINGS.md`.
 - [ ] **Per-object mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-23).** Per collection at the same (full) live set,
       gcry's one marker took 0.39× / 0.43× / 0.67× of Boehm's one marker on

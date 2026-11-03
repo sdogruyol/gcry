@@ -161,7 +161,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only. Regression 105 plants a block's address there: the code before
   keeps it, the fix frees it. Regression 1 also zeroes `drift_cycle`'s own
   frame before each cycle; a planted address in that frame's slots read
-  −4 003. One −2 444 on 1.22.2 headerless after the fix is open
+  −4 003 (`bench/log/linux/2026-11-04-reg1-drift/`).
+
+- **The execution-context Monitor's loop frame no longer keeps what its
+  thread's birth left there.** `Monitor#run_loop` never returns, and every
+  stop reads its frame. Crystal's `every` keeps `Time::Instant`s and
+  `Time::Span`s in it and stores only the `Int32` half of their second word,
+  so the other half kept the high bits of an address the birth had left at
+  that depth: each pass the word became a new address in the heap's 4 GiB
+  (low half a nanosecond count), and kept whatever block it named until the
+  next pass. In regression 1's full suite order on Crystal 1.22.2 it was
+  the one root word that held a block before the baseline and something else
+  after the check; it matches the one `drift=-2444` seen after the fix
+  above, and the Monitor word left in `make parallel-dormant`
+  ([INFERENCE] for both: neither failure was captured with it). The
+  Monitor now zeroes its stack below the loop's entry before Crystal's loop
+  builds its frame there (`MonitorGate.scrub_loop_stack`), as the idle
+  thread does at its birth; all platforms, once per process. Over-retention
+  only. Regression 107: a block's address planted under the loop is kept by
+  the code before and freed by the fix, and a marker's high half survives
+  under the loop's half-written words before the fix and not after
+  (`GCRY_MONITOR_LOOP_TEST`, research only). Regression 1 still fails on
+  1.22.2 headerless with this fix, by the same size (`drift=-1849`, 1 of 9
+  suite-order runs); an instrumented `drift=-2151` had no root word change
+  in its window, and that source is open
   (`bench/log/linux/2026-11-04-reg1-drift/`).
 
 - **The root scan no longer reads words nothing wrote in three frames, and

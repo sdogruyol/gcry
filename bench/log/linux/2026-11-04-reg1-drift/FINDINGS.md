@@ -4,11 +4,12 @@ Branch `reg1-040`, on `release-0.40.0` (`2b3626b9`). Follows
 `bench/log/linux/2026-11-02-scrub-band/` § 4, whose spec-side scrub
 (`374dd89e`) covered the dead frames below `drift_cycle` only.
 
-Status: one cause found and fixed in `src/` (the execution-context Monitor's
-dead stack), one spec construction found with a deterministic probe and
-fixed spec-side, and **one failure left unexplained**: `count=10000
-drift=-2444` on the fixed tree, in a full `process_spec` run on Crystal
-1.22.2 headerless (§ 6). The ≥100-run zero-rate check was not reached.
+Status (2026-11-03, Reg1b's continuation): two causes found and fixed in
+`src/` (the execution-context Monitor's dead stack, § 2–3, and its loop
+frame's half-written words, § 6), one spec construction fixed spec-side
+(§ 4). **Not closed**: the fixed tree still fails regression 1 on Crystal
+1.22.2 headerless, by −1 849 to −2 444 (§ 6.3, § 5), with no root word
+changing inside the window in the one instrumented capture.
 
 ## 1. Rates before, tip `2b3626b9`
 
@@ -133,48 +134,143 @@ No natural failure was traced to this frame; the probe shows the spec relied
 on it. The `it` block now calls `drift_scrub` before each `drift_cycle`. The
 bounds are unchanged.
 
-## 5. Rates after (`acd6d3e4` + `3fd75945` + `59f63197`)
+## 5. Rates after
 
-Same prefix construction (55 files: regression 105 sorts before 1 here).
+Reg1's runs on `59f63197` (§ 3–4 fixes, before § 6): `hdrba0` 0 of 13,
+`hdr` 0 of 6, `hl` 0 of 6, `hl122` 0 of 6, `d4` copy 0 of 14.
+
+On the final tree (`release-0.40.0` at `6a76d3dc` + this branch), same
+prefix construction, now 57 files (regressions 106 and 107 sort before 1):
 
 | config | runs | regression 1 fails |
 |---|---:|---:|
-| `hdrba0` | 13 | 0 |
-| `hdr` | 6 | 0 |
-| `hl` | 6 | 0 |
-| `hl122` | 6 | 0 |
-| `d4` copy, 1.22.2 headerless (fixed tree, root recorder) | 14 | 0 (drift 0 in all) |
+| headers + `GCRY_BITMAP_ALLOC=0` (`rba0a`, `rba0b`) | 20 | 0 |
+| headers (`rhdr`) | 10 | 0 |
+| 1.22.2 headerless (`rhl122`) | 9 | **1** (`drift=-1849`) |
+| 1.22.2 headerless, full suite, 103 files (`rfull122`) | 25 | 0 |
 
-Before: 4 of 113 tip runs, 3 of 28 on `hdrba0`. 0 of 13 after on `hdrba0`
-is not yet evidence (p ≈ 0.3 at the before rate); the ≥100-run target was
-not reached.
+**The ≥100 / ≥50 / ≥50 zero-failure target is not met**: the 1.22.2
+headerless prefix failed in its second run (§ 6.3), and the loops were
+stopped there, sharing the lock with another agent at ~15 min a round.
 
-## 6. Open: −2 444 on the fixed tree, 1.22.2 headerless
+## 6. The 1.22.2 headerless failures
 
-The `process_spec` check on Crystal 1.22.2 (full suite, headerless) failed
-regression 1 once on the fixed tree: `count=10000 drift=-2444 | count=1000
-drift=0` (`rates/fix-ps122-hl-failure.txt`). The
-headers and `GCRY_BITMAP_ALLOC=0` 1.22.2 runs passed. A full-suite build of
-the root-recorder copy (`d4full`) was built to catch it and stopped before
-its first run. Its magnitude matches neither the Monitor class (16–70
-thousand) nor the frame probe; it is close to ScrubBand's 1.22.2 headerless
-−1 225/−1 457, which had a finalizer. Untraced.
+### 6.1 Searching
+
+The full-suite copies are `rates/d4full.txt` … `d7full.txt` (Reg1's root
+recorder over Reg1's fixed tree `dwt2`, 1.22.2 headerless, 2–3.5 min a run).
+
+| copy | adds | runs | regression 1 fails |
+|---|---|---:|---:|
+| `d4full` (Reg1) | per-collection counts, root recorder | 8 | 0 |
+| `d5full` (`diag2/diag5.cr`) | 40 more 10 000-cycles per process at the same position | 8 (336 windows) | 0 |
+| `d6full` | the site report below | 12 | 1 (`drift=-2151`) |
+| `d7full` (`diag2/diag6.cr`, `mark-parent-recorder.diff`) | every first mark of the last pre-baseline collection with its parent | 40 | 0 |
+
+No window after the first in a process drifted (`d5full`): the event belongs
+to cycle 1, not to anything periodic.
+
+### 6.2 The Monitor's loop frame (fixed)
+
+`d6full`'s site report lists every root word that first-marked a block in
+the last pre-baseline collection and holds something else after the check
+(`diag2/d6-sites.txt`). In 2 of 12 runs there was exactly one, and in the
+other 10 none: SYSMON's stack at `bottom-4952` and `bottom-4920`,
+`0x713506dd2e24` → `0x713523d54b04` and `0x71391b03ac69` →
+`0x71392a4d7cfa`, the block it named alive both times (drift 0). gdb on
+the same binary (`diag2/gdb_site.py`) puts both slots in Crystal's
+`Monitor#run_loop` frame, 0xb8 and 0xd8 above its SP, and the disassembly
+stores only `%eax` there: the `Int32` nanoseconds of the `Time::Instant`s
+`start + @every` and `start`. The other 4 bytes are never written, and
+`run_loop` never returns, so they keep what the thread's birth left at that
+depth: the high half of an address in the heap's region. The word is a new
+address in that 4 GiB every 10 ms pass (low half < 10^9), and keeps whatever
+it names until the next pass. That is the parked-seed FINDINGS' "Monitor
+word" (low half ≈ 10 ms there: the `remaining` span), which it left open as
+Crystal's frame. [INFERENCE] it is also Reg1's `-2444` (same configuration,
+a block alive at the baseline let go inside the window); that run was not
+instrumented.
+
+Fix (`src/gcry/monitor_gate.cr`): the `run_loop` prologue, after `settle`,
+zeroes the stack the birth touched below it (`MonitorGate.scrub_loop_stack`,
+the pagemap low-water mark or 64 KiB, the shape of `IdleRelease`'s birth
+scrub) and wipes the band frameless; Crystal's loop is reached through a
+`@[NoInline]` redefinition so its frame is built after the scrub even in
+`--release`. All platforms (the frame is above the SP everywhere), once per
+process. Over-retention only.
+
+Regression 107 (`process_spec/regression/107_monitor_loop_frame_spec.cr`,
+`GCRY_MONITOR_LOOP_TEST`, read in `GC.init` because the Monitor starts
+before any spec; each arm its own process; `diag2/r107-matrix.txt`):
+
+| build | fixed | control | unplanted | halves fixed | halves control |
+|---|---|---|---|---|---|
+| 1.21 debug | freed | kept (5 words) | freed | 0 | (passed) |
+| 1.21 headers | freed | kept (5) | freed | 0 | 11 |
+| 1.21 headers, `GCRY_BITMAP_ALLOC=0` | freed | skip (0 words) | freed | 0 | 1 |
+| 1.21 `--release` | freed | kept (141) | freed | 0 | skip (0) |
+| 1.21 `--release` headers | (passed) | kept (141) | (passed) | 0 | skip (0) |
+| 1.22.2 debug | freed | kept (2) | freed | 0 | 9 |
+| 1.22.2 headers | freed | skip (0) | freed | 0 | 9 |
+
+Whole planted words survive only in slots the loop never writes, and how
+many varies with the build and the pass (0, 2 and 5 in three 1.22.2 debug
+runs); the halves arms plant `LOOP_MARKER` and count words that keep its
+high half under a low half the loop wrote, which every debug build has.
+Each build has at least one control arm that fails before the fix. A first
+version made the block with 24 000 bytes in a chunk the Monitor's cursor
+held; it read allocated after the collections in every arm, the unplanted
+one included, with nothing pointing at it ([INFERENCE] a cursor's claim,
+the case regression 106 fixed); the block is now large and the check uses
+`find_live_object_with_chunk`.
+
+### 6.3 Not the Monitor: `-2151`, `-1849` (open)
+
+`d6full` run 10 (`diag2/d6-run10-failure.txt`): `count=10000 drift=-2151`,
+the drop at post0, finalizer entries 149 throughout. No block a root
+first-marked in the cycle was gone, and no root word changed between the
+last pre-baseline collection and the check. So the 2 151 objects were
+reached through something that is not a recorded root: a live heap object
+that dropped them inside the window, or a pending finalizer or callback
+closure (`mark_metadata_roots`, not recorded) [INFERENCE]. In that run the
+main fiber ran on the `DEFAULT-0` thread and the main thread ran another
+fiber. `d7full`, which records each first mark's parent to name that
+holder, did not fail in 40 runs.
+
+On the final tree, with § 6.2's fix, the prefix binary on 1.22.2 headerless
+failed run 2 with `count=10000 drift=-1849 | count=1000 drift=0`
+(`rates/rhl122.txt`): the same size class, so this source is still there.
+Its cause and whether it is gcry's or the suite's are open.
 
 ## 7. Keep rule
 
-Perf A/B on `reg1-040` at `3fd75945` against `v0.39.0`, nine benches, 15
-reps, Boehm, pads `p16 p64 bp16 bp64`: run 41492282987 (ubuntu-latest,
-ubuntu-24.04-arm, windows-latest, macos-15-intel; its macos-latest job was
-cancelled without steps) and 41496538104 (macos-latest, completed). Not yet
-evaluated with `keep.py`.
+`acd6d3e4` (§ 3): perf A/B on `reg1-040` at `3fd75945` against `v0.39.0`,
+nine benches, 15 reps, Boehm, pads `p16 p64 bp16 bp64`: runs 41492282987
+(ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-15-intel) and
+41496538104 (macos-latest). `keep.py` (`ab/keep.txt`): every row `ok` or
+`placement`, **none unexcused**. The PEAK flags (macOS JsonParse*,
+arm64/Windows JsonParse*) are the ones every 0.40 run shows against v0.39.0
+(`2026-11-03-reg21-marked-unmarked/ab/keep.txt`), and the fix is Linux only.
 
-## 8. Checks on `59f63197`'s tree
+§ 6.2's fix: run 41548974920 (`probe/reg1b-keep` at `292fe822`, the same
+inputs; `ab/keep-loop-frame.txt`). Every row `ok` or `placement`
+except two on ubuntu-latest: JsonParsePure time +4.4% [+3.8, +5.0] and
+JsonParseSerializable +2.7% [+2.5, +3.0], wall level. Attribution
+[INFERENCE, not re-run]: the fix runs once per process, at the Monitor's
+start, so it has no per-collection or per-allocation cost to show; the
+same ubuntu-latest JsonParse* rows were unexcused or wide placements in
+earlier 0.40 runs on unrelated changes (`2026-11-02-pace-growth/ab/41293138039-keep.txt`
++5.3% / +8.0%, `2026-11-02-scrub-band/ab/keep.txt` +5.9% / +7.4%), and
+this run's ubuntu-latest drew a slower machine (JsonParsePure base 0.847 s
+against 0.590 s in 41492282987). A re-run would settle it.
 
-`verify.sh` all green (format, lint, `spec/all_specs` three ways,
-`process_spec` 428/429/429 examples, 0 failures), `make windows-typecheck`,
-`make darwin-typecheck`, `make alloc-entry-frame` (5 examples, 0 failures).
-`process_spec` on 1.22.2: headers 429 / `GCRY_BITMAP_ALLOC=0` 429 examples,
-0 failures; headerless 428 examples, **1 failure** (§ 6).
+## 8. Checks on the final tree
+
+`7bfb0358` on `6a76d3dc` (`rates/checks-final.txt`): `verify.sh` green
+(format, lint, `spec/all_specs` 307 / 330 / 307, `process_spec` 442 / 443 /
+443, 0 failures), `make windows-typecheck`, `make darwin-typecheck`,
+`make alloc-entry-frame` (5 examples, 0 failures); `process_spec` on 1.22.2
+headerless 442, headers 443, `GCRY_BITMAP_ALLOC=0` 443, 0 failures.
 
 ## Files
 
@@ -183,3 +279,7 @@ evaluated with `keep.py`.
   `src/` copy with `root-recorder.diff` applied, `-Dreg1_diag`), the failing
   runs' output, `gdb_lowwater.py`.
 - `probe/probe1.cr`: the frame probe (§ 4).
+- `diag2/`: Reg1b's copies (§ 6): `diag5.cr`, `diag6.cr`, the mark-parent
+  recorder diff over `diag/root-recorder.diff`'s tree, `gdb_site.py`,
+  `dump107.cr`, the site lines, run 10's failure, regression 107's matrix.
+- `ab/keep.txt`: `keep.py` on 41492282987 and 41496538104.

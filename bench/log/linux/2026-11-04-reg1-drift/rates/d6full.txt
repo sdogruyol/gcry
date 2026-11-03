@@ -1,0 +1,12 @@
+d6full 1 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 2 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 3 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 4 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 5 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 6 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 7 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 8 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 9 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 10 rc=1 fail=[crystal ] {count=10000 drift=-2151 | count=1000 drift=0} 428 examples, 1 failures, 0 errors, 2 pending
+d6full 11 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d6full 12 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
