@@ -424,6 +424,13 @@ end
 # Only for the process GC: a library heap never stops the world, so there is
 # nothing to shut the Monitor out of and no reason to reach into the stdlib.
 {% if flag?(:gc_none) && @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
+  # Each method wrapped below must exist in this Crystal: a rename would
+  # otherwise leave the Monitor ungated, or its loop unscrubbed.
+  {% for name in %w[run_loop transfer_schedulers_blocked_on_syscall increase_parallelism collect_stacks] %}
+    {% unless Fiber::ExecutionContext::Monitor.has_method?(name) %}
+      {% raise "gcry: Fiber::ExecutionContext::Monitor##{name.id} not found; MonitorGate wraps it" %}
+    {% end %}
+  {% end %}
   class Fiber::ExecutionContext::Monitor
     # Crystal's loop in a frame of its own, never inlined into the prologue
     # below: the frame must be built after the scrub, not as part of the
@@ -433,17 +440,22 @@ end
       previous_def
     end
 
+    # The scrub runs before `settle`, while the Monitor is still a mutator a
+    # stop suspends, as `IdleRelease`'s birth scrub runs before its thread is
+    # exempt: what it calls (the low-water probe) then never runs alongside a
+    # stop. The frameless wipe after `settle` takes the band under this frame,
+    # `settle`'s residue included.
     private def run_loop : Nil
       # While still a mutator: a block allocated once settled would run on
       # through a stop.
-      Gcry::MonitorGate.loop_test_alloc if Gcry::MonitorGate.loop_test != 0
-      Gcry::MonitorGate.settle
       if Gcry::MonitorGate.loop_test != 0
+        Gcry::MonitorGate.loop_test_alloc
         Gcry::MonitorGate.loop_test_plant(Gcry::Roots.hardware_stack_pointer.address)
       end
+      Gcry::MonitorGate.scrub_loop_stack unless Gcry::MonitorGate.loop_residue_kept?
+      Gcry::MonitorGate.settle
       unless Gcry::MonitorGate.loop_residue_kept?
-        Gcry::MonitorGate.scrub_loop_stack
-        # The band that left under this frame, and the frame it ran on: the
+        # The band that left under this frame, and the frames it ran on: the
         # allocation slow path's frameless wipe, 1 KiB down from this SP.
         Gcry::Roots.wipe_below_sp(Gcry::Roots.wipe_limit(Gcry::Roots.hardware_stack_pointer.address))
       end

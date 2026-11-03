@@ -1,0 +1,60 @@
+== 1.21 debug
+fixed: monitor107: fixed: block freed after three collections, 0 planted word(s) in the loop's frames
+.control: monitor107: control: block kept after three collections, 5 planted word(s) in the loop's frames
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+.halves control: monitor107: halves control: 1 word(s) in the loop's frames keep the planted high half
+......fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+16 examples, 0 failures, 0 errors, 0 pending
+== 1.21 headers
+fixed: monitor107: fixed: block freed after three collections, 0 planted word(s) in the loop's frames
+.control: monitor107: control: block freed after three collections, 0 planted word(s) in the loop's frames
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+.halves fixed: monitor107: halves fixed: 0 word(s) in the loop's frames keep the planted high half
+.halves control: monitor107: halves control: 10 word(s) in the loop's frames keep the planted high half
+......fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+16 examples, 0 failures, 0 errors, 0 pending
+== 1.21 headers ba0
+fixed: monitor107: fixed: block freed after three collections, 0 planted word(s) in the loop's frames
+.control: monitor107: control: block freed after three collections, 0 planted word(s) in the loop's frames
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+.halves fixed: monitor107: halves fixed: 0 word(s) in the loop's frames keep the planted high half
+.halves control: monitor107: halves control: 1 word(s) in the loop's frames keep the planted high half
+......fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+16 examples, 0 failures, 0 errors, 0 pending
+== 1.21 release
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+......fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+16 examples, 0 failures, 0 errors, 0 pending
+== 1.21 release headers
+.halves control: monitor107: halves control: 0 word(s) in the loop's frames keep the planted high half
+......fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+16 examples, 0 failures, 0 errors, 0 pending
+== 1.22.2 debug
+fixed: monitor107: fixed: block freed after three collections, 0 planted word(s) in the loop's frames
+.control: monitor107: control: block freed after three collections, 0 planted word(s) in the loop's frames
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+.halves fixed: monitor107: halves fixed: 0 word(s) in the loop's frames keep the planted high half
+.halves control: monitor107: halves control: 8 word(s) in the loop's frames keep the planted high half
+......fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+16 examples, 0 failures, 0 errors, 0 pending
+== 1.22.2 headers
+fixed: monitor107: fixed: block freed after three collections, 0 planted word(s) in the loop's frames
+.control: monitor107: control: block freed after three collections, 0 planted word(s) in the loop's frames
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+.halves fixed: monitor107: halves fixed: 0 word(s) in the loop's frames keep the planted high half
+.halves control: monitor107: halves control: 8 word(s) in the loop's frames keep the planted high half
+......fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+16 examples, 0 failures, 0 errors, 0 pending

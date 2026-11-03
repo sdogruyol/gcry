@@ -176,9 +176,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above, and the Monitor word left in `make parallel-dormant`
   ([INFERENCE] for both: neither failure was captured with it). The
   Monitor now zeroes its stack below the loop's entry before Crystal's loop
-  builds its frame there (`MonitorGate.scrub_loop_stack`), as the idle
-  thread does at its birth; all platforms, once per process. Over-retention
-  only. Regression 107: a block's address planted under the loop is kept by
+  builds its frame there (`MonitorGate.scrub_loop_stack`), while it is
+  still a mutator a stop suspends, as the idle thread does at its birth;
+  all platforms, once per process. Over-retention only. The stack
+  low-water probe (Linux pagemap, Darwin page query) now reads into a
+  buffer on the caller's stack instead of one static buffer, so a probe
+  outside a stop cannot change the collector's answer for a parked
+  fiber's stack; a Crystal without the Monitor methods gcry wraps fails
+  to build. Regression 107: a block's address planted under the loop is kept by
   the code before and freed by the fix, and a marker's high half survives
   under the loop's half-written words before the fix and not after
   (`GCRY_MONITOR_LOOP_TEST`, research only). Regression 1 still fails on

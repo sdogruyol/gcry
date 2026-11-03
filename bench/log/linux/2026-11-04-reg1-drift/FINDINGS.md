@@ -199,6 +199,25 @@ scrub) and wipes the band frameless; Crystal's loop is reached through a
 `--release`. All platforms (the frame is above the SP everywhere), once per
 process. Over-retention only.
 
+Review (MonReview): the first version scrubbed after `settle`, i.e. once
+the Monitor was exempt from stops, and the scrub's low-water probe
+(`Platform.stack_low_water`) read `/proc/self/pagemap` into one static
+buffer the collector's own probe shares; a Monitor read between the
+collector's `pread` and its loop could give `low_water_or_guard` a mark
+above a parked fiber's live frames, so that fiber's frames would not be
+scanned. Not observed; no hook makes the race deterministic, so no
+regression arm. Now the prologue scrubs before `settle` (as
+`IdleRelease`'s birth scrub), and both probes (Linux pagemap, Darwin
+`mach_vm_page_range_query`) read into a buffer on the caller's stack, so
+no caller can race another. The wrapped Monitor methods are checked at
+compile time (`has_method?`), so a rename in Crystal fails the build.
+After the reorder (`diag2/r107-matrix-reordered.txt`, with regression
+105): 107's fixed, unplanted and halves-fixed arms pass in every build;
+the failing controls are the block arm in 1.21 debug (5 words) and
+`--release` (131, headers 108), and the halves arm in 1.21 headers (10), 1.21 headers
+`GCRY_BITMAP_ALLOC=0` (1) and 1.22.2 debug and headers (8 each); the other
+controls print the skip mark. 105's three arms pass in all seven builds.
+
 Regression 107 (`process_spec/regression/107_monitor_loop_frame_spec.cr`,
 `GCRY_MONITOR_LOOP_TEST`, read in `GC.init` because the Monitor starts
 before any spec; each arm its own process; `diag2/r107-matrix.txt`):
