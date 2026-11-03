@@ -92,40 +92,50 @@ scrubbing dead stack. Conservative root scans include that red zone.
 - Crystal's own suites (`spec/std`, `compiler_spec`) are not run on Windows;
   their CI jobs are Linux-only.
 - Workload numbers come from two places. 0.40.0 was measured natively on
-  GitHub's `windows-latest` runner (AMD EPYC, 4 vCPUs) against 0.39.0 and
-  Boehm, 15 interleaved reps, with a 16-byte pad arm of each tree (run
-  41253485376, `bench/log/windows/2026-11-01-0.40-runners/`;
+  GitHub's `windows-latest` runner (AMD EPYC 7763, 4 vCPUs) against 0.39.0
+  and Boehm, 15 interleaved reps, with 16- and 64-byte pad arms of each
+  tree (run 41577045896, `bench/log/windows/2026-11-05-0.40-runners/`;
   `perf-ab.yml` with `-f os='["windows-latest"]'` repeats it; 0.39.0 against
   0.38.0: `bench/log/windows/2026-10-24-0.39-runners/`). Kemal on
   Windows was last measured in one 12-vCPU Windows 11 QEMU/KVM VM
   (`bench/log/windows/2026-10-06-vm-validation/`), as the runner has no
   `wrk`. Windows ARM64 workloads are unmeasured; ARM64 has CI coverage only.
-  - **Throughput.** crystal-metric runs at 95–120% of Boehm's speed on
-    0.40.0 (Knuckeotide 98%, Revcomp 95%, Binarytrees 120%; 0.39.0 in the
-    same run 96–119%). Seven rows are slower than 0.39.0 in wall time beyond
-    their spread: Revcomp +7.3%, Primes +6.3%, JsonParseSerializable +2.9%,
-    JsonParsePull and JsonGenerate +2.5%, JsonParsePure +2.0%, RegexDna
-    +1.4%. All seven are code placement: built with nops ahead of all their
-    code at each of the four 16-byte phases, in one session, 0.40.0 and
-    0.39.0 read the same time at the same phase (medians −2.3% to +3.3%
-    apart, both signs), and unpadded 0.40.0 sits on a slow phase of each row
-    and 0.39.0 on a fast one. The JSON parse rows move 3.5–6% between
-    phases, JsonGenerate 7%, RegexDna 1.4%, Revcomp 16–19% (below), and a
-    control that allocates nothing 4%. Primes reads the same at equal
-    collection counts; its tenth collection is a step of the pacing that
-    0.39.0 takes in 0 to 20 of 21 runs depending on its placement. No
-    default-path commit of 0.40.0, reverted alone, moves a row out of the
-    tip's band, and the hit path's added work on Windows is one load and
-    one test per 64 blocks (`bench/log/windows/2026-11-02-0.40-win-rows/`).
+  - **Throughput.** crystal-metric runs at 95–119% of Boehm's speed on
+    0.40.0 (Knuckeotide 95%, Revcomp 96%, Binarytrees 119%; 0.39.0 in the
+    same run 95–119%). Six rows are slower than 0.39.0 in wall time beyond
+    their spread: Revcomp +6.1%, JsonParseSerializable +3.1%, JsonParsePure
+    +3.0%, JsonParsePull +2.8%, RegexDna +1.3%, Binarytrees +0.7%. Revcomp,
+    JsonParseSerializable, JsonParsePull and RegexDna are code placement: a
+    16- or 64-byte pad arm of 0.40.0 reads inside 0.39.0's band in the same
+    run, and built with nops ahead of all their code at each of the four
+    16-byte phases, in one session, 0.40.0 and 0.39.0 read the same time at
+    the same phase (medians −2.3% to +3.3% apart, both signs), with
+    unpadded 0.40.0 on a slow phase of each row and 0.39.0 on a fast one.
+    The JSON parse rows move 3.5–6% between phases, JsonGenerate 7%,
+    RegexDna 1.4%, Revcomp 16–19% (below), and a control that allocates
+    nothing 4% (`bench/log/windows/2026-11-02-0.40-win-rows/`).
+    JsonParsePure (timed +7.5%) read placement with four phases a side, but
+    this run's two pads do not reach 0.39.0's band (0.40.0 0.854–0.883 s,
+    0.39.0 0.824–0.847 s), with one collection fewer and 8.8% less mark
+    time. Binarytrees (+0.7%, timed within the spread) is the hit path's
+    word advance, inline on x86-64 Windows since it cost the EPYC 9V74
+    3–5%: on this runner's EPYC 7763 inline averages 0.39.0's time over
+    the placements, where out of line was 1.8–2.7% under it
+    (`bench/log/windows/2026-11-03-binarytrees/`). Primes is level: 0.40.0
+    collected 9 times in every run and 0.39.0 10 times in 5 of 15; the
+    tenth collection was a step of the pacing, which the growth-priced pace
+    removed (`bench/log/linux/2026-11-02-pace-growth/`).
     In the VM, Kemal reached 106.5% of Boehm on `/json` and 102.9% on `/`.
   - **Memory.** Peak working set (`PeakWorkingSetSize`) is not Linux RSS:
     decommitted pages that are recommitted count again. On 0.40.0 it is
     under Boehm's on 7 of 9 rows, 0.43–0.93×; in-place `realloc` growth in
     0.36.0 took the buffer-growing rows down 13–17% from 0.35.0
     (JsonGenerate 0.70× → 0.58×, JsonParseSerializable 0.94× → 0.81×,
-    Revcomp 0.75× → 0.61×). The exceptions are JsonParsePure 1.07× and
-    Knuckeotide 1.19× [1.18, 1.66] (0.39.0: 1.57× [1.21, 1.70] in the same
-    run; paired −2.3% [−16.1%, +1.7%], within the spread: its peak is
+    Revcomp 0.75× → 0.61×). JsonParseSerializable and JsonParsePull read
+    0.81× against 0.39.0's 0.77× (+4.4% and +4.1%): the growth-priced pace
+    collects them less often. The exceptions are JsonParsePure 1.07× and
+    Knuckeotide 1.58× [1.19, 1.64] (0.39.0: 1.63× [1.23, 1.68] in the same
+    run; paired −4.0% [−6.4%, +0.7%], within the spread: its peak is
     bimodal across reps for both). 0.39.0's slow-path stack wipe
     runs on Windows too (three tail-call hops); the rest of Knuckeotide's
     peak is its collection schedule
@@ -144,11 +154,11 @@ scrubbing dead stack. Conservative root scans include that red zone.
     was level with it (wall −0.8% and +0.2%). 0.39.0's Revcomp timed section
     is 3.3% [1.7, 4.0] slower than 0.38.0's while its whole-process wall is
     5.0% faster (`bench/log/windows/2026-10-24-0.39-runners/`). 0.40.0's is
-    18.8% slower than 0.39.0's (wall +7.3%): unpadded, 0.40.0 puts
+    15.7% slower than 0.39.0's (wall +6.1%): unpadded, 0.40.0 puts
     `Revcomp#revcomp` at ≡ 32 mod 64, the slowest of the four offsets, and
-    0.39.0 built at each of the four offsets reads 0.40.0's time there to
-    within 3.3%; padding alone moves Revcomp over a 16–19% band
-    (`bench/log/windows/2026-11-02-0.40-win-rows/` §1,
+    the same run reads both releases alike at the same offset (≡ 0: 1.388
+    and 1.390 s, ≡ 48: 1.275 and 1.263 s); padding alone moves Revcomp over
+    a 16–19% band (`bench/log/windows/2026-11-02-0.40-win-rows/` §1,
     `bench/log/linux/2026-11-01-0.40-keep-rule/` §2). In 0.36.0 Primes was
     2.8% slower, with 22% more mark time at the same collection count:
     in-place growth moves where collections fall in a bench whose live set
