@@ -1,0 +1,105 @@
+2026-11-03T04:15:53Z
+ 07:15:53  up 16 days 11:42,  0 users,  load average: 0.73, 1.77, 1.36
+%CPU     PID ELAPSED     COMMAND
+46.9    8836 16-11:39:15 gnome-shell
+36.5   15011 16-11:36:02 ptyxis
+ 2.9 2189215 9-22:56:10  omp
+ 1.7 2967353 15-19:47:55 resources-proce
+ 1.4   43983 16-10:24:25 omp
+ 0.7    9284 16-11:39:14 xdg-desktop-por
+ 0.6    9236 16-11:39:14 gnome-remote-de
+ 0.5   18260 16-11:34:53 rustdesk
+ 0.4 3821081 14-15:47:55 omp
+ 0.3  544915 26:28       rustdesk
+ 0.3    8567 16-11:39:15 pipewire
+== before-session
+2026-11-03T04:21:16Z
+ 07:21:16  up 16 days 11:47,  0 users,  load average: 1.00, 1.31, 1.26
+%CPU     PID ELAPSED     COMMAND
+46.9    8836 16-11:44:38 gnome-shell
+36.4   15011 16-11:41:25 ptyxis
+ 2.9 2189215 9-23:01:34  omp
+ 1.7 2967353 15-19:53:19 resources-proce
+ 1.4   43983 16-10:29:48 omp
+ 0.7    9284 16-11:44:38 xdg-desktop-por
+ 0.6    9236 16-11:44:38 gnome-remote-de
+ 0.5   18260 16-11:40:16 rustdesk
+ 0.4 3821081 14-15:53:18 omp
+ 0.3  544915 31:51       rustdesk
+ 0.3    8567 16-11:44:38 pipewire
+== after-session
+2026-11-03T04:49:43Z
+ 07:49:43  up 16 days 12:15,  0 users,  load average: 2.21, 2.12, 1.79
+%CPU     PID ELAPSED     COMMAND
+46.9    8836 16-12:13:05 gnome-shell
+36.4   15011 16-12:09:52 ptyxis
+ 2.9 2189215 9-23:30:01  omp
+ 1.7 2967353 15-20:21:46 resources-proce
+ 1.4   43983 16-10:58:15 omp
+ 1.3  614808 00:17       rustdesk
+ 0.8  614815 00:17       rustdesk
+ 0.7    9284 16-12:13:05 xdg-desktop-por
+ 0.6    9236 16-12:13:05 gnome-remote-de
+ 0.5   18260 16-12:08:43 rustdesk
+ 0.4 3821081 14-16:21:45 omp
+== before-kemal-pads
+2026-11-03T04:50:21Z
+ 07:50:21  up 16 days 12:16,  0 users,  load average: 1.13, 1.85, 1.71
+%CPU     PID ELAPSED     COMMAND
+46.9    8836 16-12:13:42 gnome-shell
+36.4   15011 16-12:10:30 ptyxis
+ 2.9 2189215 9-23:30:38  omp
+ 1.7 2967353 15-20:22:23 resources-proce
+ 1.4   43983 16-10:58:52 omp
+ 0.7    9284 16-12:13:42 xdg-desktop-por
+ 0.6  614808 00:54       rustdesk
+== after-kemal-pads
+2026-11-03T05:22:08Z
+ 08:22:08  up 16 days 12:48,  0 users,  load average: 2.15, 2.12, 2.04
+%CPU     PID ELAPSED     COMMAND
+46.8    8836 16-12:45:29 gnome-shell
+36.4   15011 16-12:42:17 ptyxis
+ 2.9 2189215 10-00:02:25 omp
+ 1.7 2967353 15-20:54:10 resources-proce
+ 1.4   43983 16-11:30:40 omp
+ 0.7    9284 16-12:45:29 xdg-desktop-por
+ 0.6    9236 16-12:45:29 gnome-remote-de
+== start 04:21:16
+ 07:21:16 up 16 days, 11:47,  1 user,  load average: 1.00, 1.31, 1.26
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+   8836 naruto    20   0   11.7g 867200 323480 S   9.1   7.4    7d+17h gnome-s+
+  43983 naruto    20   0   64.6g 589232 101996 S   9.1   5.0 338:38.24 omp
+      1 root      20   0   26448  10404   5892 S   0.0   0.1   6:39.65 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.42 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      8 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+== after-cm 04:37:34
+ 07:37:34 up 16 days, 12:03,  1 user,  load average: 1.41, 1.30, 1.28
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+      1 root      20   0   26448  10404   5892 S   0.0   0.1   6:39.94 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.42 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      8 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+     10 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+     13 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+== end 04:49:43
+ 07:49:43 up 16 days, 12:15,  1 user,  load average: 2.21, 2.12, 1.79
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+   8836 naruto    20   0   11.7g 866604 323480 S   9.1   7.4    7d+17h gnome-s+
+  43983 naruto    20   0   64.6g 573748 102032 S   9.1   4.9 339:37.65 omp
+      1 root      20   0   26448  10404   5892 S   0.0   0.1   6:40.15 systemd
+      2 root      20   0       0      0      0 S   0.0   0.0   0:00.42 kthreadd
+      3 root      20   0       0      0      0 S   0.0   0.0   0:00.00 pool_wo+
+      4 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      5 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      6 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      7 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
+      8 root       0 -20       0      0      0 I   0.0   0.0   0:00.00 kworker+
