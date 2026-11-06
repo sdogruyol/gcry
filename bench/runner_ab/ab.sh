@@ -142,6 +142,48 @@ if [ "$AB_BENCHES" != - ]; then
     padded build "$psrc" "ab-$pname" -Dgc_none
     arms+=(--arm "$pname=$root/bin/ab-$pname$exe")
   done
+  # Probe only (probe/winbt). AB_REVERTS="name=sha,sha[:pN] ...": arm rv_<name>
+  # (rv_<name>_pN when padded), this checkout's source with those commits
+  # reverted. AB_PATCHES="name=file[:pN] ...": arm pt_<name>, the source with
+  # that patch applied. AB_ENVARMS="name=arm:K=V,K=V ...": arm <name>, arm's
+  # binary under that environment.
+  for spec in ${AB_REVERTS:-}; do
+    rn=${spec%%=*} rshas=${spec#*=} rpad=""
+    case "$rshas" in *:*) rpad=${rshas#*:} rshas=${rshas%%:*} ;; esac
+    if [ ! -d "../ab-rv-$rn" ]; then
+      git worktree add -q --detach "../ab-rv-$rn" HEAD
+      # shellcheck disable=SC2086
+      (cd "../ab-rv-$rn" && git -c user.email=ab@probe -c user.name=ab revert --no-commit ${rshas//,/ } && git diff --cached --stat HEAD)
+    fi
+    an="rv_$rn${rpad:+_$rpad}"
+    if [ -n "$rpad" ]; then PREPAD=${rpad#p} build "../ab-rv-$rn" "ab-$an" -Dgc_none; else build "../ab-rv-$rn" "ab-$an" -Dgc_none; fi
+    arms+=(--arm "$an=$root/bin/ab-$an$exe")
+  done
+  for spec in ${AB_PATCHES:-}; do
+    rn=${spec%%=*} rpatch=${spec#*=} rpad=""
+    case "$rpatch" in *:*) rpad=${rpatch#*:} rpatch=${rpatch%%:*} ;; esac
+    if [ ! -d "../ab-pt-$rn" ]; then
+      git worktree add -q --detach "../ab-pt-$rn" HEAD
+      (cd "../ab-pt-$rn" && git apply "$root/$rpatch" && git diff --stat)
+    fi
+    an="pt_$rn${rpad:+_$rpad}"
+    if [ -n "$rpad" ]; then PREPAD=${rpad#p} build "../ab-pt-$rn" "ab-$an" -Dgc_none; else build "../ab-pt-$rn" "ab-$an" -Dgc_none; fi
+    arms+=(--arm "$an=$root/bin/ab-$an$exe")
+  done
+  for spec in ${AB_ENVARMS:-}; do
+    en=${spec%%=*} rest=${spec#*=}
+    ebin=${rest%%:*} ekv=${rest#*:}
+    arms+=(--arm "$en=$root/bin/ab-$ebin$exe")
+    for kv in ${ekv//,/ }; do arms+=(--arm-env "$en" "$kv"); done
+  done
+  # AB_REVS="name=sha[:pN] ...": arm <name>, crystal-metric with SHA's src.
+  for spec in ${AB_REVS:-}; do
+    rn=${spec%%=*} rsha=${spec#*=} rpad=""
+    case "$rsha" in *:*) rpad=${rsha#*:} rsha=${rsha%%:*} ;; esac
+    [ -d "../ab-rev-$rsha" ] || git worktree add -q --detach "../ab-rev-$rsha" "$rsha"
+    if [ -n "$rpad" ]; then PREPAD=${rpad#p} build "../ab-rev-$rsha" "ab-$rn" -Dgc_none; else build "../ab-rev-$rsha" "ab-$rn" -Dgc_none; fi
+    arms+=(--arm "$rn=$root/bin/ab-$rn$exe")
+  done
   crystal --version
   # shellcheck disable=SC2086 # AB_BENCHES is a space-separated list
   "$py" bench/runner_ab/ab.py --out "$out" --reps "${AB_REPS:-10}" "${arms[@]}" $AB_BENCHES

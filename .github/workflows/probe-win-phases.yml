@@ -1,0 +1,56 @@
+name: Probe win phases
+
+# Probe only, deleted afterwards. Windows JsonParsePure and Binarytrees on
+# the 0.40 tip against 0.39.0: every 16-byte phase of both trees (unpadded,
+# prepadded 16/32/48/64), plus the src at 2c600dfb (WinRows' measured state)
+# and at e7efe740 (half of the commits since) at four phases each.
+on:
+  push:
+    branches: [probe/win-phases]
+
+jobs:
+  ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        session: [s1, s2, s3]
+    runs-on: windows-latest
+    timeout-minutes: 340
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - env:
+          AB_BASE: c0d570c52793cfa144d88f3f4b600c839f7a40ce
+          AB_REPS: "21"
+          AB_BENCHES: "JsonParsePure JsonParseSerializable JsonParsePull Binarytrees Fannkuchredux"
+          AB_BOEHM: "0"
+          AB_PADS: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
+          AB_REVS: >-
+            c2c=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c
+            c2cp16=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c:p16
+            c2cp32=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c:p32
+            c2cp48=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c:p48
+            ce7=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e
+            ce7p16=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e:p16
+            ce7p32=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e:p32
+            ce7p48=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e:p48
+          AB_OUT: bench/log/_ab
+        run: |
+          pwsh -c '(Get-CimInstance Win32_Processor).Name' > cpu.txt
+          cat cpu.txt
+          bench/runner_ab/ab.sh
+          cp cpu.txt bench/log/_ab/
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-win-phases-${{ matrix.session }}
+          path: bench/log/_ab/
+          if-no-files-found: ignore
+          retention-days: 30

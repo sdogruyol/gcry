@@ -112,6 +112,7 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
     m = [x for x in LINE.finditer(text) if x.group(1) == bench]
     mark = collections = scanned = None
     per_collection = []
+    gc_sums = {}
     if os.path.exists(trace):
         with open(trace) as f:
             ends = [json.loads(l) for l in f if '"collect_end"' in l]
@@ -121,9 +122,12 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
         # grows scans the sum of its live set at those points, so a change
         # that moves them moves Σ mark without costing anything per byte.
         per_collection = [e.get("scanned_bytes", 0) for e in ends]
+        # Probe only (probe/winbt): Σ of each phase over the run, ms.
+        gc_sums = {k: sum(e.get(k + "_ns", 0) for e in ends) / 1e6
+                   for k in ("pause", "clear", "scrub", "roots", "static", "stacks", "sweep", "stw_stop", "stw_start", "flush")}
     r = dict(rc=rc, wall=wall, peak=peak, utime=utime, stime=stime, faults=faults, mark=mark,
              collections=collections, scanned=scanned, scanned_per_collection=per_collection,
-             time=None, result=None)
+             time=None, result=None, **gc_sums)
     if m:
         r["time"] = float(m[-1].group(4))
         r["result"] = "ok" if m[-1].group(2) == "ok" else m[-1].group(3).strip()
