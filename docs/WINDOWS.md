@@ -104,23 +104,30 @@ scrubbing dead stack. Conservative root scans include that red zone.
     0.40.0 (Knuckeotide 95%, Revcomp 96%, Binarytrees 119%; 0.39.0 in the
     same run 95–119%). Six rows are slower than 0.39.0 in wall time beyond
     their spread: Revcomp +6.1%, JsonParseSerializable +3.1%, JsonParsePure
-    +3.0%, JsonParsePull +2.8%, RegexDna +1.3%, Binarytrees +0.7%. Revcomp,
-    JsonParseSerializable, JsonParsePull and RegexDna are code placement: a
-    16- or 64-byte pad arm of 0.40.0 reads inside 0.39.0's band in the same
-    run, and built with nops ahead of all their code at each of the four
-    16-byte phases, in one session, 0.40.0 and 0.39.0 read the same time at
-    the same phase (medians −2.3% to +3.3% apart, both signs), with
-    unpadded 0.40.0 on a slow phase of each row and 0.39.0 on a fast one.
-    The JSON parse rows move 3.5–6% between phases, JsonGenerate 7%,
-    RegexDna 1.4%, Revcomp 16–19% (below), and a control that allocates
-    nothing 4% (`bench/log/windows/2026-11-02-0.40-win-rows/`).
-    JsonParsePure (timed +7.5%) read placement with four phases a side, but
-    this run's two pads do not reach 0.39.0's band (0.40.0 0.854–0.883 s,
-    0.39.0 0.824–0.847 s), with one collection fewer and 8.8% less mark
-    time. Binarytrees (+0.7%, timed within the spread) is the hit path's
-    word advance, inline on x86-64 Windows since it cost the EPYC 9V74
-    3–5%: on this runner's EPYC 7763 inline averages 0.39.0's time over
-    the placements, where out of line was 1.8–2.7% under it
+    +3.0%, JsonParsePull +2.8%, RegexDna +1.3%, Binarytrees +0.7%. All six
+    are code placement. Built with nops ahead of all their code at each of
+    the four 16-byte phases, in one session, 0.40.0 and 0.39.0 read the
+    same time at the same phase, with unpadded 0.40.0 on a slow phase of
+    each row and 0.39.0 on a fast one. The JSON parse rows move 3.5–6%
+    between phases, JsonGenerate 7%, RegexDna 1.4%, Revcomp 16–19% (below),
+    and a control that allocates nothing 4%
+    (`bench/log/windows/2026-11-02-0.40-win-rows/`). For Revcomp,
+    JsonParseSerializable, JsonParsePull and RegexDna, the run's own 16- or
+    64-byte pad arm reads inside 0.39.0's band. For JsonParsePure (timed
+    +7.5%) and Binarytrees, neither pad reaches it, and both were re-measured
+    at four phases a side on the same source
+    (`bench/log/windows/2026-11-06-win-phases/`). JsonParsePure's ranges
+    overlap in six of six sessions on three CPUs, and 0.40.0 is 0.6–2.1%
+    faster in wall time at the same phase. The timed section reads +1.5% to
+    +2.0% pooled on the EPYC 7763, −2.1% on an EPYC 9V45 and −0.2% on a
+    Xeon 8573C. No commit carries it: the sources at `2c600dfb` and
+    `e7efe740` read level, and no group of the later commits, reverted,
+    lowers the band at every phase. 0.40.0's one collection fewer falls in
+    the setup, not the timed section. Binarytrees' ranges meet, and at the
+    same phase 0.40.0 reads +0.4% to +0.8%. That is the hit path's word
+    advance, inline on x86-64 Windows since it cost the EPYC 9V74 3–5%: on
+    the EPYC 7763, inline averages 0.39.0's time over the placements, where
+    out of line was 1.8–2.7% under it
     (`bench/log/windows/2026-11-03-binarytrees/`). Primes is level: 0.40.0
     collected 9 times in every run and 0.39.0 10 times in 5 of 15; the
     tenth collection was a step of the pacing, which the growth-priced pace

@@ -25,9 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.39.0's at 102.2–104.9%. The other four from `perf-ab.yml` run
   41577045896 on the GitHub runners (the first refresh's inputs, two pads a
   side; `bench/log/{linux,macos,windows}/2026-11-05-0.40-runners/`): the
-  keep rule finds 2 of 45 rows unexcused, both on Windows — JsonParsePure
-  (+3.0% wall, placement with four phases a side in earlier sessions) and
-  Binarytrees (+0.7%, the inline word advance on an EPYC 7763); Windows'
+  keep rule finds 2 of 45 rows unexcused, both on Windows. Both are code
+  placement at four phases a side (the next entry): JsonParsePure (+3.0%
+  wall) and Binarytrees (+0.7%, the inline word advance on an EPYC 7763).
+  Windows'
   other slower rows (Revcomp +6.1%, JsonParseSerializable, JsonParsePull,
   RegexDna) and Intel's (Revcomp +7.7%, JsonParsePull +2.3%) have a 0.40.0
   pad arm inside 0.39.0's band. Primes'
@@ -38,6 +39,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   M1 JsonParsePure's 0.93× → 1.06×, a register pin in crystal-metric's
   driver (next entry). JsonGenerate's peak stays −13.6% on both Macs.
   Kemal `/json` is level on all four runners it runs on.
+
+- **Windows JsonParsePure and Binarytrees on 0.40.0's final source are
+  code placement, measured at four phases a side.** These are the keep
+  rule's two unexcused rows in run 41577045896, where two pads a side
+  could not reach 0.39.0's band. Each tree was built at all four 16-byte
+  phases in one session (six sessions on `windows-latest`: four on an EPYC
+  7763, one on an EPYC 9V45, one on a Xeon 8573C), with the source at
+  `2c600dfb` and `e7efe740` and the tip less each group of the later
+  commits as further arms. JsonParsePure's ranges overlap in every
+  session, and 0.40.0 is 0.6–2.1% faster in wall time at the same phase.
+  Its timed section reads +1.5% to +2.0% pooled on the 7763 (phase 48 slow,
+  16 level), −2.1% on the 9V45 and −0.2% on the 8573C. The checkpoints
+  read level, and no revert group lowers the band at every phase. The
+  collection 0.40.0 skips is in the setup, before crystal-metric's
+  `GC.collect` ahead of the timer. Binarytrees (three 7763 sessions): the
+  ranges meet, the same-phase difference is +0.4% to +0.8%, and the slow
+  phase is the one 0.40.0 sits on unpadded. No source change
+  (`bench/log/windows/2026-11-06-win-phases/`).
 
 - **M1 JsonParsePure's peak (0.93× → 1.06× of Boehm's) is a register pin
   in crystal-metric's `Benchmark::run`, not the pace.** Since `19cf3a60`

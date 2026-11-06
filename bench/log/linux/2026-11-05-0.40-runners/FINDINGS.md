@@ -43,7 +43,12 @@ runners, with each arm's median % of Boehm. Per-platform notes:
   (timed +7.5% [+6.1, +8.6], wall +3.0%; 0.40's arms 0.854–0.883 s, 0.39.0's
   0.824–0.847 s) **and Windows Binarytrees** (wall +0.7% [+0.0, +3.8],
   timed +0.3% [−0.6, +1.2] within the spread; 0.40's arms 1.310–1.316 s,
-  0.39.0's 1.286–1.309 s). See the Windows file.
+  0.39.0's 1.286–1.309 s). See the Windows file. Both are code placement
+  with all four 16-byte phases of each tree in one session
+  (`../../windows/2026-11-06-win-phases/`). JsonParsePure: the ranges
+  overlap in six of six sessions on three CPUs, and 0.40 is faster in wall
+  time at the same phase. Binarytrees: the ranges meet, and the same-phase
+  difference is +0.4% to +0.8%.
 - **The Primes step is gone.** 0.40 collected 9 times in 73 of 75 runs
   across the five runners (one 10 on M1, one on Intel), 0.39.0 10 times in
   4 of 15 on Intel, 5 of 15 on Windows and 2 of 15 on M1. Intel Primes reads
@@ -128,8 +133,8 @@ range:
 | ubuntu-24.04-arm | JsonGenerate | time +1.5% [+0.9, +1.7] | **1.089**, **1.090**, **1.082** | 1.075, 1.075, 1.092 | placement |
 | macos-15-intel | JsonParsePull | time +5.5%, wall +2.3% [+0.8, +6.4] | 2.114, 2.189, **1.994** | 2.005, 2.143, 2.151 | placement |
 | macos-15-intel | Revcomp | time +14.2%, wall +7.7% [+2.6, +8.1] | **3.386**, 3.717, 3.914 | 3.298, 3.512, 3.603 | placement |
-| windows-latest | JsonParsePure | time +7.5% [+6.1, +8.6], wall +3.0% | 0.883, 0.857, 0.854 | 0.824, 0.841, 0.847 | **unexcused** |
-| windows-latest | Binarytrees | wall +0.7% [+0.0, +3.8] | 1.316, 1.310, 1.312 | 1.309, 1.286, 1.306 | **unexcused** |
+| windows-latest | JsonParsePure | time +7.5% [+6.1, +8.6], wall +3.0% | 0.883, 0.857, 0.854 | 0.824, 0.841, 0.847 | **unexcused** here; placement with four phases a side (`../../windows/2026-11-06-win-phases/`) |
+| windows-latest | Binarytrees | wall +0.7% [+0.0, +3.8] | 1.316, 1.310, 1.312 | 1.309, 1.286, 1.306 | **unexcused** here; placement with four phases a side (the same) |
 | windows-latest | JsonGenerate | time +1.3% [+0.9, +1.6] | 1.359, **1.302**, **1.310** | 1.341, 1.295, 1.299 | placement |
 | windows-latest | JsonParseSerializable | time +6.4%, wall +3.1% | 0.735, **0.719**, **0.696** | 0.691, 0.684, 0.727 | placement |
 | windows-latest | JsonParsePull | time +6.4%, wall +2.8% | 0.729, **0.711**, **0.688** | 0.686, 0.677, 0.714 | placement |

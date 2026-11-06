@@ -1,0 +1,440 @@
+diff --git a/src/gcry/barrier.cr b/src/gcry/barrier.cr
+index 7f853316..e61d31ed 100644
+--- a/src/gcry/barrier.cr
++++ b/src/gcry/barrier.cr
+@@ -119,7 +119,6 @@ module Gcry
+           next if ChunkHeader.dormant?(chunk)
+           low = chunk.address
+           high = chunk.address + chunk.value.mapped_bytes
+-          ChunkHeader.set_barrier_armed(chunk, Platform.mprotect_cards_cover?(low, high))
+           Platform.mprotect_protect_range(low, high)
+         end
+         true
+@@ -282,38 +281,6 @@ module Gcry
+             )
+           end
+         end
+-        # An incremental termination also reads every page the cards cannot
+-        # vouch for: neither protected nor dirty, or outside them. The arm
+-        # protected the chunks it found; a chunk mapped since (a large
+-        # allocation's own mapping, a class's next chunk), one revived from
+-        # dormant and the nursery's were never protected, so their writes
+-        # set no dirty bit — and what is allocated in them while marking is
+-        # black and never scanned. A pointer the mutator moved out of a
+-        # heap field into such an object, the field cleared, was swept by the
+-        # finish until 2026-11-02. Each such page is read once: the
+-        # re-protect below brings it under the barrier (the nursery aside,
+-        # bounded by its size). Minors need none of it: they walk every old
+-        # object for nursery pointers whatever the barrier says
+-        # (`scan_old_for_nursery_pointers`).
+-        # `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+-        if !nursery_only && Platform.mprotect_scan_untracked
+-          each_chunk do |chunk|
+-            next if ChunkHeader.dormant?(chunk)
+-            low = chunk.address
+-            high = low + chunk.value.mapped_bytes
+-            if ChunkHeader.barrier_armed?(chunk) || !Platform.mprotect_scan_unarmed_chunks
+-              Platform.each_mprotect_untracked_page(low, high) do |page|
+-                scan_range_for_barrier_pointers(Pointer(Void).new(page), Pointer(Void).new(page + Platform::PAGE), false)
+-              end
+-            else
+-              # Never protected under these cards — mapped since, maybe where
+-              # a chunk unmapped mid-cycle left its pages marked protected and
+-              # clean (a large block freed, its mapping released, a new one
+-              # mapped at the same address). The bits say nothing about it.
+-              scan_range_for_barrier_pointers(Pointer(Void).new(low), Pointer(Void).new(high), false)
+-            end
+-          end
+-        end
+         Platform.clear_mprotect_dirty_bits
+         # Re-arm RO on old chunks for the next mutator window — under cards
+         # that cover them. The cards were sized to the heap at the arm, and a
+@@ -340,7 +307,6 @@ module Gcry
+           each_chunk do |chunk|
+             next if ChunkHeader.nursery?(chunk)
+             next if ChunkHeader.dormant?(chunk)
+-            ChunkHeader.set_barrier_armed(chunk, Platform.mprotect_cards_cover?(chunk.address, chunk.address + chunk.value.mapped_bytes))
+             Platform.mprotect_protect_range(chunk.address, chunk.address + chunk.value.mapped_bytes)
+           end
+         else
+diff --git a/src/gcry/block.cr b/src/gcry/block.cr
+index ba611667..8423f1c6 100644
+--- a/src/gcry/block.cr
++++ b/src/gcry/block.cr
+@@ -494,13 +494,6 @@ module Gcry
+       # fork that leaves another thread's `free` in flight leaves it set in
+       # the child, where that chunk is then claimed from under the lock only.
+       FREEING = 4096_u32
+-      # The mprotect barrier protected this chunk under the current cards
+-      # (`Heap#arm_mprotect_on_old_chunks`, the re-protect in
+-      # `Heap#scan_mprotect_pages`). A chunk mapped since has a fresh header
+-      # without it, even where the cards still call an earlier chunk's pages
+-      # at the same address protected and clean: an incremental termination
+-      # then reads every page of it rather than trust those bits.
+-      BARRIER_ARMED = 8192_u32
+       # Bits 16–21 of a large chunk's flags: the address space reserved for
+       # it from its base, mapped or not (`Heap#grow_large`), as log2 of what
+       # it holds past its first page: the extent is that power of two plus
+@@ -693,17 +686,6 @@ module Gcry
+       update_flag(chunk, Flags::DORMANT, value)
+     end
+ 
+-    def self.barrier_armed?(chunk : ChunkHeader*) : Bool
+-      (chunk.value.flags & Flags::BARRIER_ARMED) != 0
+-    end
+-
+-    # Collector only, world stopped, before the chunk's pages are protected
+-    # (the header write would otherwise fault). Writes only on a change.
+-    def self.set_barrier_armed(chunk : ChunkHeader*, value : Bool) : Nil
+-      return if barrier_armed?(chunk) == value
+-      update_flag(chunk, Flags::BARRIER_ARMED, value)
+-    end
+-
+     def self.cursor?(chunk : ChunkHeader*) : Bool
+       (chunk.value.flags & Flags::CURSOR) != 0
+     end
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 783f7a0f..04cf8837 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -1002,23 +1002,6 @@ module Gcry
+     # after it takes the collection section, before anything else; must not
+     # allocate (regression 99's *race* queues a second slice there).
+     class_property inc_slice_locked_hook : Proc(Nil)? = nil
+-    # Research only: false leaves the roots out of the incremental
+-    # terminating stop, the code before 2026-11-02 — the finish marks from
+-    # the begin stop's root scan and the dirty pages alone, and sweeps an
+-    # object a mutator moved from a heap field to a root meanwhile. The
+-    # control arm of `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+-    # A class property, not a field: a `Heap` field here would move every
+-    # field after it.
+-    class_property inc_finish_rescan_roots : Bool = true
+-    # Research only: false scans every incremental mark-stack entry as it is
+-    # popped, unresolved — the code before 2026-11-03, which read a block
+-    # freed while grey, unmapped or not (`mark_loop_budget`). The control arm
+-    # of `process_spec/regression/102_incremental_free_grey_spec.cr`. A
+-    # class property, as the knob above.
+-    class_property inc_scan_checks_entries : Bool = true
+-    # Incremental mark-stack entries popped and not scanned because their
+-    # block was freed after the push (`mark_loop_budget`), process-wide.
+-    class_getter inc_stale_entries_skipped : UInt64 = 0_u64
+     @world_stopped = false
+     # Thread that called stop_world — may allocate / take GC locks during STW.
+     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
+@@ -2298,27 +2281,6 @@ module Gcry
+                            end
+             abort_incremental if barrier_lost && @inc_lost_cycle_ends_in_stop
+           end
+-          if @mark_stack.empty? && !barrier_lost && @@inc_finish_rescan_roots
+-            # And the roots again, the begin stop's whole set. The barrier
+-            # records stores into heap pages and nothing else: a pointer a
+-            # mutator loads out of a field into a local, a register, a
+-            # static or another thread's stack — and then clears or
+-            # overwrites the field — leaves the object reachable from a root
+-            # alone, and nothing reports it. Until 2026-11-02 no stop after
+-            # the first scanned a root, and the finish swept such an object
+-            # while the program held it, as Boehm's incremental mode does not
+-            # (`GC_stopped_mark` pushes the roots again). The sweep below
+-            # runs only in a stop that rescanned the roots and the dirty
+-            # pages and drained what they found within this slice's budget;
+-            # a slice that cannot drain it leaves the cycle open, and the
+-            # next one to empty the stack rescans both. A slice stays
+-            # bounded: the dirty-page scan, one root scan (the begin stop's
+-            # cost) and at most three budgets of marking.
+-            # `collect_a_little` begins every cycle with these arguments.
+-            # `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+-            mark_incremental_roots(scan_stack: true, roots: nil)
+-            mark_loop_budget(work_units)
+-          end
+           if @mark_stack.empty? && !barrier_lost
+             collection_event(CollectionEvent::MarkEnd)
+             enqueue_unreachable_finalizers
+@@ -3827,7 +3789,20 @@ module Gcry
+         # marks, and a root marked before it there would be swept.
+         bitmap_settle_cursor_sets
+         mark_bitmap_alloc_in_flight
+-        mark_incremental_roots(scan_stack, roots)
++        @before_collect_callbacks.each(&.call)
++        @roots.each { |ptr| mark_explicit_root(ptr) }
++        mark_large_alloc_in_flight
++        roots.try &.each { |ptr| mark_explicit_root(ptr) }
++        mark_metadata_roots
++        other_stacks = other_stacks_are_roots?(scan_stack)
++        scrub_parked_fiber_stacks if other_stacks
++        scan_all_fiber_roots if other_stacks
++        scan_thread_roots if other_stacks && @stop_the_world
++        if @scan_static_roots
++          scan_static_ranges
++        end
++        scan_mutator_stack if scan_stack
++        scan_other_thread_stacks if other_stacks
+         # Arm page-dirty barrier for mutator writes between incremental slices.
+         arm_page_barrier_after_collect
+         # The check above chose a backend; the arm can still leave none
+@@ -3848,29 +3823,6 @@ module Gcry
+       end
+     end
+ 
+-    # The root set of an incremental cycle, marked by its begin stop and
+-    # again by every terminating stop (`collect_a_little`): the explicit and
+-    # in-flight roots, the before-collect callbacks (Boehm's `GC_add_roots`
+-    # ranges and push-other-roots), static data, and every thread's and
+-    # fiber's stack and registers. Marks are idempotent, so a second pass
+-    # pushes only what the first did not reach.
+-    private def mark_incremental_roots(scan_stack : Bool, roots : Array(Void*)?) : Nil
+-      @before_collect_callbacks.each(&.call)
+-      @roots.each { |ptr| mark_explicit_root(ptr) }
+-      mark_large_alloc_in_flight
+-      roots.try &.each { |ptr| mark_explicit_root(ptr) }
+-      mark_metadata_roots
+-      other_stacks = other_stacks_are_roots?(scan_stack)
+-      scrub_parked_fiber_stacks if other_stacks
+-      scan_all_fiber_roots if other_stacks
+-      scan_thread_roots if other_stacks && @stop_the_world
+-      if @scan_static_roots
+-        scan_static_ranges
+-      end
+-      scan_mutator_stack if scan_stack
+-      scan_other_thread_stacks if other_stacks
+-    end
+-
+     private def abort_incremental : Nil
+       return unless @inc_active
+       @inc_active = false
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 3d275833..d7e5e021 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -462,79 +462,14 @@ module Gcry
+       end
+     end
+ 
+-    # The incremental drain, `collect_a_little`'s only one. Its entries can
+-    # be older than the stop that pops them: the begin stop pushes the roots'
+-    # blocks and a slice leaves what its budget did not reach, and between
+-    # stops the program runs. A block it frees meanwhile keeps its entry —
+-    # nothing searches the stack — and the free can hand the block out
+-    # again, or unmap its chunk (a large free trims the cache), or a new
+-    # mapping can take the address. `scan_object` trusts an entry: a tagged
+-    # one is read with no chunk at all, and on the header layout an untagged
+-    # one's header is read before the chunk lookup, so a large block freed
+-    # grey and unmapped was a read of unmapped memory in the slice that
+-    # popped it, and a freed block left mapped had its dead payload traced,
+-    # keeping what only it had pointed to through the cycle. Here each entry
+-    # is resolved before anything at its address is read and scanned only if
+-    # it still names an allocated block's start in a chunk of its kind (a
+-    # tagged entry's class; the large payload a rest entry resumes in). A
+-    # block handed out again at the address is allocated black and passes:
+-    # its scan marks what it holds when popped, floating garbage of the
+-    # cycle like any live block's, swept by the next. The check costs 5–8%
+-    # of a slice's marking on a heap of small blocks; resolving every entry
+-    # through `find_object_with_chunk` cost 27%, hence the inline path for
+-    # the common one. The stop-the-world mark pushes and pops within one
+-    # stop and keeps `mark_loop`.
+-    # `process_spec/regression/102_incremental_free_grey_spec.cr`.
+     private def mark_loop_budget(work_units : Int32) : Nil
+-      check = @@inc_scan_checks_entries
+       units = 0
+       while units < work_units && !@mark_stack.empty?
+-        entry = @mark_stack.pop
+-        if !check || incremental_entry_current?(entry)
+-          scan_object(entry)
+-        else
+-          @@inc_stale_entries_skipped &+= 1
+-        end
++        scan_object(@mark_stack.pop)
+         units += 1
+       end
+     end
+ 
+-    # Whether a mark-stack entry still names the block it was pushed for.
+-    private def incremental_entry_current?(entry : BlockHeader*) : Bool
+-      header = mark_entry_header(entry)
+-      addr = header.address
+-      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+-      # A tagged entry on a bitmap chunk, the common case, inline: the
+-      # radix entry, the chunk's class and data range, the block's start and
+-      # its `occ` bit, as `resolve_candidate` reads them.
+-      l1 = @radix_l1
+-      if tag &- 1 < SIZE_CLASS_COUNT && @bitmap_alloc && !l1.null? && addr >= @heap_min && addr < @heap_max
+-        chunk = Heap.radix_entry(l1, @radix_granule_shift, @radix_l2_mask, addr)
+-        unless chunk.null?
+-          cls = chunk.value.size_class
+-          bitmap_words = chunk.value.bitmap_words.to_u64
+-          data_start = chunk.address &+ chunk.value.data_offset
+-          chunk_end = chunk.address &+ chunk.value.mapped_bytes
+-          if cls &+ 1 == tag && bitmap_words != 0 && (chunk.value.flags & ChunkHeader::Flags::NURSERY) == 0 &&
+-             addr >= data_start && addr < chunk_end
+-            index = cls.to_i32
+-            ordinal = Heap.block_ordinal(addr &- data_start, @block_magic.unsafe_fetch(index))
+-            block_bytes = @block_bytes.unsafe_fetch(index)
+-            start = data_start &+ ordinal &* block_bytes
+-            return false unless start == addr && start &+ block_bytes <= chunk_end
+-            occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+-            return (occ.value & (1_u64 << (ordinal & 63))) != 0
+-          end
+-        end
+-      end
+-      found = find_object_with_chunk(header.as(Void*))
+-      return false unless found
+-      block, chunk = found
+-      return ChunkHeader.large?(chunk) if tag == MARK_ENTRY_TAG_REST
+-      return false unless block == header
+-      tag == 0 || chunk.value.size_class.to_u64 &+ 1 == tag
+-    end
+-
+     private def scan_object(entry : BlockHeader*, shard : MarkShard? = nil) : Nil
+       # A tagged entry is a small, non-atomic block of a known class (see
+       # `mark_entry`): its payload and length need no chunk. The rest tag is
+diff --git a/src/gcry/collect_scan.cr b/src/gcry/collect_scan.cr
+index 4cd5ba31..22eae76b 100644
+--- a/src/gcry/collect_scan.cr
++++ b/src/gcry/collect_scan.cr
+@@ -1975,11 +1975,24 @@ module Gcry
+           @sp_clamp_hits += 1
+         else
+           @sp_clamp_fallbacks += 1
+-          low = pthread_scan_low_off_sp(low, high)
++          # SP on pool fiber (or elsewhere): Parallel LAG from high.
++          if multi_mutator_threads?
++            lag = @stw_multi_pthread_lag
++            unless lag == 0
++              lagged = high > lag ? high - lag : low
++              low = lagged if lagged > low
++            end
++          end
+         end
+       else
+         @sp_clamp_fallbacks += 1
+-        low = pthread_scan_low_off_sp(low, high)
++        if multi_mutator_threads?
++          lag = @stw_multi_pthread_lag
++          unless lag == 0
++            lagged = high > lag ? high - lag : low
++            low = lagged if lagged > low
++          end
++        end
+       end
+ 
+       # Same removal as the parked-fiber path: with lag 0 this scans the whole
+@@ -2000,56 +2013,6 @@ module Gcry
+       end
+     end
+ 
+-    # Off by default only for regression 103's control arm: the whole mapping
+-    # again, whoever is running on it (`pthread_scan_low_off_sp`).
+-    property pthread_scan_running_sp_clamp : Bool = true
+-
+-    # Where a pthread mapping's scan starts when the thread's own SP is not
+-    # in it. The mapping is the stack of the thread's main fiber, and that
+-    # fiber can be running on another thread: the program's main fiber
+-    # moves when the execution context's monitor hands the scheduler of a
+-    # thread blocked in a syscall to another thread, and a collection is
+-    # then often run on it. Until 2026-11-03 the mapping was read whole from
+-    # its low-water mark, the frames below the running SP included, dead or
+-    # being built — on the collector's own stack, the mark chain under this
+-    # very scan, whose locals hold each candidate's chunk data start and
+-    # block header. Those were taken for pointers into the chunk's first
+-    # block and the looked-up block, which were kept through any number of
+-    # collections (regression 21's two control blocks, in CI's 1.22.2 step
+-    # whenever the main fiber had moved,
+-    # `bench/log/linux/2026-11-03-reg21-marked-unmarked/FINDINGS.md`).
+-    # A thread running on the mapping now bounds it as the owner's own SP
+-    # would: the collector at its SP (nothing below this frame is live), a
+-    # stopped thread at its suspend SP less the usual slack. A thread
+-    # mid-swap, its current fiber not yet the stack its SP is on, is not
+-    # found, and the mapping is read whole, as before.
+-    # `process_spec/regression/103_pthread_stack_running_sp_spec.cr`.
+-    @[AlwaysInline]
+-    private def pthread_scan_low_off_sp(low : UInt64, high : UInt64) : UInt64
+-      if @pthread_scan_running_sp_clamp
+-        own = Roots.hardware_stack_pointer.address
+-        return own if own >= low && own < high
+-        current = Thread.current
+-        Thread.unsafe_each do |thread|
+-          next if thread == current
+-          fiber = thread.@current_fiber
+-          next unless fiber && fiber.@stack.bottom.address > low && fiber.@stack.pointer.address < high
+-          if (rsp = other_thread_scan_sp(thread)) && rsp.address >= low && rsp.address < high
+-            return stack_scan_low(rsp.address, low)
+-          end
+-        end
+-      end
+-      # SP on pool fiber (or elsewhere): Parallel LAG from high.
+-      if multi_mutator_threads?
+-        lag = @stw_multi_pthread_lag
+-        unless lag == 0
+-          lagged = high > lag ? high - lag : low
+-          return lagged if lagged > low
+-        end
+-      end
+-      low
+-    end
+-
+     private def mark_metadata_roots : Nil
+       # Finalizer/link tables are LibC storage (not GC roots for Entry.object).
+       # Only mark callback closure_data so Proc captures stay alive, and the
+diff --git a/src/gcry/platform/linux_mprotect.cr b/src/gcry/platform/linux_mprotect.cr
+index 0e9fc1c2..721ce778 100644
+--- a/src/gcry/platform/linux_mprotect.cr
++++ b/src/gcry/platform/linux_mprotect.cr
+@@ -211,19 +211,6 @@ module Gcry
+     # Research only: true makes `mprotect_set_heap_range` give up as on a
+     # span past its page limit or a refused `malloc`, leaving no cards.
+     class_property mprotect_refuse_cards : Bool = false
+-    # Research only: false makes an incremental termination scan read the
+-    # dirty pages alone, the code before 2026-11-02 — a chunk mapped since
+-    # the arm goes unread until the cycle ends (`Heap#scan_mprotect_pages`,
+-    # `each_mprotect_untracked_page`). The control arm of
+-    # `process_spec/regression/100_incremental_stack_rescan_spec.cr`'s
+-    # *newchunk* window.
+-    class_property mprotect_scan_untracked : Bool = true
+-    # Research only: false makes that scan trust the cards' bits for a chunk
+-    # the barrier never protected (`ChunkHeader::Flags::BARRIER_ARMED` unset),
+-    # the code before — a chunk mapped mid-cycle where one unmapped since the
+-    # arm left its pages marked protected and clean goes unread. The control
+-    # arm of regression 100's *remap* window.
+-    class_property mprotect_scan_unarmed_chunks : Bool = true
+ 
+     # Install SEGV handler that re-enables write + marks page dirty.
+     # Faults the barrier did not cause are forwarded to the previous handler.
+@@ -617,39 +604,6 @@ module Gcry
+       end
+     end
+ 
+-    # Each page whole inside [low, high) that the cards cannot vouch for:
+-    # outside them, or inside them and neither protected nor dirty. A page
+-    # protected and clean has seen no write since it was protected; a dirty
+-    # one is read by `each_mprotect_dirty_page`. Anything else has been
+-    # writable with nothing recording its writes — a chunk mapped since the
+-    # arm (inside the cards or past them), a dormant chunk revived since,
+-    # a nursery chunk (never protected). Collector only, world stopped, as
+-    # every reader of the bits: no handler is inside.
+-    def self.each_mprotect_untracked_page(low : UInt64, high : UInt64, & : UInt64 ->) : Nil
+-      page = (low + PAGE - 1) & ~(PAGE - 1)
+-      page_hi = high & ~(PAGE - 1)
+-      return if page_hi <= page
+-      st = @@mp_state.get
+-      base = st.null? ? 0_u64 : st.value.base
+-      limit = st.null? ? 0_u64 : base + st.value.pages.to_u64 * PAGE
+-      while page < page_hi
+-        if page < base || page >= limit
+-          yield page
+-          page += PAGE
+-          next
+-        end
+-        i = ((page - base) // PAGE).to_i32
+-        vouched = (dirty_words(st) + (i >> 6)).value | (protected_words(st) + (i >> 6)).value
+-        if vouched == UInt64::MAX
+-          # The whole word is protected or dirty: on to the next one.
+-          page = base + ((i | 63) + 1).to_u64 * PAGE
+-          next
+-        end
+-        yield page if (vouched & (1_u64 << (i & 63))) == 0
+-        page += PAGE
+-      end
+-    end
+-
+     # Both callers protect pages again right after (`arm_mprotect_on_old_chunks`,
+     # `scan_mprotect_pages`), so the generation moves: see `mprotect_recheck`.
+     def self.clear_mprotect_dirty_bits : Nil

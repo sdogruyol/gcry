@@ -43,25 +43,32 @@ in 5 of 15; the growth-priced pace) and JsonGenerate's wall is level.
   `prepad64` at ≡ 48 (1.275); 0.39.0 at ≡ 48 (1.263), `baseprepad16` ≡ 16
   (1.264), `baseprepad64` ≡ 0 (1.390). At the same offset the trees read
   within 0.012 s.
-- **JsonParsePure: not excused by this run's two pads a side.** Timed +7.5%
-  [+6.1, +8.6]; 0.40's arms 0.854–0.883 s, 0.39.0's 0.824–0.847 s, the
-  nearest 0.7% apart. 0.40 collects 13 times to 0.39.0's 14 (the pace) with
-  Σ mark −8.8%, so the extra time is not the collector's work. With all four
-  16-byte phases of each tree in one session the row read placement
-  (`../2026-11-02-0.40-win-rows/` §1, the JSON parse rows 3.5–6% between
-  phases), and so did the pace's four-pad keep run (41297103900, `prepad64`
-  0.903 s inside 0.39.0's 0.889–0.920 s,
-  `../../linux/2026-11-02-pace-growth/` §4). [INFERENCE] the same phase
-  band, with neither 16 nor 64 bytes reaching 0.40's fast phase here; not
-  re-measured with four phases at `2658369a`.
-- **Binarytrees: wall +0.7% [+0.0, +3.8], timed +0.3% [−0.6, +1.2]** inside
-  the spread. 0.40's three arms 1.310–1.316 s, 0.39.0's 1.286–1.309 s;
-  averaged over the three placements 0.40 is 1.0% slower. This is what
-  `../2026-11-03-binarytrees/` §5 and §8 measured for the inline word
-  advance (`da2082e1`) on the EPYC 7763: there out of line was 1.8–2.7%
-  under 0.39.0 and inline averages 0.39.0's time, the price of the EPYC
-  9V74's 3–5% (the row's keep runs on 7763 at `da2082e1` read +1.7% to
-  +3.3% unpadded with the pads inside 0.39.0's range).
+- **JsonParsePure: placement. This run's two pads a side could not show
+  it, so `../2026-11-06-win-phases/` re-ran four phases a side.** Timed
+  +7.5% [+6.1, +8.6]; 0.40's arms 0.854–0.883 s, 0.39.0's 0.824–0.847 s,
+  the nearest 0.7% apart. With all four 16-byte phases of both trees in
+  one session, on `2658369a` (six sessions: four on EPYC 7763, one on
+  9V45, one on Xeon 8573C), the ranges overlap in every session, and
+  0.40 is 0.6–2.1% *faster* in wall time at the same phase. The timed
+  section reads +1.5% to +2.0% pooled on the 7763, with phase 48 slow and
+  phase 16 level, −2.1% on the 9V45 and −0.2% on the 8573C. The source at
+  `2c600dfb` and at `e7efe740` reads level with 0.39.0, and no group of the
+  later commits, reverted, lowers the band at every phase. Unpadded, 0.40
+  sits at phase 32 (slow) and 0.39.0 at 48 (fast on the 7763); 0.40's fast
+  phase there (16) is its 32-byte prepad, which this run does not build.
+  0.40 collects 13 times to 0.39.0's 14 (the pace) with Σ mark −8.8%.
+  The collection it does not run is in the setup, before crystal-metric's
+  `GC.collect` ahead of the timer; the timed section runs the same
+  collections in both trees.
+- **Binarytrees: wall +0.7% [+0.0, +3.8], timed +0.3% [−0.6, +1.2]:
+  placement.** 0.40's three arms read 1.310–1.316 s and 0.39.0's
+  1.286–1.309 s. With four phases a side (`../2026-11-06-win-phases/` §4,
+  three sessions on EPYC 7763), the trees' ranges meet. At the same phase
+  0.40 reads +0.4% to +0.8% pooled, timed and wall, and its slow phase, 32,
+  is where it sits unpadded. That is the inline word advance (`da2082e1`)
+  averaging 0.39.0's time on this CPU, as `../2026-11-03-binarytrees/` §5
+  and §8 measured: there, out of line read 1.8–2.7% under 0.39.0, the price
+  of the EPYC 9V74's 3–5%.
 - **Peaks:** JsonParseSerializable and JsonParsePull +4.4% and +4.1%
   (0.77× → 0.81× of Boehm's), the growth-priced pace's trade, with
   18.5–19.0% less Σ scanned. Knuckeotide −4.0% [−6.4, +0.7].

@@ -1,0 +1,52 @@
+# Per-tree medians over all of a tree's arms (time, wall s; Σ mark, Σ pause ms), round 1
+## 42256500844-s1 (AMD EPYC 7763 64-Core Processor)
+JsonParsePure          0.39.0  time 0.823 wall 1.852 mark  255.9 pause  265.8 collections 14
+JsonParsePure          0.40    time 0.837 wall 1.844 mark  231.1 pause  241.1 collections 13
+JsonParsePure          c2c     time 0.835 wall 1.866 mark  238.1 pause  248.2 collections 14
+JsonParsePure          ce7     time 0.812 wall 1.827 mark  230.7 pause  240.3 collections 13
+JsonParseSerializable  0.39.0  time 0.695 wall 1.861 mark   94.8 pause  102.5 collections 15
+JsonParseSerializable  0.40    time 0.712 wall 1.880 mark   74.3 pause   81.9 collections 14
+JsonParseSerializable  c2c     time 0.722 wall 1.892 mark   90.0 pause   98.4 collections 15
+JsonParseSerializable  ce7     time 0.708 wall 1.857 mark   72.8 pause   80.3 collections 14
+JsonParsePull          0.39.0  time 0.688 wall 1.849 mark   95.0 pause  102.7 collections 14
+JsonParsePull          0.40    time 0.708 wall 1.854 mark   75.2 pause   82.4 collections 13
+JsonParsePull          c2c     time 0.710 wall 1.875 mark   89.6 pause   97.2 collections 14
+JsonParsePull          ce7     time 0.697 wall 1.848 mark   73.7 pause   80.7 collections 13
+Binarytrees            0.39.0  time 1.280 wall 1.302 mark   41.9 pause  103.3 collections 213
+Binarytrees            0.40    time 1.284 wall 1.304 mark   38.6 pause  100.1 collections 213
+Binarytrees            c2c     time 1.275 wall 1.297 mark   39.6 pause  101.0 collections 213
+Binarytrees            ce7     time 1.280 wall 1.304 mark   38.7 pause  100.5 collections 213.5
+## 42256500844-s2 (AMD EPYC 7763 64-Core Processor)
+JsonParsePure          0.39.0  time 0.875 wall 1.941 mark  258.4 pause  269.1 collections 14
+JsonParsePure          0.40    time 0.885 wall 1.942 mark  235.2 pause  244.7 collections 13
+JsonParsePure          c2c     time 0.877 wall 1.946 mark  240.0 pause  250.0 collections 14
+JsonParsePure          ce7     time 0.867 wall 1.918 mark  231.8 pause  241.3 collections 13
+JsonParseSerializable  0.39.0  time 0.730 wall 1.949 mark   98.1 pause  106.1 collections 15
+JsonParseSerializable  0.40    time 0.741 wall 1.953 mark   79.1 pause   86.8 collections 14
+JsonParseSerializable  c2c     time 0.743 wall 1.968 mark   91.6 pause  100.1 collections 15
+JsonParseSerializable  ce7     time 0.736 wall 1.948 mark   78.1 pause   85.5 collections 14
+JsonParsePull          0.39.0  time 0.717 wall 1.949 mark   96.6 pause  104.4 collections 14
+JsonParsePull          0.40    time 0.731 wall 1.946 mark   78.3 pause   85.4 collections 13
+JsonParsePull          c2c     time 0.732 wall 1.950 mark   91.3 pause   98.9 collections 14
+JsonParsePull          ce7     time 0.727 wall 1.944 mark   77.9 pause   85.2 collections 13
+Binarytrees            0.39.0  time 1.333 wall 1.360 mark   43.2 pause  105.5 collections 215
+Binarytrees            0.40    time 1.349 wall 1.385 mark   39.7 pause  102.7 collections 216
+Binarytrees            c2c     time 1.333 wall 1.354 mark   43.2 pause  105.6 collections 215
+Binarytrees            ce7     time 1.341 wall 1.371 mark   42.4 pause  104.3 collections 215.5
+## 42256500844-s3 (AMD EPYC 7763 64-Core Processor)
+JsonParsePure          0.39.0  time 0.823 wall 1.858 mark  255.8 pause  266.6 collections 14
+JsonParsePure          0.40    time 0.842 wall 1.860 mark  231.4 pause  241.6 collections 13
+JsonParsePure          c2c     time 0.838 wall 1.876 mark  240.2 pause  250.8 collections 14
+JsonParsePure          ce7     time 0.817 wall 1.852 mark  232.1 pause  242.5 collections 13
+JsonParseSerializable  0.39.0  time 0.702 wall 1.874 mark   95.2 pause  103.8 collections 15
+JsonParseSerializable  0.40    time 0.716 wall 1.886 mark   75.1 pause   83.0 collections 14
+JsonParseSerializable  c2c     time 0.728 wall 1.894 mark   89.2 pause   97.7 collections 15
+JsonParseSerializable  ce7     time 0.712 wall 1.867 mark   74.7 pause   82.5 collections 14
+JsonParsePull          0.39.0  time 0.694 wall 1.853 mark   94.3 pause  102.3 collections 14
+JsonParsePull          0.40    time 0.708 wall 1.857 mark   73.6 pause   81.4 collections 13
+JsonParsePull          c2c     time 0.714 wall 1.888 mark   89.6 pause   97.6 collections 14
+JsonParsePull          ce7     time 0.702 wall 1.859 mark   75.2 pause   82.6 collections 13
+Binarytrees            0.39.0  time 1.297 wall 1.322 mark   41.2 pause  106.3 collections 209
+Binarytrees            0.40    time 1.303 wall 1.327 mark   40.4 pause  105.0 collections 209
+Binarytrees            c2c     time 1.286 wall 1.318 mark   39.7 pause  105.5 collections 208.5
+Binarytrees            ce7     time 1.303 wall 1.331 mark   44.4 pause  108.6 collections 208
