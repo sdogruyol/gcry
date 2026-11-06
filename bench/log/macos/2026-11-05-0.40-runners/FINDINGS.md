@@ -32,13 +32,17 @@ Peaks:
 
 - **JsonParsePure 0.93× → 1.06× of Boehm's (+14.7%).** 0.40 collects 13
   times in every run (549–558 MiB), 0.39.0 14–16 times (473–534 MiB); every
-  0.40 arm reads 1.06× and every 0.39.0 arm 0.92–0.93×, so it is not
-  placement. The step is in the tip's history between `421b09be` (scrub
-  band run 41336546414: 0.92×, 14 collections) and `d7c6f89f` (41378856093:
-  1.06×, 13); the growth-priced pace's own run (41293138039) read 0.92× at
-  14. Not attributed [INFERENCE: one collection fewer under the pace once a
-  change in that range made the cycle cheaper]. 1.06–1.07× is where this row
-  sits for both releases on arm64 Linux and Windows.
+  0.40 arm reads 1.06× and every 0.39.0 arm 0.92–0.93×. The pads move code
+  but do not change register allocation. The step is in the tip's history
+  between `421b09be` (scrub band run 41336546414: 0.92×, 14 collections)
+  and `d7c6f89f` (41378856093: 1.06×, 13); the growth-priced pace's own run
+  (41293138039) read 0.92× at 14. **Attributed 2026-11-06
+  (`../2026-11-06-m1-peak/`): a register pin in crystal-metric's
+  `Benchmark::run`, not the pace.** From `19cf3a60` on, the inlined driver
+  keeps the setup's dead `JsonGenerate` in `x20` across the `GC.collect`
+  before the timed run, and that collection keeps 120 MiB (0.1 MiB before).
+  1.06–1.07× is where this row sits for both releases on arm64 Linux and
+  Windows.
 - JsonParseSerializable +6.5% and JsonParsePull +9.4% (0.94× and 0.92×):
   the pace's trade (`../../linux/2026-11-02-pace-growth/`), 20–25% less
   Σ scanned.

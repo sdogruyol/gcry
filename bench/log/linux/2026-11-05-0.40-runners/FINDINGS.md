@@ -65,9 +65,11 @@ runners, with each arm's median % of Boehm. Per-platform notes:
   reads 1.06× and every 0.39.0 arm 0.92–0.93×. It is not in the pace's own
   run (41293138039: 0.92× at 14 collections) nor the scrub band's
   (41336546414: 0.92×, 14); it is first in 41378856093 (`d7c6f89f`, 1.06×,
-  13) and again in 41519085944 (1.06×, 13). Not attributed [INFERENCE: one
-  collection fewer under the pace, the cycle's cost lowered by a change
-  between `421b09be` and `d7c6f89f`]; 1.06× is what arm64 Linux and Windows
+  13) and again in 41519085944 (1.06×, 13). Attributed 2026-11-06
+  (`../../macos/2026-11-06-m1-peak/`): from `19cf3a60` on, crystal-metric's
+  inlined `Benchmark::run` keeps the setup's dead `JsonGenerate` in a
+  callee-saved register across the `GC.collect` before the timed run, a
+  register pin, not the pace; 1.06× is what arm64 Linux and Windows
   read on this row for both trees. JsonGenerate keeps the high heap's
   −13.6% on both Macs; Intel Revcomp −22.8%.
 - **Kemal**, `var` against `base` paired per trial, median [IQR]: `/json`

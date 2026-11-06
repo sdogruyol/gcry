@@ -1,0 +1,49 @@
+name: probe m1 peak
+
+# Probe only, on `probe/m1-peak-*`: JsonParsePure's schedule across the src
+# commits between 421b09be and d7c6f89f, traced, interleaved per rep.
+on:
+  push:
+    branches: ["probe/m1-peak-*"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - run: sysctl -n hw.ncpu machdep.cpu.brand_string hw.memsize
+      - env:
+          PROBE_BENCHES: "JsonParsePure Primes"
+          PROBE_REPS: "15"
+          PROBE_ARMS: >-
+            v039=c0d570c52793cfa144d88f3f4b600c839f7a40ce
+            pre=16a6804b5615af30be12d2e1c16189887fea7f7e
+            band421=d0fa2dcde7b7428801f06db678153cb105f6ae17
+            hit=19cf3a602e5409a93dad2a16de3d84670cf05411
+            r86=9f0c139d29c2e679a28530cafd5c45b96f982aa5
+            band=e2737a3327134ade420b109fb9ee2449b4491958
+            refin=258f88e5e174f6308e33cc050efe26e436c157df
+            whole=c51890f8f17183275966c3c80ea6e4522f751edf
+            drain=617a16574a66ebd953d595057d28a82108111339
+            pth=cb95cc6f0861bd2cbfccd0d1858e6b1d6bb3b616
+            tip=2658369ab3f3583dfc86620e52cad4fd3a0bbaea
+            tipnog=21be3cb9bc746b9b71cef779c73fb39d00acd313
+        run: bench/runner_ab/probe_pace.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.os }}
+          path: probe-out

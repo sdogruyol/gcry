@@ -1,0 +1,115 @@
+# probe 42262924921, macos-latest: Benchmark::run after JsonGenerate::new, then GC::collect's prologue. pb-<sha>: c0d570c5 v039, 16a6804b pre, d0fa2dcd band421 (421b09be's src), 19cf3a60 hit, 2658369a tip, 21be3cb9 tipnog
+== bin/pb-16a6804b5615
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x20, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x20, #0x18]!
+bl	"_*GC::collect:Nil"
+bl	"_*Time::local:Time"
+:
+sub	sp, sp, #0x40
+stp	x22, x21, [sp, #0x10]
+stp	x20, x19, [sp, #0x20]
+stp	x29, x30, [sp, #0x30]
+== bin/pb-19cf3a602e54
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x8, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x8, #0x18]!
+str	x8, [sp, #0x12f0]
+bl	"_*GC::collect:Nil"
+:
+sub	sp, sp, #0x40
+stp	x22, x21, [sp, #0x10]
+stp	x20, x19, [sp, #0x20]
+stp	x29, x30, [sp, #0x30]
+== bin/pb-21be3cb9bc74
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x8, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x8, #0x18]!
+str	x8, [sp, #0x12f0]
+bl	"_*GC::collect:Nil"
+:
+sub	sp, sp, #0x40
+stp	x22, x21, [sp, #0x10]
+stp	x20, x19, [sp, #0x20]
+stp	x29, x30, [sp, #0x30]
+== bin/pb-2658369ab3f3
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x8, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x8, #0x18]!
+str	x8, [sp, #0x12f0]
+bl	"_*GC::collect:Nil"
+:
+sub	sp, sp, #0x40
+stp	x22, x21, [sp, #0x10]
+stp	x20, x19, [sp, #0x20]
+stp	x29, x30, [sp, #0x30]
+== bin/pb-c0d570c52793
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x20, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x20, #0x18]!
+bl	"_*GC::collect:Nil"
+bl	"_*Time::local:Time"
+:
+sub	sp, sp, #0x40
+stp	x22, x21, [sp, #0x10]
+stp	x20, x19, [sp, #0x20]
+stp	x29, x30, [sp, #0x30]
+== bin/pb-d0fa2dcde7b7
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x20, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x20, #0x18]!
+bl	"_*GC::collect:Nil"
+bl	"_*Time::local:Time"
+:
+sub	sp, sp, #0x40
+stp	x22, x21, [sp, #0x10]
+stp	x20, x19, [sp, #0x20]
+stp	x29, x30, [sp, #0x30]

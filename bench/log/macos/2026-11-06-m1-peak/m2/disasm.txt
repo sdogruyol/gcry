@@ -1,0 +1,56 @@
+# Benchmark::run after JsonGenerate::new (JsonParsePure#initialize inlined), per arm: is x20 reused before the GC.collect in _run?
+v039 x20_overwritten=1
+pre x20_overwritten=1
+band421 x20_overwritten=1
+hit x20_overwritten=0
+r86 x20_overwritten=0
+band x20_overwritten=0
+refin x20_overwritten=0
+whole x20_overwritten=0
+drain x20_overwritten=0
+pth x20_overwritten=0
+tip x20_overwritten=0
+tipnog x20_overwritten=0
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x20, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x20, #0x18]!
+bl	"_*GC::collect:Nil"
+bl	"_*Time::local:Time"
+
+bl	"_*JsonGenerate::new<Int32>:JsonGenerate"
+mov	x20, x0
+ldr	x0, [x0, #0x18]
+ldr	x1, [x20, #0x20]
+bl	"_*JsonGenerate#run:Bool"
+ldr	x0, [x20, #0x18]
+bl	"_*IO::Memory#to_s:String"
+mov	x8, x19
+str	x0, [x19, #0x10]
+stp	xzr, xzr, [x19, #0x20]
+str	xzr, [x8, #0x18]!
+str	x8, [sp, #0x12f0]
+bl	"_*GC::collect:Nil"
+
+== tip GC::collect prologue (x20 saved at fp-0x10)
+:
+sub	sp, sp, #0x40
+stp	x22, x21, [sp, #0x10]
+stp	x20, x19, [sp, #0x20]
+stp	x29, x30, [sp, #0x30]
+
+== dtip c.1 frames, atos -l 0x1025e4000 (slide from main+12)
+*Gcry::Heap#scan_all_fiber_roots:Nil (in dtip) + 516
+*Gcry::Heap#run_collection_body<Bool, Bool, Nil, Bool, Bool, Bool>:Nil (in dtip) + 7524
+*Gcry::Heap#run_collection<Bool, Bool, Nil, Bool, Bool, Bool>:Nil (in dtip) + 324
+*GC::collect:Nil (in dtip) + 468
+*Benchmark::run<(String | Nil)>:Nil (in dtip) + 41588
+__crystal_main (in dtip) + 20096
+main (in dtip) + 12

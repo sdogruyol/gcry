@@ -35,9 +35,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spread; +7.6% and +6.3% before), and so is arm64 JsonGenerate's fifteenth
   collection. JsonParseSerializable's and JsonParsePull's peaks rise 4–15%
   on every runner (at most 0.95× Boehm's, Intel JsonParsePull), the pace;
-  M1 JsonParsePure's 0.93× → 1.06×, not attributed. JsonGenerate's peak
-  stays −13.6% on both Macs. Kemal `/json` is level on all four runners it
-  runs on.
+  M1 JsonParsePure's 0.93× → 1.06×, a register pin in crystal-metric's
+  driver (next entry). JsonGenerate's peak stays −13.6% on both Macs.
+  Kemal `/json` is level on all four runners it runs on.
+
+- **M1 JsonParsePure's peak (0.93× → 1.06× of Boehm's) is a register pin
+  in crystal-metric's `Benchmark::run`, not the pace.** Since `19cf3a60`
+  (hot heap fields first, word advance out of line) changed gcry's
+  allocation entry, which is inlined into that function, LLVM keeps the
+  setup's dead `JsonGenerate` in `x20` across the `GC.collect` before the
+  timed run. `GC.collect` saves the register in its frame, the stack scan
+  reads it, and the 120 MiB of coordinates survive that collection: 120
+  MiB scanned and a 274 MiB heap where 0.39.0 has 0.1 MiB and 62 MiB. The
+  parse then grows from a heap about 110 MiB larger, and the peak is 558
+  MiB where it was 489 MiB. The collection after it frees them. The one
+  collection fewer comes from the 64 MiB first stretch that the pin sets.
+  A same-session bisect on `macos-latest` (probe 42257657635, 15 reps)
+  puts the step at `19cf3a60` exactly. The tip with the pace's growth
+  term off reads the same 558 MiB. A live caller register is a root, so
+  there is no collector fix: the pace and Primes' 9 collections are
+  unchanged (`bench/log/macos/2026-11-06-m1-peak/`).
 
 - **Windows: 0.40.0's seven slower rows are code placement, row by row.**
   Same-session runs on `windows-latest` with nops ahead of all the code at

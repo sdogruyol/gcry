@@ -4986,6 +4986,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       except Intel Binarytrees, which the release tip fails the same way
       (+5.7% unexcused, +3.6% within spread in its own Binarytrees-only
       sessions; the candidate against the tip is within spread).
+- [x] **M1 JsonParsePure's peak rose 0.93× → 1.06× of Boehm's in 0.40.
+      Attributed 2026-11-06, no fix (`bench/log/macos/2026-11-06-m1-peak/`).**
+      It is not the pace. From `19cf3a60` on, crystal-metric's
+      `Benchmark::run` keeps the setup's dead `JsonGenerate` in `x20`
+      across the `GC.collect` before the timed run. That function inlines
+      gcry's allocation entry, which the commit changed, and with it the
+      register allocation. `GC.collect` saves the register, and the
+      collection keeps 120 MiB that 0.39.0 frees: 274 MiB of heap where
+      0.39.0 has 62. A same-session bisect on `macos-latest` (42257657635)
+      puts the step at that commit, and the tip with the growth term off
+      peaks the same. A live caller register is a root, and the row stays
+      inside the 1.1× budget.
 - [x] **Decide what to do with `Gcry::Layout` registration — removed in
       0.36.0 (2026-10-14).** The mark had read no layout since a mixed union's buffer
       collided with registered maps

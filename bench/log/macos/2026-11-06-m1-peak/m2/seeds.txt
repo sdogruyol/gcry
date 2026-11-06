@@ -1,0 +1,45 @@
+== dtip (run dtip.2, collection 7 = the GC.collect before the timed run)
+M1SEED c=6 src=0 slot=16bc7eff8 val=1c6120c80240 base=1c6120c80240 size=192 w0=a3 atomic=0 sp=16ba4df10 bottom=16ba54000
+M1SEED c=6 src=0 slot=16bc7eff8 val=1c6120c80300 base=1c6120c80300 size=192 w0=a3 atomic=0 sp=16ba4df10 bottom=16ba54000
+M1SEED c=6 src=0 slot=109b63ff8 val=1c6120c80480 base=1c6120c80480 size=192 w0=a3 atomic=0 sp=16ba4df10 bottom=16ba54000
+M1SEED c=6 src=0 slot=10a363ff8 val=1c6121128180 base=1c6121128180 size=192 w0=a3 atomic=0 sp=16ba4df10 bottom=16ba54000
+M1SEED c=6 src=0 slot=10a363ff8 val=1c6121b54180 base=1c6121b54180 size=192 w0=a3 atomic=0 sp=16ba4df10 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba4ea48 val=1c6120fa88a0 base=1c6120fa88a0 size=32 w0=d00000001 atomic=1 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba4eaa0 val=1c6120dc1090 base=1c6120dc1090 size=16 w0=1c6120fa88a0 atomic=0 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba4eab0 val=1c6120cc0730 base=1c6120cc0730 size=48 w0=10a atomic=0 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba4eab8 val=1c6120cc0700 base=1c6120cc0700 size=48 w0=10b atomic=0 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba4fcb8 val=1c61210e85e8 base=1c61210e85e0 size=64 w0=49 atomic=0 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba4fcf8 val=1c6120c00b00 base=1c6120c00b00 size=32 w0=100000004 atomic=0 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba4fd00 val=1c6120fa8820 base=1c6120fa8820 size=32 w0=d00000001 atomic=1 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba528e8 val=1c6120c00a80 base=1c6120c00a80 size=32 w0=10000000f atomic=0 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba529e0 val=1c6120dc1060 base=1c6120dc1060 size=16 w0=1c61210283b0 atomic=0 sp=16ba4dc50 bottom=16ba54000
+M1SEED c=6 src=0 slot=16ba53198 val=1c6120c403b0 base=1c6120c403b0 size=80 w0=a6 atomic=1 sp=16ba4dc50 bottom=16ba54000
+== dpre (run dpre.1, collection 7 = the GC.collect before the timed run)
+M1SEED c=6 src=0 slot=16b7a6ff8 val=1a68a3c80240 base=1a68a3c80240 size=192 w0=a3 atomic=0 sp=16b575f30 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b7a6ff8 val=1a68a3c80300 base=1a68a3c80300 size=192 w0=a3 atomic=0 sp=16b575f30 bottom=16b57c000
+M1SEED c=6 src=0 slot=10a07fff8 val=1a68a4128180 base=1a68a4128180 size=192 w0=a3 atomic=0 sp=16b575f30 bottom=16b57c000
+M1SEED c=6 src=0 slot=10a07fff8 val=1a68a3c80480 base=1a68a3c80480 size=192 w0=a3 atomic=0 sp=16b575f30 bottom=16b57c000
+M1SEED c=6 src=0 slot=10a87fff8 val=1a68a4b54180 base=1a68a4b54180 size=192 w0=a3 atomic=0 sp=16b575f30 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b575d90 val=1a68a3fa88a0 base=1a68a3fa88a0 size=32 w0=d00000001 atomic=1 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b576ab0 val=1a68a3dc1090 base=1a68a3dc1090 size=16 w0=1a68a3fa88a0 atomic=0 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b576ac0 val=1a68a3cc0718 base=1a68a3cc0700 size=48 w0=10b atomic=0 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b577cc8 val=1a68a40e85e8 base=1a68a40e85e0 size=64 w0=49 atomic=0 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b577d08 val=1a68a3c00b00 base=1a68a3c00b00 size=32 w0=100000004 atomic=0 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b577d10 val=1a68a3fa8820 base=1a68a3fa8820 size=32 w0=d00000001 atomic=1 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b57a568 val=1a68a3cc06a0 base=1a68a3cc06a0 size=48 w0=104a492d0 atomic=0 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b57a8f8 val=1a68a3c00a80 base=1a68a3c00a80 size=32 w0=10000000f atomic=0 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b57a9f0 val=1a68a3dc1060 base=1a68a3dc1060 size=16 w0=1a68a40283b0 atomic=0 sp=16b575c70 bottom=16b57c000
+M1SEED c=6 src=0 slot=16b57b1a8 val=1a68a3c403b0 base=1a68a3c403b0 size=80 w0=a6 atomic=1 sp=16b575c70 bottom=16b57c000
+
+== dtip frame chain at that collection (run c.1)
+M1CHAIN entry_sp=16d816a80
+M1FRAME fp=16d816000 ret=10260fa2c
+M1FRAME fp=16d8161f0 ret=1025ff514
+M1FRAME fp=16d816a70 ret=1025fcdd0
+M1FRAME fp=16d816ad0 ret=1026c51a4
+M1FRAME fp=16d816b10 ret=1026be958
+M1FRAME fp=16d81aa00 ret=1025e96c8
+M1FRAME fp=16d81b500 ret=10266f4e4
+M1FRAME fp=16d81b510 ret=1870d44e4
+M1FRAME fp=16d81bb70 ret=0
+M1SEED c=6 src=0 slot=16d816b00 val=1f823b4c0730 base=1f823b4c0730 size=48 w0=10a atomic=0 sp=16d815ca0 bottom=16d81c000
