@@ -41,9 +41,33 @@ class Gcry::Heap
   end
 end
 
-# An atomic class nothing in the spec runner allocates, so the word under
-# test is this example's alone.
+# An atomic class nothing in the spec runner allocates on purpose. Something
+# can still land in it: a failing example's message is an atomic `String` the
+# runner keeps to the end of the run, and 95's crashed child's output (2 864–
+# 2 954 bytes) was one, in the chunk this example then allocated from, which
+# read `chunk_occupied_count` 2 (`bench/log/linux/2026-11-03-arm64-ci/`). So
+# the example first takes a chunk in which its block is the only one
+# allocated (`claim74_alone`), and every count below is that chunk's.
 private CLAIM74_BYTES = 2900
+
+# Generous: a chunk of this class holds a few dozen blocks, and what the
+# runner leaves in the class is a handful of strings.
+private CLAIM74_FILLER_LIMIT = 4096
+
+# Allocate in the class until a block comes back that is its chunk's only
+# allocated one: the cursor has moved to a chunk nothing else occupies,
+# normally a fresh one. The blocks before it stay live in *fillers*, so the
+# cursor does not come back to their chunks. Returns that block, its chunk,
+# word and bit.
+private def claim74_alone(heap, fillers : Array(Void*)) : {Void*, Gcry::ChunkHeader*, Int32, UInt64}
+  loop do
+    p = GC.malloc_atomic(CLAIM74_BYTES)
+    chunk, word, bit = heap.claim74_position(p)
+    return {p, chunk, word, bit} if heap.chunk_occupied_count(chunk) == 1
+    fillers << p
+    fail "no chunk of the class to itself after #{fillers.size} blocks" if fillers.size >= CLAIM74_FILLER_LIMIT
+  end
+end
 
 describe "Regression: a cursor frozen mid-allocation keeps its claim through the stop's sweep" do
   it "keeps the claimed word occupied and hands each block out once" do
@@ -54,8 +78,8 @@ describe "Regression: a cursor frozen mid-allocation keeps its claim through the
     lazy = heap.lazy_sweep
     heap.lazy_sweep = false
     begin
-      p = GC.malloc_atomic(CLAIM74_BYTES)
-      chunk, word, bit = heap.claim74_position(p)
+      fillers = Array(Void*).new(CLAIM74_FILLER_LIMIT)
+      p, chunk, word, bit = claim74_alone(heap, fillers)
       claim_word, claim = heap.claim74_claim(chunk)
       claim_word.should eq(word)
       claim.should_not eq(0_u64)
@@ -86,6 +110,9 @@ describe "Regression: a cursor frozen mid-allocation keeps its claim through the
       end
       heap.claim74_occ(chunk, word).should eq(claim | bit)
       heap.chunk_occupied_count(chunk).should eq(claim.popcount + 1)
+      # The fillers stay live to here, so the cursor never went back to
+      # their chunks.
+      fillers.each { |f| heap.live?(f).should be_true }
     ensure
       heap.lazy_sweep = lazy
     end
