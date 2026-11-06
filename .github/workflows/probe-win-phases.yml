@@ -3,7 +3,9 @@ name: Probe win phases
 # Probe only, deleted afterwards. Windows JsonParsePure and Binarytrees on
 # the 0.40 tip against 0.39.0: every 16-byte phase of both trees (unpadded,
 # prepadded 16/32/48/64), plus the src at 2c600dfb (WinRows' measured state)
-# and at e7efe740 (half of the commits since) at four phases each.
+# and at e7efe740 (half of the commits since) at four phases each. Round 2:
+# JsonParsePure, the tip less each group of the commits after e7efe740
+# (bench/runner_ab/probe/rv-*.patch, src only) at four phases each.
 on:
   push:
     branches: [probe/win-phases]
@@ -29,18 +31,30 @@ jobs:
       - env:
           AB_BASE: c0d570c52793cfa144d88f3f4b600c839f7a40ce
           AB_REPS: "21"
-          AB_BENCHES: "JsonParsePure JsonParseSerializable JsonParsePull Binarytrees Fannkuchredux"
+          AB_BENCHES: "JsonParsePure Fannkuchredux"
           AB_BOEHM: "0"
           AB_PADS: "p16 p32 p48 p64 bp16 bp32 bp48 bp64"
-          AB_REVS: >-
-            c2c=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c
-            c2cp16=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c:p16
-            c2cp32=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c:p32
-            c2cp48=2c600dfbdc730fb83d79fc5164aa9f4ef4fc3c0c:p48
-            ce7=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e
-            ce7p16=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e:p16
-            ce7p32=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e:p32
-            ce7p48=e7efe740d3b52b2f69dd9695344cf9f4d57c9a7e:p48
+          AB_PATCHES: >-
+            hot=bench/runner_ab/probe/rv-hot.patch
+            hot=bench/runner_ab/probe/rv-hot.patch:p16
+            hot=bench/runner_ab/probe/rv-hot.patch:p32
+            hot=bench/runner_ab/probe/rv-hot.patch:p48
+            heap=bench/runner_ab/probe/rv-heap.patch
+            heap=bench/runner_ab/probe/rv-heap.patch:p16
+            heap=bench/runner_ab/probe/rv-heap.patch:p32
+            heap=bench/runner_ab/probe/rv-heap.patch:p48
+            scrub=bench/runner_ab/probe/rv-scrub.patch
+            scrub=bench/runner_ab/probe/rv-scrub.patch:p16
+            scrub=bench/runner_ab/probe/rv-scrub.patch:p32
+            scrub=bench/runner_ab/probe/rv-scrub.patch:p48
+            monitor=bench/runner_ab/probe/rv-monitor.patch
+            monitor=bench/runner_ab/probe/rv-monitor.patch:p16
+            monitor=bench/runner_ab/probe/rv-monitor.patch:p32
+            monitor=bench/runner_ab/probe/rv-monitor.patch:p48
+            incr=bench/runner_ab/probe/rv-incr.patch
+            incr=bench/runner_ab/probe/rv-incr.patch:p16
+            incr=bench/runner_ab/probe/rv-incr.patch:p32
+            incr=bench/runner_ab/probe/rv-incr.patch:p48
           AB_OUT: bench/log/_ab
         run: |
           pwsh -c '(Get-CimInstance Win32_Processor).Name' > cpu.txt
