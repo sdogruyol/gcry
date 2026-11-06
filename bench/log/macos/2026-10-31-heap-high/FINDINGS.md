@@ -138,6 +138,14 @@ Probe run 41203118928 (`runs/probe-41203118928.txt`), on `macos-latest` and
 Linux and Windows leave the examples pending (`process_spec` on Linux
 x86-64: 302 and 303 examples, 2 pending).
 
+**Native, off the runners (2026-11-05, `2658369a`).** On the owner's Apple
+M2 Pro (macOS 26.6.2) regression 92 ran both arms with no skip: together
+with 93 and 94, 12 examples, 0 failures, 0 pending, headerless and
+`-Dgcry_block_headers`, on Crystal 1.21.0 and 1.22.1; the whole
+`process_spec` 386 / 387 examples, 0 failures, 0 pending, on 1.21.0. The
+host was loaded (load average 50–70) for the full suite and quiet (~1) for
+the 92–94 runs; nothing here is timed.
+
 ## 4. Linux and Windows
 
 The placement is behind `{% if flag?(:darwin) %}`; elsewhere `heap_map` and
