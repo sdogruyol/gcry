@@ -999,9 +999,18 @@ module Gcry
     # arm of regression 99's *softdirty* window.
     property inc_scan_false_is_lost : Bool = true
     # Research only: called by `collect_a_little` on the slicing thread just
-    # after it takes the collection section, before anything else; must not
-    # allocate (regression 99's *race* queues a second slice there).
+    # after it takes the collection section and has read `@inc_active` again,
+    # before it sets `@collecting` or stops the world; must not allocate
+    # (regression 99's *race* queues a second slice there, regression 108 a
+    # full collection).
     class_property inc_slice_locked_hook : Proc(Nil)? = nil
+    # Research only: false makes `collect` and `minor_collect` drop an open
+    # incremental cycle (`abort_incremental`) before they queue for the
+    # collection section, the code before 2026-11-07 — the control arm of
+    # `process_spec/regression/108_collect_drops_cycle_in_section_spec.cr`.
+    # A class property, not a field: a `Heap` field here would move every
+    # field after it.
+    class_property collect_drops_cycle_in_section : Bool = true
     # Research only: false leaves the roots out of the incremental
     # terminating stop, the code before 2026-11-02 — the finish marks from
     # the begin stop's root scan and the dirty pages alone, and sweeps an
@@ -2165,7 +2174,9 @@ module Gcry
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
-      abort_incremental
+      # The open incremental cycle, if any, is dropped inside the section
+      # (`run_collection_body`), not here.
+      abort_incremental unless @@collect_drops_cycle_in_section
       Trace.collect_start(major: true)
       @warm_released_collects &+= 1 if release_warm
       run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce,
@@ -2195,7 +2206,7 @@ module Gcry
       return if thread_not_ready_for_collect?
       return unless @nursery_enabled
 
-      abort_incremental
+      abort_incremental unless @@collect_drops_cycle_in_section
       Trace.collect_start(major: false)
       run_collection(major: false, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
       Trace.collect_end(self, major: false)
@@ -2224,16 +2235,18 @@ module Gcry
 
       barrier_lost = false
       lock_post_stw
-      if hook = @@inc_slice_locked_hook
-        hook.call
-      end
       # Read again under the section: the checks above were made before
-      # this thread queued for it, and the slice ahead of it may have ended
-      # the cycle — one whose scan lost the barrier ends it inside its stop
-      # (below). Running on would sweep that cycle's marks, made blind.
+      # this thread queued for it, and what ran ahead of it may have ended
+      # the cycle — a slice whose scan lost the barrier ends it inside its
+      # stop (below), a full or minor collection as it takes the section
+      # (`run_collection_body`). Running on would sweep that cycle's marks,
+      # made blind.
       if @inc_lost_cycle_ends_in_stop && !@inc_active
         unlock_post_stw
         return false
+      end
+      if hook = @@inc_slice_locked_hook
+        hook.call
       end
       finished = false
       begin
@@ -3103,6 +3116,20 @@ module Gcry
         # writing it then changed whether the cycle in flight released, and
         # the next caller's write could clear it before this one ran.
         @release_warm_this_collect = release_warm
+        # An open incremental cycle is dropped here, holding the section,
+        # where no slice can be inside its own. `collect` and `minor_collect`
+        # dropped it before they queued, until 2026-11-07: a slice holding
+        # the section between its re-read of `@inc_active` and its stop then
+        # ran on with the cycle gone — its grey entries cleared, the backend
+        # `None`, so no lost barrier — rescanned the roots, marked nothing
+        # new from them and swept what only the cleared entries reached,
+        # objects a root still held. With the re-read off a slice queued
+        # ahead of the collection did the same (the interleaving that made
+        # regression 99's *race* control flaky). Boehm finishes the cycle in
+        # progress, under the allocation lock, before a full collection
+        # (`GC_try_to_collect_inner`).
+        # `process_spec/regression/108_collect_drops_cycle_in_section_spec.cr`.
+        abort_incremental if @@collect_drops_cycle_in_section
         # The idle thread's cycle re-checks `GC.disable` here, holding the
         # lock, because the check it made before asking can be long stale: it
         # may have waited on this lock through the program's own collections

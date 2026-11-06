@@ -380,10 +380,19 @@ end
 # losing slice — `Heap.inc_slice_locked_hook` releases it there, before
 # the slice sets `@collecting`, and waits until it holds a ticket — so it
 # runs the moment the losing slice lets the section go, ahead of the full
-# collection. Fixed: it finds the cycle dropped and returns false. Control
-# (`inc_lost_cycle_ends_in_stop = false`): it runs a slice on the marks the
-# blind barrier left, finds nothing more to mark, and sweeps on them —
-# finishing the cycle (true) before the full collection runs.
+# collection, whose `collect` drops the cycle only once it holds the
+# section (regression 108). Fixed: the queued slice finds the cycle dropped
+# and returns false before the hook. Control (`inc_lost_cycle_ends_in_stop
+# = false`): it reaches the hook with the cycle still open, drains the
+# entries the losing slice left grey (its budget unbounded, as the losing
+# slice's is), finds the backend `None` and so no lost barrier, and sweeps
+# on those marks — finishing the cycle (true) before the full collection
+# runs. Until regression 108's fix the control was flaky: the full
+# collection's `collect` dropped the cycle before it queued, so on an idle
+# machine the queued slice ran on a dropped cycle (and still swept), and on
+# a loaded one, where it woke first, its 4 096 marks did not drain what the
+# losing slice left and it returned false
+# (`bench/log/linux/2026-11-06-reg99-race/FINDINGS.md`).
 private module Mprotect99Race
   @@armed = Atomic(Int32).new(0)
   @@go = Atomic(Int32).new(0)
@@ -392,18 +401,32 @@ private module Mprotect99Race
   # Whether the second thread took a ticket while the losing slice held
   # the section, rather than arriving after it.
   @@queued = Atomic(Int32).new(0)
+  # The slice after the losing one at the hook: 0 not there, 1 with the
+  # cycle dropped, 2 with it open.
+  @@next_saw = Atomic(Int32).new(0)
+  @@after_losing = Atomic(Int32).new(0)
 
   def self.queued? : Bool
     @@queued.get == 1
+  end
+
+  def self.next_saw : Int32
+    @@next_saw.get
   end
 
   def self.arm : Nil
     @@armed.set(1)
   end
 
-  # In the losing slice, holding the section. Allocates nothing.
+  # In a slice holding the section. Allocates nothing.
   def self.locked : Nil
-    return unless @@armed.swap(0) == 1
+    unless @@armed.swap(0) == 1
+      if @@after_losing.swap(0) == 1
+        @@next_saw.set(Gcry.default_heap.@inc_active ? 2 : 1)
+      end
+      return
+    end
+    @@after_losing.set(1)
     heap = Gcry.default_heap
     queued = heap.@post_stw_next
     @@go.set(1)
@@ -423,7 +446,7 @@ private module Mprotect99Race
     until @@go.get == 1
       Intrinsics.pause
     end
-    @@result.set(Gcry.default_heap.collect_a_little(MPROTECT99_WORK) ? 2 : 1)
+    @@result.set(Gcry.default_heap.collect_a_little(Int32::MAX) ? 2 : 1)
   end
 
   def self.result : Int32
@@ -451,11 +474,14 @@ private def mprotect99_race(arm : String) : Nil
     heap.inc_barrier_lost_collections.should eq(1)
     Mprotect99Race.queued?.should be_true
     result = Mprotect99Race.result
-    mprotect99_say("mprotect99 race: the queued slice returned #{result == 2}")
+    saw = Mprotect99Race.next_saw
+    mprotect99_say("mprotect99 race: the queued slice returned #{result == 2}, the cycle at its hook: #{saw == 2 ? "open" : saw == 1 ? "dropped" : "not reached"}")
     if arm == "control"
+      saw.should eq(2)
       result.should eq(2)
       mprotect99_say("mprotect99 race: control finished the cycle on the blind marks")
     else
+      saw.should eq(0)
       result.should eq(1)
       mprotect99_say(MPROTECT99_FIXED_MARK)
     end
