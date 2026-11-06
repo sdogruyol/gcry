@@ -1,0 +1,16 @@
+stw-mt-property-test-release-sched-119-seed1042657934.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3019695 stw-mt-2-1/3019696) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-195-seed814958551.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3023450 stw-mt-2-1/3023451) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-225-seed582702073.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3025546 stw-mt-2-1/3025547) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-265-seed799940852.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3132440 stw-mt-2-1/3132441) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-62-seed346370598.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3122855 stw-mt-2-1/3122856) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-75-seed986657673.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3124358 stw-mt-2-1/3124359) classified=True gcry-frames=none
+6 logs, 0 not the 17486 shape
+stw-mt-property-test-release-sched-156-seed203510182.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/2218750 stw-mt-2-1/2218751) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-177-seed463132462.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/2408030 stw-mt-2-1/2408031) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-256-seed685379377.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/2939019 stw-mt-2-1/2939020) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-98-seed875988396.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/160633 stw-mt-2-1/160634) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-20-seed565119187.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3030167 stw-mt-2-1/3030168) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-252-seed392178025.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3093324 stw-mt-2-1/3093325) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-86-seed528279868.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3053713 stw-mt-2-1/3053714) classified=True gcry-frames=none
+stw-mt-property-test-release-sched-99-seed566667970.log: 17486-shape threads=8 resume=2 (stw-mt-2-0/3056418 stw-mt-2-1/3056419) classified=True gcry-frames=none
+8 logs, 0 not the 17486 shape
