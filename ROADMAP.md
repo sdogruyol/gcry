@@ -4878,7 +4878,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       word whose low half is a ~10 ms nanosecond count and whose high half
       matches the heap's. Open; not gcry's frame.
       `bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`.
-- [ ] **Regression 1's drift in suite order (2026-11-04, partly fixed).**
+- [ ] **Regression 1's drift in suite order (2026-11-04, test fixed
+      2026-11-06; open only to name the in-suite holder).**
       4 of 113 tip runs failed with −15 985 to −70 174, block headers
       only: two words 648 bytes below the Monitor's sleeping SP, the base
       and top of a fiber stack `collect_stacks` had freed and gcry had
@@ -4888,12 +4889,30 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       fixed: the Monitor's loop frame kept its birth's high half under the
       `Int32` nanoseconds of `every`'s `Time::Instant`s, a new heap address
       each pass; the loop now starts on zeroed stack (regression 107; this
-      is the Monitor word the item above left open). Open: 1.22.2
-      headerless still fails, −2 151 (instrumented, no root word changed
+      is the Monitor word the item above left open). Then 1.22.2
+      headerless still failed, −2 151 (instrumented, no root word changed
       in the window, so held by a heap object, a pending finalizer or a
       closure [INFERENCE]) and −1 849 on the final tree, 1 in 9 prefix
-      runs; 0 in 25 full-suite runs. The ≥100-run zero-rate target is not
-      met. `bench/log/linux/2026-11-04-reg1-drift/FINDINGS.md`.
+      runs; 0 in 25 full-suite runs.
+      `bench/log/linux/2026-11-04-reg1-drift/FINDINGS.md`. Since
+      2026-11-06 the cycles run in a child process with the same bounds
+      and baseline logic: 0 of 100 suite-order runs on 1.22.2 headerless
+      and 0 of 50 on headers + `GCRY_BITMAP_ALLOC=0`, every child at 0,
+      against 1 of 74 (−1 881) for the in-process spec in the same window.
+      The test no longer depends on it; what stays open is only which
+      object an earlier spec leaves holding ~2 000 objects into the window
+      in the shared process. `bench/log/linux/2026-11-06-spec-harden/`.
+- [ ] **Regression 99's *race* control arm sometimes does not reproduce
+      (seen 2026-11-06).** "the queued slice returned false" (`Expected
+      2, got 1`): 1 of 100 and 3 of 74 suite-order runs on 1.22.2
+      headerless, 2 of 50 on headers + `GCRY_BITMAP_ALLOC=0`; the fixed arm
+      never failed. Not investigated.
+      `bench/log/linux/2026-11-06-spec-harden/` § 1.
+- [ ] **Regression 21's "controls kept 8 > 1" once more (2026-11-06).**
+      1 of 174 suite-order runs on 1.22.2 headerless, on a tree with
+      regressions 103 and 106, the main fiber moved (21's `GC_stackbottom`
+      example pending). Not investigated; output in
+      `bench/log/linux/2026-11-06-spec-harden/reg1/`.
 - [ ] **Per-object mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-23).** Per collection at the same (full) live set,
       gcry's one marker took 0.39× / 0.43× / 0.67× of Boehm's one marker on

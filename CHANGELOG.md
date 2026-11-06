@@ -159,6 +159,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Regression 1 runs its drift cycles in a process of their own.** In
+  the suite's shared process it still drifted rarely on Crystal 1.22.2
+  headerless (−1 849, −2 151, −2 444; −1 881 in 1 of 74 runs of the tree
+  before this), held by state an earlier spec left, with no root word
+  changing in the window. The example now spawns its own binary for the
+  two cycles, with the same baseline logic and bounds, and asserts the
+  child's verdict: 0 failures in 100 suite-order runs on 1.22.2 headerless
+  and 50 with headers and `GCRY_BITMAP_ALLOC=0`, every child reading 0
+  for both counts (`bench/log/linux/2026-11-06-spec-harden/`).
+
+- **Regression 74 no longer fails when another spec's string shares its
+  size class.** It counted occupied blocks in whatever chunk its block
+  landed in, and on arm64 CI regression 95's failure message sat there
+  (`chunk_occupied_count` 2). It now allocates in the class until its
+  block is the only one in its chunk, then asserts exactly what it did.
+  With a string of the class kept first, the old spec fails 20 of 20 and
+  the new one 0 of 20 across both layouts; with `cursor_premark_claim`
+  removed from the stop's settle the new one fails 40 of 40 on the claim
+  (`bench/log/linux/2026-11-06-spec-harden/`).
+
 - **`GC_base`, `GC_size` and `GC_register_finalizer` no longer answer a
   freed block as live once a cursor has claimed its word, and regression 21
   no longer fails "controls kept 8 > 1".** The bitmap allocator claims all
