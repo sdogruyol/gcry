@@ -840,6 +840,20 @@ module Gcry
     # mid-allocation, left alone with its chunks pinned and its claims
     # marked, because that owner will finish its allocation from them,
     # without the class lock, when it resumes.
+    #
+    # A set that never takes the hit path (the fallback shared by threads
+    # past the table, the monitor's, the out-of-memory reserve's) is never
+    # retired here, since its owner may be running, and its claims are marked
+    # for the same reason; but it is pinned only when it is mid-allocation.
+    # Its owners allocate only under the class lock, which the after-world
+    # sweep takes too, so there is nothing to pin it against. Until
+    # 2026-11-07 it was pinned at every stop, so the after-world sweep never
+    # swept a chunk it held: every block that died there stayed allocated
+    # until the cursor moved on. A thread born while the table was full keeps
+    # the fallback for life — the pool thread that took over a moved main
+    # fiber in regression 21, whose eight dead controls `GC_base` answered
+    # live (`bench/log/linux/2026-11-07-reg21-fallback-pinned/FINDINGS.md`,
+    # `process_spec/regression/109_no_hit_set_chunks_swept_spec.cr`).
     protected def bitmap_settle_cursor_sets : Nil
       return unless @bitmap_alloc
       each_chunk do |chunk|
@@ -857,21 +871,24 @@ module Gcry
         ChunkHeader.set_pinned(chunk, false)
       end
       each_cursor_set do |set|
-        if set.value.no_hit_path != 0_u8 || cursor_set_mid_allocation?(set)
+        no_hit = set.value.no_hit_path != 0_u8
+        mid = cursor_set_mid_allocation?(set)
+        if no_hit || mid
+          pin = mid || !@no_hit_sets_swept
           i = 0
           while i < POOL_SLOTS
             s = CursorSet.slot(set, i)
             chunk = s.value.chunk
             unless chunk.null?
-              ChunkHeader.set_pinned(chunk, true)
+              ChunkHeader.set_pinned(chunk, true) if pin
               cursor_premark_claim(s, chunk)
             end
             i += 1
           end
-          # The out-of-memory reserve's set is never on the hit path, so it is
-          # pinned at every stop; counting it would add one per collection to
-          # a number that says a mutator was frozen mid-allocation.
-          @cursor_sets_pinned &+= 1 unless set == @oom_reserve_set
+          # Not the out-of-memory reserve's set, which never takes the hit
+          # path: a pin of it would add to a number that says a mutator was
+          # frozen mid-allocation.
+          @cursor_sets_pinned &+= 1 if pin && set != @oom_reserve_set
         else
           credit_cursor_set(set)
           i = 0
@@ -887,6 +904,10 @@ module Gcry
         end
       end
     end
+
+    # Off only for regression 109's control arm: the stop pins every set that
+    # never takes the hit path, as before (`bitmap_settle_cursor_sets`).
+    property no_hit_sets_swept : Bool = true
 
     # Root every block a cursor slot is mid-handover on. Called from the root
     # phase, like `mark_large_alloc_in_flight`. The sentinel a slot carries
