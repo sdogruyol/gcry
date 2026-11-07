@@ -1,5 +1,6 @@
 require "../../src/gcry"
 require "spec"
+require "../support/collection_window"
 
 # The frames an allocation-triggered collection runs on held whatever the
 # stack had at their depth before. The allocation entry (`GC.malloc_atomic`,
@@ -90,32 +91,6 @@ private def stale86_entry_sp(body_sp : UInt64) : UInt64
   {% end %}
 end
 
-# The idle collector (`IdleRelease`) is born at the end of the process's
-# first collection, which was the control arm's, and allocates on its own
-# thread (`Thread#start`'s main fiber) until it exempts itself. On Windows
-# that birth was slow enough to land inside a later arm's window, where the
-# threshold is 1: the idle thread collected, and the arm's own allocation
-# found that collection still running (`@collecting`) and returned without
-# one, 5 runs of 200 on windows-latest
-# (`bench/log/windows/2026-11-03-reg86-idle-birth/`). Its collection could
-# also have been the one the hook measured, at the idle thread's SP. So the
-# first collection runs here and the birth is waited out before any arm:
-# once exempt, the idle thread allocates nothing until it collects at idle,
-# minutes away. It joins Crystal's thread list from its own `Thread#start`,
-# so it may not be listed yet when the collection returns.
-private def stale86_settle_idle_thread : Nil
-  return unless Gcry::IdleRelease.armed?
-  GC.collect
-  deadline = Time.instant + 10.seconds
-  loop do
-    exempt = false
-    Thread.each { |t| exempt = true if Gcry::IdleRelease.signal_exempt?(t) }
-    break if exempt
-    fail "the idle thread was not born and exempt within 10 s of the first collection" if Time.instant > deadline
-    sleep 1.millisecond
-  end
-end
-
 # Pattern words in `[collect_entry_sp, caller SP)` at the collection, with the
 # slow path's wipe on or off, and the SP the wipe started at.
 private def stale86_count(wipe : Bool, gap : Bool = true) : {Int32, UInt64, UInt64}
@@ -140,6 +115,7 @@ private def stale86_count(wipe : Bool, gap : Bool = true) : {Int32, UInt64, UInt
     nil
   end
   begin
+    credit_window_debt
     # The first slow path below this frame on this stack records where its
     # wipe started: the allocation below (set after the closure above, which
     # allocates; gcry's own threads allocate too, on their own stacks).
@@ -163,7 +139,9 @@ end
 describe "Regression: an allocation's slow path collects on frames built over zeros" do
   it "leaves no stale word between the allocation and the collector" do
     {% if flag?(:release) && (flag?(:x86_64) || flag?(:aarch64)) %}
-      stale86_settle_idle_thread
+      # No thread the process started on its own may be allocating inside
+      # an arm's window (`settle_runtime_threads`).
+      settle_runtime_threads
       control, _, _ = stale86_count(wipe: false)
       fixed, entry_sp, wipe_sp = stale86_count(wipe: true)
       natural, _, _ = stale86_count(wipe: true, gap: false)

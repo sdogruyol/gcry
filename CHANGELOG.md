@@ -438,6 +438,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   idle thread is exempt before any arm: 0 of 800, one collection per arm
   (`bench/log/windows/2026-11-03-reg86-idle-birth/`).
 
+- **Regression 79 no longer misses its collection on Windows arm64.** The
+  IOCP forwarder thread Crystal starts before `main` copies its name to
+  UTF-16 once its fiber is current, an allocation that landed inside the
+  spec's threshold-1 window and took the collection section; the spec's
+  own allocation then coalesced into it and returned without a collection
+  (`Expected 0 to be > 0`, 4–8 of 200 runs on windows-11-arm, default and
+  headers). Regressions 79 and 86, which check that one allocation at
+  threshold 1 collected, and 27's two examples that check that
+  `GC_collect_a_little` ran a due collection, now call
+  `settle_runtime_threads` (`process_spec/support/collection_window.cr`).
+  It runs the first collection and waits until the idle thread is exempt
+  and every named thread has its Windows description, i.e. is past its
+  birth's allocations. Inside each threshold-1 window, 79 and 86 also call
+  `credit_window_debt`, which makes the credited debt at least 1. The slow
+  path checks the credited debt before it credits its own allocation, so
+  right after a collection a window could see 0 and not collect (79 after
+  27 in one process). 79 and 86 each: 0 of 450 runs on windows arm64 and
+  0 of 450 on x86-64, 150 per variant
+  (`bench/log/windows/2026-11-07-reg79-iocp-birth/`).
+
 - **The nursery and incremental marking no longer crash on the mprotect
   page barrier when the heap's chunks change between collections.** The
   barrier's cards are sized to the heap at the arm, and the dirty-page scan
