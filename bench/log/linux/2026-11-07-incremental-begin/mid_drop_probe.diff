@@ -1,0 +1,16 @@
+Temporary probe hook for mid_drop_probe.cr (not committed to src), over the
+fix commit's src/gcry/collect.cr:
+
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ class Heap (after `class_property inc_begin_hook`)
+     class_property inc_begin_hook : Proc(Nil)? = nil
++    class_property probe_mid_drop_hook : Proc(Nil)? = nil
+@@ private def abort_incremental
+       return unless @inc_active
+       @inc_active = false
++      if probe = @@probe_mid_drop_hook
++        probe.call
++      end
+       @incremental_marking = false
+       @mark_stack.clear

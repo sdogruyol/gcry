@@ -1,0 +1,8 @@
+2026-11-07T08:50:52+0300 pattern-fuzz-nursery-mprotect runs=10 pass=10 fail=0 stall=0 crystal_scheduler_deadlock=0 (478 s)
+2026-11-07T08:57:41+0300 pattern-fuzz-incremental-mprotect runs=5 pass=5 fail=0 stall=0 crystal_scheduler_deadlock=0 (407 s)
+2026-11-07T09:08:10+0300 claim-stress-lazy runs=100 pass=100 fail=0 stall=0 crystal_scheduler_deadlock=0 (603 s)
+2026-11-07T09:23:14+0300 claim-stress-in-stop runs=150 pass=150 fail=0 stall=0 crystal_scheduler_deadlock=0 (904 s)
+2026-11-07T09:27:43+0300 claim-stress-fallback-lazy runs=50 pass=50 fail=0 stall=0 crystal_scheduler_deadlock=0 (269 s)
+2026-11-07T09:32:08+0300 claim-stress-fallback-in-stop runs=50 pass=50 fail=0 stall=0 crystal_scheduler_deadlock=0 (265 s)
+2026-11-07T09:32:55+0300 claim-stress-gate runs=2 pass=2 fail=0 stall=0 crystal_scheduler_deadlock=0 (47 s)
+2026-11-07T09:32:55+0300 done
