@@ -155,7 +155,9 @@ is full; one more thread makes eight 256-byte atomic blocks through the
 fallback (addresses masked in libc memory), scrubs its frames and exits;
 three `GC.collect`s from the main thread; then `Heap#live?` / `GC_base` per
 block. Skip marker when the blocks are not on a chunk the fallback holds
-(always under `GCRY_BITMAP_ALLOC=0`), or, in the control arm, when no
+(always under `GCRY_BITMAP_ALLOC=0`), when no collection swept after the
+world (an in-stop sweep ignores the pin, so the fixed arm would pass
+vacuously; added after review), or, in the control arm, when no
 after-world sweep met a pinned chunk.
 
 | build | fixed | control (`no_hit_sets_swept = false`) |
@@ -250,6 +252,62 @@ On the branch's tree:
 - `make windows-typecheck`, `make darwin-typecheck`: pass.
 - `make alloc-entry-frame`: 5 examples, 0 failures.
 
+## 8. After review: a guard for the unpinned chunks
+
+The fix lets sweeps take chunks a running thread allocates from, which no
+test exercised: regression 109's fixed arm only checks that dead blocks go.
+A sweep or retire of such a chunk under its user (a block handed out and
+swept, a claim reclaimed) would show only as a use-after-free. Two guards,
+each failing on a mutant (below); the code before was safe here too (it
+never swept those chunks), so they guard later changes rather than tell
+the trees apart:
+
+- `bench/claim_stress.cr --workers=72` (stamped blocks, cross-thread frees,
+  a collection every 0.2–2.2 ms), past the 64-set table, so the threads
+  beyond it allocate through the fallback. A run with more workers than the
+  table fails unless a worker was seen on the fallback
+  (`Heap#on_fallback_cursor_set?`, a public read added for it), and a lazy
+  run unless some collection swept after the world. `make claim-stress`
+  runs both arms with 72 workers after the 4-worker ones; the overnight
+  script loops them (`claim-stress-fallback-lazy`, `-in-stop`, 100 runs
+  each, in `stress.yml`'s `mt` shard).
+- Regression 109's *stamped* arm: with the table full, one thread on the
+  fallback allocates stamped blocks of five classes, atomic and not,
+  dropping some, through 20 collections; every kept block must keep its
+  stamp and read live. 42 000–44 000 blocks, 20 of 20 collections swept
+  after the world, 0 broken (headerless and headers; skipped under
+  `GCRY_BITMAP_ALLOC=0`; `runs/r109-layouts2.txt`).
+
+Also: regression 109 now skips unless a collection swept after the world,
+and `oom_reserve.cr`'s note on the reserve set no longer says its chunks
+are pinned at every stop.
+
+`claim_stress --seconds=5 --workers=72`, seeds 1–50 per arm, Crystal 1.21.0
+release build, one run per lock hold (`cs_campaign.sh`;
+`runs/claim-stress-72.txt`); the base tree's build is the same source with
+`diag/fb_helper.cr` supplying the public read:
+
+| tree | arm | runs | pass | fallback passes (min–max) | after-world sweeps (min–max) |
+|---|---|---:|---:|---|---|
+| fix | lazy | 50 | 50 | 61–120 | 5–11 |
+| fix | in stop | 50 | 50 | 50–107 | 0 (in stop) |
+| base `b339f533` | lazy | 50 | 50 | 61–116 | 5–11 |
+| base | in stop | 50 | 50 | 44–106 | 0 (in stop) |
+
+The mutant (`diag/mutation.txt`): the fix with a no-hit set's claim left
+unmarked when the set is not pinned, so the sweep reclaims blocks the
+fallback still holds in its mask. `claim_stress --workers=72` fails all 6
+runs (lazy: 2 with 40 broken stamps, 1 SIGSEGV; in stop: 3 SIGSEGV;
+`runs/cs_mut.txt`); regression 109's stamped arm fails, 5 781 stamps broken,
+each block reading `live?=false` (`runs/mut109.txt`).
+
+On the tree after these changes: `verify.sh` (format, lint 260 inspected,
+`spec/all_specs` 307/330/307, `process_spec` 449/450/450 examples, 0
+failures, 2 pending), `process_spec` on 1.22.2 (449/450/450, 0 failures),
+`make windows-typecheck`, `make darwin-typecheck`, `make alloc-entry-frame`
+and `make claim-stress` pass; the late-mover suite order, 10 more runs (9
+moved), 0 failures of 21 (`runs/lmvfix2.txt`).
+
 ## Files
 
 - `diag/d21h.cr`, `diag/d21h-spec.diff`: the diagnostic and its changes to
@@ -262,6 +320,7 @@ On the branch's tree:
 - `runs/`: per-run summaries; the diagnostic's output for a passing base
   run (`dg122-4-d21.txt`), the failing late-mover base run
   (`ldg122-1-d21.txt`) and the fix (`ldgfix-1-d21.txt`); regression 109 in
-  the three layouts (`r109-layouts.txt`).
+  the three layouts (`r109-layouts.txt`); § 8's stress and mutant runs.
+- `cs_campaign.sh`, `diag/fb_helper.cr`, `diag/mutation.txt`: § 8.
 - `ab/`: `keep.py` output and the summaries of the five runs and the two
   `macos-latest` follow-ups.

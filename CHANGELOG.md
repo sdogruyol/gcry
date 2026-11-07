@@ -177,7 +177,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs (97 moved), and 0 in 30 with the move before the first example.
   Since v0.23.0; never under `GCRY_BITMAP_ALLOC=0`
   (`bench/log/linux/2026-11-07-reg21-fallback-pinned/`). Regression 109,
-  with a control arm.
+  with a control arm, and a stamped arm in which a thread on the fallback
+  allocates through 20 collections; `make claim-stress` and the overnight
+  loops also run `claim_stress` with 72 workers, past the table, in both
+  sweep arms (50 runs each green on this tree and the one before; a mutant
+  that leaves the unpinned claim unmarked fails both guards).
 
 - **Regression 1 runs its drift cycles in a process of their own.** In
   the suite's shared process it still drifted rarely on Crystal 1.22.2

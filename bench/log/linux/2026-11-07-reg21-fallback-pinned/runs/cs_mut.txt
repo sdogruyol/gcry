@@ -1,0 +1,6 @@
+mut lazy seed=1 rc=11 5 errors 
+mut lazy seed=2 rc=1 40 errors RESULT: FAIL seed=2
+mut lazy seed=3 rc=1 40 errors RESULT: FAIL seed=3
+mut GCRY_DISABLE_LAZY_SWEEP=1 seed=1 rc=11 0 errors 
+mut GCRY_DISABLE_LAZY_SWEEP=1 seed=2 rc=11 0 errors 
+mut GCRY_DISABLE_LAZY_SWEEP=1 seed=3 rc=11 0 errors 

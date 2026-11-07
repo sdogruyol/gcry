@@ -1,0 +1,14 @@
+fixed: nohit109: fixed: 1 of 8 kept after three collections, 0 pinned chunk(s) skipped by the sweep
+fixed: nohit109: blocks freed
+control: nohit109: blocks kept
+stamped: nohit109: stamp broken: block Pointer(Void)@0x7c08143dfea0 (128 B, serial 2111) reads 0x109a5eed0000083f, live?=false
+stamped: nohit109: stamp broken: block Pointer(Void)@0x7c08143dffa0 (128 B, serial 2119) reads 0x109a5eed00000847, live?=false
+stamped: nohit109: stamp broken: block Pointer(Void)@0x7c08143e02a0 (128 B, serial 2152) reads 0x109a5eed00000868, live?=false
+stamped: nohit109: stamp broken: block Pointer(Void)@0x7c0814370040 (1000 B, serial 2162) reads 0x109a5eed00000872, live?=false
+stamped: nohit109: stamp broken: block Pointer(Void)@0x7c081445c7a0 (48 B, serial 2180) reads 0x109a5eed00000884, live?=false
+stamped: nohit109: stamp broken: block Pointer(Void)@0x7c0814370440 (1000 B, serial 2163) reads 0x109a5eed00000873, live?=false
+stamped: nohit109: stamp broken: block Pointer(Void)@0x7c081447a5c0 (16 B, serial 2176) reads 0x109a5eed00000880, live?=false
+stamped: nohit109: stamped: 44166 blocks allocated through the fallback across 20 collections, 20 swept after the world, 5781 stamp(s) broken
+       1 examples, 0 failures, 0 errors, 0 pending
+6 examples, 1 failures, 0 errors, 0 pending
+Failed examples:
