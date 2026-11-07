@@ -1,0 +1,13 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 59b00b0d..bcb02063 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -1251,7 +1251,7 @@ module Gcry
+     # `bytes_local` and size-class index to the stack and back on every
+     # allocation (frame 0x88 → 0x98); out of line, 5 stack stores in place of
+     # 19 and a 0x28 frame (`bench/log/macos/2026-11-02-intel-binarytrees/`).
+-    @[NoInline]
++    @[AlwaysInline]
+     protected def cursor_advance_word(s : CursorSlot*, index : Int32) : UInt64
+       chunk = s.value.chunk
+       return 0_u64 if chunk.null?

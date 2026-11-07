@@ -1,0 +1,11 @@
+2026-10-31T14:48:42.9937940Z crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test --error-trace
+2026-10-31T14:49:31.8859250Z stw-mt-sample: 40 runs from seed 1793458125, 0 failed, 0 stalled, 0 upstream scheduler deadlock(s) (not counted); logs in bench/log/ci-samples
+2026-10-31T14:49:34.5067940Z GCRY_IDLE_RELEASE_MS=50 bin/idle_release
+2026-10-31T14:49:43.0289220Z idle release: 40 bursts, gaps of 1-2 x 50 ms, 20000 checksummed live objects
+2026-10-31T14:49:43.0291710Z   idle collections 28 of 68
+2026-10-31T14:49:43.0292140Z   empty chunks left mapped by the last collection 4718592
+2026-10-31T14:49:43.0292590Z   finalizers run 7799, on the idle thread 0
+2026-10-31T14:49:43.0293040Z   idle collections while GC.disable'd: 0
+2026-10-31T14:49:43.0297560Z FAIL: the last collection kept 4718592 bytes of empty chunks mapped — it did not release
+2026-10-31T14:49:43.0298190Z make: *** [idle-release] Error 1
+2026-10-31T14:49:43.0405080Z ##[error]Process completed with exit code 2.

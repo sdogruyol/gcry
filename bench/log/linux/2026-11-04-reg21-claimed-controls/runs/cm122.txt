@@ -1,0 +1,8 @@
+cm122 1 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]
+cm122 2 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]
+cm122 3 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]
+cm122 4 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]
+cm122 5 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]
+cm122 6 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]
+cm122 7 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]
+cm122 8 rc=0 f21=0 moved=1 [] 398 examples, 0 failures, 0 errors, 3 pending fails=[]

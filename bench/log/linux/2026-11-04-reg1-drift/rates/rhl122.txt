@@ -1,0 +1,9 @@
+rhl122 1 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending
+rhl122 2 rc=1 fail=[1_live_objects_dormant_spec.cr:97 ] {count=10000 drift=-1849 | count=1000 drift=0} 294 examples, 1 failures, 0 errors, 2 pending
+rhl122 3 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending
+rhl122 4 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending
+rhl122 5 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending
+rhl122 6 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending
+rhl122 7 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending
+rhl122 8 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending
+rhl122 9 rc=0 fail=[] {} 294 examples, 0 failures, 0 errors, 2 pending

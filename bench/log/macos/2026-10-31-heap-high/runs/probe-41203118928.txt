@@ -1,0 +1,60 @@
+green macos-15-intel 10 examples, 0 failures, 0 errors, 0 pending
+green macos-15-intel RESULT r92 arm=green os=macos-15-intel flags='' rc=0
+green macos-15-intel 10 examples, 0 failures, 0 errors, 0 pending
+green macos-15-intel RESULT r92 arm=green os=macos-15-intel flags='-Dgcry_block_headers' rc=0
+green macos-15-intel high92: fixed: heap at or above 0x1305d5c00000, block at 0x1305d6724000, the constant names nothing
+green macos-15-intel 1 examples, 0 failures, 0 errors, 0 pending
+green macos-15-intel high92: control: block at 0x129f00000 covers 0x12a05f200 and the collection kept it
+green macos-15-intel 1 examples, 0 failures, 0 errors, 0 pending
+green macos-15-intel high_heap=true base=0x123ab9800000 misses=0
+green macos-15-intel chunks 0x123ab9c00000 .. 0x123acb699000 fences=0 pid=4361
+green macos-15-intel high_heap=false base=0x149895200000 misses=0
+green macos-15-intel chunks 0x10da67000 .. 0x120d19000 fences=0 pid=4446
+green macos-15-intel 296 examples, 0 failures, 0 errors, 2 pending
+green macos-15-intel RESULT all_specs rc=0
+green macos-15-intel 246 examples, 0 failures, 0 errors, 0 pending
+green macos-15-intel RESULT process_spec rc=0
+green macos-15-intel 247 examples, 0 failures, 0 errors, 0 pending
+green macos-15-intel RESULT process_spec_headers rc=0
+red macos-15-intel               Expected 4473188352 to be GreaterOrEqual 27281321885696
+red macos-15-intel        1 examples, 1 failures, 0 errors, 0 pending
+red macos-15-intel 10 examples, 1 failures, 0 errors, 0 pending
+red macos-15-intel RESULT r92 arm=red os=macos-15-intel flags='' rc=1
+red macos-15-intel               Expected 4485652480 to be GreaterOrEqual 29044108165120
+red macos-15-intel        1 examples, 1 failures, 0 errors, 0 pending
+red macos-15-intel 10 examples, 1 failures, 0 errors, 0 pending
+red macos-15-intel RESULT r92 arm=red os=macos-15-intel flags='-Dgcry_block_headers' rc=1
+red macos-15-intel        Expected 4505485312 to be GreaterOrEqual 29382022266880
+red macos-15-intel 1 examples, 1 failures, 0 errors, 0 pending
+red macos-15-intel high92: control: block at 0x129f00000 covers 0x12a05f200 and the collection kept it
+red macos-15-intel 1 examples, 0 failures, 0 errors, 0 pending
+red macos-latest               Expected 4348919808 to be GreaterOrEqual 21850985857024
+red macos-latest        1 examples, 1 failures, 0 errors, 0 pending
+red macos-latest 10 examples, 1 failures, 0 errors, 0 pending
+red macos-latest RESULT r92 arm=red os=macos-latest flags='' rc=1
+red macos-latest               Expected 4306665472 to be GreaterOrEqual 21350448103424
+red macos-latest        1 examples, 1 failures, 0 errors, 0 pending
+red macos-latest 10 examples, 1 failures, 0 errors, 0 pending
+red macos-latest RESULT r92 arm=red os=macos-latest flags='-Dgcry_block_headers' rc=1
+red macos-latest        Expected 4338483200 to be GreaterOrEqual 20564362133504
+red macos-latest 1 examples, 1 failures, 0 errors, 0 pending
+red macos-latest high92: control: block at 0x129f00000 covers 0x12a05f200 and the collection kept it
+red macos-latest 1 examples, 0 failures, 0 errors, 0 pending
+green macos-latest 10 examples, 0 failures, 0 errors, 0 pending
+green macos-latest RESULT r92 arm=green os=macos-latest flags='' rc=0
+green macos-latest 10 examples, 0 failures, 0 errors, 0 pending
+green macos-latest RESULT r92 arm=green os=macos-latest flags='-Dgcry_block_headers' rc=0
+green macos-latest high92: fixed: heap at or above 0x1b9cdbc00000, block at 0x1b9cdc728000, the constant names nothing
+green macos-latest 1 examples, 0 failures, 0 errors, 0 pending
+green macos-latest high92: control: block at 0x129f00000 covers 0x12a05f200 and the collection kept it
+green macos-latest 1 examples, 0 failures, 0 errors, 0 pending
+green macos-latest high_heap=true base=0x14a5a6200000 misses=0
+green macos-latest chunks 0x14a5a6600000 .. 0x14a5b80b4000 fences=0 pid=8613
+green macos-latest high_heap=false base=0x1f1ccda00000 misses=0
+green macos-latest chunks 0x102660000 .. 0x11a0b0000 fences=0 pid=8943
+green macos-latest 297 examples, 0 failures, 0 errors, 2 pending
+green macos-latest RESULT all_specs rc=0
+green macos-latest 246 examples, 0 failures, 0 errors, 1 pending
+green macos-latest RESULT process_spec rc=0
+green macos-latest 247 examples, 0 failures, 0 errors, 0 pending
+green macos-latest RESULT process_spec_headers rc=0

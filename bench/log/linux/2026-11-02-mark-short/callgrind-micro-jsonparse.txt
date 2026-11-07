@@ -1,0 +1,9 @@
+# callgrind (cgm.sh), micro `jsonparse 4`: JsonGenerate(300 000)'s text parsed to JSON::Any and held, then 5 explicit
+# collections with one marker; self instructions inside GC.collect, by function group. Same graph in every arm.
+arm    batch_scan_Ir  vs_probe  scan_edges_inline_Ir  # tree
+probe      2819101150    +0.0%    150482006  # e9e9f0a9
+tip        2534101029   -10.1%    146551456  # 07b61d28
+one2       3905051045   +38.5%    509973958  # dropped-one-span-exit.patch
+one        3097943447    +9.9%    156341659  # dropped-one-exit.patch
+s4         3394320479   +20.4%    174341514  # dropped-one-lo-exit.patch
+s6         2502600778   -11.2%    146551483  # 5b8ec420 (unrolled twin)

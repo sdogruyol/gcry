@@ -1,0 +1,91 @@
+# Darwin gates jobs (darwin arm64 and x86_64) of the ci.yml runs created since 2026-10-01 that failed or were re-run,
+# every attempt: run, sha, branch, attempt, created, job, name, conclusion, and for a failure its FAIL / make error lines.
+# 418 runs since 2026-10-01; 156 since the 524 288 fix (2026-10-10). Collected 2026-10-31.
+41209225316	80d23a9d	release-0.40.0	1	2026-10-31T14:14:42Z	124560517197	test (darwin arm64, gates)	failure	FAIL: the last collection kept 4718592 bytes of empty chunks mapped — it did not release|make: *** [idle-release] Error 1|
+40318812585	9157672e	master	1	2026-10-26T11:56:48Z	121558132716	test (windows arm64, gates)	failure	
+39775800632	07cc4a7f	release-0.39.0	1	2026-10-22T12:07:28Z	119814936226	test (windows x86_64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+39716627889	a6dae18e	release-0.39.0	1	2026-10-22T03:24:10Z	119620524034	test (windows x86_64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+39716627889	a6dae18e	release-0.39.0	1	2026-10-22T03:24:10Z	119620524106	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+39716627889	a6dae18e	release-0.39.0	1	2026-10-22T03:24:10Z	119620524209	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+39716627889	a6dae18e	release-0.39.0	1	2026-10-22T03:24:10Z	119620524341	test (windows arm64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+39710938995	d689faaa	release-0.39.0	1	2026-10-22T02:21:34Z	119601851327	test (windows arm64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+39710938995	d689faaa	release-0.39.0	1	2026-10-22T02:21:34Z	119601851424	test (windows x86_64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+39703631435	aa12027b	release-0.39.0	1	2026-10-22T01:05:22Z	119578884120	test (windows arm64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+39703631435	aa12027b	release-0.39.0	1	2026-10-22T01:05:22Z	119578884364	test (windows x86_64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+39081061134	7a80cb1c	release-0.37.0	1	2026-10-17T23:59:05Z	117537910409	test (windows x86_64, gates)	failure	
+39073579395	5802d7b5	release-0.37.0	1	2026-10-17T22:04:44Z	117516049279	test (darwin x86_64, gates)	failure	make: *** [poison-freed] Error 1|
+39073579395	5802d7b5	release-0.37.0	1	2026-10-17T22:04:44Z	117516049390	test (windows arm64, gates)	failure	
+38975094005	4f9f956e	ci/perf-pr	1	2026-10-16T22:19:56Z	117222511786	test (darwin arm64, gates)	failure	make: *** [nursery-tlab-smoke] Error 11|
+38633380085	48e7c749	release-0.36.0	1	2026-10-14T20:35:37Z	116090337173	test (windows arm64, gates)	failure	make: *** [Makefile:171: bitmap-marks-freelist] Error 1|
+38581615506	e39b82c8	release-0.36.0	1	2026-10-14T14:33:45Z	115913491888	test (windows x86_64, gates)	failure	
+38581615506	e39b82c8	release-0.36.0	1	2026-10-14T14:33:45Z	115913492504	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+38581615506	e39b82c8	release-0.36.0	1	2026-10-14T14:33:45Z	115913492597	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+38066151463	bc880f11	fix/default-path-defects	1	2026-10-10T16:04:12Z	114254093750	test (darwin x86_64, gates)	failure	make: *** [thread-birth-root] Error 1|
+38062299726	a2b9229b	fix/default-path-defects	1	2026-10-10T15:06:54Z	114242854326	test (darwin arm64, gates)	failure	make: *** [thread-birth-root] Error 1|
+38062299726	a2b9229b	fix/default-path-defects	1	2026-10-10T15:06:54Z	114242854559	test (darwin x86_64, gates)	failure	make: *** [thread-birth-root] Error 1|
+38034037360	d1a19f78	master	1	2026-10-10T07:19:34Z	114160669204	test (darwin arm64, gates)	failure	FAIL: the last collection kept 524288 bytes of empty chunks mapped — it did not release|make: *** [idle-release] Error 1|
+37944971921	f298f003	readiness-2	1	2026-10-09T14:32:44Z	113868779804	test (darwin x86_64, root gates)	failure	
+37932800744	2cef1733	readiness-2	1	2026-10-09T12:51:26Z	113827408890	test (windows arm64, gates)	failure	
+37821609046	2e2eca6c	readiness	1	2026-10-08T18:05:34Z	113463762031	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37654265592	8599ef2f	readiness	1	2026-10-07T16:43:21Z	112905259136	test (windows arm64, gates)	failure	make: *** [Makefile:1837: counter-loss] Error 1|
+37654265592	8599ef2f	readiness	1	2026-10-07T16:43:21Z	112905259443	test (darwin arm64, gates)	failure	
+37654256583	8599ef2f	readiness	1	2026-10-07T16:43:17Z	112905229478	test (darwin arm64, gates)	failure	
+37644516648	1ef4c258	readiness	1	2026-10-07T15:30:47Z	112871685774	test (windows arm64, gates)	failure	make: *** [Makefile:180: bitmap-marks-freelist] Error 1|
+37644516648	1ef4c258	readiness	1	2026-10-07T15:30:47Z	112871685831	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37644511202	1ef4c258	readiness	1	2026-10-07T15:30:45Z	112871666319	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37644511202	1ef4c258	readiness	1	2026-10-07T15:30:45Z	112871666425	test (windows arm64, gates)	failure	make: *** [Makefile:180: bitmap-marks-freelist] Error 1|
+37632373590	74d684ce	readiness	1	2026-10-07T13:55:13Z	112829662414	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37632373590	74d684ce	readiness	1	2026-10-07T13:55:13Z	112829662476	test (darwin x86_64, root gates)	failure	
+37632373590	74d684ce	readiness	1	2026-10-07T13:55:13Z	112829662550	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37632365002	74d684ce	readiness	1	2026-10-07T13:55:09Z	112829634410	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37632365002	74d684ce	readiness	1	2026-10-07T13:55:09Z	112829634469	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37632365002	74d684ce	readiness	1	2026-10-07T13:55:09Z	112829634634	test (darwin x86_64, root gates)	failure	
+37455387011	3744a87e	readiness	1	2026-10-06T11:17:13Z	112241605140	test (darwin arm64, gates)	failure	make: *** [parallel-mark-process] Error 1|
+37448529977	2eee648a	readiness	1	2026-10-06T10:15:08Z	112219113130	test (windows x86_64, gates)	failure	make: *** [Makefile:180: bitmap-marks-freelist] Error 1|
+37448529977	2eee648a	readiness	1	2026-10-06T10:15:08Z	112219113226	test (darwin x86_64, root gates)	failure	
+37448529977	2eee648a	readiness	1	2026-10-06T10:15:08Z	112219113253	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37448529977	2eee648a	readiness	1	2026-10-06T10:15:08Z	112219113344	test (windows arm64, gates)	failure	make: *** [Makefile:180: bitmap-marks-freelist] Error 1|
+37448529977	2eee648a	readiness	1	2026-10-06T10:15:08Z	112219113453	test (darwin arm64, gates)	failure	make: *** [parallel-mark-process] Error 1|
+37448523649	2eee648a	readiness	1	2026-10-06T10:15:05Z	112219092954	test (darwin x86_64, root gates)	failure	
+37448523649	2eee648a	readiness	1	2026-10-06T10:15:05Z	112219093130	test (windows x86_64, gates)	failure	make: *** [Makefile:180: bitmap-marks-freelist] Error 1|
+37448523649	2eee648a	readiness	1	2026-10-06T10:15:05Z	112219093224	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37448523649	2eee648a	readiness	1	2026-10-06T10:15:05Z	112219093268	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37448523649	2eee648a	readiness	1	2026-10-06T10:15:05Z	112219093299	test (windows arm64, gates)	failure	make: *** [Makefile:180: bitmap-marks-freelist] Error 1|
+37328942780	bbb8afae	readiness	1	2026-10-05T14:57:37Z	111826755413	test (darwin x86_64, gates)	failure	make: *** [nursery-tlab-smoke] Error 1|
+37328942780	bbb8afae	readiness	1	2026-10-05T14:57:37Z	111826755483	test (darwin arm64, gates)	failure	make: *** [thread-staging] Error 1|
+37328942780	bbb8afae	readiness	1	2026-10-05T14:57:37Z	111826755725	test (windows x86_64, gates)	failure	
+37323674463	1f6e1d1c	readiness	1	2026-10-05T14:18:44Z	111808846646	test (darwin arm64, gates)	failure	make: *** [thread-staging] Error 1|
+37323674463	1f6e1d1c	readiness	1	2026-10-05T14:18:44Z	111808846743	test (darwin x86_64, gates)	failure	make: *** [unaligned-only-buffer] Error 1|
+37323674463	1f6e1d1c	readiness	1	2026-10-05T14:18:44Z	111808847002	test (windows x86_64, gates)	failure	
+37317180137	895dafb6	readiness	1	2026-10-05T13:29:21Z	111786763260	test (darwin x86_64, gates)	failure	make: *** [parallel-mark-termination] Error 1|
+37317180137	895dafb6	readiness	1	2026-10-05T13:29:21Z	111786763356	test (darwin arm64, gates)	failure	make: *** [parallel-mark-termination] Error 1|
+37317180137	895dafb6	readiness	1	2026-10-05T13:29:21Z	111786763609	test (windows x86_64, gates)	failure	make: *** [Makefile:1429: parallel-mark-termination] Error 1|
+37317180137	895dafb6	readiness	1	2026-10-05T13:29:21Z	111786763827	test (windows arm64, gates)	failure	make: *** [Makefile:1429: parallel-mark-termination] Error 1|
+37310960053	adc52ba8	readiness	1	2026-10-05T12:38:39Z	111765971924	test (windows x86_64, gates)	failure	make: *** [Makefile:197: parallel-mark-process] Error 1|
+37310960053	adc52ba8	readiness	1	2026-10-05T12:38:39Z	111765972122	test (windows arm64, gates)	failure	make: *** [Makefile:197: parallel-mark-process] Error 1|
+37310960053	adc52ba8	readiness	1	2026-10-05T12:38:39Z	111765972172	test (darwin x86_64, root gates)	failure	
+37310960053	adc52ba8	readiness	1	2026-10-05T12:38:39Z	111765972188	test (darwin x86_64, gates)	failure	make: *** [parallel-mark-process] Error 1|
+37310960053	adc52ba8	readiness	1	2026-10-05T12:38:39Z	111765972205	test (darwin arm64, gates)	failure	make: *** [parallel-mark-process] Error 1|
+37236816039	dd57d4be	master	1	2026-10-04T21:37:03Z	111537465148	test (windows arm64, gates)	failure	
+37228431698	a1d0833c	master	1	2026-10-04T19:28:58Z	111512833478	test (windows arm64, gates)	failure	make: *** [Makefile:180: bitmap-marks-freelist] Error 1|
+37223371756	b715fa52	layout-removal	1	2026-10-04T18:10:23Z	111497973421	test (darwin x86_64, root gates)	failure	make: *** [fp-register-root] Error 1|
+37223371756	b715fa52	layout-removal	2	2026-10-04T18:10:23Z	111502394245	test (darwin x86_64, root gates)	failure	make: *** [fp-register-root] Error 1|
+37222278514	c6479814	master	1	2026-10-04T17:54:09Z	111494867889	test (darwin arm64, gates)	failure	
+37218916555	6f8ff0cf	master	1	2026-10-04T17:01:08Z	111485058064	test (windows arm64, gates)	failure	make: *** [Makefile:698: mark-audit] Error 1|
+37218916555	6f8ff0cf	master	1	2026-10-04T17:01:08Z	111485058108	test (windows x86_64, gates)	failure	make: *** [Makefile:698: mark-audit] Error 1|
+37218916555	6f8ff0cf	master	1	2026-10-04T17:01:08Z	111485058321	test (darwin x86_64, gates)	failure	make: *** [mark-audit] Error 1|
+37218916555	6f8ff0cf	master	1	2026-10-04T17:01:08Z	111485058381	test (darwin arm64, gates)	failure	make: *** [mark-audit] Error 1|
+37139276769	a8b1dbb7	monitor-wait	1	2026-10-03T17:06:13Z	111250158355	test (windows x86_64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+37139276769	a8b1dbb7	monitor-wait	1	2026-10-03T17:06:13Z	111250158362	test (darwin x86_64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37139276769	a8b1dbb7	monitor-wait	1	2026-10-03T17:06:13Z	111250158370	test (darwin x86_64, root gates)	failure	
+37139276769	a8b1dbb7	monitor-wait	1	2026-10-03T17:06:13Z	111250158377	test (darwin arm64, gates)	failure	make: *** [bitmap-marks-freelist] Error 1|
+37139276769	a8b1dbb7	monitor-wait	1	2026-10-03T17:06:13Z	111250158533	test (windows arm64, gates)	failure	make: *** [Makefile:179: bitmap-marks-freelist] Error 1|
+37130735207	ae97bd0a	master	1	2026-10-03T14:45:10Z	111225152310	test (darwin x86_64, gates)	failure	make: *** [unaligned-only-buffer] Error 1|
+37026044703	c85a35cc	master	1	2026-10-02T15:18:30Z	110900810177	test (windows arm64, gates)	failure	make: *** [Makefile:178: bitmap-marks-freelist] Error 1|
+36876251104	ba6b1fba	master	1	2026-10-01T14:25:44Z	110416323292	test (windows arm64, gates)	failure	make: *** [Makefile:1086: find-block-race] Error 1|
+36876251104	ba6b1fba	master	1	2026-10-01T14:25:44Z	110416323509	test (windows x86_64, gates)	failure	make: *** [Makefile:1676: stw-mt-sample] Error 1|
+36874017407	3af28568	master	1	2026-10-01T14:08:33Z	110408700663	test (darwin arm64, gates)	failure	make: *** [nested-spawn-uaf] Error 1|
+36867713756	f248b3a5	master	1	2026-10-01T13:18:24Z	110387307722	test (darwin arm64, gates)	failure	make: *** [thread-birth-root] Error 1|
+36867713756	f248b3a5	master	1	2026-10-01T13:18:24Z	110387308228	test (darwin x86_64, gates)	failure	make: *** [counter-loss] Error 1|
+36855614208	795117fa	master	1	2026-10-01T11:28:45Z	110347276422	test (windows arm64, gates)	failure	make: *** [Makefile:1073: find-block-race] Error 1|
+36797442134	e75185ac	master	1	2026-10-01T00:41:41Z	110164015664	test (darwin x86_64, root gates)	failure	make: *** [darwin-stw-resume] Error 1|

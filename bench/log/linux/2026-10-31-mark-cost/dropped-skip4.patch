@@ -1,0 +1,113 @@
+commit 8c1f6bc54628499483b7b2e0641dc06450a33005
+Author: Serdar Dogruyol <990485+sdogruyol@users.noreply.github.com>
+Date:   Sat Oct 31 16:52:05 2026 +0300
+
+    mark: skip words below the heap four at a time (probe)
+
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 90d50447..35aa552c 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -687,47 +687,67 @@ module Gcry
+                                lo : UInt64, hi : UInt64, l1 : Pointer(Pointer(ChunkHeader*)),
+                                shift : Int32, l2_mask : UInt64) : UInt64
+       hits = 0_u64
+-      while p < finish
+-        w = p.value
+-        p += 1
+-        next if w < lo || w >= hi
+-        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+-        if chunk.null?
+-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+-          next
++      # Words below the span's low end — most of a payload: type ids,
++      # lengths, hashes, small integers — are skipped four at a time; the
++      # one copy of the candidate code below takes the rest in order.
++      quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
++      loop do
++        while p < quad_end && p[0] < lo && p[1] < lo && p[2] < lo && p[3] < lo
++          p += 4
+         end
+-        cls = chunk.value.size_class
+-        bitmap_words = chunk.value.bitmap_words.to_u64
+-        data_start = chunk.address &+ chunk.value.data_offset
+-        chunk_end = chunk.address &+ chunk.value.mapped_bytes
+-        # `size_class` past the table covers large chunks (`UInt32::MAX`).
+-        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
+-           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
+-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+-          next
++        while p < finish && p.value < lo
++          p += 1
+         end
+-        hits &+= 1
+-        index = cls.to_i32
+-        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
+-        block_bytes = @block_bytes.unsafe_fetch(index)
+-        header_addr = data_start &+ ordinal &* block_bytes
+-        # The chunk's tail past its last whole block.
+-        next if header_addr &+ block_bytes > chunk_end
+-        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+-        bit = 1_u64 << (ordinal & 63)
+-        mark = occ + bitmap_words
+-        next if (mark.value & bit) != 0
+-        next if (occ.value & bit) == 0
+-        header = Pointer(BlockHeader).new(header_addr)
+-        next if base_only && w != BlockHeader.user_from(header).address
+-        # `chunk_set_mark` with its relaxed pre-check already done above.
+-        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+-        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+-        mark_stack_push(mark_entry(chunk, header), shard)
++        break unless p < finish
++        w = p.value
++        p += 1
++        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask)
+       end
+       hits
+     end
+ 
++    # One word of `scan_edges_run` at or above the span's low end: 1 when it
++    # was resolved in place (a fast hit), 0 when it was outside the span or
++    # went to `mark_impl`.
++    @[AlwaysInline]
++    private def scan_edge_word(w : UInt64, base_only : Bool, shard : MarkShard?, hi : UInt64,
++                               l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64) : UInt64
++      return 0_u64 if w >= hi
++      chunk = Heap.radix_entry(l1, shift, l2_mask, w)
++      if chunk.null?
++        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++        return 0_u64
++      end
++      cls = chunk.value.size_class
++      bitmap_words = chunk.value.bitmap_words.to_u64
++      data_start = chunk.address &+ chunk.value.data_offset
++      chunk_end = chunk.address &+ chunk.value.mapped_bytes
++      # `size_class` past the table covers large chunks (`UInt32::MAX`).
++      if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
++         (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
++        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++        return 0_u64
++      end
++      index = cls.to_i32
++      ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
++      block_bytes = @block_bytes.unsafe_fetch(index)
++      header_addr = data_start &+ ordinal &* block_bytes
++      # The chunk's tail past its last whole block.
++      return 1_u64 if header_addr &+ block_bytes > chunk_end
++      occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
++      bit = 1_u64 << (ordinal & 63)
++      mark = occ + bitmap_words
++      return 1_u64 if (mark.value & bit) != 0
++      return 1_u64 if (occ.value & bit) == 0
++      header = Pointer(BlockHeader).new(header_addr)
++      return 1_u64 if base_only && w != BlockHeader.user_from(header).address
++      # `chunk_set_mark` with its relaxed pre-check already done above.
++      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++      return 1_u64 if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
++      mark_stack_push(mark_entry(chunk, header), shard)
++      1_u64
++    end
++
+     # Scan length for one object, derived from its **chunk** (Phase 7.6).
+     #
+     # This used to read `header.value.size` and clamp it against the chunk, then

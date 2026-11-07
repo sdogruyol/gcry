@@ -1,0 +1,147 @@
+### 125028677690 probe (macos-15-intel, 16a6804b5615af30be12d2e1c16189887fea7f7e)
+##[group]Run cp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr
+[36;1mcp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr[0m
+[36;1mcrystal spec -Dgc_none process_spec/regression/71_large_unlink_walks_nothing_spec.cr 2>&1 | grep -E "probe71|examples" || true[0m
+[36;1m  echo "== run $i"[0m
+[36;1m  grep -E "probe71|Expected|examples|_spec.cr:[0-9]+ #" out.txt || true[0m
+probe71 entry: coll=0 large_free=0 hits=0 misses=2 threads=2
+probe71 built: coll=0 large_free=0 hits=0 misses=515 threads=2 declined=0 shape(chunks,tpos,front_before,back_before)={544, 256, 0, 256}
+probe71 collected: coll=1 declined=0 shape={543, 286, 256, 0} lazy=true threads=DEFAULT-0,SYSMON
+probe71 addrs: target=0x159be2064040 front=0x159be0f64040..0x159be2053040 back=0x159be2465040..0x159be3554040
+1 examples, 0 failures, 0 errors, 0 pending
+== run 1
+..........................................................................................probe71 entry: coll=157 large_free=7593984 hits=0 misses=0 threads=3
+probe71 built: coll=157 large_free=3395584 hits=1 misses=512 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={674, 613, 256, 256}
+probe71 collected: coll=158 declined=0 shape={672, 58, 0, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1e5511b5a040 front=0x1e5511610040..0x1e5514064040 back=0x1e5514075040..0x1e5515164040
+       Expected 58 to be GreaterOrEqual 256
+310 examples, 1 failures, 0 errors, 0 pending
+Failed examples:
+crystal spec process_spec/regression/71_large_unlink_walks_nothing_spec.cr:53 # Regression: a large free takes its chunk off the list without a walk unlinks a deep large chunk by its back-link
+== run 2
+..........................................................................................probe71 entry: coll=156 large_free=7593984 hits=0 misses=0 threads=3
+probe71 built: coll=156 large_free=3395584 hits=1 misses=512 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={674, 613, 256, 256}
+probe71 collected: coll=157 declined=0 shape={672, 58, 0, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x138bf0f5a040 front=0x138bf0a10040..0x138bf3464040 back=0x138bf3475040..0x138bf4564040
+       Expected 58 to be GreaterOrEqual 256
+310 examples, 1 failures, 0 errors, 0 pending
+Failed examples:
+crystal spec process_spec/regression/71_large_unlink_walks_nothing_spec.cr:53 # Regression: a large free takes its chunk off the list without a walk unlinks a deep large chunk by its back-link
+### 125028677835 probe (macos-latest, 16a6804b5615af30be12d2e1c16189887fea7f7e)
+##[group]Run cp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr
+[36;1mcp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr[0m
+[36;1mcrystal spec -Dgc_none process_spec/regression/71_large_unlink_walks_nothing_spec.cr 2>&1 | grep -E "probe71|examples" || true[0m
+[36;1m  echo "== run $i"[0m
+[36;1m  grep -E "probe71|Expected|examples|_spec.cr:[0-9]+ #" out.txt || true[0m
+probe71 entry: coll=0 large_free=0 hits=0 misses=2 threads=2
+probe71 built: coll=0 large_free=0 hits=0 misses=515 threads=2 declined=0 shape(chunks,tpos,front_before,back_before)={544, 256, 0, 256}
+probe71 collected: coll=1 declined=0 shape={543, 286, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x15efd8d68040 front=0x15efd7968040..0x15efd8d54040 back=0x15efd916c040..0x15efda558040
+1 examples, 0 failures, 0 errors, 0 pending
+== run 1
+..........................................................................................probe71 entry: coll=157 large_free=3129344 hits=0 misses=0 threads=3
+probe71 built: coll=157 large_free=2965504 hits=2 misses=511 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={668, 256, 0, 256}
+probe71 collected: coll=158 declined=0 shape={667, 410, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x12d6cc4b8040 front=0x12d6c97f8040..0x12d6cc4a4040 back=0x12d6cc8bc040..0x12d6cdca8040
+310 examples, 0 failures, 0 errors, 0 pending
+== run 2
+..........................................................................................probe71 entry: coll=155 large_free=3129344 hits=0 misses=0 threads=3
+probe71 built: coll=155 large_free=2965504 hits=2 misses=511 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={666, 256, 0, 256}
+probe71 collected: coll=156 declined=0 shape={665, 408, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1253f7038040 front=0x1253f43f8040..0x1253f7024040 back=0x1253f743c040..0x1253f8828040
+310 examples, 0 failures, 0 errors, 0 pending
+### 125028677898 probe (macos-15-intel, 367c3707c8f7dd4e95234900ddf259a587e7ad9f)
+##[group]Run cp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr
+[36;1mcp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr[0m
+[36;1mcrystal spec -Dgc_none process_spec/regression/71_large_unlink_walks_nothing_spec.cr 2>&1 | grep -E "probe71|examples" || true[0m
+[36;1m  echo "== run $i"[0m
+[36;1m  grep -E "probe71|Expected|examples|_spec.cr:[0-9]+ #" out.txt || true[0m
+probe71 entry: coll=0 large_free=0 hits=0 misses=2 threads=2
+probe71 built: coll=0 large_free=0 hits=0 misses=515 threads=2 declined=0 shape(chunks,tpos,front_before,back_before)={544, 256, 0, 256}
+probe71 collected: coll=1 declined=0 shape={543, 286, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1ad0d4c64040 front=0x1ad0d3b64040..0x1ad0d4c53040 back=0x1ad0d5065040..0x1ad0d6154040
+1 examples, 0 failures, 0 errors, 0 pending
+== run 1
+..........................................................................................probe71 entry: coll=156 large_free=3395584 hits=0 misses=0 threads=3
+probe71 built: coll=156 large_free=3395584 hits=0 misses=513 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={676, 256, 0, 256}
+probe71 collected: coll=157 declined=0 shape={674, 417, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1e34102b5040 front=0x1e340d810040..0x1e34102a4040 back=0x1e34106b6040..0x1e34117a5040
+310 examples, 0 failures, 0 errors, 0 pending
+== run 2
+..........................................................................................probe71 entry: coll=156 large_free=7593984 hits=0 misses=0 threads=3
+probe71 built: coll=156 large_free=3395584 hits=1 misses=512 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={675, 613, 256, 256}
+probe71 collected: coll=157 declined=0 shape={673, 59, 0, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x13d6de15a040 front=0x13d6ddc10040..0x13d6e06a4040 back=0x13d6e06b5040..0x13d6e17a4040
+       Expected 59 to be GreaterOrEqual 256
+310 examples, 1 failures, 0 errors, 0 pending
+Failed examples:
+crystal spec process_spec/regression/71_large_unlink_walks_nothing_spec.cr:53 # Regression: a large free takes its chunk off the list without a walk unlinks a deep large chunk by its back-link
+### 125028677900 probe (macos-latest, 367c3707c8f7dd4e95234900ddf259a587e7ad9f)
+##[group]Run cp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr
+[36;1mcp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr[0m
+[36;1mcrystal spec -Dgc_none process_spec/regression/71_large_unlink_walks_nothing_spec.cr 2>&1 | grep -E "probe71|examples" || true[0m
+[36;1m  echo "== run $i"[0m
+[36;1m  grep -E "probe71|Expected|examples|_spec.cr:[0-9]+ #" out.txt || true[0m
+probe71 entry: coll=0 large_free=0 hits=0 misses=2 threads=2
+probe71 built: coll=0 large_free=0 hits=0 misses=515 threads=2 declined=0 shape(chunks,tpos,front_before,back_before)={544, 256, 0, 256}
+probe71 collected: coll=1 declined=0 shape={543, 286, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x12f509b68040 front=0x12f508768040..0x12f509b54040 back=0x12f509f6c040..0x12f50b358040
+1 examples, 0 failures, 0 errors, 0 pending
+== run 1
+..........................................................................................probe71 entry: coll=157 large_free=3129344 hits=0 misses=0 threads=3
+probe71 built: coll=157 large_free=2965504 hits=2 misses=511 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={668, 256, 0, 256}
+probe71 collected: coll=158 declined=0 shape={667, 410, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1fdf10eb0040 front=0x1fdf0e238040..0x1fdf10e9c040 back=0x1fdf112b4040..0x1fdf126a0040
+310 examples, 0 failures, 0 errors, 0 pending
+== run 2
+..........................................................................................probe71 entry: coll=156 large_free=3129344 hits=0 misses=0 threads=3
+probe71 built: coll=156 large_free=2965504 hits=2 misses=511 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={667, 256, 0, 256}
+probe71 collected: coll=157 declined=0 shape={666, 409, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x173275c78040 front=0x173272ff8040..0x173275c64040 back=0x17327607c040..0x173277468040
+310 examples, 0 failures, 0 errors, 0 pending
+### 125028677913 probe (macos-15-intel, f3ccc4dce6f3f2c92e50d2d074178098e48cc314)
+##[group]Run cp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr
+[36;1mcp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr[0m
+[36;1mcrystal spec -Dgc_none process_spec/regression/71_large_unlink_walks_nothing_spec.cr 2>&1 | grep -E "probe71|examples" || true[0m
+[36;1m  echo "== run $i"[0m
+[36;1m  grep -E "probe71|Expected|examples|_spec.cr:[0-9]+ #" out.txt || true[0m
+probe71 entry: coll=0 large_free=0 hits=0 misses=2 threads=2
+probe71 built: coll=0 large_free=0 hits=0 misses=515 threads=2 declined=0 shape(chunks,tpos,front_before,back_before)={544, 256, 0, 256}
+probe71 collected: coll=1 declined=0 shape={543, 286, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x16e9b5064040 front=0x16e9b3f64040..0x16e9b5053040 back=0x16e9b5465040..0x16e9b6554040
+1 examples, 0 failures, 0 errors, 0 pending
+== run 1
+..................................................................probe71 entry: coll=157 large_free=3395584 hits=0 misses=0 threads=3
+probe71 built: coll=157 large_free=3395584 hits=0 misses=513 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={675, 256, 0, 256}
+probe71 collected: coll=158 declined=0 shape={673, 416, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1b225ae6e040 front=0x1b2258410040..0x1b225ae5d040 back=0x1b225b26f040..0x1b225c35e040
+286 examples, 0 failures, 0 errors, 0 pending
+== run 2
+..................................................................probe71 entry: coll=157 large_free=3395584 hits=0 misses=0 threads=3
+probe71 built: coll=157 large_free=3395584 hits=0 misses=513 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={675, 256, 0, 256}
+probe71 collected: coll=158 declined=0 shape={673, 416, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x172c3366e040 front=0x172c30c10040..0x172c3365d040 back=0x172c33a6f040..0x172c34b5e040
+286 examples, 0 failures, 0 errors, 0 pending
+### 125028677941 probe (macos-latest, f3ccc4dce6f3f2c92e50d2d074178098e48cc314)
+##[group]Run cp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr
+[36;1mcp ../probe/.github/probe71/71_instr_spec.cr process_spec/regression/71_large_unlink_walks_nothing_spec.cr[0m
+[36;1mcrystal spec -Dgc_none process_spec/regression/71_large_unlink_walks_nothing_spec.cr 2>&1 | grep -E "probe71|examples" || true[0m
+[36;1m  echo "== run $i"[0m
+[36;1m  grep -E "probe71|Expected|examples|_spec.cr:[0-9]+ #" out.txt || true[0m
+probe71 entry: coll=0 large_free=0 hits=0 misses=2 threads=2
+probe71 built: coll=0 large_free=0 hits=0 misses=515 threads=2 declined=0 shape(chunks,tpos,front_before,back_before)={544, 256, 0, 256}
+probe71 collected: coll=1 declined=0 shape={543, 286, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x164626768040 front=0x164625368040..0x164626754040 back=0x164626b6c040..0x164627f58040
+1 examples, 0 failures, 0 errors, 0 pending
+== run 1
+..................................................................probe71 entry: coll=156 large_free=3129344 hits=0 misses=0 threads=3
+probe71 built: coll=156 large_free=2965504 hits=2 misses=511 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={667, 256, 0, 256}
+probe71 collected: coll=157 declined=0 shape={666, 409, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1e2327284040 front=0x1e23245f8040..0x1e2327270040 back=0x1e2327688040..0x1e2328a74040
+286 examples, 0 failures, 0 errors, 0 pending
+== run 2
+..................................................................probe71 entry: coll=157 large_free=3129344 hits=0 misses=0 threads=3
+probe71 built: coll=157 large_free=2965504 hits=2 misses=511 threads=3 declined=0 shape(chunks,tpos,front_before,back_before)={668, 256, 0, 256}
+probe71 collected: coll=158 declined=0 shape={667, 410, 256, 0} lazy=true threads=DEFAULT-0,SYSMON,gc-idle
+probe71 addrs: target=0x1335010dc040 front=0x1334fe1b8040..0x1335010c8040 back=0x1335014e0040..0x1335028cc040
+286 examples, 0 failures, 0 errors, 0 pending

@@ -1,0 +1,16 @@
+# 41293138039
+-macos-15-intel Primes 0.92x/0.93x | JsonParsePure 0.80x/0.82x | Binarytrees 0.96x/0.96x | JsonGenerate 0.65x/0.65x | JsonParseSerializable 0.80x/0.76x | JsonParsePull 0.86x/0.81x | Revcomp 0.55x/0.65x | RegexDna 0.42x/0.55x | Knuckeotide 1.56x/1.56x
+-macos-latest Primes 0.89x/0.89x | JsonParsePure 0.92x/0.92x | Binarytrees 0.94x/0.94x | JsonGenerate 0.64x/0.74x | JsonParseSerializable 0.88x/0.89x | JsonParsePull 0.83x/0.84x | Revcomp 0.61x/0.61x | RegexDna 0.43x/0.43x | Knuckeotide 1.32x/1.32x
+-ubuntu-24.04-arm Primes 0.93x/0.93x | JsonParsePure 1.07x/1.07x | Binarytrees 0.68x/0.66x | JsonGenerate 0.59x/0.59x | JsonParseSerializable 0.85x/0.84x | JsonParsePull 0.86x/0.85x | Revcomp 0.76x/0.76x | RegexDna 0.42x/0.42x | Knuckeotide 1.16x/1.16x
+-ubuntu-latest Primes 0.93x/0.93x | JsonParsePure 0.80x/0.79x | Binarytrees 0.74x/0.74x | JsonGenerate 0.63x/0.63x | JsonParseSerializable 0.80x/0.77x | JsonParsePull 0.85x/0.82x | Revcomp 0.64x/0.64x | RegexDna 0.55x/0.55x | Knuckeotide 1.51x/1.34x
+-windows-latest Primes 0.93x/0.94x | JsonParsePure 1.07x/1.07x | Binarytrees 0.92x/0.92x | JsonGenerate 0.58x/0.58x | JsonParseSerializable 0.79x/0.78x | JsonParsePull 0.79x/0.78x | Revcomp 0.57x/0.57x | RegexDna 0.43x/0.43x | Knuckeotide 1.71x/1.71x
+# 41293132278
+-macos-15-intel Primes 0.92x/0.93x | JsonParsePure 0.80x/0.81x | Binarytrees 0.96x/0.96x | JsonGenerate 0.65x/0.65x | JsonParseSerializable 0.81x/0.77x | JsonParsePull 0.86x/0.85x | Revcomp 0.53x/0.53x | RegexDna 0.42x/0.42x | Knuckeotide 1.56x/1.56x
+-macos-latest Primes 0.89x/0.89x | JsonParsePure 0.92x/0.92x | Binarytrees 0.94x/0.94x | JsonGenerate 0.64x/0.64x | JsonParseSerializable 0.83x/0.84x | JsonParsePull 0.83x/0.84x | Revcomp 0.61x/0.61x | RegexDna 0.43x/0.43x | Knuckeotide 1.31x/1.29x
+-ubuntu-24.04-arm Primes 0.93x/0.93x | JsonParsePure 1.07x/1.07x | Binarytrees 0.74x/0.74x | JsonGenerate 0.58x/0.58x | JsonParseSerializable 0.90x/0.84x | JsonParsePull 0.99x/0.85x | Revcomp 0.67x/0.67x | RegexDna 0.42x/0.42x | Knuckeotide 1.16x/1.15x
+-ubuntu-latest Primes 0.93x/0.93x | JsonParsePure 0.80x/0.80x | Binarytrees 0.74x/0.74x | JsonGenerate 0.59x/0.59x | JsonParseSerializable 0.80x/0.75x | JsonParsePull 0.85x/0.79x | Revcomp 0.59x/0.59x | RegexDna 0.48x/0.48x | Knuckeotide 1.43x/1.48x
+-windows-latest Primes 0.93x/0.93x | JsonParsePure 1.07x/1.07x | Binarytrees 0.92x/0.92x | JsonGenerate 0.58x/0.58x | JsonParseSerializable 0.80x/0.77x | JsonParsePull 0.80x/0.77x | Revcomp 0.57x/0.57x | RegexDna 0.43x/0.43x | Knuckeotide 1.63x/1.60x
+# 41297103900
+-macos-15-intel Primes 0.92x/0.93x | JsonParsePure 0.80x/0.82x | Binarytrees 0.96x/0.96x | JsonGenerate 0.64x/0.65x | JsonParseSerializable 0.81x/0.76x | JsonParsePull 0.86x/0.81x | Revcomp 0.52x/0.68x | RegexDna 0.38x/0.38x | Knuckeotide 1.56x/1.56x
+-ubuntu-latest Primes 0.93x/0.93x | JsonParsePure 0.80x/0.80x | Binarytrees 0.74x/0.74x | JsonGenerate 0.62x/0.62x | JsonParseSerializable 0.79x/0.81x | JsonParsePull 0.81x/0.84x | Revcomp 0.59x/0.59x | RegexDna 0.48x/0.48x | Knuckeotide 1.40x/1.39x
+-windows-latest Primes 0.93x/0.92x | JsonParsePure 1.07x/1.07x | Binarytrees 0.92x/0.92x | JsonGenerate 0.58x/0.58x | JsonParseSerializable 0.79x/0.78x | JsonParsePull 0.79x/0.78x | Revcomp 0.60x/0.60x | RegexDna 0.43x/0.43x | Knuckeotide 1.33x/1.60x

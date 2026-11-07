@@ -1,0 +1,13 @@
+Machine code: bench/churn.cr, crystal build -Dgc_none --release --no-debug, x86-64,
+base = release-0.40.0 (a40ec329), var = inc-begin-040 (this branch's src).
+objdump -d per symbol, addresses and call targets normalised (mc_diff.py).
+functions: base 981, var 979
+changed: ['*Crystal::System::print_error<String, String>:Nil', '*Gcry::Heap#collect_a_little<Int32>:Bool']
+  *Crystal::System::print_error<String, String>:Nil: 113 -> 112 instructions
+  *Gcry::Heap#collect_a_little<Int32>:Bool: 554 -> 605 instructions
+only in base: ['*Gcry::Heap#lock_write:Nil', '*Gcry::Heap#mark_large_alloc_in_flight:Nil']
+  (out-of-line copies whose only remaining caller in base was collect_a_little:
+   callers of lock_write in base: ['*Gcry::Heap#lock_write:Nil', '*Gcry::Heap#collect_a_little<Int32>:Bool'];
+   of mark_large_alloc_in_flight: ['*Gcry::Heap#mark_large_alloc_in_flight:Nil', '*Gcry::Heap#collect_a_little<Int32>:Bool'])
+only in var: []
+print_error: register allocation only (the crash-report writer; not on any allocation or collection path).

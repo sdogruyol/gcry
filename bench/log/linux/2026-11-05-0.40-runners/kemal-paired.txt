@@ -1,0 +1,8 @@
+ubuntu-latest /json var-vs-base -1.7% [-3.5, +0.5] peak -0.0% [-0.2, +0.1] | baseprepad64=103.5 var=106.6 baseprepad16=108.9 base=110.3 prepad64=110.7 prepad16=108.8
+ubuntu-latest / var-vs-base -0.8% [-1.6, -0.1] peak +0.6% [+0.3, +1.1] | prepad64=99.9 prepad16=100.3 baseprepad64=99.8 var=100.0 baseprepad16=99.4 base=100.7
+ubuntu-24.04-arm /json var-vs-base +0.1% [-5.9, +3.6] peak +0.1% [-0.2, +0.1] | prepad16=106.7 prepad64=106.9 var=104.8 baseprepad64=103.0 baseprepad16=104.3 base=107.1
+ubuntu-24.04-arm / var-vs-base -0.5% [-3.1, +1.9] peak +0.1% [-0.3, +0.2] | base=101.5 var=100.2 baseprepad16=102.3 prepad16=102.5 prepad64=100.8 baseprepad64=99.6
+macos-latest /json var-vs-base -1.3% [-4.5, +2.4] peak -0.9% [-2.6, -0.0] | base=102.0 baseprepad64=102.3 prepad64=101.8 baseprepad16=101.5 var=101.4 prepad16=104.6
+macos-latest / var-vs-base +4.1% [-1.4, +15.8] peak -1.1% [-1.6, -0.9] | baseprepad16=106.0 var=100.8 base=93.0 prepad64=103.5 baseprepad64=100.9 prepad16=98.3
+macos-15-intel /json var-vs-base -1.8% [-2.8, +4.5] peak -1.6% [-2.2, -0.8] | var=106.1 prepad64=107.9 baseprepad64=104.7 prepad16=106.5 base=107.5 baseprepad16=105.6
+macos-15-intel / var-vs-base +5.1% [-9.8, +24.6] peak -0.8% [-1.8, -0.6] | var=103.4 baseprepad16=99.4 baseprepad64=100.3 base=101.6 prepad16=99.9 prepad64=103.7

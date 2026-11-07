@@ -1,0 +1,28 @@
+hdrba0 1 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 2 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 3 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 4 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 5 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 6 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 7 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 8 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 9 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 10 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 11 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 12 rc=1 fail=[1_live_objects_dormant_spec.cr:91 ] {count=10000 drift=-50002 | count=1000 drift=-2} 275 examples, 1 failures, 0 errors, 2 pending
+hdrba0 13 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 14 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 15 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 16 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 17 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 18 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 19 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 20 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 21 rc=1 fail=[1_live_objects_dormant_spec.cr:91 ] {count=10000 drift=-15985 | count=1000 drift=-2} 275 examples, 1 failures, 0 errors, 2 pending
+hdrba0 22 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 23 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 24 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 25 rc=1 fail=[1_live_objects_dormant_spec.cr:91 ] {count=10000 drift=-70174 | count=1000 drift=-2} 275 examples, 1 failures, 0 errors, 2 pending
+hdrba0 26 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 27 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending
+hdrba0 28 rc=0 fail=[] {} 275 examples, 0 failures, 0 errors, 2 pending

@@ -1,0 +1,20 @@
+old_hdr 1 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 2 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 3 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 4 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 5 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 6 rc=1 fail=[1_live_objects_dormant_spec.cr ] other=[] 213 examples, 1 failures, 0 errors, 2 pending
+old_hdr 7 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 8 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 9 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 10 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 11 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 12 rc=1 fail=[61_free_link_holder_spec.cr ] other=[] 213 examples, 1 failures, 0 errors, 2 pending
+old_hdr 13 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 14 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 15 rc=1 fail=[61_free_link_holder_spec.cr ] other=[] 213 examples, 1 failures, 0 errors, 2 pending
+old_hdr 16 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 17 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 18 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending
+old_hdr 19 rc=1 fail=[61_free_link_holder_spec.cr ] other=[] 213 examples, 1 failures, 0 errors, 2 pending
+old_hdr 20 rc=0 fail=[] other=[] 213 examples, 0 failures, 0 errors, 2 pending

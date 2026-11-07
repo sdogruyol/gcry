@@ -1,0 +1,70 @@
+name: probe large-cache flush
+
+# Research probe (ROADMAP: "A cached large chunk released while something
+# still read its block header"). Runs the queued (default) arm's children of
+# `bench/dormant_flush_race.cr` --child, the sighting's configuration (default
+# headerless bitmap layout, lazy sweep after the world, per-free mutator trims
+# restored), many times, and keeps the whole output of every failing child.
+on:
+  push:
+    branches: ["probe/large-cache-flush"]
+
+jobs:
+  stress:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+        shard: [1, 2, 3]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    name: stress ${{ matrix.os }} ${{ matrix.shard }}
+    env:
+      CHILDREN: "200"
+      PARALLEL: "2"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: c0d570c52793cfa144d88f3f4b600c839f7a40ce
+      - timeout-minutes: 5
+        continue-on-error: true
+        uses: ./.github/actions/apt-update
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none bench/dormant_flush_race.cr -o bin/dormant_flush_race --error-trace
+      - name: Children
+        run: |
+          mkdir -p out
+          one() {
+            i=$1
+            GCRY_MOSTLY_EMPTY=1 GCRY_UNMAP_GUARD=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=5000 \
+              timeout 300 bin/dormant_flush_race --child > out/$i.log 2>&1
+            rc=$?
+            echo "$i $rc" >> out/results.txt
+            grep -h '^child: [0-9]* corrupt verifies' out/$i.log >> out/traffic.txt
+            [ $rc -eq 0 ] && rm -f out/$i.log
+            return 0
+          }
+          export -f one
+          start=$(date +%s)
+          seq 1 "$CHILDREN" | xargs -P "$PARALLEL" -I{} bash -c 'one {}'
+          end=$(date +%s)
+          total=$(wc -l < out/results.txt)
+          bad=$(awk '$2 != 0' out/results.txt | wc -l)
+          hung=$(awk '$2 == 124' out/results.txt | wc -l)
+          awk '{for (k = 1; k < NF; k++) { if ($k == "walks") w += $(k+1); if ($k == "queued") q += $(k+1); if ($k == "direct") d += $(k+1); if ($k == "lg_by_sweep") s += $(k+1) }; n++} END { printf "TRAFFIC children=%d walks=%d queued=%d direct=%d lg_by_sweep=%d\n", n, w, q, d, s }' out/traffic.txt
+          echo "RESULT os=${{ matrix.os }} shard=${{ matrix.shard }} children=$total failed=$bad timed_out=$hung seconds=$((end - start))"
+          for f in out/*.log; do
+            [ -e "$f" ] || continue
+            echo "=== $f"
+            grep -v '^gcry: large ' "$f" | grep -v 'is ignored on the headerless layout' | head -60
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: out-${{ matrix.os }}-${{ matrix.shard }}
+          path: out/

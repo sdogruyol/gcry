@@ -1,0 +1,16 @@
+## /json
+v039p64  req/s median     46813 (min 45346 max 47778, n=9)  100.0% of first arm  peak RSS   19.9 MB (1.00x)
+boehm    req/s median     44618 (min 43797 max 44961, n=9)   95.3% of first arm  peak RSS   16.0 MB (0.80x)
+v039     req/s median     46819 (min 46181 max 47736, n=9)  100.0% of first arm  peak RSS   19.9 MB (1.00x)
+v040p64  req/s median     46524 (min 44804 max 48283, n=9)   99.4% of first arm  peak RSS   19.9 MB (1.00x)
+v040p16  req/s median     46293 (min 45237 max 46659, n=9)   98.9% of first arm  peak RSS   19.9 MB (1.00x)
+v039p16  req/s median     45611 (min 44894 max 46740, n=9)   97.4% of first arm  peak RSS   19.8 MB (1.00x)
+v040     req/s median     46077 (min 44795 max 47666, n=9)   98.4% of first arm  peak RSS   19.8 MB (1.00x)
+## /
+v039p64  req/s median     72561 (min 68670 max 75465, n=9)  100.0% of first arm  peak RSS   19.7 MB (1.00x)
+boehm    req/s median     72848 (min 68708 max 75394, n=9)  100.4% of first arm  peak RSS   16.0 MB (0.81x)
+v039     req/s median     71509 (min 68238 max 74197, n=9)   98.6% of first arm  peak RSS   19.7 MB (1.00x)
+v040p64  req/s median     71257 (min 68638 max 76477, n=9)   98.2% of first arm  peak RSS   19.8 MB (1.00x)
+v040p16  req/s median     71729 (min 67022 max 72486, n=9)   98.9% of first arm  peak RSS   19.8 MB (1.00x)
+v039p16  req/s median     71753 (min 68826 max 74392, n=9)   98.9% of first arm  peak RSS   19.7 MB (1.00x)
+v040     req/s median     71586 (min 67653 max 76168, n=9)   98.7% of first arm  peak RSS   19.8 MB (1.00x)

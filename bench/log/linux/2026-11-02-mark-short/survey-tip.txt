@@ -1,0 +1,27 @@
+# survey.sh tip (07b61d28), one run each, default markers, taskset -c 0-3
+Pidigits               gcs   98 scanned/gc med        252 KiB min       71 max       324 mark    0.914 ms
+Binarytrees            gcs  222 scanned/gc med         86 KiB min       71 max      8226 mark   19.072 ms
+Brainfuck              gcs    3 scanned/gc med         72 KiB min       71 max        72 mark    0.028 ms
+Brainfuck2             gcs    3 scanned/gc med         76 KiB min       71 max        77 mark    0.028 ms
+Fannkuchredux          gcs    3 scanned/gc med         71 KiB min       71 max        72 mark    0.026 ms
+Fasta                  gcs   15 scanned/gc med         72 KiB min       71 max        72 mark    0.169 ms
+Knuckeotide            gcs   69 scanned/gc med         78 KiB min       71 max      6216 mark   10.013 ms
+Mandelbrot             gcs    3 scanned/gc med         72 KiB min       71 max        72 mark    0.029 ms
+Matmul                 gcs    6 scanned/gc med        160 KiB min       71 max       187 mark    0.183 ms
+Nbody                  gcs    3 scanned/gc med         72 KiB min       71 max        72 mark    0.026 ms
+RegexDna               gcs   25 scanned/gc med         71 KiB min       71 max        73 mark    0.345 ms
+Revcomp                gcs   28 scanned/gc med         71 KiB min       71 max        72 mark    0.403 ms
+Spectralnorm           gcs    3 scanned/gc med         71 KiB min       71 max        72 mark    0.029 ms
+Threadring             gcs    3 scanned/gc med        217 KiB min      114 max       217 mark    0.090 ms
+Base64Encode           gcs  393 scanned/gc med         72 KiB min       71 max        72 mark    1.472 ms
+Base64Decode           gcs  224 scanned/gc med         72 KiB min       71 max        72 mark    0.850 ms
+Primes                 gcs    9 scanned/gc med         74 KiB min       71 max    321251 mark   79.634 ms
+JsonGenerate           gcs   14 scanned/gc med     136096 KiB min     2706 max    352235 mark  167.983 ms
+JsonParsePure          gcs   15 scanned/gc med      87609 KiB min     2706 max    358558 mark  124.523 ms
+JsonParseSerializable  gcs   14 scanned/gc med       8107 KiB min       72 max    161364 mark   41.165 ms
+JsonParsePull          gcs   13 scanned/gc med      10856 KiB min       72 max    161364 mark   41.245 ms
+Mandelbrot2            gcs   26 scanned/gc med         71 KiB min       71 max        72 mark    0.155 ms
+Noise                  gcs    5 scanned/gc med         78 KiB min       71 max        81 mark    0.059 ms
+Sudoku                 gcs    4 scanned/gc med         79 KiB min       71 max       115 mark    0.054 ms
+TextRaytracer          gcs    3 scanned/gc med         72 KiB min       71 max        72 mark    0.026 ms
+NeuralNet              gcs   71 scanned/gc med         76 KiB min       71 max        76 mark    0.433 ms

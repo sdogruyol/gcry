@@ -1,0 +1,200 @@
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index c17d7b84..05385e49 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -3038,12 +3038,14 @@ module Gcry
+     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false,
+                                idle : Bool = false, release_warm : Bool = false) : Nil
+       @collect_entry_sp = Roots.hardware_stack_pointer.address
++      dbg_watch_idle_slot("enter")
+       # Everything below the SP is dead here, and it is last cycle's collector
+       # residue. Zero it before this cycle's scan chain overlays and scans it,
+       # then the band the scrub's own call left (`collect_band_wipe`).
+       collect_scrub
+       collect_band_wipe_here
+       run_collection_body(major, scan_stack, roots, coalesce, idle, release_warm)
++      dbg_watch_idle_slot("exit")
+       # The frames this cycle just used are dead below the SP again. Zero them
+       # so nothing between now and the next entry scans them as live.
+       collect_scrub
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 3d275833..9edd8ca7 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -294,11 +294,19 @@ module Gcry
+       when RootSource::Stack
+         @first_mark_stack_objects += 1
+         @first_mark_stack_bytes += bytes
++        if bytes > (1_u64 << 20) && @dbg_stack_user == 0
++          @dbg_stack_user = user_of(chunk, header).address
++          @dbg_stack_bytes = bytes
++        end
+         @first_mark_stack_atomic_bytes += bytes if atomic
+       when RootSource::Parked
+         @first_mark_parked_objects += 1
+         @first_mark_parked_bytes += bytes
+         @first_mark_parked_atomic_bytes += bytes if atomic
++        if bytes > (1_u64 << 20) && @dbg_seed_user == 0
++          @dbg_seed_user = user_of(chunk, header).address
++          @dbg_seed_bytes = bytes
++        end
+       when RootSource::Static
+         @first_mark_static_objects += 1
+         @first_mark_static_bytes += bytes
+diff --git a/src/gcry/collect_scan.cr b/src/gcry/collect_scan.cr
+index 4cd5ba31..b088f64f 100644
+--- a/src/gcry/collect_scan.cr
++++ b/src/gcry/collect_scan.cr
+@@ -17,6 +17,10 @@ module Gcry
+       Roots.scan_stack(top, bottom, top, bottom) do |candidate|
+         mark_root_candidate(candidate, source: RootSource::Parked)
+       end
++      if @dbg_seed_user != 0
++        LibC.dprintf(2, "DBG big parked seed from PUSH_STACK top=%#lx bottom=%#lx user=%#lx\n", top, bottom, @dbg_seed_user)
++        @dbg_seed_user = 0_u64
++      end
+     end
+ 
+     # `push_stack` for a range registered as a root (`GC_add_roots`,
+@@ -803,9 +807,58 @@ module Gcry
+           mark_root_candidate(candidate, source: RootSource::Stack)
+         end
+       end
++      dbg_stack_seed(bottom.address, stack.pointer.address)
+       scan_precise_mutator_stack(bottom)
+     end
+ 
++    def dbg_chunks_with(v : UInt64) : Nil
++      each_chunk do |c|
++        base = c.address
++        m = c.value.mapped_bytes
++        ext = ChunkHeader.large?(c) ? large_grow_extent(c) : 0_u64
++        hi = base &+ (ext > m ? ext : m)
++        if v >= base && v < hi
++          LibC.dprintf(2, "DBG     chunk base=%#lx mapped=%lu extent=%lu large=%d class=%lu\n",
++            base, m, ext, ChunkHeader.large?(c) ? 1 : 0, c.value.size_class.to_u64!)
++        end
++      end
++    end
++
++    @dbg_stack_user = 0_u64
++    @dbg_stack_bytes = 0_u64
++
++    def dbg_stack_seed(bottom : UInt64, base : UInt64) : Nil
++      user = @dbg_stack_user
++      return if user == 0
++      @dbg_stack_user = 0_u64
++      fin = user &+ @dbg_stack_bytes
++      sp = Roots.hardware_stack_pointer.address
++      t = Thread.current?
++      tn = t ? t.name : nil
++      f = Fiber.current
++      fnm = f.name
++      LibC.dprintf(2, "DBG big stack seed user=%#lx bytes=%lu thread=%s fiber=%s base=%#lx bottom=%#lx sp=%#lx entry_sp=%#lx collections=%lu\n",
++        user, @dbg_stack_bytes, tn ? tn.to_unsafe : "(nil)".to_unsafe, fnm ? fnm.to_unsafe : "(nil)".to_unsafe, base, bottom, sp, @collect_entry_sp, @collections)
++      a = (sp &- 8192) & ~7_u64
++      a = base if a < base
++      n = 0
++      while a < bottom && n < 12
++        if Roots.page_readable?(a & ~(Roots::PAGE_SIZE &- 1))
++          v = Pointer(UInt64).new(a).value
++          if v >= user && v < fin
++            LibC.dprintf(2, "DBG   holder slot=%#lx below_bottom=%lu above_sp=%ld above_entry_sp=%ld value=user+%lu\n",
++              a, bottom &- a, a.to_i64 &- sp.to_i64, a.to_i64 &- @collect_entry_sp.to_i64, v &- user)
++            dbg_chunks_with(v) if v != user
++            n += 1
++          end
++          a &+= 8
++        else
++          a = (a & ~(Roots::PAGE_SIZE &- 1)) &+ Roots::PAGE_SIZE
++        end
++      end
++      LibC.dprintf(2, "DBG   holders in stack window: %d\n", n)
++    end
++
+     # Below SP (+ red zone): catch LLVM spill slots maps/FP walk miss without
+     # scanning the whole fiber high-water (exclusive's RSS point). 4 KiB was
+     # too shallow under acik --release (ThreadPool UAF / collect hang); 16 KiB
+@@ -1461,10 +1514,67 @@ module Gcry
+             mark_root_candidate(candidate, source: RootSource::Parked)
+           end
+         end
++        dbg_after_fiber(fiber, top, bottom, stw_multi)
+       end
+       scan_fork_orphan_roots
+     end
+ 
++    def dbg_watch_idle_slot(where : String) : Nil
++      cur = Thread.current?
++      cn = cur ? cur.name : nil
++      Thread.unsafe_each do |thread|
++        next unless thread.name == "gc-idle"
++        mf = thread.@main_fiber
++        next unless mf
++        bottom = mf.@stack.bottom.address
++        v = Pointer(UInt64).new(bottom &- 4984).value
++        LibC.dprintf(2, "DBG watch %s collections=%lu collector=%s slot=%#lx value=%#lx parked_sp=%#lx\n",
++          where.to_unsafe, @collections, cn ? cn.to_unsafe : "(nil)".to_unsafe, bottom &- 4984, v, IdleRelease.parked_sp)
++      end
++    end
++
++    @dbg_seed_user = 0_u64
++    @dbg_seed_bytes = 0_u64
++
++    def dbg_after_fiber(fiber : Fiber, top : UInt64, bottom : UInt64, stw_multi : Bool) : Nil
++      user = @dbg_seed_user
++      return if user == 0
++      @dbg_seed_user = 0_u64
++      fin = user &+ @dbg_seed_bytes
++      name = fiber.name
++      LibC.dprintf(2, "DBG big parked seed user=%#lx bytes=%lu fiber=%#lx name=%s running=%d base=%#lx bottom=%#lx stack_top=%#lx scan_top=%#lx scanned=%lu stw_multi=%d own_sp=%#lx\n",
++        user, @dbg_seed_bytes, fiber.object_id, name ? name.to_unsafe : "(nil)".to_unsafe, fiber.running? ? 1 : 0,
++        fiber.@stack.pointer.address, bottom, fiber.@context.stack_top.address, top, bottom &- top, stw_multi ? 1 : 0,
++        Roots.hardware_stack_pointer.address)
++      Thread.unsafe_each do |thread|
++        cf = thread.@current_fiber
++        mf = thread.@main_fiber
++        on = cf && cf == fiber
++        own = mf && mf == fiber
++        sp = other_thread_scan_sp(thread)
++        tn = thread.name
++        LibC.dprintf(2, "DBG   thread=%#lx name=%s current_is=%d main_is=%d sp=%#lx exempt=%d current_fiber=%#lx\n",
++          thread.object_id, tn ? tn.to_unsafe : "(nil)".to_unsafe, on ? 1 : 0, own ? 1 : 0, sp ? sp.address : 0_u64,
++          stw_signal_exempt?(thread) ? 1 : 0, cf ? cf.object_id : 0_u64)
++      end
++      a = top & ~7_u64
++      n = 0
++      while a < bottom && n < 8
++        if Roots.page_readable?(a & ~(Roots::PAGE_SIZE &- 1))
++          v = Pointer(UInt64).new(a).value
++          if v >= user && v < fin
++            LibC.dprintf(2, "DBG   holder slot=%#lx below_bottom=%lu above_stack_top=%ld value=user+%lu\n",
++              a, bottom &- a, (a.to_i64 &- fiber.@context.stack_top.address.to_i64), v &- user)
++            dbg_chunks_with(v)
++            n += 1
++          end
++          a &+= 8
++        else
++          a = (a & ~(Roots::PAGE_SIZE &- 1)) &+ Roots::PAGE_SIZE
++        end
++      end
++    end
++
+     # A forked child's dead threads (`Platform.unlist_threads_after_fork`):
+     # what they held at the fork stays as reachable as it was. Each `Thread`
+     # is marked as `scan_thread_roots` marks a listed one, and their stacks
+diff --git a/src/gcry/unowned_stack_roots.cr b/src/gcry/unowned_stack_roots.cr
+index 6e17ddc9..cc0f123f 100644
+--- a/src/gcry/unowned_stack_roots.cr
++++ b/src/gcry/unowned_stack_roots.cr
+@@ -87,6 +87,10 @@ module Gcry
+         words.value &+= 1
+         mark_root_candidate(candidate, source: RootSource::Parked) if offer
+       end
++      if @dbg_seed_user != 0
++        LibC.dprintf(2, "DBG big parked seed from DEAD FIBER STACK lo=%#lx hi=%#lx user=%#lx\n", lo, hi, @dbg_seed_user)
++        @dbg_seed_user = 0_u64
++      end
+     end
+ 
+     private def plausible_stack_range?(lo : UInt64, hi : UInt64) : Bool

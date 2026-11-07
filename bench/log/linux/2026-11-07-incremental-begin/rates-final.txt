@@ -1,0 +1,44 @@
+## headerless 1.21 unpinned
+110-fixed 100 0
+110-control 100 0
+108-fixed 100 0
+108-control 100 0
+99-race-fixed 100 0
+99-race-control 100 0
+99-nocards-fixed 100 0
+99-nocards-control 100 0
+99-softdirty-fixed 100 0
+99-softdirty-control 100 0
+## headerless 1.21 pinned
+110-fixed 100 0
+110-control 100 0
+108-fixed 100 0
+108-control 100 0
+99-race-fixed 100 0
+99-race-control 100 0
+99-nocards-fixed 100 0
+99-nocards-control 100 0
+99-softdirty-fixed 100 0
+99-softdirty-control 100 0
+## headers GCRY_BITMAP_ALLOC=0 unpinned
+110-fixed 100 0
+110-control 100 0
+108-fixed 100 0
+108-control 100 0
+99-race-fixed 100 0
+99-race-control 100 0
+99-nocards-fixed 100 0
+99-nocards-control 100 0
+99-softdirty-fixed 100 0
+99-softdirty-control 100 0
+## headers GCRY_BITMAP_ALLOC=0 pinned
+110-fixed 100 0
+110-control 100 0
+108-fixed 100 0
+108-control 100 0
+99-race-fixed 100 0
+99-race-control 100 0
+99-nocards-fixed 100 0
+99-nocards-control 100 0
+99-softdirty-fixed 100 0
+99-softdirty-control 100 0

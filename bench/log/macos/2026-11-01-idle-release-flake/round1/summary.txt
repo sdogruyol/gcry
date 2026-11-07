@@ -1,0 +1,20 @@
+v038    load  runs=1005 rc={'0': 999, '1': 6} kept_nonzero=6 idle_start p50=116.7 p99=222.2 max=254.7 ms; end max=266.9; no idle gc in last gap: 5
+    kept=5767168 reread=0 idle_start=-1.0 idle_end=-1.0 slept=201.678 idle=32/72 shard=1 round=7 p2
+    kept=5242880 reread=0 idle_start=-1.0 idle_end=-1.0 slept=203.224 idle=31/71 shard=1 round=50 p2
+    kept=4456448 reread=0 idle_start=213.187 idle_end=221.288 slept=207.049 idle=23/62 shard=2 round=2 p1
+    kept=6815744 reread=0 idle_start=-1.0 idle_end=-1.0 slept=204.694 idle=25/65 shard=2 round=26 p1
+    kept=5505024 reread=0 idle_start=-1.0 idle_end=-1.0 slept=215.263 idle=29/69 shard=2 round=54 p2
+    kept=4456448 reread=0 idle_start=-1.0 idle_end=-1.0 slept=208.761 idle=29/69 shard=3 round=32 p2
+v038    plain runs= 338 rc={'0': 338} kept_nonzero=0 idle_start p50=132.6 p99=227.3 max=236.2 ms; end max=249.0; no idle gc in last gap: 0
+v039    load  runs=1011 rc={'0': 1009, '1': 2} kept_nonzero=2 idle_start p50=114.7 p99=229.5 max=262.5 ms; end max=272.0; no idle gc in last gap: 2
+    kept=5505024 reread=0 idle_start=-1.0 idle_end=-1.0 slept=201.253 idle=29/69 shard=1 round=84 p3
+    kept=6815744 reread=0 idle_start=-1.0 idle_end=-1.0 slept=204.597 idle=33/73 shard=2 round=20 p3
+v039    plain runs= 338 rc={'0': 338} kept_nonzero=0 idle_start p50=128.7 p99=223.8 max=251.3 ms; end max=259.8; no idle gc in last gap: 0
+v039rc  load  runs=1011 rc={'0': 1006, '1': 5} kept_nonzero=5 idle_start p50=119.2 p99=225.2 max=243.5 ms; end max=258.8; no idle gc in last gap: 5
+    kept=5505024 reread=0 idle_start=-1.0 idle_end=-1.0 slept=201.442 idle=31/71 shard=1 round=39 p1
+    kept=5767168 reread=0 idle_start=-1.0 idle_end=-1.0 slept=201.124 idle=29/69 shard=1 round=39 p2
+    kept=3932160 reread=0 idle_start=-1.0 idle_end=-1.0 slept=223.52 idle=30/71 shard=1 round=76 p1
+    kept=3670016 reread=0 idle_start=-1.0 idle_end=-1.0 slept=235.568 idle=25/65 shard=2 round=61 p3
+    kept=4718592 reread=0 idle_start=-1.0 idle_end=-1.0 slept=204.831 idle=24/64 shard=4 round=66 p2
+v039rc  plain runs= 338 rc={'0': 337, '1': 1} kept_nonzero=1 idle_start p50=132.6 p99=231.7 max=261.2 ms; end max=274.7; no idle gc in last gap: 1
+    kept=3670016 reread=0 idle_start=-1.0 idle_end=-1.0 slept=208.04 idle=29/69 shard=3 round=37 p1

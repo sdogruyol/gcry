@@ -1,0 +1,67 @@
+# Heap#malloc's word advance (cursor_advance_word inlined), x86_64-windows-msvc, crystal 1.21.0 --release -Dgc_none, crystal-metric main.cr
+# 0.39.0 (v0.39.0)
+   18c72:      	movq	0x70(%rsp), %r9
+   18c77:      	testq	%r11, %r11
+   18c7a:      	jne	0x18d97 <Heap#malloc+0x4e7>
+   18c80:      	incq	%r8
+   18c83:      	movq	%r8, 0x30(%rsp)
+   18c88:      	cmpq	%r9, %r8
+   18c8b:      	je	0x18d83 <Heap#malloc+0x4d3>
+   18c91:      	movq	0x28(%rsp), %rax
+   18c96:      	cmpl	$0x0, 0x1c(%rax)
+   18c9a:      	movq	0x30(%rsp), %r8
+   18c9f:      	je	0x18c80 <Heap#malloc+0x3d0>
+   18ca1:      	movq	(%r10,%r8,8), %r11
+   18ca5:      	notq	%r11
+   18ca8:      	cmpq	%rdi, %r8
+   18cab:      	jne	0x18cbd <Heap#malloc+0x40d>
+   18cad:      	cmpb	$0x0, 0x27(%rsp)
+   18cb2:      	jne	0x1912c <Heap#malloc+0x87c>
+   18cb8:      	andq	0x50(%rsp), %r11
+   18cbd:      	cmpb	$0x1, 0x4290(%rcx)
+# claim of a word with free blocks (no FREEING test):
+   18d97:      	movl	%r8d, 0x8(%r12)
+   18d9c:      	testq	%r8, %r8
+
+# 0.40 (07b61d28)
+   18d46:      	incq	%r8
+   18d49:      	movq	%r8, 0x38(%rsp)
+   18d4e:      	cmpq	%r9, %r8
+   18d51:      	je	0x18ea0 <Heap#malloc+0x520>
+   18d57:      	movq	0x28(%rsp), %rax
+   18d5c:      	cmpl	$0x0, 0x1c(%rax)
+   18d60:      	movq	0x38(%rsp), %r8
+   18d65:      	je	0x18d46 <Heap#malloc+0x3c6>
+   18d67:      	movq	0x30(%rsp), %rax
+   18d6c:      	movq	(%rax,%r8,8), %r11
+   18d70:      	notq	%r11
+   18d73:      	cmpq	%r10, %r8
+   18d76:      	jne	0x18d88 <Heap#malloc+0x408>
+   18d78:      	cmpb	$0x0, 0x27(%rsp)
+   18d7d:      	jne	0x1922b <Heap#malloc+0x8ab>
+   18d83:      	andq	0x50(%rsp), %r11
+   18d88:      	cmpb	$0x1, 0x42b0(%rcx)
+   18d8f:      	jne	0x18d3d <Heap#malloc+0x3bd>
+   18d91:      	testq	%r11, %r11
+   18d94:      	je	0x18d3d <Heap#malloc+0x3bd>
+   18d96:      	movq	0x28(%rsp), %rax
+# claim of a word with free blocks: FREEING read (a plain movl; the acquire fence emits nothing), then the claim
+   18e4e:      	movq	0x28(%rsp), %rax
+   18e53:      	movl	0x14(%rax), %eax
+   18e56:      	testl	$0x1000, %eax           # imm = 0x1000
+   18e5b:      	jne	0x18e93 <Heap#malloc+0x513>
+   18e5d:      	movq	0x38(%rsp), %rax
+   18e62:      	movl	%eax, 0x8(%r12)
+   18e67:      	testq	%rax, %rax
+
+# FREEING's two locked RMWs: only in GC.free_impl (explicit GC.free; called by zlib's and GMP's free hooks in Crystal 1.21's stdlib, not by these benches)
+    f079:      	cmpb	$0x1, %r13b
+    f07d:      	jne	0xf087 <.2A.GC.3A..3A.free_impl.3C.Pointer.28.Void.29..3E..3A.Nil+0xa97>
+    f07f:      	lock
+    f080:      	orl	$0x1000, 0x14(%rdi)     # imm = 0x1000
+    f087:      	lock
+    f088:      	andq	%r12, (%rax,%r14,8)
+    f0c8:      	testb	%r13b, %r13b
+    f0cb:      	je	0xf0d5 <.2A.GC.3A..3A.free_impl.3C.Pointer.28.Void.29..3E..3A.Nil+0xae5>
+    f0cd:      	lock
+    f0ce:      	andl	$0xffffefff, 0x14(%rdi) # imm = 0xFFFFEFFF

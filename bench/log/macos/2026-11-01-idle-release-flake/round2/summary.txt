@@ -1,0 +1,48 @@
+== shard 1
+alone:
+nanosleep 12.5 ms x 2000: p50=41.34 p90=62.09 p99=71.23 p99.9=124.52 max=127.19 ms; over 25 ms: 1385, over 50 ms: 826, over 100 ms: 4
+three at once:
+nanosleep 12.5 ms x 2000: p50=35.14 p90=59.57 p99=65.61 p99.9=83.3 max=98.46 ms; over 25 ms: 1397, over 50 ms: 646, over 100 ms: 0
+nanosleep 12.5 ms x 2000: p50=34.39 p90=59.63 p99=66.47 p99.9=90.3 max=99.06 ms; over 25 ms: 1368, over 50 ms: 627, over 100 ms: 0
+nanosleep 12.5 ms x 2000: p50=34.99 p90=59.91 p99=66.07 p99.9=80.67 max=98.47 ms; over 25 ms: 1374, over 50 ms: 631, over 100 ms: 0
+1: rounds=126 runs=1001
+  fix plain: runs=126 rc={'0': 126} last-gap read p50=292.6 max=373.7 ms, over 205 ms: 126
+  gateonly plain: runs=125 rc={'0': 125} last-gap read p50=304.9 max=372.1 ms, over 205 ms: 125
+  fix load: runs=375 rc={'0': 375} last-gap read p50=295.2 max=367.7 ms, over 205 ms: 375
+  gateonly load: runs=375 rc={'0': 375} last-gap read p50=275.7 max=370.4 ms, over 205 ms: 374
+== shard 2
+alone:
+nanosleep 12.5 ms x 2000: p50=44.79 p90=62.0 p99=66.35 p99.9=103.37 max=124.59 ms; over 25 ms: 1383, over 50 ms: 896, over 100 ms: 3
+three at once:
+nanosleep 12.5 ms x 2000: p50=35.64 p90=60.31 p99=65.76 p99.9=89.14 max=92.32 ms; over 25 ms: 1395, over 50 ms: 680, over 100 ms: 0
+nanosleep 12.5 ms x 2000: p50=34.65 p90=59.89 p99=64.7 p99.9=73.98 max=81.93 ms; over 25 ms: 1369, over 50 ms: 679, over 100 ms: 0
+nanosleep 12.5 ms x 2000: p50=36.23 p90=60.47 p99=65.55 p99.9=76.67 max=92.0 ms; over 25 ms: 1410, over 50 ms: 706, over 100 ms: 0
+2: rounds=127 runs=1016
+  fix plain: runs=127 rc={'0': 127} last-gap read p50=284.0 max=365.1 ms, over 205 ms: 126
+  gateonly plain: runs=127 rc={'0': 127} last-gap read p50=282.6 max=382.0 ms, over 205 ms: 127
+  fix load: runs=381 rc={'0': 381} last-gap read p50=282.3 max=363.8 ms, over 205 ms: 377
+  gateonly load: runs=381 rc={'0': 381} last-gap read p50=269.2 max=365.1 ms, over 205 ms: 379
+== shard 3
+alone:
+nanosleep 12.5 ms x 2000: p50=53.52 p90=107.99 p99=114.82 p99.9=122.62 max=257.47 ms; over 25 ms: 1420, over 50 ms: 1045, over 100 ms: 370
+three at once:
+nanosleep 12.5 ms x 2000: p50=59.95 p90=108.2 p99=119.26 p99.9=122.61 max=122.64 ms; over 25 ms: 1521, over 50 ms: 1095, over 100 ms: 373
+nanosleep 12.5 ms x 2000: p50=61.5 p90=108.21 p99=118.81 p99.9=122.67 max=122.79 ms; over 25 ms: 1546, over 50 ms: 1119, over 100 ms: 387
+nanosleep 12.5 ms x 2000: p50=62.57 p90=108.09 p99=119.06 p99.9=122.59 max=122.62 ms; over 25 ms: 1584, over 50 ms: 1139, over 100 ms: 359
+3: rounds=128 runs=1021
+  fix plain: runs=128 rc={'0': 128} last-gap read p50=285.0 max=366.9 ms, over 205 ms: 128
+  gateonly plain: runs=128 rc={'0': 128} last-gap read p50=302.5 max=361.0 ms, over 205 ms: 128
+  fix load: runs=384 rc={'0': 384} last-gap read p50=291.7 max=364.3 ms, over 205 ms: 382
+  gateonly load: runs=381 rc={'0': 381} last-gap read p50=303.8 max=366.8 ms, over 205 ms: 379
+== shard 4
+alone:
+nanosleep 12.5 ms x 2000: p50=36.17 p90=62.59 p99=109.41 p99.9=115.13 max=137.71 ms; over 25 ms: 1351, over 50 ms: 761, over 100 ms: 49
+three at once:
+nanosleep 12.5 ms x 2000: p50=60.44 p90=108.13 p99=115.97 p99.9=160.14 max=210.55 ms; over 25 ms: 1545, over 50 ms: 1152, over 100 ms: 428
+nanosleep 12.5 ms x 2000: p50=57.05 p90=108.14 p99=116.93 p99.9=163.03 max=203.93 ms; over 25 ms: 1513, over 50 ms: 1113, over 100 ms: 408
+nanosleep 12.5 ms x 2000: p50=59.86 p90=108.95 p99=117.95 p99.9=203.95 max=210.54 ms; over 25 ms: 1512, over 50 ms: 1133, over 100 ms: 454
+4: rounds=126 runs=1005
+  fix plain: runs=126 rc={'0': 126} last-gap read p50=294.2 max=373.6 ms, over 205 ms: 126
+  gateonly plain: runs=126 rc={'0': 126} last-gap read p50=304.7 max=376.2 ms, over 205 ms: 125
+  fix load: runs=378 rc={'0': 378} last-gap read p50=285.0 max=373.4 ms, over 205 ms: 376
+  gateonly load: runs=375 rc={'0': 375} last-gap read p50=280.0 max=367.4 ms, over 205 ms: 373

@@ -14,9 +14,10 @@
 #
 # PASS needs all of:
 #   * no live object reads back wrong;
-#   * idle collections actually happened (`idle_collections > 0`), and the last
-#     one released every empty chunk it found — `fully_free - released -
-#     dormant == 0`, which only a releasing collection gives;
+#   * idle collections actually happened (`idle_collections > 0`), the idle
+#     stretch after the last burst got one, and it released every empty chunk
+#     it found — `fully_free - released - dormant == 0`, which only a
+#     releasing collection gives;
 #   * finalizers ran as promptly as without it, and none on the idle thread;
 #   * nothing collects at idle while `GC.disable` is in force.
 #
@@ -98,6 +99,9 @@ corrupt = 0
 first_round = -1
 first_id = 0_u64
 first_word = 0
+# The idle collections before the last gap, and when that gap began.
+idle_before_last = 0_u64
+last_gap_start = Time.instant
 
 rounds.times do |round|
   (live_n // 10).times do
@@ -109,9 +113,14 @@ rounds.times do |round|
   fsink = nil.as(Finalized?)
   200.times { fsink = Finalized.new }
 
-  # The last gap is long enough that the idle collection certainly runs, so
-  # the release check below reads a heap it has just swept.
+  # The last gap is the idle time four times over, and the release check below
+  # then waits for the idle collection it was for, rather than assuming the
+  # gap held it.
   gap = round == rounds - 1 ? idle_ms * 4 : idle_ms * (100 + rng.rand(101)) // 100
+  if round == rounds - 1
+    idle_before_last = heap.idle_collections
+    last_gap_start = Time.instant
+  end
   sleep gap.milliseconds
 
   live.each do |obj|
@@ -126,16 +135,48 @@ rounds.times do |round|
   end
 end
 
-# What the last collection left, read before anything below allocates. On
-# macOS an idle collection leaves empties dormant (released in place) rather
-# than unmapped, and the `GC.disable` arm's allocations can revive one: the
-# revival takes its bytes out of `dormant_chunk_bytes` (bitmap_alloc.cr,
+# The last gap's idle collection, waited for. The idle thread decides on
+# polls a quarter of the idle time apart, and on macos-latest its collection
+# lands late: a probe of this gate saw the last gap's begin a median 132 ms
+# into the 200 ms gap (58 ms on a Linux host), after 200 ms in 86 of 1 014
+# runs, and as late as 377 ms. A read made at 200 ms then found the burst's
+# own ordinary collection — the warm budget kept, 18 chunks in the failure of
+# run 41209225316 — with the release still to come
+# (`bench/log/macos/2026-11-01-idle-release-flake/`). Waiting changes when the
+# check reads, not what it requires: an idle collection must still come, and
+# the counters are read from it. Ten seconds is 200 idle times at 50 ms; none
+# arriving is the idle stretch never collected, and fails. The wait allocates
+# nothing, so the read still comes before anything that could revive a
+# dormant chunk.
+#
+# On macOS an idle collection leaves empties dormant (released in place)
+# rather than unmapped, and the `GC.disable` arm's allocations can revive one:
+# the revival takes its bytes out of `dormant_chunk_bytes` (bitmap_alloc.cr,
 # heap.cr) while the last sweep's `fully_free_chunk_bytes` still counts them.
 # Read after those allocations, the sum came out as two chunks "kept" —
 # 524 288 on macos-26-arm64, master run 38034037360 and again on this
 # branch's run 38074816599 — with nothing wrong with the release.
-kept_empty = heap.fully_free_chunk_bytes.to_i64 - heap.released_chunk_bytes.to_i64 -
-             heap.dormant_chunk_bytes.to_i64
+#
+# And read again if a collection began across the read: a sweep in flight
+# zeroes the three sums and refills them chunk by chunk. The idle thread runs
+# one more when the collection it ran overlapped the burst's last
+# allocations, which re-armed it.
+idle_armed = Gcry::IdleRelease.armed?
+kept_empty = 0_i64
+loop do
+  if idle_armed
+    until heap.idle_collections > idle_before_last && !heap.collecting?
+      break if Time.instant - last_gap_start > 10.seconds
+      sleep 1.millisecond
+    end
+  end
+  cols = heap.collections
+  kept_empty = heap.fully_free_chunk_bytes.to_i64 - heap.released_chunk_bytes.to_i64 -
+               heap.dormant_chunk_bytes.to_i64
+  break unless heap.collecting? || heap.collections != cols
+end
+last_gap_idle = heap.idle_collections > idle_before_last
+idle_wait_ms = (Time.instant - last_gap_start).total_milliseconds
 
 # `GC.disable` must hold off the idle collector: no collection the program did
 # not ask for. The check sits under the post-STW lock, because the one made
@@ -157,6 +198,9 @@ fin_idle = FinLog.on_idle
 
 puts "idle release: #{rounds} bursts, gaps of 1-2 x #{idle_ms} ms, #{live_n} checksummed live objects"
 puts "  idle collections #{idle} of #{heap.collections}"
+if idle_armed
+  puts "  the last gap's idle collection: #{last_gap_idle ? "finished, read #{idle_wait_ms.round(1)} ms after the burst" : "none in 10 s"}"
+end
 puts "  empty chunks left mapped by the last collection #{kept_empty}"
 puts "  finalizers run #{fin_ran}, on the idle thread #{fin_idle}"
 puts "  idle collections while GC.disable'd: #{disabled_idle}"
@@ -167,6 +211,9 @@ if corrupt > 0
 end
 if idle == 0
   puts "FAIL: no collection ran at idle"
+  fail = true
+elsif idle_armed && !last_gap_idle
+  puts "FAIL: no idle collection in the 10 s after the last burst — that idle stretch was never collected"
   fail = true
 elsif kept_empty != 0
   puts "FAIL: the last collection kept #{kept_empty} bytes of empty chunks mapped — it did not release"

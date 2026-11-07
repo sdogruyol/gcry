@@ -1,0 +1,13 @@
+== ../bin/r109h
+fixed: nohit109: fixed: 1 of 8 kept after three collections, 0 pinned chunk(s) skipped by the sweep
+fixed: nohit109: blocks freed
+.control: nohit109: control: 8 of 8 kept after three collections, 12 pinned chunk(s) skipped by the sweep
+control: nohit109: blocks kept
+.stamped: nohit109: stamped: 43398 blocks allocated through the fallback across 20 collections, 20 swept after the world, 0 stamp(s) broken
+stamped: nohit109: stamps held
+6 examples, 0 failures, 0 errors, 0 pending
+== env GCRY_BITMAP_ALLOC=0 ../bin/r109h
+fixed: nohit109: blocks not where the regression needs them, skipped: not on the fallback set's chunk (0 sets)
+.control: nohit109: blocks not where the regression needs them, skipped: not on the fallback set's chunk (0 sets)
+.stamped: nohit109: blocks not where the regression needs them, skipped: the allocating thread is not on the fallback set (0 sets)
+6 examples, 0 failures, 0 errors, 0 pending

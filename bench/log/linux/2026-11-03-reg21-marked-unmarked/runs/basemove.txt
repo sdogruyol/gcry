@@ -1,0 +1,6 @@
+basemove 1 rc=1 moved=1 390 examples, 1 failures, 0 errors, 3 pending fails=[21_boehm_c_abi_spec.cr:115 ]
+basemove 2 rc=1 moved=1 390 examples, 1 failures, 0 errors, 3 pending fails=[21_boehm_c_abi_spec.cr:115 ]
+basemove 3 rc=1 moved=1 390 examples, 1 failures, 0 errors, 3 pending fails=[21_boehm_c_abi_spec.cr:115 ]
+basemove 4 rc=1 moved=1 390 examples, 1 failures, 0 errors, 3 pending fails=[21_boehm_c_abi_spec.cr:115 ]
+basemove 5 rc=1 moved=1 390 examples, 1 failures, 0 errors, 3 pending fails=[21_boehm_c_abi_spec.cr:115 ]
+basemove 6 rc=1 moved=1 390 examples, 1 failures, 0 errors, 3 pending fails=[21_boehm_c_abi_spec.cr:115 ]

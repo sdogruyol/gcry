@@ -1,0 +1,19 @@
+--- base/process_spec/regression/21_boehm_c_abi_spec.cr
++++ forced_base/21_boehm_c_abi_spec.cr
+@@ -1,4 +1,4 @@
+-require "../../src/gcry"
++require "../base/src/gcry"
+ require "spec"
+ 
+ # Readiness B4 / M8: code compiled against Boehm's C API inside a gcry process.
+@@ -124,6 +124,10 @@
+       hidden
+     end
+     collect
++    # Forced claim (Reg21c): one 256-byte atomic allocation after the
++    # collections, as a finalizer or another thread can make.
++    forced = LibGC.malloc_atomic(BLOCK_BYTES)
++    forced.as(UInt8*).clear(BLOCK_BYTES)
+     controls.count { |h| live_and_intact?(h) }.should be <= 1
+     kept.each { |h| live_and_intact?(h).should be_true }
+   end

@@ -97,6 +97,14 @@ module Gcry
       @@birth_released.set(1)
     end
 
+    # Research only, the control arm of
+    # `process_spec/regression/93_idle_stretch_inside_collection_spec.cr`:
+    # take the activity baseline *after* each idle collection, as before
+    # 2026-11-01 (`loop_forever`). An allocation that lands while the
+    # collection is still finishing is then counted in the baseline, and the
+    # idle stretch it begins is never collected.
+    class_property? baseline_after_collect : Bool = false
+
     # Is *fiber* the idle collector's? It runs only its thread's main fiber.
     # For the research skip below only.
     def self.fiber?(fiber : Fiber) : Bool
@@ -166,7 +174,80 @@ module Gcry
       @@started = true
       # Not `gcry-`: that prefix tells the thread census a thread is one of
       # gcry's raw helpers, outside Crystal's list. This one is on the list.
-      @@thread = Thread.new(name: "gc-idle") { loop_forever }
+      # The block is the thread's outermost gcry frame, and `loop_forever`'s
+      # is built under it only once the stack below has been zeroed: see
+      # `birth_residue_kept`.
+      @@thread = Thread.new(name: "gc-idle") do
+        plant_for_test if @@test_birth_plant != 0
+        unless @@birth_residue_kept
+          scrub_birth_stack
+          # The band that left under this frame, and the frame it ran on: the
+          # allocation slow path's frameless wipe, 1 KiB down from this SP.
+          # Unoptimised, its calls are not inlined and leave their return
+          # addresses and a pushed register above the wipe, none of them a
+          # heap address.
+          Roots.wipe_below_sp(Roots.wipe_limit(Roots.hardware_stack_pointer.address))
+        end
+        loop_forever
+      end
+    end
+
+    # The idle thread zeroes its stack below the block that starts it before
+    # `loop_forever` builds its frame there. That frame never returns, and
+    # the scan reads it at every collection for as long as the process
+    # lives (from `parked_sp` on Linux, the suspend SP elsewhere); a slot of
+    # it the function never writes keeps whatever the thread's birth left
+    # at that depth — `Thread#start` allocates the main `Fiber` there just
+    # before. `scrub_dead_stack` cannot reach it: it clears below the SP,
+    # and the slot is above it.
+    #
+    # That is what held `make parallel-dormant`'s burst in CI (job
+    # 125102880486) and 0.3–0.5% of local runs: in that build the slot at
+    # `parked_sp + 32`, eight bytes of `loop_forever`'s frame of which only a
+    # `Bool` local writes one, held an address left from the birth, and it
+    # named a word inside the burst's 3.6 MiB outer-array buffer whenever the
+    # buffer was mapped where that address pointed: 36 MB kept for good,
+    # "seeded by … parked 3713 KiB"
+    # (`bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`). From the
+    # pages the birth touched, so the whole stack is clean, not only the
+    # window under the loop frame; a fresh stack has a few.
+    #
+    # Research only, the control arm of
+    # `process_spec/regression/104_unwritten_root_words_spec.cr`: `true`
+    # leaves the birth's residue where it is, as before 2026-11-03.
+    class_property? birth_residue_kept : Bool = false
+
+    # Research only, for regression 104: when not 0, the address
+    # `test_birth_plant ^ BIRTH_PLANT_KEY` is written over 64 KiB of this
+    # thread's stack under the block, before the birth scrub, standing in for
+    # a birth that left a pointer there. Stored masked so the field is no root.
+    class_property test_birth_plant : UInt64 = 0_u64
+    BIRTH_PLANT_KEY   = 0x6b6b_9494_6b6b_9494_u64
+    BIRTH_PLANT_WORDS =                      8192
+
+    @[NoInline]
+    private def self.plant_for_test : Nil
+      pad = uninitialized StaticArray(UInt64, BIRTH_PLANT_WORDS)
+      word = @@test_birth_plant ^ BIRTH_PLANT_KEY
+      BIRTH_PLANT_WORDS.times { |i| pad[i] = word }
+      asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
+    end
+
+    # Everything the birth touched below this call's SP, less `SCRUB_SKIP`
+    # for the `memset` frame: from the lowest faulted page, since a page never
+    # faulted holds nothing, or `SCRUB_BYTES` when the probe cannot say. The
+    # caller wipes the skipped band and this call's own frame.
+    @[NoInline]
+    private def self.scrub_birth_stack : Nil
+      stack = Fiber.current.@stack
+      floor = stack.pointer.address + Platform.host_page_size
+      sp = Roots.hardware_stack_pointer.address
+      return if sp <= floor + SCRUB_SKIP
+      high = sp - SCRUB_SKIP
+      low = Platform.stack_low_water(floor, high)
+      low = high > floor + SCRUB_BYTES ? high - SCRUB_BYTES : floor if low <= floor
+      return if low >= high
+      Pointer(UInt8).new(low).clear(high - low)
     end
 
     # Dead stack zeroed below this thread's SP before every park. A thread's
@@ -194,6 +275,9 @@ module Gcry
       Pointer(UInt8).new(low).clear(high - low)
     end
 
+    # Never inlined into the block in `ensure_started`: its frame must be
+    # built after the birth scrub, not as part of the block's.
+    @[NoInline]
     def self.loop_forever : Nil
       # Poll at a quarter of the idle time, clamped: the collection lands
       # within ~1.25x the configured delay, and an idle process wakes a few
@@ -261,8 +345,14 @@ module Gcry
         next if now - last_change < @@idle_ns
         heap.idle_collect
         collected = true
-        # The collection's own bookkeeping is not the mutator waking up.
-        last_total = heap.allocation_activity
+        # The baseline stays `total`, read before the collection: an
+        # allocation from the moment it was read on — the collection does
+        # none — is the mutator waking up, and the next poll re-arms. Read
+        # again here, the baseline took in an allocation that landed while
+        # the collection was finishing, and the idle stretch that allocation
+        # began never got its collection: the program kept its warm budget
+        # for good. `process_spec/regression/93_idle_stretch_inside_collection_spec.cr`.
+        last_total = heap.allocation_activity if @@baseline_after_collect
       end
     end
   end

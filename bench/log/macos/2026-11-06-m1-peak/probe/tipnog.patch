@@ -1,0 +1,13 @@
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 783f7a0f..cccee545 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -249,7 +249,7 @@ module Gcry
+       return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
+       survived = Heap.pace_survived(survived, @bytes_before_gc, prev_survived, prev_allocated)
+       @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
+-        now - cycle_started_ns, base, @threshold_pace_max_pct, @mark_scanned_bytes, survived)
++        now - cycle_started_ns, base, @threshold_pace_max_pct)
+     end
+ 
+     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.

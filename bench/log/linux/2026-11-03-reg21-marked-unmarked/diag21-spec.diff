@@ -1,0 +1,31 @@
+diff --git a/process_spec/regression/21_boehm_c_abi_spec.cr b/process_spec/regression/21_boehm_c_abi_spec.cr
+index 2bb6d99e..9cd2c267 100644
+--- a/process_spec/regression/21_boehm_c_abi_spec.cr
++++ b/process_spec/regression/21_boehm_c_abi_spec.cr
+@@ -1,5 +1,6 @@
+ require "../../src/gcry"
+ require "spec"
++require "./21_diag"
+ 
+ # Readiness B4 / M8: code compiled against Boehm's C API inside a gcry process.
+ # `crystal i` runs its program with the Boehm prelude and resolves `LibGC` from
+@@ -115,7 +116,7 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
+   it "keeps a block alive from a GC_add_roots range, and only then" do
+     controls = Array(UInt64).new(8) do
+       unrooted = libc_word
+-      fresh_block { |p| unrooted.value = p }
++      fresh_block { |p| unrooted.value = p; Diag21.at_alloc(p) }
+     end
+     kept = Array(UInt64).new(8) do
+       rooted = libc_word
+@@ -123,7 +124,9 @@ describe "Boehm's GC_* C ABI in a gcry program (B4/M8)" do
+       LibGC.add_roots(rooted.as(Void*), (rooted + 1).as(Void*))
+       hidden
+     end
+-    collect
++    Diag21.arm(controls)
++    Diag21.collect3(controls)
++    Diag21.report(controls, ->(h : UInt64) { live_and_intact?(h) })
+     controls.count { |h| live_and_intact?(h) }.should be <= 1
+     kept.each { |h| live_and_intact?(h).should be_true }
+   end

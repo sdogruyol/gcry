@@ -1,0 +1,121 @@
+diff --git a/src/gcry/c_abi.cr b/src/gcry/c_abi.cr
+index 72ce1f6f..d61b2ed8 100644
+--- a/src/gcry/c_abi.cr
++++ b/src/gcry/c_abi.cr
+@@ -236,13 +236,12 @@ module Gcry
+     end
+ 
+     # Boehm's `GC_base`: the start of the live block containing *pointer*, or
+-    # null. Interior pointers resolve, as in Boehm. A block a cursor has
+-    # claimed and not handed out is not live (`find_live_object_with_chunk`).
++    # null. Interior pointers resolve, as in Boehm.
+     def self.base(pointer : Void*) : Void*
+       return Pointer(Void).null if pointer.null?
+       heap = Gcry.default_heap?
+       return Pointer(Void).null unless heap
+-      found = heap.find_live_object_with_chunk(pointer)
++      found = heap.find_object_with_chunk(pointer)
+       return Pointer(Void).null unless found
+       header, chunk = found
+       heap.user_of(chunk, header)
+@@ -270,7 +269,7 @@ module Gcry
+                                 order : Finalizers::Order) : Nil
+       previous = {Pointer(Void).null, Pointer(Void).null}
+       heap = Gcry.default_heap?
+-      if heap && (found = heap.find_live_object_with_chunk(object))
++      if heap && (found = heap.find_object_with_chunk(object))
+         header, chunk = found
+         if heap.user_of(chunk, header) == object
+           previous = heap.replace_c_finalizer(object, fn.pointer, data, order)
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 783f7a0f..073211b8 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -2624,31 +2624,6 @@ module Gcry
+       {header, chunk}
+     end
+ 
+-    # `find_object_with_chunk` less a block a cursor has claimed and not
+-    # handed out (`block_allocated_exact?`): the live block a pointer names,
+-    # for the lookups that answer "live" to a program — `GC_base`, `GC_size`,
+-    # a finalizer's registration. The raw lookup is right for the pointers a
+-    # program holds, which a claim never covers; a pointer it keeps after the
+-    # block was freed is another matter. A claim takes every free block of a
+-    # bitmap word at once, so the first allocation after a sweep in that
+-    # block's class, on any thread, made every freed block of the word read
+-    # live again, with its old bytes intact: regression 21's eight control
+-    # blocks, freed by its three collections, were all answered by `GC_base`
+-    # once one 256-byte atomic allocation had claimed their word
+-    # (`bench/log/linux/2026-11-04-reg21-claimed-controls/FINDINGS.md`).
+-    # `process_spec/regression/106_claimed_block_not_live_spec.cr`.
+-    def find_live_object_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
+-      found = find_object_with_chunk(pointer)
+-      return nil unless found
+-      return found unless @live_lookup_exact
+-      header, chunk = found
+-      block_allocated_exact?(chunk, header) ? found : nil
+-    end
+-
+-    # Off only for regression 106's control arm: the live lookups answer a
+-    # claimed block as live again, as before (`find_live_object_with_chunk`).
+-    property live_lookup_exact : Bool = true
+-
+     protected def maybe_collect : Nil
+       return unless @enabled
+       return if @collecting
+diff --git a/src/gcry/heap.cr b/src/gcry/heap.cr
+index f69a61aa..26d9e25b 100644
+--- a/src/gcry/heap.cr
++++ b/src/gcry/heap.cr
+@@ -742,26 +742,9 @@ module Gcry
+         @slow_wipe_sp = sp if @slow_wipe_sp == 0 && sp < watch && watch &- sp < 65536
+       end
+       Roots.wipe_below_sp(limit)
+-      return allocate_traced_below_gap(size, flags & 1 != 0, flags & 2 != 0) if @slow_wipe_gap
+       allocate_traced(size, flags & 1 != 0, flags & 2 != 0)
+     end
+ 
+-    # Research only, regression 86's known stale words: `allocate_traced`'s
+-    # frame and the collector's, built below `SLOW_WIPE_GAP_WORDS` words that
+-    # nothing writes, inside the band `allocate_wipe` clears (1 KiB below its
+-    # SP). Whatever the stack held there before the allocation (the pattern
+-    # the spec plants) is still there at the collection unless the wipe ran,
+-    # on every target and whatever the hit path's frame looks like.
+-    @[NoInline]
+-    private def allocate_traced_below_gap(size : UInt64, atomic : Bool, clear : Bool) : Void*
+-      gap = uninitialized StaticArray(UInt64, SLOW_WIPE_GAP_WORDS)
+-      asm("" :: "r"(gap.to_unsafe) : "memory" : "volatile")
+-      ptr = allocate_traced(size, atomic, clear)
+-      asm("" :: "r"(gap.to_unsafe) : "memory" : "volatile")
+-      ptr
+-    end
+-
+-    SLOW_WIPE_GAP_WORDS = 32
+     @[NoInline]
+     private def allocate_traced(size : UInt64, atomic : Bool, clear : Bool) : Void*
+       ptr = allocate(size, atomic: atomic, clear: clear)
+@@ -784,9 +767,6 @@ module Gcry
+     # called with: the wipe must start within a frame record of it.
+     property slow_wipe_watch : UInt64 = 0_u64
+     property slow_wipe_sp : UInt64 = 0_u64
+-    # Regression 86: build the slow path's frames below an unwritten gap
+-    # (`allocate_traced_below_gap`).
+-    property slow_wipe_gap : Bool = false
+ 
+     # Boehm's `GC_realloc`: null is `malloc(size)`, and size 0 frees
+     # `pointer` and answers null (`mallocx.c`, as C's `realloc` does in glibc).
+@@ -803,11 +783,10 @@ module Gcry
+     # Boehm's `GC_size`: the usable size of the live block containing
+     # `pointer` — its base or any byte inside it, as Boehm accepts — at least
+     # what was requested for it. 0 when no live block of this heap contains
+-    # `pointer` (null, freed — a cursor's claim included — LibC, another
+-    # heap). Crystal's std_spec asks it about a `String`'s data, which starts
+-    # inside the block.
++    # `pointer` (null, freed, LibC, another heap). Crystal's std_spec asks it
++    # about a `String`'s data, which starts inside the block.
+     def usable_size(pointer : Void*) : UInt64
+-      found = find_live_object_with_chunk(pointer)
++      found = find_object_with_chunk(pointer)
+       return 0_u64 unless found
+       header, chunk = found
+       owned_size(chunk, header)

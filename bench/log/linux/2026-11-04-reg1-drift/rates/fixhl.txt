@@ -1,0 +1,6 @@
+fixhl 1 rc=0 fail=[] {} 280 examples, 0 failures, 0 errors, 2 pending
+fixhl 2 rc=0 fail=[] {} 280 examples, 0 failures, 0 errors, 2 pending
+fixhl 3 rc=0 fail=[] {} 280 examples, 0 failures, 0 errors, 2 pending
+fixhl 4 rc=0 fail=[] {} 280 examples, 0 failures, 0 errors, 2 pending
+fixhl 5 rc=0 fail=[] {} 280 examples, 0 failures, 0 errors, 2 pending
+fixhl 6 rc=0 fail=[] {} 280 examples, 0 failures, 0 errors, 2 pending

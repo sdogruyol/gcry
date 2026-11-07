@@ -64,7 +64,7 @@ module Gcry::Platform
     false
   end
 
-  def self.each_mprotect_dirty_page(& : UInt64 ->) : Nil
+  def self.each_mprotect_dirty_page(low : UInt64, high : UInt64, & : UInt64 ->) : Nil
   end
 
   def self.clear_mprotect_dirty_bits : Nil

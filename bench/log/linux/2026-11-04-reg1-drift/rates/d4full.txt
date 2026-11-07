@@ -1,0 +1,8 @@
+d4full 1 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d4full 2 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d4full 3 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d4full 4 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d4full 5 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d4full 6 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d4full 7 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending
+d4full 8 rc=0 fail=[] {} 428 examples, 0 failures, 0 errors, 2 pending

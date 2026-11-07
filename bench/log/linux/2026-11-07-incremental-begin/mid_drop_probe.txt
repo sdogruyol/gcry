@@ -1,0 +1,10 @@
+arm=fixed hook: ticket=1 open=0 mprotect=1 stack=36 | after collect: open=false backend=none stack=0 | slice: ran=1 open=1 mprotect=1 stack=36 result=1 | chain alive 20000/20000
+arm=control hook: ticket=1 open=1 mprotect=1 stack=36 | after collect: open=true backend=none stack=0 | slice: ran=1 open=1 mprotect=0 stack=0 result=1 | chain alive 20000/20000
+arm=fixed hook: ticket=1 open=0 mprotect=1 stack=36 | after collect: open=false backend=none stack=0 | slice: ran=1 open=1 mprotect=1 stack=36 result=1 | chain alive 20000/20000
+arm=control hook: ticket=1 open=1 mprotect=1 stack=36 | after collect: open=true backend=none stack=0 | slice: ran=1 open=1 mprotect=0 stack=0 result=1 | chain alive 20000/20000
+arm=fixed hook: ticket=1 open=0 mprotect=1 stack=36 | after collect: open=false backend=none stack=0 | slice: ran=1 open=1 mprotect=1 stack=36 result=1 | chain alive 20000/20000
+arm=control hook: ticket=1 open=1 mprotect=1 stack=36 | after collect: open=true backend=none stack=0 | slice: ran=1 open=1 mprotect=0 stack=0 result=1 | chain alive 20000/20000
+arm=fixed hook: ticket=1 open=0 mprotect=1 stack=36 | after collect: open=false backend=none stack=0 | slice: ran=1 open=1 mprotect=1 stack=36 result=1 | chain alive 20000/20000
+arm=control hook: ticket=1 open=1 mprotect=1 stack=36 | after collect: open=true backend=none stack=0 | slice: ran=1 open=1 mprotect=0 stack=0 result=1 | chain alive 20000/20000
+arm=fixed hook: ticket=1 open=0 mprotect=1 stack=36 | after collect: open=false backend=none stack=0 | slice: ran=1 open=1 mprotect=1 stack=36 result=1 | chain alive 20000/20000
+arm=control hook: ticket=1 open=1 mprotect=1 stack=36 | after collect: open=true backend=none stack=0 | slice: ran=1 open=1 mprotect=0 stack=0 result=1 | chain alive 20000/20000

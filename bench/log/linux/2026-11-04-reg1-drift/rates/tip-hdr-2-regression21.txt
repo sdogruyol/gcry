@@ -1,0 +1,24 @@
+unplanted: scrub101: wipe true, band 192 bytes, its low end 784 bytes below the entry SP
+unplanted: scrub101: target freed
+..**...
+
+Pending:
+  Boehm's GC_* C ABI in a gcry program (B4/M8) defines GC_stackbottom where crystal i looks for it, tracking the main thread's stack bottom
+  Regression: on macOS no heap mapping lies where a 33-bit integer points fixed arm in a process of its own
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Failures:
+
+  1) Boehm's GC_* C ABI in a gcry program (B4/M8) keeps a block alive from a GC_add_roots range, and only then
+     Failure/Error: controls.count { |h| live_and_intact?(h) }.should be <= 1
+
+       Expected 8 to be LessOrEqual 1
+
+     # process_spec/regression/21_boehm_c_abi_spec.cr:127
+
+Finished in 39.19 seconds
+275 examples, 1 failures, 0 errors, 3 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/21_boehm_c_abi_spec.cr:115 # Boehm's GC_* C ABI in a gcry program (B4/M8) keeps a block alive from a GC_add_roots range, and only then

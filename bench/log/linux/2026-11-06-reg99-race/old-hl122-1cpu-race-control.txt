@@ -1,0 +1,19 @@
+mprotect99 race: the queued slice returned false
+F
+
+Failures:
+
+  1) Regression: the mprotect dirty-page scan against a chunk set that moved since the arm mprotect-outside-cards child race-control
+     Failure/Error: {% if flag?(:linux) %}
+
+       Expected: 2
+            got: 1
+
+     # process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:435
+
+Finished in 35.34 milliseconds
+1 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:699 # Regression: the mprotect dirty-page scan against a chunk set that moved since the arm mprotect-outside-cards child race-control

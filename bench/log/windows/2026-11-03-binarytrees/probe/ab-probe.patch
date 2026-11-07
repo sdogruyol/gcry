@@ -1,0 +1,79 @@
+diff --git a/bench/runner_ab/ab.py b/bench/runner_ab/ab.py
+index 9e4c427c..5070cddd 100644
+--- a/bench/runner_ab/ab.py
++++ b/bench/runner_ab/ab.py
+@@ -112,6 +112,7 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
+     m = [x for x in LINE.finditer(text) if x.group(1) == bench]
+     mark = collections = scanned = None
+     per_collection = []
++    gc_sums = {}
+     if os.path.exists(trace):
+         with open(trace) as f:
+             ends = [json.loads(l) for l in f if '"collect_end"' in l]
+@@ -121,9 +122,12 @@ def run_one(exe, bench, trace, args=None, extra_env=None):
+         # grows scans the sum of its live set at those points, so a change
+         # that moves them moves Σ mark without costing anything per byte.
+         per_collection = [e.get("scanned_bytes", 0) for e in ends]
++        # Probe only (probe/winbt): Σ of each phase over the run, ms.
++        gc_sums = {k: sum(e.get(k + "_ns", 0) for e in ends) / 1e6
++                   for k in ("pause", "clear", "scrub", "roots", "static", "stacks", "sweep", "stw_stop", "stw_start", "flush")}
+     r = dict(rc=rc, wall=wall, peak=peak, utime=utime, stime=stime, faults=faults, mark=mark,
+              collections=collections, scanned=scanned, scanned_per_collection=per_collection,
+-             time=None, result=None)
++             time=None, result=None, **gc_sums)
+     if m:
+         r["time"] = float(m[-1].group(4))
+         r["result"] = "ok" if m[-1].group(2) == "ok" else m[-1].group(3).strip()
+diff --git a/bench/runner_ab/ab.sh b/bench/runner_ab/ab.sh
+index 85264f76..bb12f0fb 100755
+--- a/bench/runner_ab/ab.sh
++++ b/bench/runner_ab/ab.sh
+@@ -142,6 +142,48 @@ if [ "$AB_BENCHES" != - ]; then
+     padded build "$psrc" "ab-$pname" -Dgc_none
+     arms+=(--arm "$pname=$root/bin/ab-$pname$exe")
+   done
++  # Probe only (probe/winbt). AB_REVERTS="name=sha,sha[:pN] ...": arm rv_<name>
++  # (rv_<name>_pN when padded), this checkout's source with those commits
++  # reverted. AB_PATCHES="name=file[:pN] ...": arm pt_<name>, the source with
++  # that patch applied. AB_ENVARMS="name=arm:K=V,K=V ...": arm <name>, arm's
++  # binary under that environment.
++  for spec in ${AB_REVERTS:-}; do
++    rn=${spec%%=*} rshas=${spec#*=} rpad=""
++    case "$rshas" in *:*) rpad=${rshas#*:} rshas=${rshas%%:*} ;; esac
++    if [ ! -d "../ab-rv-$rn" ]; then
++      git worktree add -q --detach "../ab-rv-$rn" HEAD
++      # shellcheck disable=SC2086
++      (cd "../ab-rv-$rn" && git -c user.email=ab@probe -c user.name=ab revert --no-commit ${rshas//,/ } && git diff --cached --stat HEAD)
++    fi
++    an="rv_$rn${rpad:+_$rpad}"
++    if [ -n "$rpad" ]; then PREPAD=${rpad#p} build "../ab-rv-$rn" "ab-$an" -Dgc_none; else build "../ab-rv-$rn" "ab-$an" -Dgc_none; fi
++    arms+=(--arm "$an=$root/bin/ab-$an$exe")
++  done
++  for spec in ${AB_PATCHES:-}; do
++    rn=${spec%%=*} rpatch=${spec#*=} rpad=""
++    case "$rpatch" in *:*) rpad=${rpatch#*:} rpatch=${rpatch%%:*} ;; esac
++    if [ ! -d "../ab-pt-$rn" ]; then
++      git worktree add -q --detach "../ab-pt-$rn" HEAD
++      (cd "../ab-pt-$rn" && git apply "$root/$rpatch" && git diff --stat)
++    fi
++    an="pt_$rn${rpad:+_$rpad}"
++    if [ -n "$rpad" ]; then PREPAD=${rpad#p} build "../ab-pt-$rn" "ab-$an" -Dgc_none; else build "../ab-pt-$rn" "ab-$an" -Dgc_none; fi
++    arms+=(--arm "$an=$root/bin/ab-$an$exe")
++  done
++  for spec in ${AB_ENVARMS:-}; do
++    en=${spec%%=*} rest=${spec#*=}
++    ebin=${rest%%:*} ekv=${rest#*:}
++    arms+=(--arm "$en=$root/bin/ab-$ebin$exe")
++    for kv in ${ekv//,/ }; do arms+=(--arm-env "$en" "$kv"); done
++  done
++  # AB_REVS="name=sha[:pN] ...": arm <name>, crystal-metric with SHA's src.
++  for spec in ${AB_REVS:-}; do
++    rn=${spec%%=*} rsha=${spec#*=} rpad=""
++    case "$rsha" in *:*) rpad=${rsha#*:} rsha=${rsha%%:*} ;; esac
++    [ -d "../ab-rev-$rsha" ] || git worktree add -q --detach "../ab-rev-$rsha" "$rsha"
++    if [ -n "$rpad" ]; then PREPAD=${rpad#p} build "../ab-rev-$rsha" "ab-$rn" -Dgc_none; else build "../ab-rev-$rsha" "ab-$rn" -Dgc_none; fi
++    arms+=(--arm "$rn=$root/bin/ab-$rn$exe")
++  done
+   crystal --version
+   # shellcheck disable=SC2086 # AB_BENCHES is a space-separated list
+   "$py" bench/runner_ab/ab.py --out "$out" --reps "${AB_REPS:-10}" "${arms[@]}" $AB_BENCHES

@@ -1,0 +1,5 @@
+fmvbase 1 rc=1 f21=1 moved=1 [Expected 8 to be LessOrEqual 1] 297 examples, 2 failures, 0 errors, 3 pending fails=[crystal 21_boehm_c_abi_spec.cr:115 ]
+fmvbase 2 rc=1 f21=1 moved=1 [Expected 8 to be LessOrEqual 1] 297 examples, 2 failures, 0 errors, 3 pending fails=[crystal 21_boehm_c_abi_spec.cr:115 ]
+fmvbase 3 rc=1 f21=1 moved=1 [Expected 8 to be LessOrEqual 1] 297 examples, 2 failures, 0 errors, 3 pending fails=[crystal 21_boehm_c_abi_spec.cr:115 ]
+fmvbase 4 rc=1 f21=1 moved=1 [Expected 8 to be LessOrEqual 1] 297 examples, 2 failures, 0 errors, 3 pending fails=[crystal 21_boehm_c_abi_spec.cr:115 ]
+fmvbase 5 rc=1 f21=1 moved=1 [Expected 8 to be LessOrEqual 1] 297 examples, 2 failures, 0 errors, 3 pending fails=[crystal 21_boehm_c_abi_spec.cr:115 ]

@@ -1,0 +1,35 @@
+F
+
+Failures:
+
+  1) 4 GiB fence places the committed front of a reservation too long to place whole
+     Failure/Error: Gcry.four_gib_window(ptr.address, commit).should eq({0_u64, 0_u64})
+
+       Expected: {0, 0}
+            got: {136927851315200, 136927853412352}
+
+     # ../wt/spec/four_gib_fence_spec.cr:179
+
+Finished in 290 microseconds
+1 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec ../wt/spec/four_gib_fence_spec.cr:163 # 4 GiB fence places the committed front of a reservation too long to place whole
+TRACE try=0 ptr=0x7c97fe000000 front_end=0x7c9802000000 lo=0x7c97fff00000 hi=0x7c9800100000
+TRACE try=1 ptr=0x7c98fe6b0000 front_end=0x7c99026b0000 lo=0x7c98fff00000 hi=0x7c9900100000
+TRACE try=2 ptr=0x7c96ffef0000 front_end=0x7c9703ef0000 lo=0x7c96fff00000 hi=0x7c9700100000
+TRACE try=3 ptr=0x7c95ffef0000 front_end=0x7c9603ef0000 lo=0x7c95fff00000 hi=0x7c9600100000
+TRACE try=4 ptr=0x7c94ffef0000 front_end=0x7c9503ef0000 lo=0x7c94fff00000 hi=0x7c9500100000
+TRACE try=5 ptr=0x7c93ffef0000 front_end=0x7c9403ef0000 lo=0x7c93fff00000 hi=0x7c9400100000
+TRACE try=6 ptr=0x7c92ffef0000 front_end=0x7c9303ef0000 lo=0x7c92fff00000 hi=0x7c9300100000
+TRACE try=7 ptr=0x7c91ffef0000 front_end=0x7c9203ef0000 lo=0x7c91fff00000 hi=0x7c9200100000
+TRACE try=8 ptr=0x7c90ffef0000 front_end=0x7c9103ef0000 lo=0x7c90fff00000 hi=0x7c9100100000
+TRACE try=9 ptr=0x7c8fffef0000 front_end=0x7c9003ef0000 lo=0x7c8ffff00000 hi=0x7c9000100000
+TRACE try=10 ptr=0x7c8effef0000 front_end=0x7c8f03ef0000 lo=0x7c8efff00000 hi=0x7c8f00100000
+TRACE try=11 ptr=0x7c8dffef0000 front_end=0x7c8e03ef0000 lo=0x7c8dfff00000 hi=0x7c8e00100000
+TRACE try=12 ptr=0x7c8cffef0000 front_end=0x7c8d03ef0000 lo=0x7c8cfff00000 hi=0x7c8d00100000
+TRACE try=13 ptr=0x7c8bffef0000 front_end=0x7c8c03ef0000 lo=0x7c8bfff00000 hi=0x7c8c00100000
+TRACE try=14 ptr=0x7c8affef0000 front_end=0x7c8b03ef0000 lo=0x7c8afff00000 hi=0x7c8b00100000
+TRACE try=15 ptr=0x7c89ffef0000 front_end=0x7c8a03ef0000 lo=0x7c89fff00000 hi=0x7c8a00100000
+TRACE try=16 ptr=0x7c88ffef0000 front_end=0x7c8903ef0000 lo=0x7c88fff00000 hi=0x7c8900100000

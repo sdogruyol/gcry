@@ -749,6 +749,14 @@ module GC
     # `0` maps wherever the kernel answers, as before 0.39.0.
     Gcry.four_gib_fence = false if env_flag_zero?("GCRY_FOUR_GIB_FENCE")
 
+    # macOS maps the heap at a random base 16 to 32 TiB up, past the 33-bit
+    # integers that point into the 4–8 GiB the kernel would put it at
+    # (`Gcry.high_heap_base`). `0` maps wherever the kernel answers, as
+    # before 0.40.0.
+    {% if flag?(:darwin) %}
+      Gcry.high_heap = false if env_flag_zero?("GCRY_HIGH_HEAP")
+    {% end %}
+
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
     # ordinal's magic reciprocal is exact to — past that a block address would
@@ -938,6 +946,9 @@ module GC
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
       heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
     end
+    # Research only: leave the band below the collector scrub's own call as it
+    # was (`Heap#collect_band_wipe`), the control arm of its measurement.
+    heap.collect_band_wipe = false if env_flag_zero?("GCRY_COLLECT_BAND_WIPE")
     # Research only: the collector scrub's bounds from libc, which is a
     # `/proc/self/maps` parse per call on the initial thread.
     heap.scrub_libc_bounds = true if env_flag_one?("GCRY_SCRUB_LIBC_BOUNDS")
@@ -1190,6 +1201,11 @@ module GC
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
+    # Research only: regression 107's arms (`MonitorGate.loop_test`). Read
+    # here because the Monitor starts after `GC.init` and before any spec.
+    if arm = env_digit("GCRY_MONITOR_LOOP_TEST")
+      Gcry::MonitorGate.loop_test = arm
+    end
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: let the Darwin free-page walk visit bitmap-allocated
     # chunks, which is the stand-down in `flush_pending_page_release_chunks`
@@ -2051,6 +2067,22 @@ module GC
   # :nodoc:
   def self.start_world : Nil
     Gcry.default_heap.start_world_external if @@gcry_ready
+  end
+
+  # :nodoc:
+  # The stdlib wraps every blocking syscall a thread makes outside the event
+  # loop in this (Crystal 1.22: `Thread.sleep`, condition-variable waits).
+  # `gc/none.cr`'s takes the block as a captured `&proc`, so every call
+  # allocated its closure — 48 bytes each time the Monitor (SYSMON) slept,
+  # every 10 ms, for the life of the process. That kept
+  # `Heap#allocation_activity` moving in a program that had stopped, and on
+  # 1.22 the idle collector never ran at all: 0 idle collections where 1.21
+  # ran one (`process_spec/regression/94_runtime_idle_allocates_nothing_spec.cr`,
+  # `process_spec/regression/93_idle_stretch_inside_collection_spec.cr`).
+  # gcry needs nothing around the call — a stop suspends a thread blocked in
+  # one like any other — so this only yields. Below 1.22 nothing calls it.
+  def self.syscall(&) : Nil
+    yield
   end
 
   private def self.bootstrap_malloc(size : LibC::SizeT, clear : Bool) : Void*

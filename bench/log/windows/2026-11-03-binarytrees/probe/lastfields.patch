@@ -1,0 +1,20 @@
+diff --git a/src/gcry.cr b/src/gcry.cr
+index 15bfcd10..3fb77d4c 100644
+--- a/src/gcry.cr
++++ b/src/gcry.cr
+@@ -255,3 +255,6 @@ end
+     require "./gcry/c_abi"
+   {% end %}
+ {% end %}
++
++# Probe only: the hit path fields declared last.
++require "./gcry/heap_hot"
+diff --git a/src/gcry/heap.cr b/src/gcry/heap.cr
+index e71782a7..2cc86c40 100644
+--- a/src/gcry/heap.cr
++++ b/src/gcry/heap.cr
+@@ -1,4 +1,3 @@
+-require "./heap_hot"
+ require "./block"
+ require "./os_memory"
+ require "./crystal_trace"

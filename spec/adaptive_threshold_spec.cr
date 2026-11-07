@@ -5,6 +5,12 @@ class Gcry::Heap
   def threshold_pace_pct_for_spec=(pct : UInt64)
     @threshold_pace_pct = pct
   end
+
+  # The growth `update_threshold_pace` carries between majors: the last
+  # scanned set, and the last stretch's survived and allocated bytes.
+  def pace_state_for_spec : {UInt64, UInt64, UInt64}
+    {@pace_scanned_bytes, @pace_survived_bytes, @pace_allocated_bytes}
+  end
 end
 
 # The process heap sizes itself from the live set after each major
@@ -243,6 +249,51 @@ describe "adaptive collection threshold" do
       Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 50_000_000_u64, mib * 8, 300_u64).should eq 300
     end
 
+    it "prices a growing scanned set against at least the floor, up to the maximum" do
+      floor = Gcry::Heap::PACE_GROWTH_SCAN_FLOOR
+      # 20 ms after 100 ms of allocating 8 MiB holds this cycle at 16 MiB.
+      # Nothing survived: the cycle is priced at its own cost.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        floor * 2, 0_u64).should eq 200
+      # Half of each allocated byte survives into a 128 MiB scanned set: the
+      # next 16 MiB stretch adds 8 MiB, 1/16 of it, so T = 16 / (1 − 16 ×
+      # 0.5 / 128) MiB, 17.07 MiB.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        floor * 2, mib * 4).should eq 213
+      # A scanned set under the floor is priced as the floor: 16 / (1 − 16 ×
+      # 0.5 / 64) MiB = 18.29 MiB, whether it scanned 6 MiB or none.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        mib * 6, mib * 4).should eq 228
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 20_000_000_u64, mib * 8, 300_u64,
+        0_u64, mib * 4).should eq 228
+      # 80 ms holds this cycle at 64 MiB, 800% under a 1000% maximum. If all
+      # of it survives into a 64 MiB scanned set, the next cycle reads twice
+      # as much however short the stretch (P × rate ≥ scanned): the maximum.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 80_000_000_u64, mib * 8, 1000_u64,
+        floor, 0_u64).should eq 800
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 80_000_000_u64, mib * 8, 1000_u64,
+        floor, mib * 8).should eq 1000
+      # Survived past allocated counts as allocated: 32 / (1 − 32 × 1 / 256)
+      # MiB at 40 ms, not the 64 MiB that 4 bytes per allocated byte gives.
+      Gcry::Heap.threshold_pace_pct(mib * 8, 100_000_000_u64, 40_000_000_u64, mib * 8, 1000_u64,
+        floor * 4, mib * 32).should eq 457
+      # A cheap cycle stays unpaced however fast the heap grows.
+      Gcry::Heap.threshold_pace_pct(mib * 2, 100_000_000_u64, 1_000_000_u64, mib * 8, 300_u64,
+        floor, mib * 2).should eq 100
+    end
+
+    it "prices the lower of the last two stretches' survival rates" do
+      # No previous stretch: nothing is a trend yet.
+      Gcry::Heap.pace_survived(mib * 8, mib * 16, 0_u64, 0_u64).should eq 0
+      # A step after a steady stretch (Knuckeotide's rebuild): not priced.
+      Gcry::Heap.pace_survived(mib * 5, mib * 16, 0_u64, mib * 8).should eq 0
+      # The previous stretch kept a quarter, this one half: a quarter of
+      # this stretch's 16 MiB.
+      Gcry::Heap.pace_survived(mib * 8, mib * 16, mib * 2, mib * 8).should eq mib * 4
+      # This stretch kept less than the previous rate: what it kept.
+      Gcry::Heap.pace_survived(mib * 2, mib * 16, mib * 8, mib * 8).should eq mib * 2
+    end
+
     it "scales the live-sized threshold, keeps its pace across an unmeasured cycle and drops it on a releasing one" do
       heap = Gcry::Heap.new
       begin
@@ -263,5 +314,83 @@ describe "adaptive collection threshold" do
         heap.destroy
       end
     end
+
+    it "carries the scanned set and each stretch's growth across majors it does not measure" do
+      heap = Gcry::Heap.new
+      begin
+        heap.adaptive_threshold = true
+        heap.threshold_pace_max_pct = 300_u64
+        heap.threshold_pace_pct_for_spec = 250_u64
+        # No automatic major while filling: the roots array lives in the
+        # spec's own heap. Each stretch below allocates 1 MiB, under half of
+        # the paced 20 MiB threshold, so no major is measured and the pace
+        # stands, but every one records its scan and growth.
+        heap.gc_threshold = UInt64::MAX
+        roots = Array(Void*).new(1024)
+        256.times { roots << heap.malloc(4096) }
+        heap.collect(scan_stack: false, roots: roots)
+        s1 = heap.mark_scanned_bytes
+        s1.should be >= 256_u64 * 4096
+        heap.pace_state_for_spec.should eq({s1, s1, heap.bytes_before_gc})
+
+        # Growth: S − previous S, of what this stretch allocated.
+        256.times { roots << heap.malloc(4096) }
+        heap.collect(scan_stack: false, roots: roots)
+        s2 = heap.mark_scanned_bytes
+        s2.should be > s1
+        heap.pace_state_for_spec.should eq({s2, s2 - s1, heap.bytes_before_gc})
+        heap.threshold_pace_pct.should eq 250
+
+        # A shrinking set records no growth, so the next stretch's is a step.
+        roots.pop(384)
+        heap.collect(scan_stack: false, roots: roots)
+        s3 = heap.mark_scanned_bytes
+        s3.should be < s2
+        heap.pace_state_for_spec.should eq({s3, 0_u64, heap.bytes_before_gc})
+        heap.threshold_pace_pct.should eq 250
+
+        # A releasing collection grows the set too, but its stretch is not
+        # the program's: it records the scan and no growth, and drops the pace.
+        256.times { roots << heap.malloc(4096) }
+        heap.collect(scan_stack: false, roots: roots, release_warm: true)
+        s4 = heap.mark_scanned_bytes
+        s4.should be > s3
+        heap.pace_state_for_spec.should eq({s4, 0_u64, heap.bytes_before_gc})
+        heap.threshold_pace_pct.should eq 100
+      ensure
+        heap.destroy
+      end
+    end
+
+    {% if flag?(:gcry_block_headers) && flag?(:linux) %}
+      # Incremental slices need the page-dirty barrier (Linux) and the
+      # nursery off (block headers only), as in `phase6_spec.cr`.
+      it "carries the growth of an incremental major, which it does not measure" do
+        heap = Gcry::Heap.new
+        begin
+          heap.nursery_enabled = false
+          heap.adaptive_threshold = true
+          heap.threshold_pace_max_pct = 300_u64
+          heap.threshold_pace_pct_for_spec = 250_u64
+          heap.gc_threshold = UInt64::MAX
+          64.times { heap.add_root(heap.malloc(4096)) }
+          heap.collect(scan_stack: false)
+          s1 = heap.mark_scanned_bytes
+          64.times { heap.add_root(heap.malloc(4096)) }
+          finished = false
+          10_000.times do
+            finished = heap.collect_a_little(32)
+            break if finished
+          end
+          finished.should be_true
+          s2 = heap.mark_scanned_bytes
+          s2.should be > s1
+          heap.pace_state_for_spec.should eq({s2, s2 - s1, heap.bytes_before_gc})
+          heap.threshold_pace_pct.should eq 250
+        ensure
+          heap.destroy
+        end
+      end
+    {% end %}
   end
 end

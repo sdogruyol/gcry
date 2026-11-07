@@ -1,0 +1,53 @@
+name: probe m1 peak
+
+# Probe only, on `probe/m1-peak-*`: JsonParsePure's schedule across the src
+# commits between 421b09be and d7c6f89f, traced, interleaved per rep.
+on:
+  push:
+    branches: ["probe/m1-peak-*"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - run: sysctl -n hw.ncpu machdep.cpu.brand_string hw.memsize
+      - env:
+          PROBE_BENCHES: "JsonParsePure"
+          PROBE_REPS: "1"
+          PROBE_ARMS: >-
+            v039=c0d570c52793cfa144d88f3f4b600c839f7a40ce
+            pre=16a6804b5615af30be12d2e1c16189887fea7f7e
+            band421=d0fa2dcde7b7428801f06db678153cb105f6ae17
+            hit=19cf3a602e5409a93dad2a16de3d84670cf05411
+            tip=2658369ab3f3583dfc86620e52cad4fd3a0bbaea
+            tipnog=21be3cb9bc746b9b71cef779c73fb39d00acd313
+        run: bench/runner_ab/probe_pace.sh
+      - run: |
+          for b in bin/pb-*; do
+            [ "${b%.dwarf}" = "$b" ] || continue
+            echo "== $b"
+            otool -tV "$b" -p '_*Benchmark::run<(String | Nil)>:Nil' > run.s || true
+            otool -tV "$b" -p '_*GC::collect:Nil' > collect.s || true
+            cut -c18- run.s | grep -m1 -A12 'JsonGenerate::new<Int32>:JsonGenerate"' || true
+            sed -n 3,7p collect.s | cut -c18- || true
+          done > probe-out/disasm.txt
+          cat probe-out/disasm.txt
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.os }}
+          path: probe-out

@@ -1975,24 +1975,11 @@ module Gcry
           @sp_clamp_hits += 1
         else
           @sp_clamp_fallbacks += 1
-          # SP on pool fiber (or elsewhere): Parallel LAG from high.
-          if multi_mutator_threads?
-            lag = @stw_multi_pthread_lag
-            unless lag == 0
-              lagged = high > lag ? high - lag : low
-              low = lagged if lagged > low
-            end
-          end
+          low = pthread_scan_low_off_sp(low, high)
         end
       else
         @sp_clamp_fallbacks += 1
-        if multi_mutator_threads?
-          lag = @stw_multi_pthread_lag
-          unless lag == 0
-            lagged = high > lag ? high - lag : low
-            low = lagged if lagged > low
-          end
-        end
+        low = pthread_scan_low_off_sp(low, high)
       end
 
       # Same removal as the parked-fiber path: with lag 0 this scans the whole
@@ -2011,6 +1998,56 @@ module Gcry
       Roots.scan_stack(low, high, pthread_bounds[0].address, pthread_bounds[1].address) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)
       end
+    end
+
+    # Off by default only for regression 103's control arm: the whole mapping
+    # again, whoever is running on it (`pthread_scan_low_off_sp`).
+    property pthread_scan_running_sp_clamp : Bool = true
+
+    # Where a pthread mapping's scan starts when the thread's own SP is not
+    # in it. The mapping is the stack of the thread's main fiber, and that
+    # fiber can be running on another thread: the program's main fiber
+    # moves when the execution context's monitor hands the scheduler of a
+    # thread blocked in a syscall to another thread, and a collection is
+    # then often run on it. Until 2026-11-03 the mapping was read whole from
+    # its low-water mark, the frames below the running SP included, dead or
+    # being built — on the collector's own stack, the mark chain under this
+    # very scan, whose locals hold each candidate's chunk data start and
+    # block header. Those were taken for pointers into the chunk's first
+    # block and the looked-up block, which were kept through any number of
+    # collections (regression 21's two control blocks, in CI's 1.22.2 step
+    # whenever the main fiber had moved,
+    # `bench/log/linux/2026-11-03-reg21-marked-unmarked/FINDINGS.md`).
+    # A thread running on the mapping now bounds it as the owner's own SP
+    # would: the collector at its SP (nothing below this frame is live), a
+    # stopped thread at its suspend SP less the usual slack. A thread
+    # mid-swap, its current fiber not yet the stack its SP is on, is not
+    # found, and the mapping is read whole, as before.
+    # `process_spec/regression/103_pthread_stack_running_sp_spec.cr`.
+    @[AlwaysInline]
+    private def pthread_scan_low_off_sp(low : UInt64, high : UInt64) : UInt64
+      if @pthread_scan_running_sp_clamp
+        own = Roots.hardware_stack_pointer.address
+        return own if own >= low && own < high
+        current = Thread.current
+        Thread.unsafe_each do |thread|
+          next if thread == current
+          fiber = thread.@current_fiber
+          next unless fiber && fiber.@stack.bottom.address > low && fiber.@stack.pointer.address < high
+          if (rsp = other_thread_scan_sp(thread)) && rsp.address >= low && rsp.address < high
+            return stack_scan_low(rsp.address, low)
+          end
+        end
+      end
+      # SP on pool fiber (or elsewhere): Parallel LAG from high.
+      if multi_mutator_threads?
+        lag = @stw_multi_pthread_lag
+        unless lag == 0
+          lagged = high > lag ? high - lag : low
+          return lagged if lagged > low
+        end
+      end
+      low
     end
 
     private def mark_metadata_roots : Nil

@@ -1,0 +1,237 @@
+commit 9193a5dc1c9066b70b496f35b2b53693b06955a5
+Author: Serdar Dogruyol <990485+sdogruyol@users.noreply.github.com>
+Date:   Sat Oct 31 17:32:47 2026 +0300
+
+    mark: gather in-span words of a batch branch-free before resolving them (probe)
+
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 90d50447..7e2fa501 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -691,43 +691,53 @@ module Gcry
+         w = p.value
+         p += 1
+         next if w < lo || w >= hi
+-        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+-        if chunk.null?
+-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+-          next
+-        end
+-        cls = chunk.value.size_class
+-        bitmap_words = chunk.value.bitmap_words.to_u64
+-        data_start = chunk.address &+ chunk.value.data_offset
+-        chunk_end = chunk.address &+ chunk.value.mapped_bytes
+-        # `size_class` past the table covers large chunks (`UInt32::MAX`).
+-        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
+-           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
+-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+-          next
+-        end
+-        hits &+= 1
+-        index = cls.to_i32
+-        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
+-        block_bytes = @block_bytes.unsafe_fetch(index)
+-        header_addr = data_start &+ ordinal &* block_bytes
+-        # The chunk's tail past its last whole block.
+-        next if header_addr &+ block_bytes > chunk_end
+-        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+-        bit = 1_u64 << (ordinal & 63)
+-        mark = occ + bitmap_words
+-        next if (mark.value & bit) != 0
+-        next if (occ.value & bit) == 0
+-        header = Pointer(BlockHeader).new(header_addr)
+-        next if base_only && w != BlockHeader.user_from(header).address
+-        # `chunk_set_mark` with its relaxed pre-check already done above.
+-        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+-        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+-        mark_stack_push(mark_entry(chunk, header), shard)
++        hits &+= resolve_candidate(w, base_only, shard, l1, shift, l2_mask)
+       end
+       hits
+     end
+ 
++    # One word inside the heap span `[@heap_min, @heap_max)`: mark the block
++    # it points into and push it if it holds pointers. 1 when the word was
++    # resolved in place (a fast hit for `@radix_fast_hits`), 0 when it went to
++    # `mark_impl`.
++    @[AlwaysInline]
++    private def resolve_candidate(w : UInt64, base_only : Bool, shard : MarkShard?,
++                                  l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64) : UInt64
++      chunk = Heap.radix_entry(l1, shift, l2_mask, w)
++      if chunk.null?
++        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++        return 0_u64
++      end
++      cls = chunk.value.size_class
++      bitmap_words = chunk.value.bitmap_words.to_u64
++      data_start = chunk.address &+ chunk.value.data_offset
++      chunk_end = chunk.address &+ chunk.value.mapped_bytes
++      # `size_class` past the table covers large chunks (`UInt32::MAX`).
++      if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
++         (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
++        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
++        return 0_u64
++      end
++      index = cls.to_i32
++      ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
++      block_bytes = @block_bytes.unsafe_fetch(index)
++      header_addr = data_start &+ ordinal &* block_bytes
++      # The chunk's tail past its last whole block.
++      return 1_u64 if header_addr &+ block_bytes > chunk_end
++      occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
++      bit = 1_u64 << (ordinal & 63)
++      mark = occ + bitmap_words
++      return 1_u64 if (mark.value & bit) != 0
++      return 1_u64 if (occ.value & bit) == 0
++      header = Pointer(BlockHeader).new(header_addr)
++      return 1_u64 if base_only && w != BlockHeader.user_from(header).address
++      # `chunk_set_mark` with its relaxed pre-check already done above.
++      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++      return 1_u64 if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
++      mark_stack_push(mark_entry(chunk, header), shard)
++      1_u64
++    end
++
+     # Scan length for one object, derived from its **chunk** (Phase 7.6).
+     #
+     # This used to read `header.value.size` and clamp it against the chunk, then
+diff --git a/src/gcry/mark.cr b/src/gcry/mark.cr
+index 30d6a3cf..f6c27d93 100644
+--- a/src/gcry/mark.cr
++++ b/src/gcry/mark.cr
+@@ -8,6 +8,15 @@ module Gcry
+     # Entries of the batch buffer (`batch_buffer`), 8 KiB.
+     BATCH_ENTRIES = 1024
+ 
++    # Words of the candidate buffer mapped right behind every batch buffer
++    # (this one and each parallel marker's, `Heap#ensure_mark_buffers`), 4 KiB:
++    # `Heap#scan_batch_prefetched` gathers the batch's words inside the heap
++    # span there before resolving them.
++    CAND_ENTRIES = 512
++
++    # Bytes of a batch buffer's mapping: the batch, then the candidates.
++    BATCH_MAP_BYTES = (BATCH_ENTRIES + CAND_ENTRIES).to_u64 * 8_u64
++
+     @base : Void* = Pointer(Void).null
+     @capacity : Int32 = 0
+     @size : Int32 = 0
+@@ -24,7 +33,7 @@ module Gcry
+ 
+     def destroy : Nil
+       unless @batch.null?
+-        Gcry.os_unmap(@batch.as(Void*), BATCH_ENTRIES.to_u64 * sizeof(Void*))
++        Gcry.os_unmap(@batch.as(Void*), BATCH_MAP_BYTES)
+         @batch = Pointer(Void*).null
+       end
+       return if @base.null?
+@@ -36,13 +45,14 @@ module Gcry
+     end
+ 
+     # `BATCH_ENTRIES` words for the serial drain to scan a batch from
+-    # (`Heap#serial_mark_drain`), mapped on first use; null if the map
+-    # failed. Mapped rather than on the collector's stack: there 8 KiB of
+-    # block addresses would widen the frame the entry and exit scrubs have to
+-    # cover (`Heap#run_collection`) by more than twice.
++    # (`Heap#serial_mark_drain`), and `CAND_ENTRIES` behind them, mapped on
++    # first use; null if the map failed. Mapped rather than on the
++    # collector's stack: there 8 KiB of block addresses would widen the frame
++    # the entry and exit scrubs have to cover (`Heap#run_collection`) by more
++    # than twice, and the candidates would stay below the mutator's SP.
+     def batch_buffer : Void**
+       if @batch.null?
+-        ptr = Gcry.os_map(BATCH_ENTRIES.to_u64 * sizeof(Void*))
++        ptr = Gcry.os_map(BATCH_MAP_BYTES)
+         @batch = ptr.as(Void**) unless Gcry.mmap_failed?(ptr)
+       end
+       @batch
+diff --git a/src/gcry/parallel_mark.cr b/src/gcry/parallel_mark.cr
+index 11f3cb93..0696cb46 100644
+--- a/src/gcry/parallel_mark.cr
++++ b/src/gcry/parallel_mark.cr
+@@ -417,7 +417,8 @@ module Gcry
+     protected def ensure_mark_buffers(shard : MarkShard) : Bool
+       return true if shard[SHARD_BASE] != 0_u64
+       push_bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
+-      batch_bytes = MARK_POP_BATCH.to_u64 * sizeof(Void*).to_u64
++      # The pop batch, then `MarkStack::CAND_ENTRIES` candidate words.
++      batch_bytes = (MARK_POP_BATCH + MarkStack::CAND_ENTRIES).to_u64 * sizeof(Void*).to_u64
+       ptr = Gcry.os_map(push_bytes &+ batch_bytes)
+       return false if Gcry.mmap_failed?(ptr)
+       shard[SHARD_BATCH] = ptr.address &+ push_bytes
+@@ -438,7 +439,7 @@ module Gcry
+     # helpers. Until 0.37.0 they stayed mapped past the heap, a 4 KiB push
+     # buffer a shard; the pop batch in the same mapping would have tripled it.
+     protected def release_mark_buffers : Nil
+-      bytes = (MARK_PUSHBUF_CAP + MARK_POP_BATCH).to_u64 * sizeof(Void*).to_u64
++      bytes = (MARK_PUSHBUF_CAP + MARK_POP_BATCH + MarkStack::CAND_ENTRIES).to_u64 * sizeof(Void*).to_u64
+       MARK_SHARDS.times do |s|
+         shard = mark_shard(s)
+         base = shard[SHARD_BASE]
+@@ -579,10 +580,13 @@ module Gcry
+       short = @mark_test_short_tid
+       allow_interior = @allow_interior_pointers
+       lo = @heap_min
+-      hi = @heap_max
++      span = @heap_max &- lo
+       l1 = @radix_l1
+       shift = @radix_granule_shift
+       l2_mask = @radix_l2_mask
++      # The candidate buffer mapped behind the batch (`MarkStack::CAND_ENTRIES`).
++      cand = (batch + (shard ? MARK_POP_BATCH : MarkStack::BATCH_ENTRIES)).as(UInt64*)
++      nc = 0
+       bytes = 0_u64
+       hits = 0_u64
+       ahead = m < MARK_PREFETCH_DEPTH ? m : MARK_PREFETCH_DEPTH
+@@ -616,9 +620,25 @@ module Gcry
+         if short != 0 && words > 0 && user.as(Int32*).value == short
+           words -= 1
+         end
+-        cursor = user.as(UInt64*)
+-        hits &+= scan_edges_run(cursor, cursor + words, base_only, shard, lo, hi, l1, shift, l2_mask)
++        flag = base_only ? CAND_BASE_ONLY : 0_u64
++        q = user.as(UInt64*)
++        finish = q + words
++        while q < finish
++          room = MarkStack::CAND_ENTRIES &- nc
++          stop = finish - q > room ? q + room : finish
++          while q < stop
++            w = q.value
++            cand[nc] = w | flag
++            nc &+= (w &- lo < span ? 1 : 0)
++            q += 1
++          end
++          if q < finish
++            hits &+= resolve_candidates(cand, nc, shard, l1, shift, l2_mask)
++            nc = 0
++          end
++        end
+       end
++      hits &+= resolve_candidates(cand, nc, shard, l1, shift, l2_mask)
+       if @mark_parallel
+         count_parallel_scanned_bytes(bytes, shard)
+       else
+@@ -627,6 +647,24 @@ module Gcry
+       end
+     end
+ 
++    # Set on a buffered candidate (`scan_batch_prefetched`) taken from a
++    # payload scanned base-only. A word inside the heap span is below 2^48 on
++    # every supported target, so bit 63 is free.
++    CAND_BASE_ONLY = 1_u64 << 63
++
++    @[AlwaysInline]
++    private def resolve_candidates(cand : UInt64*, nc : Int32, shard : MarkShard?,
++                                   l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64) : UInt64
++      hits = 0_u64
++      c = 0
++      while c < nc
++        v = cand[c]
++        c += 1
++        hits &+= resolve_candidate(v & ~CAND_BASE_ONLY, (v & CAND_BASE_ONLY) != 0, shard, l1, shift, l2_mask)
++      end
++      hits
++    end
++
+     # A worker keeps scanning its own new children while there are few of
+     # them, and publishes only when its push buffer has more than
+     # `MARK_LOCAL_DRAIN_MAX`.
