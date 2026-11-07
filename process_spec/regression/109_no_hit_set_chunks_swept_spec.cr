@@ -8,10 +8,11 @@ require "spec"
 # monitor's and the out-of-memory reserve's), so the after-world sweep never
 # swept a chunk it held: every block that died there stayed allocated until
 # the cursor moved on. Regression 21's "controls kept 8 > 1" on Crystal 1.22.2
-# headerless was that: the main fiber had moved to a pool thread born while
-# `process_gc_spec`'s 80 threads filled the table, its eight dead controls sat
-# in the fallback's chunk, and `GC_base` answered them live after three
-# collections (`bench/log/linux/2026-11-07-reg21-fallback-pinned/FINDINGS.md`).
+# headerless (1 in 174 suite-order runs) is that: with the main fiber moved
+# right after `process_gc_spec`'s 80 threads fill the table, the pool thread
+# that takes it is on the fallback, its eight dead controls sit in the
+# fallback's chunk, and `GC_base` answers them live after three collections,
+# every run (`bench/log/linux/2026-11-07-reg21-fallback-pinned/FINDINGS.md`).
 # The stop now pins such a set only when it is mid-allocation
 # (`Heap#bitmap_settle_cursor_sets`).
 #
