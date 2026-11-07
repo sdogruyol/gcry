@@ -1,0 +1,40 @@
+name: probe claim72
+
+# Probe only, on `probe/claim72`: `make claim-stress` (the 4-worker arms and
+# the `--fallback` arms) at 1bc3b87d on the runners whose gates failed the
+# 72-worker arm, five seeds each, printing the fallback counts.
+on:
+  push:
+    branches: ["probe/claim72"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    name: probe (${{ matrix.os }})
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 1bc3b87d97345101e52c635515ef524f5496425a
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: make claim-stress, five seeds
+        run: |
+          mkdir -p bin
+          git log --oneline -1
+          rc=0
+          for s in 1 2 3 4 5; do
+            echo "=== seed $s"
+            make claim-stress CLAIM_SEED=$s 2>&1 | tee -a probe.log || rc=1
+          done
+          echo "=== summary"
+          grep -E "^claim_stress|fallback_allocs|filled|RESULT|FAIL" probe.log
+          exit $rc

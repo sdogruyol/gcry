@@ -334,8 +334,18 @@ fill never landed, when no allocation went through the fallback, or, lazy,
 when no collection swept after the world. `make claim-stress` and the
 overnight loops run `--workers=8 --fallback` in both arms. Locally both
 arms pass with every allocation of all 8 workers on the fallback (657 712
-and 477 665; 581 after-world sweeps in the lazy arm); the runner probe is
-below.
+and 477 665; 581 after-world sweeps in the lazy arm).
+
+Runner probe 42347952115 (`probe/claim72` at `9d9d5609`, checking out
+`1bc3b87d97345101e52c635515ef524f5496425a`, deleted after; workflow
+`probe/claim72-workflow.yml`): `make claim-stress` with seeds 1–5 on each
+runner whose gate had failed, Crystal 1.21.0 (`probe/42347952115-*.txt`):
+
+| runner | runs | pass | `--fallback` runs: table filled | fallback allocations | lazy after-world sweeps |
+|---|---:|---:|---|---|---|
+| macos-latest | 20 | 20 | 10 of 10 (63 parked) | 294 826–586 101, all 8 workers | ≥ 114 |
+| macos-15-intel | 20 | 20 | 10 of 10 (63 parked) | 209 423–370 659, all 8 workers | ≥ 27 |
+| windows-latest | 20 | 20 | 10 of 10 (62 parked) | 281 711–513 614, all 8 workers | ≥ 24 |
 
 ## Files
 
@@ -350,6 +360,6 @@ below.
   run (`dg122-4-d21.txt`), the failing late-mover base run
   (`ldg122-1-d21.txt`) and the fix (`ldgfix-1-d21.txt`); regression 109 in
   the three layouts (`r109-layouts.txt`); § 8's stress and mutant runs.
-- `cs_campaign.sh`, `diag/fb_helper.cr`, `diag/mutation.txt`: § 8.
+- `cs_campaign.sh`, `diag/fb_helper.cr`, `diag/mutation.txt`: § 8; `probe/`: § 9.
 - `ab/`: `keep.py` output and the summaries of the five runs and the two
   `macos-latest` follow-ups.
