@@ -999,10 +999,10 @@ module Gcry
     # arm of regression 99's *softdirty* window.
     property inc_scan_false_is_lost : Bool = true
     # Research only: called by `collect_a_little` on the slicing thread just
-    # after it takes the collection section and has read `@inc_active` again,
-    # before it sets `@collecting` or stops the world; must not allocate
-    # (regression 99's *race* queues a second slice there, regression 108 a
-    # full collection).
+    # after it takes the collection section and has read `@inc_active` again
+    # (or begun the cycle there), before it sets `@collecting` or stops the
+    # world for its slice; must not allocate (regression 99's *race* queues
+    # a second slice there, regression 108 a full collection).
     class_property inc_slice_locked_hook : Proc(Nil)? = nil
     # Research only: false makes `collect` and `minor_collect` drop an open
     # incremental cycle (`abort_incremental`) before they queue for the
@@ -1011,6 +1011,18 @@ module Gcry
     # A class property, not a field: a `Heap` field here would move every
     # field after it.
     class_property collect_drops_cycle_in_section : Bool = true
+    # Research only: false makes `collect_a_little` begin a cycle
+    # (`begin_incremental`) before it queues for the collection section,
+    # the code before 2026-11-07 — the control arm of
+    # `process_spec/regression/110_incremental_begin_in_section_spec.cr`.
+    # A class property, as the knob above.
+    class_property inc_begins_in_section : Bool = true
+    # Research only: called by `collect_a_little` on the slicing thread
+    # after its entry checks (`@collecting` read false among them), before
+    # it queues for the section or begins a cycle; must not allocate
+    # (regression 110 holds a slice there until a full collection is past
+    # its stop).
+    class_property inc_begin_hook : Proc(Nil)? = nil
     # Research only: false leaves the roots out of the incremental
     # terminating stop, the code before 2026-11-02 — the finish marks from
     # the begin stop's root scan and the dirty pages alone, and sweeps an
@@ -2225,23 +2237,53 @@ module Gcry
       return false if thread_not_ready_for_collect?
 
       started = monotonic_ns
-      unless @inc_active
-        begin_incremental(scan_stack: true, roots: nil)
+      if hook = @@inc_begin_hook
+        hook.call
       end
-
-      # If begin_incremental couldn't arm a barrier, inc_active stays false
-      # and we bail out so the alloc path falls through to a full STW collect.
-      return false unless @inc_active
+      # A cycle is begun holding the collection section, where every other
+      # stop is made; Boehm begins one under the allocation lock
+      # (`GC_collect_a_little_inner`). The checks above are not enough: a
+      # full collection sets `@collecting` only once it holds the section
+      # and is past its prelude. Begun before the section (the code before
+      # 2026-11-07), a cycle whose thread had read `@collecting` false
+      # stopped the world inside that collection: its `lock_write` waited
+      # out the collection's stop and took the world in the post-stop
+      # passes, ahead of the sweep after the world, and cleared the marks
+      # that sweep reads — the collection then swept everything a root does
+      # not point at directly, its re-arm took the new cycle's barrier down
+      # and the begin's `@collecting = false` ended the collection's flag.
+      # A begin that landed while the collection dropped an open cycle had
+      # its grey entries and its barrier undone by the rest of the drop.
+      # `process_spec/regression/110_incremental_begin_in_section_spec.cr`.
+      begins = !@inc_active
+      unless @@inc_begins_in_section
+        begin_incremental(scan_stack: true, roots: nil) if begins
+        # If begin_incremental couldn't arm a barrier, inc_active stays false
+        # and we bail out so the alloc path falls through to a full STW collect.
+        return false unless @inc_active
+        begins = false
+      end
 
       barrier_lost = false
       lock_post_stw
-      # Read again under the section: the checks above were made before
-      # this thread queued for it, and what ran ahead of it may have ended
-      # the cycle — a slice whose scan lost the barrier ends it inside its
-      # stop (below), a full or minor collection as it takes the section
-      # (`run_collection_body`). Running on would sweep that cycle's marks,
-      # made blind.
-      if @inc_lost_cycle_ends_in_stop && !@inc_active
+      if begins
+        # Holding the section: no collection is running and none can begin
+        # until this thread releases it. A slice queued ahead of this one may
+        # have begun a cycle already; this one runs a slice of it.
+        begin_incremental(scan_stack: true, roots: nil) unless @inc_active
+        # If begin_incremental couldn't arm a barrier, inc_active stays false
+        # and we bail out so the alloc path falls through to a full STW collect.
+        unless @inc_active
+          unlock_post_stw
+          return false
+        end
+      elsif @inc_lost_cycle_ends_in_stop && !@inc_active
+        # Read again under the section: the checks above were made before
+        # this thread queued for it, and what ran ahead of it may have ended
+        # the cycle — a slice whose scan lost the barrier ends it inside its
+        # stop (below), a full or minor collection as it takes the section
+        # (`run_collection_body`). Running on would sweep that cycle's marks,
+        # made blind.
         unlock_post_stw
         return false
       end
