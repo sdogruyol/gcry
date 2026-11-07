@@ -176,10 +176,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drop (probe). The cycle now begins after `lock_post_stw`, in the same
   section → `lock_write` → stop order as every collection; a slice that
   queued expecting an open cycle still returns false when it finds it
-  gone. Boehm begins a cycle under its allocation lock. Regression 110:
-  fixed, a 20 000-block chain behind an explicit root lives and the cycle
-  runs on mprotect; control (`Heap.inc_begins_in_section = false`), 19 999
-  of its blocks are swept by the collection's own sweep. Affects every
+  gone, and one that queued to begin returns true without beginning when
+  a collection ran while it queued (that collection paid the debt). A
+  raise inside the begin (a before-collect callback, the event hook, the
+  stop) releases the section and drops the half-begun cycle. Boehm begins
+  a cycle under its allocation lock. Regression 110: fixed, a 20 000-block
+  chain behind an explicit root lives; control
+  (`Heap.inc_begins_in_section = false`), 19 999 of its blocks are swept
+  by the collection's own sweep. Its *raise* arm: an event hook raising
+  in the begin, then another thread's `collect` returns; control
+  (`Heap.inc_begin_raise_releases_section = false`) it still waits after
+  5 s. Affects every
   release through 0.39.0 (each begins the cycle before the section; the
   sweep-after-world form since lazy sweep became the default, 0.17.0 at
   the latest). The default stop-the-world path's machine code is
