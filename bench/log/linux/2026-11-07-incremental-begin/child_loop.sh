@@ -15,6 +15,7 @@ one() { # name env-var value filter
     st=$?
     case "$name" in
       110-control) echo "$out" | grep -q "inc110: control began a cycle" || st=1 ;;
+      110-raise-control) echo "$out" | grep -q "inc110 raise: control kept the section" || st=1 ;;
       *) echo "$out" | grep -q "1 examples, 0 failures" || st=1 ;;
     esac
     if [ $st -ne 0 ]; then
@@ -26,6 +27,8 @@ one() { # name env-var value filter
 }
 one 110-fixed GCRY_INC110_CHILD fixed "inc110 child fixed"
 one 110-control GCRY_INC110_CHILD control "inc110 child control"
+one 110-raise-fixed GCRY_INC110_CHILD raise-fixed "inc110 child raise-fixed"
+one 110-raise-control GCRY_INC110_CHILD raise-control "inc110 child raise-control"
 one 108-fixed GCRY_COLLECT108_CHILD fixed "collect108 child fixed"
 one 108-control GCRY_COLLECT108_CHILD control "collect108 child control"
 for arm in race-fixed race-control nocards-fixed nocards-control softdirty-fixed softdirty-control; do

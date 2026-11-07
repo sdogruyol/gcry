@@ -177,12 +177,59 @@ step exit 0 — `spec/all_specs.cr` 307 / 330 / 307 examples,
 `process_spec` 457 / 458 / 458 and 457 on 1.22.2, 0 failures, 2
 pending.
 
+## 7. Review follow-up (rebased onto `94972759`)
+
+Two findings of the review, both fixed in `collect_a_little`:
+
+1. **A raise inside the begin held the section for ever.** The begin ran
+   after `lock_post_stw` but before the slice's `begin … ensure
+   unlock_post_stw`; a before-collect callback, the collection event hook
+   or the stop can raise there. Now a rescue around `begin_incremental`
+   drops the half-begun cycle (`abort_incremental`: `@inc_active` was set
+   before anything that can raise, the marks or barrier possibly not),
+   releases the section and re-raises. Research knob
+   `Heap.inc_begin_raise_releases_section` (false: the first version).
+   Regression 110's *raise* arm: the event hook raises at the begin's
+   `PreStopWorld`, then another thread calls `collect`. Fixed: the raise
+   reaches the caller, no cycle is open, the `collect` returns. Control:
+   the cycle stays open and the `collect` still waits after 5 s; the child
+   prints its mark and leaves through `_exit`.
+2. **A queued begin started a cycle no debt asked for.** `@collections`
+   is read at entry; a slice that queued to begin and finds it changed
+   when it holds the section (a peer's finishing slice, a full or minor
+   collection ran meanwhile) releases the section and returns true, as
+   `run_collection_body`'s coalesce check skips a paid debt. A slice
+   queued ahead that began a cycle counts no collection, so this one runs
+   a slice of it. Regression 110's fixed arm now asserts that its queued
+   slice returned true without reaching its locked hook and left no cycle
+   open, and that the main thread's next `collect_a_little` begins under
+   the section and runs on mprotect.
+
+Not changed, noted: `begin_incremental` reports `Start` before its own
+`begin … ensure`, so an event hook raising at `Start` leaves `@collecting`
+set (until the next collection clears it); the section and the cycle are
+released by the rescue above. Pre-existing, on every release.
+
+Rates (`rates-review.txt`, the four configurations of § 5, now with the
+*raise* arms): all 12 child arms × 4 configurations, 0 failures in 100
+each; under load (`rates-review-loaded.txt`) 110 fixed and control 0 of
+500. Machine code (`mc_diff_review.txt`, same base binary — `a40ec329` to
+`94972759` changes nothing in `src/`): of 981 functions only
+`collect_a_little` differs (554 → 581 instructions); nothing else, not
+even the inlining change of § 4. Checks (`checks-review.sh`,
+`checks-review.txt`): `verify.sh` after `rm -rf lib/ameba bin/ameba`,
+`make windows-typecheck`, `make darwin-typecheck`, `make
+alloc-entry-frame`, `process_spec` on 1.22.2 — every step exit 0;
+`process_spec` 461 / 462 / 462 and 461 on 1.22.2, 0 failures, 2 pending.
+The stress loops were not rerun.
+
 ## Files
 
 - `quick-entry.cr`, `child_loop.sh`, `loaded_loop.sh`, `rates.txt`,
-  `rates-final.txt`, `rates-loaded.txt` (§ 3, § 5).
+  `rates-final.txt`, `rates-loaded.txt`, `rates-review.txt`,
+  `rates-review-loaded.txt` (§ 3, § 5, § 7).
 - `pointerof_class_var.cr` (§ 3).
 - `mid_drop_probe.cr`, `mid_drop_probe.diff`, `mid_drop_probe.txt` (§ 2).
-- `mc_diff.py`, `mc_diff.txt` (§ 4).
-- `checks.sh`, `checks.txt`, `checks-final.txt`, `stress-summary.txt`
-  (§ 6).
+- `mc_diff.py`, `mc_diff.txt`, `mc_diff_review.txt` (§ 4, § 7).
+- `checks.sh`, `checks.txt`, `checks-final.txt`, `stress-summary.txt`,
+  `checks-review.sh`, `checks-review.txt` (§ 6, § 7).

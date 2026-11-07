@@ -1,0 +1,4 @@
+functions: base 981, var 981
+changed: *Gcry::Heap#collect_a_little<Int32>:Bool: 554 -> 581
+only in base: []
+only in var: []
