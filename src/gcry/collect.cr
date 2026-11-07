@@ -1017,6 +1017,11 @@ module Gcry
     # `process_spec/regression/110_incremental_begin_in_section_spec.cr`.
     # A class property, as the knob above.
     class_property inc_begins_in_section : Bool = true
+    # Research only: false keeps the collection section held, and the
+    # half-begun cycle open, when a begin under the section raises — the
+    # first version of the fix above, the control arm of regression 110's
+    # *raise* window.
+    class_property inc_begin_raise_releases_section : Bool = true
     # Research only: called by `collect_a_little` on the slicing thread
     # after its entry checks (`@collecting` read false among them), before
     # it queues for the section or begins a cycle; must not allocate
@@ -2237,6 +2242,7 @@ module Gcry
       return false if thread_not_ready_for_collect?
 
       started = monotonic_ns
+      collections = @collections
       if hook = @@inc_begin_hook
         hook.call
       end
@@ -2268,9 +2274,34 @@ module Gcry
       lock_post_stw
       if begins
         # Holding the section: no collection is running and none can begin
-        # until this thread releases it. A slice queued ahead of this one may
-        # have begun a cycle already; this one runs a slice of it.
-        begin_incremental(scan_stack: true, roots: nil) unless @inc_active
+        # until this thread releases it. One that ran while this thread
+        # queued — a peer's finishing slice, a full or minor collection —
+        # paid the debt that sent it here, as `run_collection_body`'s
+        # coalesce check reads it: a new cycle now would be one no
+        # allocation asked for. A slice queued ahead of this one may have
+        # begun a cycle already (no collection counted); this one runs a
+        # slice of it.
+        if @collections != collections
+          unlock_post_stw
+          return true
+        end
+        unless @inc_active
+          begin
+            begin_incremental(scan_stack: true, roots: nil)
+          rescue ex
+            # A before-collect callback, the event hook or the stop raised.
+            # The section is released, as every other holder releases it on
+            # a raise, and the half-begun cycle — `@inc_active` set, its
+            # marks and barrier not, or not all — is dropped. Kept (the
+            # research knob off), every later `lock_post_stw` waited for
+            # ever. `process_spec/regression/110_incremental_begin_in_section_spec.cr`.
+            if @@inc_begin_raise_releases_section
+              abort_incremental
+              unlock_post_stw
+            end
+            raise ex
+          end
+        end
         # If begin_incremental couldn't arm a barrier, inc_active stays false
         # and we bail out so the alloc path falls through to a full STW collect.
         unless @inc_active
