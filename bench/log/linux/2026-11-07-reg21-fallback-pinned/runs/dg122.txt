@@ -1,0 +1,4 @@
+dg122 1 rc=0 f21=0 moved=1 [] 296 examples, 0 failures, 0 errors, 3 pending fails=[]
+dg122 2 rc=0 f21=0 moved=1 [] 296 examples, 0 failures, 0 errors, 3 pending fails=[]
+dg122 3 rc=0 f21=0 moved=1 [] 296 examples, 0 failures, 0 errors, 3 pending fails=[]
+dg122 4 rc=0 f21=0 moved=1 [] 296 examples, 0 failures, 0 errors, 3 pending fails=[]

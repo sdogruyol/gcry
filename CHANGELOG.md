@@ -159,6 +159,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Blocks that die in a chunk the shared fallback cursor set holds are
+  reclaimed, and regression 21 no longer fails "controls kept 8 > 1" a
+  third way.** A thread that first allocates while the 64-set table is full
+  shares the fallback set for the rest of its life, and the stop pinned the
+  fallback's chunks at every collection (the monitor's and the
+  out-of-memory reserve's too), so the after-world sweep never swept them:
+  everything that died there stayed allocated, finalizers unrun, until the
+  cursor left the chunk. Regression 21 failed this way on 1.22.2 headerless
+  (1 in 174 suite-order runs, the main fiber moved): moved right after
+  `process_gc_spec`'s 80 threads fill the table, the main fiber lands on a
+  pool thread born on the fallback, and 21 fails on every run of the tree
+  before (13 of 13), its eight controls never marked, claimed or swept.
+  Such a set is now pinned only when it is mid-allocation; its owners
+  allocate only under the class lock, which the after-world sweep takes
+  (`Heap#bitmap_settle_cursor_sets`). The same move: 0 failures in 100
+  runs (97 moved), and 0 in 30 with the move before the first example.
+  Since v0.23.0; never under `GCRY_BITMAP_ALLOC=0`
+  (`bench/log/linux/2026-11-07-reg21-fallback-pinned/`). Regression 109,
+  with a control arm.
+
 - **Regression 1 runs its drift cycles in a process of their own.** In
   the suite's shared process it still drifted rarely on Crystal 1.22.2
   headerless (−1 849, −2 151, −2 444; −1 881 in 1 of 74 runs of the tree

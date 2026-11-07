@@ -4908,11 +4908,20 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       headerless, 2 of 50 on headers + `GCRY_BITMAP_ALLOC=0`; the fixed arm
       never failed. Not investigated.
       `bench/log/linux/2026-11-06-spec-harden/` § 1.
-- [ ] **Regression 21's "controls kept 8 > 1" once more (2026-11-06).**
-      1 of 174 suite-order runs on 1.22.2 headerless, on a tree with
-      regressions 103 and 106, the main fiber moved (21's `GC_stackbottom`
-      example pending). Not investigated; output in
-      `bench/log/linux/2026-11-06-spec-harden/reg1/`.
+- [x] **Regression 21's "controls kept 8 > 1" once more (2026-11-06,
+      found and fixed 2026-11-07).** 1 of 174 suite-order runs on 1.22.2
+      headerless, on a tree with regressions 103 and 106, the main fiber
+      moved. A third mechanism: the eight were never marked, claimed or
+      swept. Under the diagnostic, the thread running the moved main fiber
+      was born while `process_gc_spec`'s 80 threads filled the 64-set
+      cursor table, so it allocated through the shared fallback set, whose
+      chunks the stop pinned at every collection (as the monitor's and the
+      out-of-memory reserve's), and the after-world sweep skips a pinned
+      chunk. The mover placed right after that example fails 21 on the tree
+      before 13 of 13; the fix 0 of 100 (97 moved), and 0 of 30 with the
+      move first. Fixed: a set that never takes the hit path is pinned only
+      when mid-allocation. Regression 109 (control `no_hit_sets_swept =
+      false`). `bench/log/linux/2026-11-07-reg21-fallback-pinned/FINDINGS.md`.
 - [ ] **Per-object mark cost on a large pointer heap (2026-10-03,
       refreshed 2026-10-23).** Per collection at the same (full) live set,
       gcry's one marker took 0.39× / 0.43× / 0.67× of Boehm's one marker on
