@@ -46,7 +46,7 @@ env:
   # Shards by loop name (extended regexes over the whole name). `gates` is
   # what the other two leave.
   SHARD_FUZZ: "fuzz-60s|property-test|mt-property-test|pattern-fuzz.*"
-  SHARD_MT: "stw-mt-property-test.*|claim-stress-lazy|claim-stress-in-stop|thread-storm-release"
+  SHARD_MT: "stw-mt-property-test.*|claim-stress-lazy|claim-stress-in-stop|claim-stress-fallback-.*|thread-storm-release"
 
 jobs:
   stress:

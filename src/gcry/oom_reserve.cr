@@ -82,8 +82,10 @@ module Gcry
         Gcry.os_unmap(ptr, bytes)
         return
       end
-      # Never the hit path, and pinned rather than retired at a stop-the-world,
-      # as the shared fallback set is: several reporting threads share it.
+      # Never the hit path and never retired at a stop-the-world, like the
+      # shared fallback set: several reporting threads share it. Its chunks
+      # are pinned only while one of them is mid-allocation
+      # (`bitmap_settle_cursor_sets`).
       set.value.no_hit_path = 1_u8
       set.value.state = CursorSet::STATE_LIVE
       @oom_reserve_base = ptr.address

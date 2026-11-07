@@ -226,6 +226,11 @@ loop pattern-fuzz-nursery-mprotect 20 300 env GCRY_NURSERY=262144 GCRY_MPROTECT_
 loop pattern-fuzz-incremental-mprotect 10 600 env GCRY_INCREMENTAL=1 GCRY_MPROTECT_BARRIER=1 bin/pattern_fuzz --seed=@SEED@ --phases=100 --objects-per-phase=5000
 loop claim-stress-lazy 200 90 bin/claim_stress_rel --seconds=5 --workers=4 --seed=@SEED@
 loop claim-stress-in-stop 300 90 env GCRY_DISABLE_LAZY_SWEEP=1 bin/claim_stress_rel --seconds=5 --workers=4 --seed=@SEED@
+# Past the 64-set cursor table: the threads beyond it allocate through the
+# shared fallback set, whose chunks the sweeps now take while it allocates
+# (regression 109). A guard against a sweep or retire of them under a user.
+loop claim-stress-fallback-lazy 100 120 bin/claim_stress_rel --seconds=5 --workers=72 --seed=@SEED@
+loop claim-stress-fallback-in-stop 100 120 env GCRY_DISABLE_LAZY_SWEEP=1 bin/claim_stress_rel --seconds=5 --workers=72 --seed=@SEED@
 loop thread-storm-release 200 120 bin/thread_storm_rel --iterations=2000 --workers=16
 loop parallel-mark-process 20 600 make parallel-mark-process
 loop parallel-mark-termination 6 600 make parallel-mark-termination

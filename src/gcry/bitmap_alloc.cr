@@ -985,6 +985,14 @@ module Gcry
       bitmap_alloc_chunk?(chunk)
     end
 
+    # Does this thread allocate through the shared fallback set (it first
+    # allocated with the table full)? For the stresses that need threads
+    # there (`bench/claim_stress.cr`, regression 109).
+    def on_fallback_cursor_set? : Bool
+      set = cursor_set_cached
+      !set.null? && set == @fallback_cursor_set
+    end
+
     # Allocated blocks in a chunk, straight from `occ` — one popcount pass
     # instead of a header walk — less the blocks its cursor has claimed and
     # not handed out (`cursor_claim`). Exact on a quiescent heap or in a

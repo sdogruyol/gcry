@@ -33,6 +33,13 @@
 # the chunks of a set the stop froze mid-allocation, with that set's claim
 # marked by the settle; with the default lazy sweep those chunks are skipped.
 # Run both. Exit 0 when every stamp held and nothing drifted, 1 otherwise.
+#
+# More workers than the cursor-set table holds (`Heap::MAX_CURSOR_SETS`, 64;
+# `--workers=72`) puts the threads past it on the shared fallback set, which
+# allocates under the class lock and whose chunks the stop pins only while a
+# user is mid-allocation, so the after-world sweep sweeps them as they
+# allocate (`Heap#bitmap_settle_cursor_sets`, 2026-11-07, regression 109).
+# Such a run fails unless some worker was seen on the fallback.
 
 require "../src/gcry"
 require "wait_group"
@@ -74,6 +81,8 @@ class ClaimStress
   getter remote_frees = Atomic(UInt64).new(0)
   getter drops = Atomic(UInt64).new(0)
   getter checks = Atomic(UInt64).new(0)
+  # Ring passes made on a thread allocating through the fallback set.
+  getter fallback_passes = Atomic(UInt64).new(0)
   @messages = [] of String
   @messages_lock = Mutex.new
 
@@ -180,6 +189,7 @@ class ClaimStress
 
       n += 1
       if n % 256 == 0
+        @fallback_passes.add(1) if Gcry.default_heap.on_fallback_cursor_set?
         @ring_size.times do |j|
           check(ptrs[j], sizes[j], ids[j], "worker #{wid} ring pass") unless ptrs[j].null?
         end
@@ -238,8 +248,12 @@ workers.times do |w|
 end
 
 rng = Random.new(seed)
+# Collections from this loop whose sweep ran after the world, with the
+# workers allocating: the lazy arm's point.
+after_world = 0
 while test.running?
   GC.collect
+  after_world += 1 if heap.last_sweep_after_world
   sleep (rng.rand(2000) + 200).microseconds
 end
 test.stop
@@ -297,7 +311,8 @@ puts "  ops=#{test.ops.get} allocs=#{test.allocs.get} local_frees=#{test.local_f
      "remote_frees=#{test.remote_frees.get} drops=#{test.drops.get} checks=#{test.checks.get}"
 puts "  collections=#{heap.collections - collections} claims_released=#{heap.cursor_claims_released - released} " \
      "sets_pinned=#{heap.cursor_sets_pinned - pinned} hits=#{heap.cursor_hit_allocations} " \
-     "locked=#{heap.bitmap_locked_allocations}"
+     "locked=#{heap.bitmap_locked_allocations} sets=#{heap.cursor_set_count} fallback_passes=#{test.fallback_passes.get} " \
+     "after_world_sweeps=#{after_world}"
 puts "  refused_frees=#{refused} live_objects_drift=#{live_drift.inspect} free_bytes_drift=#{free_drift.inspect} " \
      "unlisted_chunks=#{unlisted} dormant_held=#{dormant_held}"
 
@@ -325,6 +340,14 @@ if dormant_held != 0
 end
 if test.remote_frees.get == 0 || heap.collections == collections
   STDERR.puts "  FAIL: the run did not exercise cross-thread frees and collections"
+  failed = true
+end
+if workers > Gcry::Heap::MAX_CURSOR_SETS && test.fallback_passes.get == 0
+  STDERR.puts "  FAIL: #{workers} workers and none seen allocating through the fallback set"
+  failed = true
+end
+if workers > Gcry::Heap::MAX_CURSOR_SETS && heap.lazy_sweep && after_world == 0
+  STDERR.puts "  FAIL: lazy sweep on and no collection swept after the world"
   failed = true
 end
 test.messages.each { |m| STDERR.puts "  ERROR: #{m}" }
