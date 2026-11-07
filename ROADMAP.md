@@ -4902,12 +4902,31 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       The test no longer depends on it; what stays open is only which
       object an earlier spec leaves holding ~2 000 objects into the window
       in the shared process. `bench/log/linux/2026-11-06-spec-harden/`.
-- [ ] **Regression 99's *race* control arm sometimes does not reproduce
-      (seen 2026-11-06).** "the queued slice returned false" (`Expected
-      2, got 1`): 1 of 100 and 3 of 74 suite-order runs on 1.22.2
-      headerless, 2 of 50 on headers + `GCRY_BITMAP_ALLOC=0`; the fixed arm
-      never failed. Not investigated.
-      `bench/log/linux/2026-11-06-spec-harden/` § 1.
+- [x] **Regression 99's *race* control arm sometimes does not reproduce
+      (seen 2026-11-06) — closed 2026-11-07: a full collection dropped the
+      cycle outside the collection section.** "the queued slice returned
+      false" (`Expected 2, got 1`): 1 of 100 and 3 of 74 suite-order runs
+      on 1.22.2 headerless, 2 of 50 on headers + `GCRY_BITMAP_ALLOC=0`; the
+      fixed arm never failed (`bench/log/linux/2026-11-06-spec-harden/`
+      § 1). The ticket assertion held every time: the second thread did
+      queue. What varied was the losing slice's own `collect`, whose
+      `abort_incremental` ran before it queued. When it ran before the
+      queued slice woke (the idle host's order) the slice ran on a dropped
+      cycle and swept; when the slice woke first (a loaded host, forced by
+      pinning the child to one CPU: 298 and 299 of 300) it found the chain
+      the losing slice's scan had left grey, marked 4 096 of it and
+      returned false. The early drop is a defect of its own — a slice past
+      its re-read sweeps what only the cleared entries reached, roots
+      notwithstanding — now fixed and pinned by regression 108; the race
+      control's slice now always runs on the open cycle with an unbounded
+      budget and asserts so.
+      `bench/log/linux/2026-11-06-reg99-race/FINDINGS.md`.
+- [ ] **`collect_a_little` begins a cycle outside the collection section
+      (seen 2026-11-07, not examined).** `begin_incremental` stops the world
+      and writes `@collecting` without holding the section, so it may
+      overlap a collection's post-stop passes, which the section exists to
+      keep a stop out of [INFERENCE: read from the code, no reproduction].
+      `bench/log/linux/2026-11-06-reg99-race/FINDINGS.md` § 5.
 - [x] **Regression 21's "controls kept 8 > 1" once more (2026-11-06,
       found and fixed 2026-11-07).** 1 of 174 suite-order runs on 1.22.2
       headerless, on a tree with regressions 103 and 106, the main fiber

@@ -159,6 +159,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A full collection drops an open incremental cycle only once it holds
+  the collection section, and regression 99's *race* control no longer
+  flakes.** `collect` and `minor_collect` called `abort_incremental` before
+  they queued, so it could land while another thread's slice held the
+  section, between its re-read of `@inc_active` and its stop: the slice
+  went on with its grey entries cleared and the backend `None`, saw no
+  lost barrier, and swept what only those entries reached while a root
+  held it. The drop now runs in `run_collection_body` after the section is
+  taken (Boehm finishes the cycle under its allocation lock). Regression
+  108 forces the window: fixed, a 20 000-block chain behind an explicit
+  root lives; control (`Heap.collect_drops_cycle_in_section = false`),
+  19 859 of its blocks are swept. The same early drop decided which way
+  regression 99's *race* control went: on an idle host the queued slice
+  ran on a cycle already dropped, on a loaded one it ran first and its
+  4 096 marks did not finish the chain the losing slice left grey (298 and
+  299 of 300 failures pinned to one CPU, both layouts). The control's
+  slice now always runs on the open cycle, with an unbounded budget, and
+  asserts it saw the cycle open; the fixed arm asserts its slice returned
+  before the hook. 0 failures in 300 pinned and 300 unpinned children per
+  arm on both layouts; in suite order (cut after regression 99) 0 of 300
+  unpinned and 0 of 200 pinned runs per layout, against 200 and 199 of 200
+  pinned for the tree before. The keep rule against 0.39.0 on the five
+  runners finds no row unexcused (`bench/log/linux/2026-11-06-reg99-race/`).
+
 - **Blocks that die in a chunk the shared fallback cursor set holds are
   reclaimed, and regression 21 no longer fails "controls kept 8 > 1" a
   third way.** A thread that first allocates while the 64-set table is full
