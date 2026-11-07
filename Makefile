@@ -1863,18 +1863,18 @@ alloc-entry-frame: $(BIN)
 # (`GCRY_DISABLE_LAZY_SWEEP=1`), the one that sweeps a chunk a frozen cursor
 # holds and so needs its claim marked by the settle. Red arms, by hand edit,
 # in `bench/log/linux/2026-10-17-occupancy-claim/FINDINGS.md`. The same two
-# with 72 workers, past the 64-set cursor table: the threads beyond it
-# allocate through the shared fallback set, whose chunks the sweeps take while
-# it allocates (regression 109); each run must see a worker there, and the
-# lazy one a sweep after the world
-# (`bench/log/linux/2026-11-07-reg21-fallback-pinned/`). ~70 s.
+# with `--fallback`: the 64-set cursor table filled with parked threads
+# first, so the workers allocate through the shared fallback set, whose
+# chunks the sweeps take while it allocates (regression 109); each run must
+# see allocations there, and the lazy one a sweep after the world
+# (`bench/log/linux/2026-11-07-reg21-fallback-pinned/`). ~25 s.
 .PHONY: claim-stress
 claim-stress: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/claim_stress.cr -o $(BIN)/claim_stress --error-trace
 	$(BIN)/claim_stress --seconds=5 --workers=4 --seed=$${CLAIM_SEED:-1}
 	GCRY_DISABLE_LAZY_SWEEP=1 $(BIN)/claim_stress --seconds=5 --workers=4 --seed=$${CLAIM_SEED:-1}
-	$(BIN)/claim_stress --seconds=5 --workers=72 --seed=$${CLAIM_SEED:-1}
-	GCRY_DISABLE_LAZY_SWEEP=1 $(BIN)/claim_stress --seconds=5 --workers=72 --seed=$${CLAIM_SEED:-1}
+	$(BIN)/claim_stress --seconds=5 --workers=8 --fallback --seed=$${CLAIM_SEED:-1}
+	GCRY_DISABLE_LAZY_SWEEP=1 $(BIN)/claim_stress --seconds=5 --workers=8 --fallback --seed=$${CLAIM_SEED:-1}
 
 # What a fault outside gcry's span actually *is*. The three readings there say
 # what it is not — not a gcry allocation, and whether a swept object is

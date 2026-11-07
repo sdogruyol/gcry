@@ -203,9 +203,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`bench/log/linux/2026-11-07-reg21-fallback-pinned/`). Regression 109,
   with a control arm, and a stamped arm in which a thread on the fallback
   allocates through 20 collections; `make claim-stress` and the overnight
-  loops also run `claim_stress` with 72 workers, past the table, in both
-  sweep arms (50 runs each green on this tree and the one before; a mutant
-  that leaves the unpinned claim unmarked fails both guards).
+  loops also run `claim_stress --fallback`, which fills the table with
+  parked threads so its workers allocate through the fallback, in both
+  sweep arms (a mutant that leaves the unpinned claim unmarked fails both
+  guards). Its first form, 72 workers past the table, put none on the
+  fallback on the macOS and Windows runners, whose execution context starts
+  its threads on demand.
 
 - **Regression 1 runs its drift cycles in a process of their own.** In
   the suite's shared process it still drifted rarely on Crystal 1.22.2

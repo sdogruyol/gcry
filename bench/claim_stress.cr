@@ -34,12 +34,17 @@
 # marked by the settle; with the default lazy sweep those chunks are skipped.
 # Run both. Exit 0 when every stamp held and nothing drifted, 1 otherwise.
 #
-# More workers than the cursor-set table holds (`Heap::MAX_CURSOR_SETS`, 64;
-# `--workers=72`) puts the threads past it on the shared fallback set, which
-# allocates under the class lock and whose chunks the stop pins only while a
-# user is mid-allocation, so the after-world sweep sweeps them as they
-# allocate (`Heap#bitmap_settle_cursor_sets`, 2026-11-07, regression 109).
-# Such a run fails unless some worker was seen on the fallback.
+# `--fallback` first fills the cursor-set table (`Heap::MAX_CURSOR_SETS`, 64)
+# with parked threads, one allocation each, until a new thread lands on the
+# shared fallback set, so every worker thread started after it allocates
+# through the fallback: under the class lock, with chunks the stop pins only
+# while a user is mid-allocation, so the after-world sweep sweeps them as
+# they allocate (`Heap#bitmap_settle_cursor_sets`, 2026-11-07, regression
+# 109). Such a run fails unless some worker allocation went through the
+# fallback, and a lazy one unless some collection swept after the world.
+# More workers than the table does not do it alone: the context starts its
+# threads on demand, so on a runner with few cores far fewer than the
+# workers start (`--workers=72` on macOS and Windows runners, 2026-11-07).
 
 require "../src/gcry"
 require "wait_group"
@@ -52,12 +57,14 @@ seconds = 5.0
 workers = 4
 seed = 1_i64
 ring_size = 512
+fallback = false
 
 ARGV.each do |arg|
   case arg
   when /\A--seconds=([\d.]+)\z/ then seconds = $1.to_f
   when /\A--workers=(\d+)\z/    then workers = $1.to_i
   when /\A--seed=(\d+)\z/       then seed = $1.to_i64
+  when "--fallback"             then fallback = true
   when /\A--ring=(\d+)\z/       then ring_size = $1.to_i
   else
     STDERR.puts "unknown argument #{arg}"
@@ -81,8 +88,10 @@ class ClaimStress
   getter remote_frees = Atomic(UInt64).new(0)
   getter drops = Atomic(UInt64).new(0)
   getter checks = Atomic(UInt64).new(0)
-  # Ring passes made on a thread allocating through the fallback set.
-  getter fallback_passes = Atomic(UInt64).new(0)
+  # Allocations made on a thread allocating through the fallback set, and
+  # the workers that made any.
+  getter fallback_allocs = Atomic(UInt64).new(0)
+  getter fallback_workers = Atomic(Int32).new(0)
   @messages = [] of String
   @messages_lock = Mutex.new
 
@@ -140,6 +149,7 @@ class ClaimStress
     serial = 0_u64
     inbox = @inboxes[wid]
     n = 0
+    on_fallback = 0_u64
     while running?
       i = rng.rand(@ring_size)
       unless ptrs[i].null?
@@ -173,6 +183,8 @@ class ClaimStress
       sizes[i] = size
       ids[i] = id
       @allocs.add(1)
+      # Read per allocation: a fiber moves between the context's threads.
+      on_fallback &+= 1 if Gcry.default_heap.on_fallback_cursor_set?
 
       # Frees passed from other workers: the owner of the claim on the
       # block's word is someone else, or no one any more.
@@ -189,13 +201,16 @@ class ClaimStress
 
       n += 1
       if n % 256 == 0
-        @fallback_passes.add(1) if Gcry.default_heap.on_fallback_cursor_set?
         @ring_size.times do |j|
           check(ptrs[j], sizes[j], ids[j], "worker #{wid} ring pass") unless ptrs[j].null?
         end
         Fiber.yield
       end
       @ops.add(1)
+    end
+    if on_fallback > 0
+      @fallback_allocs.add(on_fallback)
+      @fallback_workers.add(1)
     end
     @ring_size.times do |j|
       check(ptrs[j], sizes[j], ids[j], "worker #{wid} final") unless ptrs[j].null?
@@ -227,7 +242,43 @@ unless heap.stop_the_world && heap.bitmap_alloc?
 end
 
 puts "claim_stress seconds=#{seconds} workers=#{workers} seed=#{seed} ring=#{ring_size} " \
-     "lazy_sweep=#{heap.lazy_sweep} headers=#{{{ flag?(:gcry_block_headers) }}}"
+     "lazy_sweep=#{heap.lazy_sweep} headers=#{{{ flag?(:gcry_block_headers) }}} fallback=#{fallback}"
+
+# A bare thread has no event loop to sleep on.
+def claim_stress_nap : Nil
+  {% if flag?(:win32) %}
+    LibC.Sleep(1)
+  {% else %}
+    req = LibC::Timespec.new(tv_sec: 0, tv_nsec: 1_000_000)
+    LibC.nanosleep(pointerof(req), Pointer(LibC::Timespec).null)
+  {% end %}
+end
+
+# `--fallback`: parked threads, one allocation each, until one lands on the
+# fallback set. They stay parked to the end, so the table stays full.
+fill_stop = Atomic(Int32).new(0)
+fill_parkers = [] of Thread
+filled = false
+if fallback
+  (Gcry::Heap::MAX_CURSOR_SETS + 8).times do
+    landed = Atomic(Int32).new(-1)
+    fill_parkers << Thread.new do
+      GC.malloc_atomic(16)
+      landed.set(heap.on_fallback_cursor_set? ? 1 : 0)
+      until fill_stop.get == 1
+        claim_stress_nap
+      end
+    end
+    until landed.get >= 0
+      sleep 1.millisecond
+    end
+    if landed.get == 1
+      filled = true
+      break
+    end
+  end
+  puts "  filled the cursor-set table with #{fill_parkers.size} parked thread(s): #{filled}"
+end
 
 double_frees = heap.double_frees
 released = heap.cursor_claims_released
@@ -258,6 +309,8 @@ while test.running?
 end
 test.stop
 wg.wait
+fill_stop.set(1)
+fill_parkers.each(&.join)
 
 # Whatever is still in flight between workers is checked and freed here.
 workers.times do |w|
@@ -311,7 +364,7 @@ puts "  ops=#{test.ops.get} allocs=#{test.allocs.get} local_frees=#{test.local_f
      "remote_frees=#{test.remote_frees.get} drops=#{test.drops.get} checks=#{test.checks.get}"
 puts "  collections=#{heap.collections - collections} claims_released=#{heap.cursor_claims_released - released} " \
      "sets_pinned=#{heap.cursor_sets_pinned - pinned} hits=#{heap.cursor_hit_allocations} " \
-     "locked=#{heap.bitmap_locked_allocations} sets=#{heap.cursor_set_count} fallback_passes=#{test.fallback_passes.get} " \
+     "locked=#{heap.bitmap_locked_allocations} sets=#{heap.cursor_set_count} fallback_allocs=#{test.fallback_allocs.get} fallback_workers=#{test.fallback_workers.get} " \
      "after_world_sweeps=#{after_world}"
 puts "  refused_frees=#{refused} live_objects_drift=#{live_drift.inspect} free_bytes_drift=#{free_drift.inspect} " \
      "unlisted_chunks=#{unlisted} dormant_held=#{dormant_held}"
@@ -342,11 +395,15 @@ if test.remote_frees.get == 0 || heap.collections == collections
   STDERR.puts "  FAIL: the run did not exercise cross-thread frees and collections"
   failed = true
 end
-if workers > Gcry::Heap::MAX_CURSOR_SETS && test.fallback_passes.get == 0
-  STDERR.puts "  FAIL: #{workers} workers and none seen allocating through the fallback set"
+if fallback && !filled
+  STDERR.puts "  FAIL: #{fill_parkers.size} parked threads and none landed on the fallback set"
   failed = true
 end
-if workers > Gcry::Heap::MAX_CURSOR_SETS && heap.lazy_sweep && after_world == 0
+if fallback && test.fallback_allocs.get == 0
+  STDERR.puts "  FAIL: no worker allocation went through the fallback set"
+  failed = true
+end
+if fallback && heap.lazy_sweep && after_world == 0
   STDERR.puts "  FAIL: lazy sweep on and no collection swept after the world"
   failed = true
 end

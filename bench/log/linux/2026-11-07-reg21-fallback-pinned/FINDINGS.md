@@ -308,6 +308,35 @@ failures, 2 pending), `process_spec` on 1.22.2 (449/450/450, 0 failures),
 and `make claim-stress` pass; the late-mover suite order, 10 more runs (9
 moved), 0 failures of 21 (`runs/lmvfix2.txt`).
 
+## 9. `--fallback` replaces `--workers=72` (2026-11-07)
+
+The 72-worker arm failed "72 workers and none seen allocating through the
+fallback set" in PR CI run 42340290626 (`a40ec329`) on the darwin x86_64,
+darwin arm64 and windows x86_64 gates; Linux passed. Two reasons, both in
+the harness:
+
+- `Fiber::ExecutionContext::Parallel` starts its threads on demand
+  (`wake_scheduler` starts one only when no thread is spinning or parked),
+  so on a 3- or 4-core runner far fewer than 72 threads start, the table
+  need not fill, and the 72 fibers share the threads that did start.
+- The check sampled `on_fallback_cursor_set?` once per 256 operations of a
+  worker; darwin arm64's in-stop run averaged 193 operations a worker, so a
+  fallback thread could pass unseen (Windows' lazy run saw 4 samples,
+  arm64's lazy one 69).
+
+`claim_stress --fallback` now fills the table first: bare threads, one
+allocation each, parked to the end, until one lands on the fallback (63
+here: the main thread and the runtime's hold the rest). Every worker thread
+started after that is on the fallback, however many the context starts.
+The check counts allocations made on the fallback, read per allocation (a
+fiber moves between the context's threads), and fails the run when the
+fill never landed, when no allocation went through the fallback, or, lazy,
+when no collection swept after the world. `make claim-stress` and the
+overnight loops run `--workers=8 --fallback` in both arms. Locally both
+arms pass with every allocation of all 8 workers on the fallback (657 712
+and 477 665; 581 after-world sweeps in the lazy arm); the runner probe is
+below.
+
 ## Files
 
 - `diag/d21h.cr`, `diag/d21h-spec.diff`: the diagnostic and its changes to
