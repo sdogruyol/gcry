@@ -159,6 +159,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An incremental cycle begins inside the collection section.**
+  `collect_a_little` began its cycle (`begin_incremental`: a stop, the
+  marks cleared, the roots marked, the barrier armed, `@collecting` set
+  and cleared) before it queued for the section, on entry checks that read
+  `@collecting` false. A full collection sets that flag only once it holds
+  the section and is past its prelude, so a slicing thread that read it
+  false while a collection queued or prepared still began: its stop waited
+  out the collection's and took the world in the post-stop passes, ahead of
+  the default sweep after the world, and cleared the marks that sweep
+  reads. The collection then freed every object a root does not point at
+  directly, its re-arm took the new cycle's barrier down (the cycle stayed
+  open with none), and the begin's `@collecting = false` ended the
+  collection's flag early. A begin landing while a collection dropped an
+  open cycle had its grey entries and barrier undone by the rest of the
+  drop (probe). The cycle now begins after `lock_post_stw`, in the same
+  section → `lock_write` → stop order as every collection; a slice that
+  queued expecting an open cycle still returns false when it finds it
+  gone. Boehm begins a cycle under its allocation lock. Regression 110:
+  fixed, a 20 000-block chain behind an explicit root lives and the cycle
+  runs on mprotect; control (`Heap.inc_begins_in_section = false`), 19 999
+  of its blocks are swept by the collection's own sweep. Affects every
+  release through 0.39.0 (each begins the cycle before the section; the
+  sweep-after-world form since lazy sweep became the default, 0.17.0 at
+  the latest). The default stop-the-world path's machine code is
+  unchanged. `bench/log/linux/2026-11-07-incremental-begin/FINDINGS.md`.
+
 - **A full collection drops an open incremental cycle only once it holds
   the collection section, and regression 99's *race* control no longer
   flakes.** `collect` and `minor_collect` called `abort_incremental` before

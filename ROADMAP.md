@@ -4921,12 +4921,21 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       control's slice now always runs on the open cycle with an unbounded
       budget and asserts so.
       `bench/log/linux/2026-11-06-reg99-race/FINDINGS.md`.
-- [ ] **`collect_a_little` begins a cycle outside the collection section
-      (seen 2026-11-07, not examined).** `begin_incremental` stops the world
-      and writes `@collecting` without holding the section, so it may
-      overlap a collection's post-stop passes, which the section exists to
-      keep a stop out of [INFERENCE: read from the code, no reproduction].
-      `bench/log/linux/2026-11-06-reg99-race/FINDINGS.md` § 5.
+- [x] **`collect_a_little` begins a cycle outside the collection section
+      (seen 2026-11-07) — reproduced and fixed 2026-11-07.** A slicing
+      thread that read `@collecting` false while a full collection queued
+      or prepared began its cycle anyway; its stop waited out the
+      collection's and landed in the post-stop passes, ahead of the
+      default sweep after the world, and cleared the marks that sweep
+      reads: the collection freed every object a root does not point at
+      directly (regression 110's control: 19 999 of a 20 000-block chain),
+      then its re-arm left the new cycle open with no barrier, and the
+      begin cleared the collection's `@collecting`. A begin landing during
+      the collection's drop of an open cycle (probe) had its grey entries
+      and barrier undone by the rest of the drop, the cycle left open on
+      nothing. Fixed: the cycle begins holding the section. Regression 110
+      (control `Heap.inc_begins_in_section = false`).
+      `bench/log/linux/2026-11-07-incremental-begin/FINDINGS.md`.
 - [x] **Regression 21's "controls kept 8 > 1" once more (2026-11-06,
       found and fixed 2026-11-07).** 1 of 174 suite-order runs on 1.22.2
       headerless, on a tree with regressions 103 and 106, the main fiber
