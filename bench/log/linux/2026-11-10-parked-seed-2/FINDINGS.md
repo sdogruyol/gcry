@@ -173,3 +173,7 @@ No row unexcused.
 - `instr/parked-slot-words.patch`: the diagnostics (never committed to
   `src/`); `instr/sleep-wipe.patch`: the first form of the fix (round i2).
 - `keep/`: the three `perf-ab.yml` runs, `keep.py` output and summaries.
+
+## Commit hashes after the rebase
+
+The hashes above are from `parked2-040` before it was rebased onto `release-0.40.0` (kept as tag `archive/parked2-040`, `de2b7528`). On `release-0.40.0`: `2d94a233` is `32b11119`, `b8fc26cf` is `2c6c442a`, `ceebebe7` is `2c208eb0`, `de2b7528` is `0e4e6d72`. The source is the same.
