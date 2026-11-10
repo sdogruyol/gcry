@@ -1,0 +1,3 @@
+ubuntu-latest     JsonParsePure          placement time +2.1% [+1.6, +3.2]; wall +1.0% [+0.1, +2.4] var-code var=0.676 prepad16=0.675 prepad64=0.683 | base-code base=0.663 baseprepad16=0.682 baseprepad64=0.676
+ubuntu-latest     JsonParseSerializable  placement time +5.8% [+5.0, +7.1]; wall +2.2% [+1.5, +2.9] var-code var=0.586 prepad16=0.556 prepad64=0.573 | base-code base=0.550 baseprepad16=0.576 baseprepad64=0.559
+ubuntu-latest     JsonParsePull          placement time +5.8% [+5.2, +6.4]; wall +2.6% [+1.9, +3.2] var-code var=0.569 prepad16=0.542 prepad64=0.556 | base-code base=0.538 baseprepad16=0.561 baseprepad64=0.543  PEAK +0.6% [+0.0, +1.0]

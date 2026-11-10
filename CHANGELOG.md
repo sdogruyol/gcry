@@ -175,7 +175,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frames; a Crystal without it fails to build. 0 of 16 000 runs in the same
   session. Over-retention only. Regression 111 plants a marker under the
   sleep: its high half survives under half-written words before the fix and
-  not after (`GCRY_MONITOR_SLEEP_TEST`, research only)
+  not after (`GCRY_MONITOR_SLEEP_TEST`, research only). Keep rule against
+  0.39.0 on the five runners: one row flagged (`ubuntu-latest`
+  JsonParsePure, +2.1%), within spread in a 21-rep session on that runner
+  and placement against the release tip
   (`bench/log/linux/2026-11-10-parked-seed-2/`).
 
 - **An incremental cycle begins inside the collection section.**
