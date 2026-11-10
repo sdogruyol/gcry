@@ -216,3 +216,16 @@ alignment, and 0.39.0 at the tip's alignment reads the tip's time (§2). No
 reverted change makes a flagged row slower by itself (§3). arm64
 JsonGenerate's extra collection is a schedule step the unroll brings closer
 (§4); its time is inside the band and 0.39.0 reaches the step when padded.
+
+## 7. The keep rule on the release tip, five runners: 42385593882
+
+Tip `a5a07ffe` (every 0.40 src change, regressions 89–110) against
+`v0.39.0`: five runners, nine benches, 15 reps, Boehm, stats=3, pads
+`p16 p64 bp16 bp64` (`final/keep-42385593882.txt`, `final/summary-*.md`).
+45 rows: 36 ok, 9 placement, **0 unexcused**. The placement rows are the
+ones earlier sessions attributed: Windows Revcomp (time +16.4%, wall +5.8%,
+`Revcomp#revcomp`'s phase), the Windows JSON rows and Binarytrees
+(`bench/log/windows/2026-11-06-win-phases/`), Intel Revcomp and
+JsonParseSerializable, arm64 JsonGenerate (the unroll's fifteenth
+collection). Peak: every row at or under 1.07× Boehm except Knuckeotide
+(1.14–1.66×, the documented exception).
