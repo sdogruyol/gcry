@@ -4,10 +4,10 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-**Release state.** Latest release **v0.39.0** (2026-10-27): the in-stop audit's
-fixes, the mprotect re-arm and macOS executable-lookup memory-safety fixes,
-the slow-path stack wipe on every target, the mark batch loop, atomic shared
-counters and the 4 GiB fence, of PR #56. The tip is the next candidate; `CHANGELOG.md`'s `[Unreleased]` section is what it holds.
+**Release state.** Latest release **v0.40.0** (2026-11-11): the incremental
+and nursery soundness fixes, the idle collector on Crystal 1.22, the default
+collector's over-retention fixes, the growth-priced pace, the macOS high heap
+and the 4 GiB fence's long-reservation fix, of PR #57. The tip is the next candidate; `CHANGELOG.md`'s `[Unreleased]` section is what it holds.
 
 The headings below carry **no version numbers on purpose**. They are work
 buckets, and every attempt to number them has rotted: v0.20.0 through v0.25.0

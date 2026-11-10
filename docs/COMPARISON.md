@@ -6,9 +6,9 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-Snapshot of gcry **0.39.0** (`shard.yml`, 2026-10-27): sound defaults, parallel mark on by default, Boehm's `GC_*` C ABI, in-place large `realloc`, batched mark with small objects scanned in the batch loop, the occupancy claim, the slow-path stack wipe, and the fixes in `CHANGELOG.md`. Every number is quoted from the README, with its source.
+Snapshot of gcry **0.40.0** (`shard.yml`, 2026-11-11): sound defaults, parallel mark on by default, Boehm's `GC_*` C ABI, in-place large `realloc`, batched mark with small objects scanned in the batch loop, the occupancy claim, the slow-path stack wipe, the growth-priced pace, the macOS high heap, the idle collector on Crystal 1.22, and the fixes in `CHANGELOG.md`. Every number is quoted from the README, with its source.
 
-| | gcry (0.39.0) | Boehm (Crystal default) |
+| | gcry (0.40.0) | Boehm (Crystal default) |
 |--|---------------|-------------------------|
 | Integration | Shard reopen under `-Dgc_none` | Built-in `gc/boehm` |
 | Core language | **Crystal** | C |

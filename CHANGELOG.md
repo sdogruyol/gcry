@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-11
+
+> **0.39.0 and earlier have memory-safety bugs in the opt-in incremental and
+> nursery modes that 0.40.0 fixes.** With `GCRY_INCREMENTAL=1` or
+> `GCRY_NURSERY` (on Linux arm64 the mprotect barrier is the only backend, so
+> `GCRY_NURSERY` alone crashes a minor collection), a cycle could free live
+> objects or crash: an object moved onto the stack or stored into a chunk
+> mapped or remapped during the cycle, soft-dirty's "too dirty" fallback, a
+> block handed out twice after `GC.free` raced a lock-free claim, a block freed
+> while still waiting to be marked, and a full collection racing a cycle's
+> begin or drop. Regressions 91, 95 and 99–102, 108 and 110; 0.38.0 and 0.39.0
+> reproduce them. On Crystal 1.22 the idle collector never ran before 0.40.0.
+> On Linux, 0.39.0's 4 GiB fence could walk a `realloc` growing past about
+> 1 GiB down under one fence after another (16 fences and 60 GiB in the
+> traced case) and still leave its front in a window. With incremental and
+> nursery off (the default), none of the bugs fixed here freed live memory:
+> the default collector's fixes are over-retention. All are under Fixed below.
+
 ### Added
 
 - **README, COMPARISON, WINDOWS and the RFC carry 0.40.0's numbers on every
@@ -8908,7 +8926,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/sdogruyol/gcry/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/sdogruyol/gcry/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/sdogruyol/gcry/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/sdogruyol/gcry/compare/v0.36.0...v0.37.0
