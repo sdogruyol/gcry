@@ -137,6 +137,31 @@ before): 3 on 1.21.0 ([INFERENCE] the `Span` copies of `Thread.sleep'`,
   every run, control 3 every run, no skip.
 - `make parallel-dormant` once: six arms PASS.
 
+## 7. Keep rule
+
+The wrapper runs once per Monitor pass (1 KiB of stores every 10 ms); what
+it can move is code placement. `perf-ab.yml` 42841019863: `2d94a233`
+against `v0.39.0`, five runners, nine benches, 15 reps, Boehm, stats=3,
+pads `p16 p64 bp16 bp64`; `keep.py` (`../2026-11-01-0.40-keep-rule/`):
+45 rows, 32 ok, 12 placement, **1 flagged**: `ubuntu-latest` JsonParsePure,
+time +2.1% [+1.5, +2.5], wall +0.9%, var-code 0.864 / 0.873 / 0.869 against
+base-code 0.845–0.857 (`keep/keep-42841019863.txt`). The release tip's run
+(42385593882) had that row ok, on a faster runner (0.53 s).
+
+Followed as the keep rule's §2 did, on the flagged runner, 21 reps, three
+JSON rows, four pads:
+
+- 42854942802, against `v0.39.0`: JsonParsePure **ok**, +0.2%
+  [−1.0, +4.0], var 0.605 / base 0.604; JsonParseSerializable and
+  JsonParsePull placement (`keep/keep-42854942802.txt`).
+- 42852039642, against the release tip `43f2c953` itself: all three rows
+  placement, var slower unpadded (+2.1%, +5.8%, +5.8%) and `prepad16`
+  inside the tip's band in each (JsonParsePure 0.675 in 0.663–0.682,
+  JsonParseSerializable 0.556 in 0.550–0.576, JsonParsePull 0.542 in
+  0.538–0.561) (`keep/keep-42852039642.txt`).
+
+No row unexcused.
+
 ## Files
 
 - `rates.sh`, `runs/{i1,i2,r1}.tsv` and `*-summary.txt`: the rounds (binary,
@@ -147,3 +172,4 @@ before): 3 on 1.21.0 ([INFERENCE] the `Span` copies of `Thread.sleep'`,
 - `runs/gdb-watch-high-half.txt`, `instr/gdb-*.cmd`: the watchpoint.
 - `instr/parked-slot-words.patch`: the diagnostics (never committed to
   `src/`); `instr/sleep-wipe.patch`: the first form of the fix (round i2).
+- `keep/`: the three `perf-ab.yml` runs, `keep.py` output and summaries.
