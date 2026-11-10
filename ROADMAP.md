@@ -4889,7 +4889,7 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       in SYSMON's stack, same high half as the heap) lies at that depth, so
       the word is a heap address each 10 ms. Regression 107's scrub runs
       once, before the loop, and could not reach it. Fixed:
-      `Thread.sleep` (the Monitor's one caller) wipes 1 KiB below its SP
+      `Thread.sleep` (the Monitor is its one stdlib caller) wipes 1 KiB below its SP
       before Crystal's sleep builds its frames. Tip 5 of 8 000 (CI's
       signature), fix 0 of 16 000 in the same session; regression 111.
       `bench/log/linux/2026-11-10-parked-seed-2/FINDINGS.md`.

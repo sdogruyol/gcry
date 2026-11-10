@@ -413,7 +413,7 @@ module Gcry
 
     # The Monitor zeroes the stack under `Thread.sleep` before Crystal's sleep
     # builds its frames there (`Thread.sleep` below; the Monitor's `every` is
-    # its one caller). `Crystal::System::Thread.sleep` copies the `Time::Span`
+    # the stdlib's one caller; program and spec calls get the same bounded wipe). `Crystal::System::Thread.sleep` copies the `Time::Span`
     # it is given into its frame and stores 4 bytes of the 8 that hold its
     # nanoseconds; the other 4 are whatever the call before it at that depth
     # left, and each pass that is `every`'s own: on Crystal 1.21.0,
@@ -541,7 +541,7 @@ end
     end
   end
 
-  # The Monitor's `every` is the one caller (Crystal 1.21–1.22). The stack
+  # The Monitor's `every` is the stdlib's one caller (Crystal 1.21–1.22); a program calling it gets the same bounded wipe. The stack
   # under this frame is zeroed before Crystal's sleep builds its frames there,
   # so the half of a `Time::Span` word it does not write is 0
   # (`MonitorGate.sleep_test`). Crystal's sleep in a frame of its own, never

@@ -170,7 +170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lay there: `make parallel-dormant`'s dropped burst ("seeded by … parked
   3812 KiB", live 36 MB, no empty chunk dormant) in 5 of 8 000 local runs,
   the residual the parked-seed fix below named. Regression 107's loop scrub
-  runs once and could not reach it. `Thread.sleep`, whose one caller is the
+  runs once and could not reach it. `Thread.sleep`, whose one stdlib caller is the
   Monitor, now wipes 1 KiB below its SP before Crystal's sleep builds its
   frames; a Crystal without it fails to build. 0 of 16 000 runs in the same
   session. Over-retention only. Regression 111 plants a marker under the
