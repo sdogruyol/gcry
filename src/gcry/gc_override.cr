@@ -1206,6 +1206,10 @@ module GC
     if arm = env_digit("GCRY_MONITOR_LOOP_TEST")
       Gcry::MonitorGate.loop_test = arm
     end
+    # Research only: regression 111's arms (`MonitorGate.sleep_test`).
+    if arm = env_digit("GCRY_MONITOR_SLEEP_TEST")
+      Gcry::MonitorGate.sleep_test = arm
+    end
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: let the Darwin free-page walk visit bitmap-allocated
     # chunks, which is the stand-down in `flush_pending_page_release_chunks`
