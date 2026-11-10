@@ -159,6 +159,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The execution-context Monitor's sleep no longer builds a heap address
+  every 10 ms.** `Monitor#every` sleeps between passes in `Thread.sleep`, and
+  Crystal's `System::Thread.sleep` copies the `Time::Span` into its frame,
+  writing only the `Int32` half of the nanoseconds word. On Crystal 1.21.0
+  the other half was rewritten every pass by `Comparable#clamp`'s `self` in
+  `every`, an address in the Monitor's stack with the heap's high half, so
+  the Monitor slept on (that half << 32 | remaining ns), an address in the
+  heap's 4 GiB, which every stop reads whole on Linux. It kept whatever block
+  lay there: `make parallel-dormant`'s dropped burst ("seeded by … parked
+  3812 KiB", live 36 MB, no empty chunk dormant) in 5 of 8 000 local runs,
+  the residual the parked-seed fix below named. Regression 107's loop scrub
+  runs once and could not reach it. `Thread.sleep`, whose one caller is the
+  Monitor, now wipes 1 KiB below its SP before Crystal's sleep builds its
+  frames; a Crystal without it fails to build. 0 of 16 000 runs in the same
+  session. Over-retention only. Regression 111 plants a marker under the
+  sleep: its high half survives under half-written words before the fix and
+  not after (`GCRY_MONITOR_SLEEP_TEST`, research only)
+  (`bench/log/linux/2026-11-10-parked-seed-2/`).
+
 - **An incremental cycle begins inside the collection section.**
   `collect_a_little` began its cycle (`begin_incremental`: a stop, the
   marks cleared, the roots marked, the barrier armed, `@collecting` set
