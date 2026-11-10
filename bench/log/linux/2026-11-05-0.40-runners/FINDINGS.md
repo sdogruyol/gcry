@@ -83,6 +83,14 @@ runners, with each arm's median % of Boehm. Per-platform notes:
   [−3.1, +1.9], +4.1% [−1.4, +15.8], +5.1% [−9.8, +24.6]. One row slower
   beyond the spread, `ubuntu-latest` `/`, with 0.40's arms at 99.9–100.3% of
   Boehm inside 0.39.0's 99.4–100.7%: placement. Peaks within −1.6% to +0.6%.
+- **Kemal recheck on the release tip `a5a07ffe`** (Perf A/B 42834675949,
+  15 trials, Kemal only), % of Boehm, 0.40 (0.39.0) [0.40's IQR]: `/json`
+  `ubuntu-latest` 102.9% (104.1%) [101.0, 104.8], arm64 102.6% (104.3%)
+  [99.0, 104.7], M1 106.0% (102.5%) [101.3, 115.1], Intel 112.2% (111.5%)
+  [102.7, 118.2]; `/` 101.1% (100.8%), 99.9% (99.9%), 99.1% (104.8%)
+  [90.7, 103.5], 108.7% (100.9%) [93.7, 113.3]. Each 0.40 median sits
+  inside 0.39.0's IQR or the reverse; peaks 1.30–1.39×, as above. The docs'
+  Kemal rows (measured on `2658369a`) stand.
 
 ## Linux x86_64 `ubuntu-latest` (4 vCPUs, EPYC 9V74)
 
