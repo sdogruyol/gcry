@@ -4878,6 +4878,21 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       word whose low half is a ~10 ms nanosecond count and whose high half
       matches the heap's. Open; not gcry's frame.
       `bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`.
+- [x] **`make parallel-dormant`'s "parked 3812 KiB" back at ~1 in 2 000
+      (2026-11-10, fixed).** The Monitor word the item above left open;
+      regression 107 (next item) was taken for it and fixed other words.
+      All 13 runs of 8 000 that first-marked a ≥ 1 MiB block as parked
+      did it from one slot of SYSMON's stack: `rsp+0x30` of Crystal's
+      `System::Thread.sleep`, which copies its `Time::Span` and writes only
+      the `Int32` half of the nanoseconds word. The other half is rewritten
+      every pass by `Comparable#clamp` in `every`, whose `self` (an address
+      in SYSMON's stack, same high half as the heap) lies at that depth, so
+      the word is a heap address each 10 ms. Regression 107's scrub runs
+      once, before the loop, and could not reach it. Fixed:
+      `Thread.sleep` (the Monitor's one caller) wipes 1 KiB below its SP
+      before Crystal's sleep builds its frames. Tip 5 of 8 000 (CI's
+      signature), fix 0 of 16 000 in the same session; regression 111.
+      `bench/log/linux/2026-11-10-parked-seed-2/FINDINGS.md`.
 - [ ] **Regression 1's drift in suite order (2026-11-04, test fixed
       2026-11-06; open only to name the in-suite holder).**
       4 of 113 tip runs failed with −15 985 to −70 174, block headers
