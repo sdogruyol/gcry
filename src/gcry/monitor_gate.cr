@@ -410,6 +410,51 @@ module Gcry
       PLANT_WORDS.times { |i| pad[i] = word }
       asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
     end
+
+    # The Monitor zeroes the stack under `Thread.sleep` before Crystal's sleep
+    # builds its frames there (`Thread.sleep` below; the Monitor's `every` is
+    # its one caller). `Crystal::System::Thread.sleep` copies the `Time::Span`
+    # it is given into its frame and stores 4 bytes of the 8 that hold its
+    # nanoseconds; the other 4 are whatever the call before it at that depth
+    # left, and each pass that is `every`'s own: on Crystal 1.21.0,
+    # `Comparable#clamp`'s `self`, an address in the Monitor's stack, whose
+    # high half is the heap's. The word was then a count under 10^7 beneath
+    # that half, an address in the heap's 4 GiB, rewritten every 10 ms and
+    # read at every stop for as long as the Monitor sleeps: the loop-frame
+    # scrub above runs once and cannot reach it. It held `make
+    # parallel-dormant`'s burst ("seeded by … parked 3812 KiB"): 13 of 8 000
+    # local runs seeded a ≥ 1 MiB block from that one slot of SYSMON's stack,
+    # 3 kept it to the end, and with the stack zeroed first none did
+    # (`bench/log/linux/2026-11-10-parked-seed-2/FINDINGS.md`). 1 KiB below
+    # the SP, frameless, as `leave` does; over-retention only.
+    #
+    # Research only, regression 111 (`GCRY_MONITOR_SLEEP_TEST`, read in
+    # `GC.init`): before each sleep the Monitor writes `LOOP_MARKER` over
+    # 8 KiB below `Thread.sleep`'s frame, standing in for `clamp`'s residue,
+    # then zeroes it (1) or leaves it, the code before (2,
+    # `sleep_residue_kept?`, the control arm). `sleep_test_sp` is the SP the
+    # plant was taken under, and `sleep_test_ready?` turns true after the
+    # first.
+    class_property sleep_test : Int32 = 0
+    class_getter sleep_test_sp : UInt64 = 0_u64
+    @@sleep_test_ready = Atomic(Int32).new(0)
+
+    def self.sleep_residue_kept? : Bool
+      @@sleep_test == 2
+    end
+
+    def self.sleep_test_ready? : Bool
+      @@sleep_test_ready.get != 0
+    end
+
+    @[NoInline]
+    def self.sleep_test_plant(sp : UInt64) : Nil
+      @@sleep_test_sp = sp
+      pad = uninitialized StaticArray(UInt64, PLANT_WORDS)
+      PLANT_WORDS.times { |i| pad[i] = LOOP_MARKER }
+      asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
+      @@sleep_test_ready.set(1)
+    end
   end
 end
 
@@ -418,7 +463,8 @@ end
 # which to check anything per pass. The loop itself gets a prologue only, which
 # ends the thread's birth as far as a stop is concerned (`MonitorGate.settle`)
 # and zeroes the stack the loop's frame is then built on
-# (`MonitorGate.scrub_loop_stack`).
+# (`MonitorGate.scrub_loop_stack`), and the sleep between passes zeroes the
+# stack its frames are built on (`Thread.sleep`).
 # No compiler fork — reopening the class and calling `previous_def` is ordinary
 # Crystal, verified to take effect.
 # Only for the process GC: a library heap never stops the world, so there is
@@ -430,6 +476,9 @@ end
     {% unless Fiber::ExecutionContext::Monitor.has_method?(name) %}
       {% raise "gcry: Fiber::ExecutionContext::Monitor##{name.id} not found; MonitorGate wraps it" %}
     {% end %}
+  {% end %}
+  {% unless Thread.class.has_method?("sleep") %}
+    {% raise "gcry: Thread.sleep not found; MonitorGate wraps it" %}
   {% end %}
   class Fiber::ExecutionContext::Monitor
     # Crystal's loop in a frame of its own, never inlined into the prologue
@@ -489,6 +538,26 @@ end
       ensure
         Gcry::MonitorGate.leave
       end
+    end
+  end
+
+  # The Monitor's `every` is the one caller (Crystal 1.21–1.22). The stack
+  # under this frame is zeroed before Crystal's sleep builds its frames there,
+  # so the half of a `Time::Span` word it does not write is 0
+  # (`MonitorGate.sleep_test`). Crystal's sleep in a frame of its own, never
+  # inlined into this one: its frames must be built after the wipe.
+  class Thread
+    @[NoInline]
+    def self.sleep(time : Time::Span) : Nil
+      previous_def
+    end
+
+    def self.sleep(time : Time::Span) : Nil
+      Gcry::MonitorGate.sleep_test_plant(Gcry::Roots.hardware_stack_pointer.address) if Gcry::MonitorGate.sleep_test != 0
+      unless Gcry::MonitorGate.sleep_residue_kept?
+        Gcry::Roots.wipe_below_sp(Gcry::Roots.wipe_limit(Gcry::Roots.hardware_stack_pointer.address))
+      end
+      previous_def
     end
   end
 {% end %}
