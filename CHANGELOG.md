@@ -177,6 +177,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A program on Crystal 1.21 no longer dies at startup with
+  `Fiber#execution_context cannot be nil`.** The execution-context Monitor
+  starts in the prelude, before `__crystal_main` reaches gcry's class
+  variables, and runs gcry code: its loop prologue at birth, its sleeps and
+  its gated work. A class variable with a call initializer (the gate's
+  `Atomic(Int32).new` flags) is Crystal's `once`, and a Monitor that read one
+  while the main thread was running its initializer waited in it; on 1.21 its
+  fiber has no execution context, and the main thread's `resume_all` raised.
+  Seen in PR #57's darwin job, in regression 107's child (the loop prologue's
+  research flag, read at the Monitor's birth); the gate's own `@@site` and
+  `@@stopped`, read in its first gated call ~10 ms after it starts, had the
+  same shape since at least 0.36.0, so any program whose main thread was in
+  one of those initializers then could hit it. On 1.22 the Monitor waited
+  instead. Every class variable the Monitor, the idle thread and the
+  watchdog read is now literal-initialized (`Gcry::StaticAtomic`, sequentially
+  consistent `Atomic::Ops` on it). Regression 107 on an M2: 29 of 2 000 runs
+  died before, 0 of 2 000 after. Regression 112 holds the main thread inside
+  an initializer while the Monitor runs (the control arm reads the held
+  variable and dies on 1.21, stalls on 1.22), and fails on any `once` flag
+  in those modules' symbols (`GCRY_MONITOR_ONCE_TEST`, research only)
+  (`bench/log/macos/2026-11-11-monitor-once-race/`).
+
 - **The execution-context Monitor's sleep no longer builds a heap address
   every 10 ms.** `Monitor#every` sleeps between passes in `Thread.sleep`, and
   Crystal's `System::Thread.sleep` copies the `Time::Span` into its frame,

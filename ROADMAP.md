@@ -4893,6 +4893,20 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       before Crystal's sleep builds its frames. Tip 5 of 8 000 (CI's
       signature), fix 0 of 16 000 in the same session; regression 111.
       `bench/log/linux/2026-11-10-parked-seed-2/FINDINGS.md`.
+- [x] **A startup death in `once` on Crystal 1.21 (2026-11-11, fixed).**
+      PR #57's darwin job: regression 107's child died before its spec,
+      `Fiber#execution_context cannot be nil` from `Once#resume_all` in
+      `__crystal_main`. The Monitor starts in the prelude and runs gcry
+      code while the main thread initializes gcry's class variables; it
+      read one (`Atomic(Int32).new`, so a `once`) whose initializer the
+      main thread was running, and on 1.21 a fiber with no execution
+      context cannot wait there. Research knobs only in CI (the loop
+      prologue's `loop_test_ready`), but the gate's own `@@site`/`@@stopped`
+      had the same shape since at least v0.36.0: a main thread held inside
+      either died in 5 and 2 of 5 runs, no knob. Fixed: everything the
+      Monitor, the idle thread and the watchdog read is literal-initialized
+      (`StaticAtomic`). tmac 29 of 2 000 → 0 of 2 000; regression 112.
+      `bench/log/macos/2026-11-11-monitor-once-race/FINDINGS.md`.
 - [ ] **Regression 1's drift in suite order (2026-11-04, test fixed
       2026-11-06; open only to name the in-suite holder).**
       4 of 113 tip runs failed with −15 985 to −70 174, block headers
