@@ -38,7 +38,7 @@ require "spec"
   # Spec 77 only: the gate's state, which has no public reader.
   module Gcry::MonitorGate
     def self.closed_for_library_collect_spec? : Bool
-      @@stopped.get != 0
+      Gcry::StaticAtomic.load(pointerof(@@stopped)) != 0
     end
   end
 

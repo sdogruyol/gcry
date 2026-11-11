@@ -27,9 +27,24 @@
 
 module Gcry
   module MonitorGate
+    # Every class variable and constant the Monitor's thread reads — here, in
+    # the `Monitor` and `Thread.sleep` wrappers below, and in what they call —
+    # has a literal initializer, and the shared flags are plain `Int32`s read
+    # and written through `StaticAtomic`, never an `Atomic(Int32).new`. A call
+    # initializer is Crystal's `once`: run by `__crystal_main` at the
+    # declaration, or by whichever thread reads it first. The Monitor starts
+    # in the prelude (`kernel.cr`), before `__crystal_main` reaches gcry's
+    # declarations, and its loop prologue runs at once; a Monitor that read
+    # a variable while the main thread was running its initializer waited in
+    # `once`, and on Crystal 1.21 its fiber has no execution context, so the
+    # main thread's `resume_all` raised `Fiber#execution_context cannot be
+    # nil` and the program died at startup
+    # (`bench/log/macos/2026-11-11-monitor-once-race/`). Regression 112 holds
+    # the main thread in an initializer while the Monitor runs, and fails on
+    # any lazily initialized symbol in this module.
     @@enabled = true
-    @@stopped = Atomic(Int32).new(0)
-    @@busy = Atomic(Int32).new(0)
+    @@stopped : Int32 = 0
+    @@busy : Int32 = 0
 
     # Times stop_world had to wait for work the Monitor had already started, and
     # the worst one. This is the pause the handshake *adds*, so it must not be a
@@ -40,7 +55,7 @@ module Gcry
     # Times the Monitor was held off at the gate.
     @@monitor_blocks = 0_u64
     @@reg_spills = 0_u64
-    @@site = Atomic(Int32).new(0)
+    @@site : Int32 = 0
 
     def self.enabled? : Bool
       @@enabled
@@ -107,14 +122,14 @@ module Gcry
     # mutating, and pair with `open`.
     def self.close : Nil
       return unless @@enabled
-      @@stopped.set(1)
+      StaticAtomic.store(pointerof(@@stopped), 1)
 
-      return if @@busy.get == 0
+      return if StaticAtomic.load(pointerof(@@busy)) == 0
 
       # The Monitor was already inside its work. Wait it out — bounded by that
       # one call, because the handshake keeps it from starting another.
       t0 = now_ns
-      while @@busy.get != 0
+      while StaticAtomic.load(pointerof(@@busy)) != 0
         Intrinsics.pause
       end
       waited = now_ns - t0
@@ -124,7 +139,7 @@ module Gcry
     end
 
     def self.open : Nil
-      @@stopped.set(0)
+      StaticAtomic.store(pointerof(@@stopped), 0)
     end
 
     # Monitor side.
@@ -134,7 +149,7 @@ module Gcry
     SITE_OTHER    = 3
 
     def self.site : Int32
-      @@site.get
+      StaticAtomic.load(pointerof(@@site))
     end
 
     def self.site_name(v : Int32) : String
@@ -189,17 +204,17 @@ module Gcry
     # new table and no new ownership question.
     def self.enter(site : Int32 = SITE_OTHER) : Nil
       return unless @@enabled
-      @@site.set(site)
+      StaticAtomic.store(pointerof(@@site), site)
       loop do
-        @@busy.set(1)
-        if @@stopped.get == 0
+        StaticAtomic.store(pointerof(@@busy), 1)
+        if StaticAtomic.load(pointerof(@@stopped)) == 0
           plant_for_test if @@test_plant != 0
           return
         end
 
         # Back off first: holding `busy` while waiting for the world to restart
         # would deadlock against a collector waiting for `busy` to clear.
-        @@busy.set(0)
+        StaticAtomic.store(pointerof(@@busy), 0)
         @@monitor_blocks += 1
         Roots.spill_registers
         regs = uninitialized StaticArray(UInt8, Roots::REGISTER_BUFFER_SIZE)
@@ -226,7 +241,7 @@ module Gcry
 
     private def self.wait_for_open : Nil
       spins = 0
-      while @@stopped.get != 0
+      while StaticAtomic.load(pointerof(@@stopped)) != 0
         if spins < WAIT_SPINS
           spins += 1
           Intrinsics.pause
@@ -260,8 +275,9 @@ module Gcry
           Roots.wipe_below_sp(Roots.wipe_limit(Roots.hardware_stack_pointer.address))
         end
       {% end %}
-      @@busy.set(0)
-      @@site.set(SITE_NONE)
+      StaticAtomic.store(pointerof(@@busy), 0)
+      StaticAtomic.store(pointerof(@@site), SITE_NONE)
+      MonitorOnceTest.pass if MonitorOnceTest.arm != 0
     end
 
     # Dead stack zeroed below the Monitor's SP as each piece of gated work
@@ -294,7 +310,7 @@ module Gcry
     @[NoInline]
     private def self.scrub_dead_stack : Nil
       stack = Fiber.current.@stack
-      floor = stack.pointer.address + Platform.host_page_size
+      floor = stack.pointer.address + Roots.runtime_page_size
       sp = Roots.hardware_stack_pointer.address
       return if sp <= floor + SCRUB_SKIP
       high = sp - SCRUB_SKIP
@@ -351,7 +367,7 @@ module Gcry
     @[NoInline]
     def self.scrub_loop_stack : Nil
       stack = Fiber.current.@stack
-      floor = stack.pointer.address + Platform.host_page_size
+      floor = stack.pointer.address + Roots.runtime_page_size
       sp = Roots.hardware_stack_pointer.address
       return if sp <= floor + SCRUB_SKIP
       high = sp - SCRUB_SKIP
@@ -376,7 +392,7 @@ module Gcry
     class_property loop_test : Int32 = 0
     class_getter loop_test_block : UInt64 = 0_u64
     class_getter loop_test_sp : UInt64 = 0_u64
-    @@loop_test_ready = Atomic(Int32).new(0)
+    @@loop_test_ready : Int32 = 0
     # Large, so in a chunk of its own: a 24 000-byte block, in a chunk the
     # Monitor's allocation cursor still held, read allocated after the
     # collections in every arm, the unplanted one included, with nothing
@@ -389,11 +405,11 @@ module Gcry
     end
 
     def self.loop_test_ready? : Bool
-      @@loop_test_ready.get != 0
+      StaticAtomic.load(pointerof(@@loop_test_ready)) != 0
     end
 
     def self.loop_test_ready : Nil
-      @@loop_test_ready.set(1)
+      StaticAtomic.store(pointerof(@@loop_test_ready), 1)
     end
 
     @[NoInline]
@@ -437,14 +453,14 @@ module Gcry
     # first.
     class_property sleep_test : Int32 = 0
     class_getter sleep_test_sp : UInt64 = 0_u64
-    @@sleep_test_ready = Atomic(Int32).new(0)
+    @@sleep_test_ready : Int32 = 0
 
     def self.sleep_residue_kept? : Bool
       @@sleep_test == 2
     end
 
     def self.sleep_test_ready? : Bool
-      @@sleep_test_ready.get != 0
+      StaticAtomic.load(pointerof(@@sleep_test_ready)) != 0
     end
 
     @[NoInline]
@@ -453,7 +469,7 @@ module Gcry
       pad = uninitialized StaticArray(UInt64, PLANT_WORDS)
       PLANT_WORDS.times { |i| pad[i] = LOOP_MARKER }
       asm("" :: "r"(pad.to_unsafe) : "memory" : "volatile")
-      @@sleep_test_ready.set(1)
+      StaticAtomic.store(pointerof(@@sleep_test_ready), 1)
     end
   end
 end

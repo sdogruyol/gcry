@@ -4,6 +4,8 @@
 #   require "gcry"  and  crystal build -Dgc_none
 #
 # See DESIGN.md and docs/INTEGRATION.md.
+require "./gcry/static_atomic"
+require "./gcry/monitor_once_test"
 require "./gcry/clock"
 require "./gcry/cpu"
 require "./gcry/heap"

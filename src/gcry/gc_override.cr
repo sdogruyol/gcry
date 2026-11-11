@@ -1210,6 +1210,11 @@ module GC
     if arm = env_digit("GCRY_MONITOR_SLEEP_TEST")
       Gcry::MonitorGate.sleep_test = arm
     end
+    # Research only: regression 112's arms (`MonitorOnceTest.arm`), read here
+    # because its hold is in `__crystal_main`.
+    if arm = env_digit("GCRY_MONITOR_ONCE_TEST")
+      Gcry::MonitorOnceTest.arm = arm
+    end
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: let the Darwin free-page walk visit bitmap-allocated
     # chunks, which is the stand-down in `flush_pending_page_release_chunks`
