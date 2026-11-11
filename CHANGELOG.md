@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > while still waiting to be marked, and a full collection racing a cycle's
 > begin or drop. Regressions 91, 95 and 99–102, 108 and 110; 0.38.0 and 0.39.0
 > reproduce them. On Crystal 1.22 the idle collector never ran before 0.40.0.
+> On Crystal 1.21, in any configuration, a program could die at startup
+> (`Fiber#execution_context cannot be nil`) when the execution-context
+> Monitor read one of gcry's lazily initialized class variables while the
+> main thread was still initializing it; rare, present since at least 0.36.0
+> (regression 112).
 > On Linux, 0.39.0's 4 GiB fence could walk a `realloc` growing past about
 > 1 GiB down under one fence after another (16 fences and 60 GiB in the
 > traced case) and still leave its front in a window. With incremental and
