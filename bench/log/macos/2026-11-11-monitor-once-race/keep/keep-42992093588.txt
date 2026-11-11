@@ -1,0 +1,3 @@
+macos-15-intel    JsonParsePure          ok                                                      var-code var=2.421 prepad16=2.586 prepad64=2.404 | base-code base=2.435 baseprepad16=2.490 baseprepad64=2.402
+macos-15-intel    JsonParseSerializable  ok                                                      var-code var=2.399 prepad16=2.488 prepad64=2.424 | base-code base=2.351 baseprepad16=2.445 baseprepad64=2.346
+macos-15-intel    JsonParsePull          ok                                                      var-code var=2.217 prepad16=2.433 prepad64=2.328 | base-code base=2.367 baseprepad16=2.391 baseprepad64=2.260

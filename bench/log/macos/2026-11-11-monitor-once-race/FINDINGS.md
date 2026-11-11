@@ -122,3 +122,24 @@ Whole spec binaries, every arm in a process of its own, 200 runs each:
 | CI run 42982589471: macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm | 1.21.0, 1.22.2 | 200/200 each | 200/200 each | 200/200 each |
 
 `ci-probe-42982589471.txt` has the 24 CI lines.
+
+## Keep rule
+
+What the fix changes on the default path is the gate's `close`/`open` (once
+per stop), the idle thread's park and the watchdog's phase stores: the same
+sequentially consistent loads and stores, without the `once` flag check in
+front. `perf-ab.yml` 42982736692: `44b75704` against `v0.39.0`, five
+runners, nine benches, 15 reps, Boehm, pads `p16 p64 bp16 bp64`; `keep.py`
+(`../../linux/2026-11-01-0.40-keep-rule/`): 45 rows, 32 ok, 12 placement,
+**1 flagged**: `macos-15-intel` JsonParseSerializable, time +3.9% [+0.9,
++10.3], var-code 1.491–1.559 against base-code 1.437–1.471
+(`keep/keep-42982736692.txt`). Followed on that runner, 21 reps, three JSON
+rows, four pads, as parked-seed-2 did:
+
+- 42992047056, against `v0.39.0`: all three rows **ok**; JsonParseSerializable
+  var 1.638, base 1.629 (`keep/keep-42992047056.txt`).
+- 42992093588, against the release tip `97d866a1` itself: all three rows
+  **ok**; JsonParseSerializable var 2.399, base 2.351, base-code
+  2.346–2.445 (`keep/keep-42992093588.txt`).
+
+No row unexcused.
