@@ -1,0 +1,4 @@
+base-instr   runs=500 fired=499 missed=1 rc!=0=0 never_spun=1 missed&never_spun=1 fired&never_spun=0 dropped&resent=0
+base         runs=500 fired=494 missed=6 rc!=0=0 dropped&resent=0
+tip-instr    runs=500 fired=499 missed=1 rc!=0=0 never_spun=1 missed&never_spun=1 fired&never_spun=0 dropped&resent=0
+wt           runs=500 fired=498 missed=2 rc!=0=0 dropped&resent=0

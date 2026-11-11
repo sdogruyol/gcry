@@ -1,0 +1,203 @@
+=== format: crystal tool format --check
+--- format: ok
+=== lint: make lint
+shards install --development
+I: Resolving dependencies
+I: Fetching https://github.com/crystal-ameba/ameba.git
+I: Installing ameba (1.7.0)
+I: Writing shard.lock
+cd lib/ameba && shards build
+I: Dependencies are satisfied
+I: Building: ameba
+I: Building: json-schema-builder
+cp -f lib/ameba/bin/ameba bin/ameba
+bin/ameba
+Inspecting 267 files
+
+[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m
+
+Finished in 1.03 seconds
+[32m267 inspected, 0 failures[39m
+--- lint: ok
+=== knob-doc-check: make knob-doc-check
+ok — all 182 GCRY_* knobs the source reads are in docs/HARDENING.md
+--- knob-doc-check: ok
+=== stw-watchdog: make stw-watchdog
+crystal build -Dgc_none bench/stw_watchdog.cr -o bin/stw_watchdog --error-trace
+bin/stw_watchdog
+=== STW watchdog ===
+threshold 200 ms, stall 900 ms in the thread-stacks phase
+quiet arm runs at 5000 ms (CI runners deschedule; see the comment)
+
+  armed+stalled    gcry: STOP-THE-WORLD STALLED 249 ms in phase=thread-stacks — every mutator is frozen and the collector is not
+  armed+presusp    gcry: STOP-THE-WORLD STALLED 200 ms in phase=suspend — every mutator is frozen and the collector is not
+  armed+stopped    gcry: STOP-THE-WORLD STALLED 202 ms in phase=stopped-before-flush — every mutator is frozen and the collector is not
+  armed+suspend    gcry: STOP-THE-WORLD STALLED 200 ms in phase=suspend — every mutator is frozen and the collector is not
+  armed+postsusp   gcry: STOP-THE-WORLD STALLED 200 ms in phase=suspend — every mutator is frozen and the collector is not
+  armed+in-spin    gcry: SUSPEND STALLED on thread 0x7b51769ff6c0 — 0 of 4 acknowledged, 0 resends unanswered; handler entries so far 3, declined stale 0 / redundant 0. the handle is live (pthread_kill 0 → 0)
+  armed+quiet      (silent)
+  unarmed+stalled  (silent)
+
+PASS — fires on a real stall, names the phase, silent otherwise.
+
+What this does not cover: the watchdog is a raw pthread, so it keeps running
+while the world is stopped. That is the point, and it is also why it holds no
+GC object — its stack is never scanned.
+--- stw-watchdog: ok
+=== windows-typecheck: make windows-typecheck
+crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none samples/hello.cr -o bin/windows_typecheck_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc -Dgc_none samples/hello.cr -o bin/windows_typecheck_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/tls_roots.cr -o bin/windows_typecheck_tls_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc -Dgc_none bench/tls_roots.cr -o bin/windows_typecheck_tls_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc bench/chunk_search_race.cr -o bin/windows_typecheck_csr_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc bench/chunk_search_race.cr -o bin/windows_typecheck_csr_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc spec/platform_windows_spec.cr -o bin/windows_typecheck_spec_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc spec/platform_windows_spec.cr -o bin/windows_typecheck_spec_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc spec/stw_sp_spec.cr -o bin/windows_typecheck_spec_stw >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc spec/stack_scrub_spec.cr -o bin/windows_typecheck_spec_scrub >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc spec/cached_bitmap_pool_race_spec.cr -o bin/windows_typecheck_spec_pool >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc spec/stack_low_water_spec.cr -o bin/windows_typecheck_spec_lw_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc spec/stack_low_water_spec.cr -o bin/windows_typecheck_spec_lw_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/segv_region_report.cr -o bin/windows_typecheck_srr >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o bin/windows_typecheck_proc_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o bin/windows_typecheck_proc_arm64 >/dev/null
+ok — the Windows build type-checks on both targets
+--- windows-typecheck: ok
+=== darwin-typecheck: make darwin-typecheck
+crystal build --cross-compile --target aarch64-apple-darwin -Dgc_none samples/hello.cr -o bin/darwin_typecheck_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-apple-darwin -Dgc_none samples/hello.cr -o bin/darwin_typecheck_x86 >/dev/null
+crystal build --cross-compile --target aarch64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o bin/darwin_typecheck_stw_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o bin/darwin_typecheck_stw_x86 >/dev/null
+ok — the Darwin build and its STW resume gate type-check on both targets
+--- darwin-typecheck: ok
+=== gate-typecheck-x86_64-windows-msvc: crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/stw_watchdog.cr -o bin/stw_watchdog_typecheck_x86_64-windows-msvc
+cl.exe /nologo bin/stw_watchdog_typecheck_x86_64-windows-msvc.obj /Febin/stw_watchdog_typecheck_x86_64-windows-msvc /link /DEBUG:FULL /PDBALTPATH:%_PDB% /INCREMENTAL:NO /STACK:0x800000 /LIBPATH:/home/naruto/.local/share/mise/installs/crystal/1.21.0/bin/../lib/crystal synchronization.lib kernel32.lib kernel32.lib pcre2-8.lib /ENTRY:wmainCRTStartup msvcrt.lib ntdll.lib iconv.lib advapi32.lib vcruntime.lib shell32.lib ole32.lib ws2_32.lib kernel32.lib legacy_stdio_definitions.lib DbgHelp.lib ucrt.lib
+--- gate-typecheck-x86_64-windows-msvc: ok
+=== gate-typecheck-aarch64-windows-msvc: crystal build --cross-compile --target aarch64-windows-msvc -Dgc_none bench/stw_watchdog.cr -o bin/stw_watchdog_typecheck_aarch64-windows-msvc
+cl.exe /nologo bin/stw_watchdog_typecheck_aarch64-windows-msvc.obj /Febin/stw_watchdog_typecheck_aarch64-windows-msvc /link /DEBUG:FULL /PDBALTPATH:%_PDB% /INCREMENTAL:NO /STACK:0x800000 /LIBPATH:/home/naruto/.local/share/mise/installs/crystal/1.21.0/bin/../lib/crystal synchronization.lib kernel32.lib kernel32.lib pcre2-8.lib /ENTRY:wmainCRTStartup msvcrt.lib ntdll.lib iconv.lib advapi32.lib vcruntime.lib shell32.lib ole32.lib ws2_32.lib kernel32.lib legacy_stdio_definitions.lib DbgHelp.lib ucrt.lib
+--- gate-typecheck-aarch64-windows-msvc: ok
+=== gate-typecheck-x86_64-apple-darwin: crystal build --cross-compile --target x86_64-apple-darwin -Dgc_none bench/stw_watchdog.cr -o bin/stw_watchdog_typecheck_x86_64-apple-darwin
+cc bin/stw_watchdog_typecheck_x86_64-apple-darwin.o -o bin/stw_watchdog_typecheck_x86_64-apple-darwin  -rdynamic -L/home/naruto/.local/share/mise/installs/crystal/1.21.0/bin/../lib/crystal -lpcre2-8 -liconv
+--- gate-typecheck-x86_64-apple-darwin: ok
+=== gate-typecheck-aarch64-apple-darwin: crystal build --cross-compile --target aarch64-apple-darwin -Dgc_none bench/stw_watchdog.cr -o bin/stw_watchdog_typecheck_aarch64-apple-darwin
+cc bin/stw_watchdog_typecheck_aarch64-apple-darwin.o -o bin/stw_watchdog_typecheck_aarch64-apple-darwin  -rdynamic -L/home/naruto/.local/share/mise/installs/crystal/1.21.0/bin/../lib/crystal -lpcre2-8 -liconv
+--- gate-typecheck-aarch64-apple-darwin: ok
+=== alloc-entry-frame: make alloc-entry-frame
+crystal spec --release -Dgc_none process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr \
+  process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr
+stale79: 0
+.stale86: control 27, fixed 0, no gap 0; wipe starts 0 bytes below the entry SP
+.guard86: fixed: bound 134478565478400 -> 134478565478400, floor 134478565478400
+...
+
+Finished in 16.86 milliseconds
+5 examples, 0 failures, 0 errors, 0 pending
+--- alloc-entry-frame: ok
+=== process-spec: make spec-process
+CRYSTAL="crystal" BIN="bin" ci/crystal-spec.sh -Dgc_none process_spec --error-trace
+...........................................................idle fixed: unwritten104: idle fixed: block freed after three collections with the idle thread parked
+idle fixed: unwritten104: idle: planted block freed
+.idle control: unwritten104: idle control: block kept after three collections with the idle thread parked
+idle control: unwritten104: idle: planted block kept
+.idle unplanted: unwritten104: idle unplanted: block freed after three collections with the idle thread parked
+idle unplanted: unwritten104: idle: planted block freed
+.registers fixed: unwritten104: registers fixed: 0 pattern word(s) yielded from the register buffer
+registers fixed: unwritten104: registers: pattern not yielded
+.registers control: unwritten104: registers control: 21 pattern word(s) yielded from the register buffer
+registers control: unwritten104: registers: pattern yielded
+.scan fixed: unwritten104: mutator scan fixed: block freed after three collections
+scan fixed: unwritten104: mutator scan: planted block freed
+.scan control: unwritten104: mutator scan control: block kept after three collections
+scan control: unwritten104: mutator scan: planted block kept
+.scan unplanted: unwritten104: mutator scan unplanted: block freed after three collections
+scan unplanted: unwritten104: mutator scan: planted block freed
+..............gcry: GC.free ignored 0x712def9403e0: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+.gcry: GC.free ignored 0x712def9408e8: not a live gcry allocation (interior pointer, or its chunk was released); counted in double_frees / stale_frees, reported once per kind
+................................................fixed: claim106: fixed: 8 of 8 freed, 7 claimed, 0 answered live
+fixed: claim106: claimed blocks answered free
+.control: claim106: control: 8 of 8 freed, 7 claimed, 7 answered live
+control: claim106: claimed blocks answered live
+...............fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+fixed: monitor105: planted block freed
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+control: monitor105: planted block kept
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+unplanted: monitor105: planted block freed
+...................fixed: nohit109: fixed: 1 of 8 kept after three collections, 0 pinned chunk(s) skipped by the sweep
+fixed: nohit109: blocks freed
+.control: nohit109: control: 8 of 8 kept after three collections, 12 pinned chunk(s) skipped by the sweep
+control: nohit109: blocks kept
+.stamped: nohit109: stamped: 46425 blocks allocated through the fallback across 20 collections, 20 swept after the world, 0 stamp(s) broken
+stamped: nohit109: stamps held
+.........................fixed: monitor111: fixed: 0 word(s) below the sleep's frame keep the planted high half
+fixed: monitor111: no planted high half
+.control: monitor111: control: 3 word(s) below the sleep's frame keep the planted high half
+control: monitor111: planted high halves kept
+.........................................................fixed: monitor107: fixed: block freed after three collections, 0 planted word(s) in the loop's frames
+fixed: monitor107: planted block freed
+.control: monitor107: control: block kept after three collections, 6 planted word(s) in the loop's frames
+control: monitor107: planted block kept
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+unplanted: monitor107: planted block freed
+.halves fixed: monitor107: halves fixed: 0 word(s) in the loop's frames keep the planted high half
+halves fixed: monitor107: no planted high half
+.halves control: monitor107: halves control: 10 word(s) in the loop's frames keep the planted high half
+halves control: monitor107: planted high halves kept
+.............................................GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+..GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+.......fixed: scrub101: wipe true, band 192 bytes, its low end 784 bytes below the entry SP
+fixed: scrub101: target freed
+control: scrub101: wipe false, band 192 bytes, its low end 784 bytes below the entry SP
+control: scrub101: target kept
+unplanted: scrub101: wipe true, band 192 bytes, its low end 784 bytes below the entry SP
+unplanted: scrub101: target freed
+..**..live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0
+................gcry: finalization cycle involving 0x712df0765350 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 1
+gcry: finalization cycle involving 0x712df07653b0 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 2
+gcry: finalization cycle involving 0x712df07653b0 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 4
+.stale79: 3
+.....fixed: pstack103: fixed: 0 of 8 planted blocks kept
+fixed: pstack103: planted blocks freed
+.control: pstack103: control: 8 of 8 planted blocks kept
+control: pstack103: planted blocks kept
+.unplanted: pstack103: unplanted: 0 of 8 planted blocks kept
+unplanted: pstack103: planted blocks freed
+........fixed: monitor112: fixed: 3 gated call(s) finished while main was held
+.control:   from /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/once.cr:81:7 in 'wait_initializer'
+....................................gcry: static roots collapsed to 10960 bytes from 67225464 — globals are not roots this collection. collection 286
+..........gcry: finalization cycle involving 0x712daa1c15e0 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 8
+gcry: finalization cycle involving 0x712daa1c16c0 — an object with a finalizer reaches itself through its own fields, so neither its finalizer runs nor its memory is reclaimed while that holds (ordered finalization, as Boehm's). Sightings so far: 16
+....stale86: needs a --release build on x86-64 or arm64, skipped
+.guard86: fixed: bound 135522135576576 -> 135522135576576, floor 135522135576584
+..........
+  [81 fixed] holder81: collecting with @index_lock held
+  [81 fixed] holder81: fixed: branch reached with the lock held=1 free=1 taking it=0, deferred=+1, relinks declined=+0, restarted with the lock held=true, chunk released=true
+.
+  [81 control] holder81: the stop's sweep is taking @index_lock, which no thread holds
+  [81 control] holder81: collecting with @index_lock held
+  [81 control] holder81: the stop's sweep is taking @index_lock while another thread holds it
+  [81 control] gcry: STOP-THE-WORLD STALLED 1001 ms in phase=sweep — every mutator is frozen and the collector is not
+............................................................
+
+Pending:
+  Regression: on macOS no heap mapping lies where a 33-bit integer points fixed arm in a process of its own
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 1:59 minutes
+470 examples, 0 failures, 0 errors, 2 pending
+--- process-spec: ok

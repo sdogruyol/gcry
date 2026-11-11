@@ -1,0 +1,32 @@
+--- src/gcry/collect_stw.cr	2026-11-11 14:46:27.675744907 +0300
++++ src/gcry/collect_stw.cr	2026-11-11 14:46:59.108236984 +0300
+@@ -382,6 +382,9 @@
+           # instructions wide.
+           resend_spins = @suspend_resend ? @suspend_resend_spins : 0_u64
+           resend_limit = @suspend_resend_limit
++          probe_spun = 0_u64
++          probe_total = 0_u64
++          probe_n = 0_u64
+           Thread.unsafe_each do |thread|
+             next if thread == current_thread
+             next if stw_signal_exempt?(thread)
+@@ -427,7 +430,19 @@
+               end
+             end
+             acked += 1 unless abandoned
++            probe_n &+= 1
++            probe_spun &+= 1 if spins > 0
++            probe_total &+= spins
+           end
++          probe_buf = uninitialized UInt8[256]
++          probe_len = RawOut.append(probe_buf.to_unsafe, 0, "gcry-probe: waited=")
++          probe_len = RawOut.append_u64(probe_buf.to_unsafe, probe_len, probe_n)
++          probe_len = RawOut.append(probe_buf.to_unsafe, probe_len, " spun=")
++          probe_len = RawOut.append_u64(probe_buf.to_unsafe, probe_len, probe_spun)
++          probe_len = RawOut.append(probe_buf.to_unsafe, probe_len, " spins=")
++          probe_len = RawOut.append_u64(probe_buf.to_unsafe, probe_len, probe_total)
++          probe_len = RawOut.append(probe_buf.to_unsafe, probe_len, "\n")
++          RawOut.flush(probe_buf.to_unsafe, probe_len)
+           StwWatchdog.note_suspend(expected, acked, 0_u64)
+           # Positive control for the other half of the report: the loop is
+           # done, the breadcrumb is cleared, and the phase is still suspend.
