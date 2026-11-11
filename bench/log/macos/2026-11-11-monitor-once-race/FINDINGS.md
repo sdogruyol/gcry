@@ -108,7 +108,21 @@ an `Atomic(Int32).new` as the gate's were: on 1.21 the child dies in `once`,
 on 1.22.2 the Monitor finishes 1 call and stalls for the hold. A third
 example runs `nm` on the spec binary and fails on any `:init`/`:const_init`
 flag in `MonitorGate`, `IdleRelease`, `StwWatchdog`, `StaticAtomic`,
-`Clock` (it sees `MonitorOnceTest::held:init`, so the scan reads flags).
+`Clock`, `Roots`, `RawOut`, and of `Platform` the low-water probe's state
+(`pagemap_*`, `page_query_errors`, `resident_*` and their constants), the
+one `Platform` code those threads run (it sees `MonitorOnceTest::held:init`,
+so the scan reads flags). That example is the regression: on `97d866a1` it
+lists 11 flags (the gate's five, the idle thread's four, the watchdog's two).
+The process arms show the mechanism only; the fixed arm would pass on the
+old code too, since a main thread held before the gate's declarations
+leaves the Monitor to run their initializers itself, and the crash needs
+main inside the very one the Monitor reads (`production_hold_probe.cr`).
+
+Specs 76 and 77 hook the Monitor with state of their own; it was
+`Atomic.new` too, and is literal-initialized through `StaticAtomic` since
+`once-race2-040`. Loops there (each binary whole, 100 runs): 76, 77 and 112
+on Linux x86_64 with 1.21.0 and 1.22.2, and on tmac with 1.21.0 and 1.22.1,
+100/100 each.
 
 ## Loops at the fix (`44b75704`)
 
