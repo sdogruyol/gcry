@@ -196,7 +196,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   died before, 0 of 2 000 after. Regression 112 holds the main thread inside
   an initializer while the Monitor runs (the control arm reads the held
   variable and dies on 1.21, stalls on 1.22), and fails on any `once` flag
-  in those modules' symbols (`GCRY_MONITOR_ONCE_TEST`, research only)
+  in those modules' symbols (`GCRY_MONITOR_ONCE_TEST`, research only). Keep
+  rule against 0.39.0 on the five runners: one row flagged (`macos-15-intel`
+  JsonParseSerializable, +3.9%), ok in 21-rep sessions on that runner
+  against 0.39.0 and against the release tip
   (`bench/log/macos/2026-11-11-monitor-once-race/`).
 
 - **The execution-context Monitor's sleep no longer builds a heap address
