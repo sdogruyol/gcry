@@ -24,14 +24,16 @@ require "spec"
 # gate behind the library one's back.
 {% if flag?(:gc_none) && @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
   module LibraryCollectGate
-    @@passes = Atomic(Int32).new(0)
+    # Literal-initialized: the Monitor reads it, and must never wait in a
+    # class variable's `once` (regression 112).
+    @@passes : Int32 = 0
 
     def self.pass : Nil
-      @@passes.add(1)
+      Gcry::StaticAtomic.add(pointerof(@@passes), 1)
     end
 
     def self.passes : Int32
-      @@passes.get
+      Gcry::StaticAtomic.load(pointerof(@@passes))
     end
   end
 

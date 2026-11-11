@@ -54,33 +54,35 @@ require "spec"
     MASK   = 0xa5a5_a5a5_a5a5_a5a5_u64
     WORDS  =                         6
 
-    @@armed = Atomic(Int32).new(0)
-    @@addr = Atomic(UInt64).new(0_u64)
-    @@release = Atomic(Int32).new(0)
-    @@intact = Atomic(Int32).new(-1)
+    # Literal-initialized: the Monitor reads them, and must never wait in a
+    # class variable's `once` (regression 112).
+    @@armed : Int32 = 0
+    @@addr : UInt64 = 0_u64
+    @@release : Int32 = 0
+    @@intact : Int32 = -1
 
     def self.arm : Nil
-      @@addr.set(0_u64)
-      @@release.set(0)
-      @@intact.set(-1)
-      @@armed.set(1)
+      Gcry::StaticAtomic.store(pointerof(@@addr), 0_u64)
+      Gcry::StaticAtomic.store(pointerof(@@release), 0)
+      Gcry::StaticAtomic.store(pointerof(@@intact), -1)
+      Gcry::StaticAtomic.store(pointerof(@@armed), 1)
     end
 
     def self.masked_addr : UInt64
-      @@addr.get
+      Gcry::StaticAtomic.load(pointerof(@@addr))
     end
 
     def self.release : Nil
-      @@release.set(1)
+      Gcry::StaticAtomic.store(pointerof(@@release), 1)
     end
 
     def self.intact : Int32
-      @@intact.get
+      Gcry::StaticAtomic.load(pointerof(@@intact))
     end
 
     # On the Monitor's thread, from `increase_parallelism`, before its gate.
     def self.run_if_armed : Nil
-      return unless @@armed.swap(0) == 1
+      return unless Gcry::StaticAtomic.swap(pointerof(@@armed), 0) == 1
       padded
     end
 
@@ -97,15 +99,15 @@ require "spec"
     def self.hold : Nil
       block = Pointer(UInt64).malloc(WORDS)
       WORDS.times { |i| block[i] = CANARY }
-      @@addr.set(block.address ^ MASK)
+      Gcry::StaticAtomic.store(pointerof(@@addr), block.address ^ MASK)
       # A spin, not `sleep`: on 1.22 the latter's own closure is the very
       # object this spec is about, and `nanosleep` is not on Windows.
-      until @@release.get == 1
+      until Gcry::StaticAtomic.load(pointerof(@@release)) == 1
         Intrinsics.pause
       end
       ok = true
       WORDS.times { |i| ok = false unless block[i] == CANARY }
-      @@intact.set(ok ? 1 : 0)
+      Gcry::StaticAtomic.store(pointerof(@@intact), ok ? 1 : 0)
       Gcry::Roots.keep_alive(block.as(Void*))
     end
   end

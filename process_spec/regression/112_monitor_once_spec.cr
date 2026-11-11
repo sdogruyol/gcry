@@ -12,16 +12,25 @@ require "spec"
 # (`bench/log/macos/2026-11-11-monitor-once-race/`). The Monitor's state is
 # now literal-initialized (`MonitorGate`, `StaticAtomic`).
 #
-# The race is a window of nanoseconds, so the regression holds it open:
-# `MonitorOnceTest` holds the main thread inside a class variable's
-# initializer, before gcry's own are initialized, until the Monitor has
-# finished three gated calls. The fixed arm finishes them; the control arm
-# reads the held variable from the Monitor, the old `Atomic(Int32).new` shape,
-# and either dies as above (1.21) or stalls for the whole hold (1.22).
+# **The regression is the static example** (`no lazily initialized state …`):
+# no class variable or constant that the Monitor, the idle thread or the
+# watchdog reads may have a lazy initializer, which shows in the binary as an
+# `:init`/`:const_init` flag (`nm`). Before the fix it lists
+# `MonitorGate::site:init` and ten more, and fails.
 #
-# The second half is static: no class variable or constant of a module whose
-# code the Monitor, the idle thread or the watchdog runs may have a lazy
-# initializer, which shows in the binary as an `:init`/`:const_init` flag.
+# The two process arms only show the mechanism; they do not tell the fixed
+# code from the old. `MonitorOnceTest` holds the main thread inside a class
+# variable's initializer, before gcry's own are initialized, until the
+# Monitor has finished three gated calls. The control arm reads the held
+# variable from the Monitor, the old `Atomic(Int32).new` shape, and either
+# dies as above (1.21) or stalls for the whole hold (1.22). The fixed arm
+# reads nothing held and finishes them, but so would the old code: the
+# Monitor then runs the gate's not-yet-started initializers itself, and the
+# crash needs the main thread inside the very one the Monitor reads, which no
+# hook reaches without editing that initializer. The race is a window of
+# nanoseconds; the findings hold it open with a probe on `Crystal::Once`
+# (`production_hold_probe.cr`: inside `MonitorGate::site`'s initializer, 5 of
+# 5 runs died on 1.21 before the fix).
 
 private MONITOR112_SKIP_MARK = "monitor112: skipped"
 # Crystal 1.21's two ways of dying in it: the main thread's `resume_all`
@@ -34,8 +43,14 @@ private MONITOR112_ARMS = {
   "control" => "2",
 }
 
-# Modules whose class variables and constants a bare thread reads.
-private MONITOR112_GUARDED = %w[MonitorGate IdleRelease StwWatchdog StaticAtomic Clock]
+# Where a bare thread's class variables and constants live: whole modules,
+# and, of `Platform`, which has lazy constants the collector alone reads,
+# the stack low-water probe's state (Linux `pagemap_*`, Darwin
+# `page_query_errors`/`resident_*` and their constants), the one `Platform`
+# code those threads run.
+private MONITOR112_GUARDED  = %w[MonitorGate IdleRelease StwWatchdog StaticAtomic Clock Roots RawOut]
+private MONITOR112_PLATFORM = %w[pagemap_\w+ PAGEMAP_\w+ page_query_errors resident_\w+ RESIDENT_\w+
+  PAGE_QUERY_\w+ VM_REGION_\w+ SM_PRIVATE\w* TASK_VM_INFO\w*]
 
 private def monitor112_child(arm : String) : Nil
   {% if @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
@@ -83,7 +98,7 @@ describe "Regression: the Monitor never waits in a class variable's once" do
       captured = IO::Memory.new
       status = Process.run(nm, [Process.executable_path.not_nil!], output: captured, error: Process::Redirect::Inherit)
       fail "nm #{status.inspect}" unless status.success?
-      pattern = /Gcry::(?:#{MONITOR112_GUARDED.join('|')})::\w+:(?:const_)?init\b/
+      pattern = /Gcry::(?:(?:#{MONITOR112_GUARDED.join('|')})::\w+|Platform::(?:#{MONITOR112_PLATFORM.join('|')})):(?:const_)?init\b/
       lazy = captured.to_s.scan(pattern).map(&.[0]).uniq!
       # Sanity: the scan sees flags at all — the control arm's own one.
       captured.to_s.should contain("Gcry::MonitorOnceTest::held:init")

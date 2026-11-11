@@ -22,5 +22,10 @@ module Gcry
     def self.add(ptr : T*, value : T) : T forall T
       Atomic::Ops.atomicrmw(:add, ptr, value, :sequentially_consistent, false)
     end
+
+    @[AlwaysInline]
+    def self.swap(ptr : T*, value : T) : T forall T
+      Atomic::Ops.atomicrmw(:xchg, ptr, value, :sequentially_consistent, false)
+    end
   end
 end
