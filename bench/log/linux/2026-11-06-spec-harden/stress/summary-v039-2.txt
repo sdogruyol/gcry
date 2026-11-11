@@ -1,0 +1,2 @@
+2026-11-07T01:06:04+0300 stw-mt-property-test-release runs=300 pass=296 fail=0 stall=0 crystal_scheduler_deadlock=4 (1376 s)
+2026-11-07T01:06:04+0300 done

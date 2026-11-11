@@ -1,0 +1,100 @@
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 62061e39..36502c92 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -160,13 +160,32 @@ module Gcry
+     getter threshold_pace_pct : UInt64 = 100_u64
+     @last_major_end_ns = 0_u64
+ 
+-    # The pace (percent, 100..max_pct) that holds a cycle costing `cycle_ns`
+-    # after `mutator_ns` of allocating `allocated` bytes to the target, for a
+-    # live-sized threshold `base`.
++    # PROBE ONLY: 0 tip, 1 growth, 2 growth × mark share, 3 growth at the
++    # lower of the last two stretches' survival rates, 4 = 3 × mark share;
++    # `pace_floor` floors the scanned bytes the growth divides by.
++    property pace_variant : UInt64 = 0_u64
++    property pace_floor : UInt64 = 0_u64
++    @pace_scanned_bytes = 0_u64
++    @pace_prev_survived = 0_u64
++    @pace_prev_allocated = 0_u64
++
+     def self.threshold_pace_pct(allocated : UInt64, mutator_ns : UInt64, cycle_ns : UInt64,
+-                                base : UInt64, max_pct : UInt64) : UInt64
++                                base : UInt64, max_pct : UInt64,
++                                scanned : UInt64 = 0_u64, survived : UInt64 = 0_u64,
++                                mark_ns : UInt64 = 0_u64, variant : UInt64 = 0_u64,
++                                floor : UInt64 = 0_u64) : UInt64
+       return 100_u64 if mutator_ns == 0_u64 || base == 0_u64
+       paced = allocated.to_f64 * cycle_ns.to_f64 * 100.0 / (mutator_ns.to_f64 * THRESHOLD_PACE_TARGET_PCT)
++      if variant > 0_u64 && scanned > 0_u64 && survived > 0_u64 && allocated > 0_u64
++        s = scanned < floor ? floor : scanned
++        grows = paced * Math.min(survived, allocated).to_f64 / (allocated.to_f64 * s.to_f64)
++        if variant == 2_u64 || variant == 4_u64
++          share = cycle_ns == 0_u64 ? 0.0 : Math.min(mark_ns, cycle_ns).to_f64 / cycle_ns.to_f64
++          grows *= share
++        end
++        return max_pct if grows >= 1.0
++        paced /= 1.0 - grows
++      end
+       pct = paced * 100.0 / base.to_f64
+       return max_pct if pct >= max_pct.to_f64
+       pct <= 100.0 ? 100_u64 : pct.to_u64
+@@ -176,6 +195,13 @@ module Gcry
+       now = monotonic_ns
+       last = @last_major_end_ns
+       @last_major_end_ns = now
++      scanned_before = @pace_scanned_bytes
++      @pace_scanned_bytes = @mark_scanned_bytes
++      survived = @mark_scanned_bytes > scanned_before ? @mark_scanned_bytes - scanned_before : 0_u64
++      prev_survived = @pace_prev_survived
++      prev_allocated = @pace_prev_allocated
++      @pace_prev_survived = survived
++      @pace_prev_allocated = @bytes_before_gc
+       # A releasing collection (`GC.collect`, the idle collector, the one
+       # before an `OutOfMemoryError`) asks for the footprint back, as it does
+       # of the warm budget. Keeping the pace across it carried a setup phase's
+@@ -189,8 +215,13 @@ module Gcry
+       return @threshold_pace_pct if cycle_started_ns == 0_u64 || last == 0_u64
+       return @threshold_pace_pct unless last < cycle_started_ns && cycle_started_ns < now
+       return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
++      if @pace_variant >= 3_u64
++        trend = prev_allocated == 0_u64 ? 0_u64 : (prev_survived.to_f64 * @bytes_before_gc.to_f64 / prev_allocated.to_f64).to_u64
++        survived = trend if trend < survived
++      end
+       @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
+-        now - cycle_started_ns, base, @threshold_pace_max_pct)
++        now - cycle_started_ns, base, @threshold_pace_max_pct, @mark_scanned_bytes, survived,
++        @last_phase_mark_ns, @pace_variant, @pace_floor)
+     end
+ 
+     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
+diff --git a/src/gcry/gc_override.cr b/src/gcry/gc_override.cr
+index f156a70e..9ce81d17 100644
+--- a/src/gcry/gc_override.cr
++++ b/src/gcry/gc_override.cr
+@@ -452,6 +452,13 @@ module GC
+       if pace = env_u64("GCRY_THRESHOLD_PACE")
+         heap.threshold_pace_max_pct = pace.clamp(100_u64, 1000_u64)
+       end
++      # PROBE ONLY (pace-growth-040): pace variant and scanned-bytes floor.
++      if v = env_u64("GCRY_PACE_VARIANT")
++        heap.pace_variant = v
++      end
++      if f = env_u64("GCRY_PACE_FLOOR")
++        heap.pace_floor = f
++      end
+       # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
+       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
+       if (ec = env_u64("EC_PARALLELISM")) && ec > 1
+diff --git a/src/gcry/trace.cr b/src/gcry/trace.cr
+index 5ad87d7e..fa564f19 100644
+--- a/src/gcry/trace.cr
++++ b/src/gcry/trace.cr
+@@ -129,6 +129,7 @@ module Gcry
+         len = append_u64(buf, len, "size_class_live_bytes", heap.size_class_live_bytes)
+         len = append_u64(buf, len, "scanned_bytes", heap.mark_scanned_bytes)
+         len = append_u64(buf, len, "threshold_pace_pct", heap.threshold_pace_pct)
++        len = append_u64(buf, len, "bytes_before_gc", heap.bytes_before_gc)
+         # Post-STW reclaim (munmap / dormant / page release / large trim).
+         append_u64(buf, len, "flush_ns", heap.last_phase_flush_ns)
+       end

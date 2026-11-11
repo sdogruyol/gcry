@@ -1,0 +1,13 @@
+hl polluted=1 old: 10 of 10 red  []
+hl polluted=1 fixed: 0 of 10 red  []
+hl polluted=1 control: 10 of 10 red  []
+hl polluted=0 old: 0 of 10 red  []
+hl polluted=0 fixed: 0 of 10 red  []
+hl polluted=0 control: 10 of 10 red  []
+hdr polluted=1 old: 10 of 10 red  []
+hdr polluted=1 fixed: 0 of 10 red  []
+hdr polluted=1 control: 10 of 10 red  []
+hdr polluted=0 old: 0 of 10 red  []
+hdr polluted=0 fixed: 0 of 10 red  []
+hdr polluted=0 control: 10 of 10 red  []
+DONE

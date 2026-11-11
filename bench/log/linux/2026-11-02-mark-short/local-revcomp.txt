@@ -1,0 +1,57 @@
+# ms.py (bench/log/linux/2026-10-31-parallel-mark-floor/ms.py), taskset -c 0-3, default markers, medians (min-max); mark in ms.
+# tip = 07b61d28, probe = e9e9f0a9 (tip with cbf1b2e8 reverted), s6 = 5b8ec420 (kept).
+
+## Session 1: 11 trials
+Revcomp        tip        wall   0.698 ( 0.663- 0.812) cpu   2.474 ( 2.368- 2.600) mark   0.437 ( 0.399- 0.498) pause   3.300 ( 3.198- 4.342) maxp   0.250 ( 0.186- 0.905) gcs  28.000 (26.000-28.000) ns/obj 139.643 (125.810-160.173)
+Revcomp        probe      wall   0.680 ( 0.656- 0.751) cpu   2.445 ( 2.379- 2.565) mark   0.399 ( 0.371- 0.933) pause   3.403 ( 3.038- 4.560) maxp   0.247 ( 0.206- 0.835) gcs  28.000 (25.000-28.000) ns/obj 128.890 (120.761-304.071)
+RegexDna       tip        wall   2.080 ( 2.016- 2.282) cpu   2.928 ( 2.856- 3.143) mark   0.476 ( 0.394- 1.065) pause   3.139 ( 2.996- 4.100) maxp   0.266 ( 0.188- 0.704) gcs  25.000 (25.000-25.000) ns/obj  66.086 (21.229-145.849)
+RegexDna       probe      wall   2.102 ( 2.018- 2.353) cpu   2.923 ( 2.866- 3.193) mark   0.379 ( 0.338- 1.046) pause   3.203 ( 2.913- 4.306) maxp   0.254 ( 0.195- 0.685) gcs  25.000 (25.000-25.000) ns/obj 120.433 (20.863-136.075)
+
+## Session 2: 11 trials
+Revcomp        tip        wall   0.571 ( 0.562- 0.581) cpu   2.024 ( 2.006- 2.043) mark   0.378 ( 0.342- 0.412) pause   2.690 ( 2.561- 2.835) maxp   0.195 ( 0.161- 0.205) gcs  28.000 (28.000-28.000) ns/obj 119.324 (107.887-130.023)
+Revcomp        probe      wall   0.563 ( 0.555- 0.649) cpu   2.026 ( 2.003- 2.360) mark   0.349 ( 0.328- 0.381) pause   2.713 ( 2.527- 2.999) maxp   0.189 ( 0.168- 0.312) gcs  28.000 (28.000-29.000) ns/obj 110.011 (103.408-115.776)
+Revcomp        s6         wall   0.562 ( 0.551- 0.592) cpu   2.016 ( 1.988- 2.055) mark   0.339 ( 0.307- 0.384) pause   2.675 ( 2.514- 2.748) maxp   0.194 ( 0.164- 0.223) gcs  28.000 (27.000-28.000) ns/obj 106.976 (96.896-121.070)
+RegexDna       tip        wall   1.730 ( 1.719- 1.780) cpu   2.415 ( 2.396- 2.467) mark   0.494 ( 0.329- 0.745) pause   2.529 ( 2.299- 2.813) maxp   0.196 ( 0.174- 0.211) gcs  25.000 (25.000-25.000) ns/obj  27.058 (15.759-117.277)
+RegexDna       probe      wall   1.765 ( 1.715- 1.776) cpu   2.444 ( 2.402- 2.474) mark   0.364 ( 0.286- 0.601) pause   2.508 ( 2.292- 2.631) maxp   0.199 ( 0.174- 0.224) gcs  25.000 (25.000-25.000) ns/obj  46.151 (14.882-104.222)
+RegexDna       s6         wall   1.763 ( 1.714- 1.776) cpu   2.452 ( 2.396- 2.468) mark   0.295 ( 0.277- 0.641) pause   2.357 ( 2.210- 2.695) maxp   0.198 ( 0.180- 0.229) gcs  25.000 (25.000-25.000) ns/obj  95.303 (12.778-101.424)
+Base64Encode   tip        wall   0.680 ( 0.668- 0.693) cpu   0.687 ( 0.675- 0.699) mark   1.493 ( 1.429- 1.537) pause  16.891 (15.579-17.322) maxp   0.173 ( 0.144- 0.207) gcs 393.000 (393.000-393.000) ns/obj  33.035 (31.618-34.021)
+Base64Encode   probe      wall   0.643 ( 0.625- 0.652) cpu   0.650 ( 0.631- 0.659) mark   1.524 ( 1.431- 1.571) pause  16.792 (15.465-17.386) maxp   0.170 ( 0.161- 0.212) gcs 393.000 (393.000-393.000) ns/obj  33.732 (31.675-34.770)
+Base64Encode   s6         wall   0.644 ( 0.627- 0.659) cpu   0.650 ( 0.634- 0.665) mark   1.249 ( 1.162- 1.317) pause  16.789 (14.977-17.428) maxp   0.168 ( 0.150- 0.213) gcs 393.000 (393.000-393.000) ns/obj  27.637 (25.710-29.144)
+
+## Micro (small.py): 100 small objects held, 300 explicit collections, mark_ns per collection (us), medians (min-max)
+# 64 MiB written between collections (cold), 21 trials
+probe  Σmark   3.856 ms (3.552-4.120)  per collection  12.24 us (11.59-12.90)  scanned 92 KiB
+tip    Σmark   4.138 ms (3.844-4.467)  per collection  13.24 us (12.32-14.17)  scanned 92 KiB
+s6     Σmark   3.851 ms (3.574-4.195)  per collection  12.30 us (11.64-13.29)  scanned 92 KiB
+# 64 MiB written between collections (cold), 9 trials, earlier session
+probe  Σmark   3.758 ms (3.656-3.962)  per collection  12.02 us (11.73-12.65)  scanned 92 KiB
+tip    Σmark   4.326 ms (3.995-4.477)  per collection  13.36 us (12.66-13.93)  scanned 92 KiB
+s6     Σmark   4.041 ms (3.597-4.326)  per collection  12.59 us (11.67-13.33)  scanned 92 KiB
+# nothing written between collections (warm), 9 trials
+probe  Σmark   1.834 ms (1.684-2.211)  per collection   5.66 us (5.36-6.43)  scanned 92 KiB
+tip    Σmark   1.684 ms (1.462-2.129)  per collection   4.86 us (4.61-5.72)  scanned 92 KiB
+s6     Σmark   1.774 ms (1.633-2.350)  per collection   5.38 us (4.96-6.25)  scanned 92 KiB
+
+## Session 3: 11 trials, s7 = d3aeaca9 (kept: scan_edges_inline follows the cycle's loop too)
+Revcomp        tip        wall   0.575 ( 0.563- 0.622) cpu   2.030 ( 2.007- 2.088) mark   0.372 ( 0.355- 0.418) pause   2.697 ( 2.629- 2.971) maxp   0.189 ( 0.161- 0.377) gcs  28.000 (27.000-28.000) ns/obj 120.151 (113.706-130.326)
+Revcomp        probe      wall   0.567 ( 0.555- 0.582) cpu   2.026 ( 2.008- 2.047) mark   0.344 ( 0.311- 0.358) pause   2.701 ( 2.621- 2.773) maxp   0.190 ( 0.171- 0.239) gcs  28.000 (28.000-28.000) ns/obj 107.696 (98.128-112.800)
+Revcomp        s7         wall   0.576 ( 0.558- 0.859) cpu   2.034 ( 2.001- 2.694) mark   0.331 ( 0.313- 0.363) pause   2.733 ( 2.644- 3.804) maxp   0.187 ( 0.172- 1.100) gcs  28.000 (28.000-29.000) ns/obj 104.432 (98.575-114.570)
+RegexDna       tip        wall   1.732 ( 1.722- 1.762) cpu   2.419 ( 2.401- 2.444) mark   0.499 ( 0.318- 0.684) pause   2.455 ( 2.271- 2.814) maxp   0.191 ( 0.176- 0.278) gcs  25.000 (25.000-25.000) ns/obj  28.141 (13.364-122.430)
+RegexDna       probe      wall   1.768 ( 1.714- 1.781) cpu   2.454 ( 2.397- 2.476) mark   0.335 ( 0.285- 0.723) pause   2.425 ( 2.342- 2.845) maxp   0.192 ( 0.177- 0.378) gcs  25.000 (25.000-25.000) ns/obj  97.077 (14.410-113.072)
+RegexDna       s7         wall   1.739 ( 1.724- 1.788) cpu   2.428 ( 2.410- 2.470) mark   0.496 ( 0.284- 0.888) pause   2.556 ( 2.325- 3.068) maxp   0.191 ( 0.177- 0.316) gcs  25.000 (25.000-25.000) ns/obj  28.105 (17.700-105.057)
+Base64Encode   tip        wall   0.687 ( 0.669- 0.695) cpu   0.694 ( 0.676- 0.702) mark   1.488 ( 1.420- 1.525) pause  16.785 (15.882-17.224) maxp   0.169 ( 0.152- 0.243) gcs 393.000 (393.000-393.000) ns/obj  32.938 (31.421-33.751)
+Base64Encode   probe      wall   0.642 ( 0.630- 0.653) cpu   0.649 ( 0.636- 0.660) mark   1.508 ( 1.433- 1.610) pause  16.914 (15.238-17.591) maxp   0.164 ( 0.157- 0.200) gcs 393.000 (393.000-393.000) ns/obj  33.374 (31.715-35.627)
+Base64Encode   s7         wall   0.689 ( 0.669- 0.694) cpu   0.696 ( 0.675- 0.701) mark   1.480 ( 1.415- 1.557) pause  17.103 (15.880-17.644) maxp   0.184 ( 0.154- 0.233) gcs 393.000 (393.000-393.000) ns/obj  32.767 (31.323-34.456)
+Base64Decode   tip        wall   0.717 ( 0.699- 0.726) cpu   0.723 ( 0.705- 0.733) mark   0.880 ( 0.853- 0.918) pause   9.978 ( 9.498-10.328) maxp   0.171 ( 0.157- 0.197) gcs 224.000 (224.000-224.000) ns/obj  34.180 (33.114-35.662)
+Base64Decode   probe      wall   0.715 ( 0.697- 0.724) cpu   0.722 ( 0.704- 0.731) mark   0.892 ( 0.844- 0.943) pause  10.154 ( 9.636-10.362) maxp   0.166 ( 0.151- 0.181) gcs 224.000 (224.000-224.000) ns/obj  34.655 (32.789-36.635)
+Base64Decode   s7         wall   0.713 ( 0.702- 0.733) cpu   0.720 ( 0.709- 0.740) mark   0.860 ( 0.839- 0.896) pause  10.170 ( 9.291-10.958) maxp   0.172 ( 0.156- 0.821) gcs 224.000 (223.000-224.000) ns/obj  33.415 (32.601-34.816)
+# RegexDna's Σ mark is bimodal here in every arm (sorted per-run ms, session 3):
+#   tip   0.318 0.328 0.333 0.359 0.481 0.499 0.499 0.528 0.669 0.670 0.684
+#   s7    0.284 0.301 0.308 0.451 0.476 0.496 0.499 0.506 0.607 0.613 0.888
+#   probe 0.285 0.291 0.291 0.299 0.302 0.335 0.452 0.520 0.600 0.706 0.723
+
+## Micro (small.py), 64 MiB written between collections (cold), 21 trials, with s7
+probe  Σmark   3.481 ms (3.369-3.958)  per collection  11.11 us (11.02-12.84)  scanned 92 KiB
+tip    Σmark   3.749 ms (3.652-4.160)  per collection  12.04 us (11.86-12.62)  scanned 92 KiB
+s6     Σmark   3.506 ms (3.394-4.166)  per collection  11.26 us (10.96-13.11)  scanned 92 KiB
+s7     Σmark   3.497 ms (3.412-4.043)  per collection  11.19 us (11.02-11.93)  scanned 92 KiB

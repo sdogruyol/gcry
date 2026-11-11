@@ -1,0 +1,70 @@
+claim_stress seconds=5.0 workers=4 seed=1 ring=512 lazy_sweep=true headers=false fallback=false
+  collections=398 claims_released=835782 sets_pinned=82 hits=7300033 locked=815375 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=395
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=1 ring=512 lazy_sweep=false headers=false fallback=false
+  collections=394 claims_released=749120 sets_pinned=122 hits=8121036 locked=1603945 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=1 ring=512 lazy_sweep=true headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=124 claims_released=8858 sets_pinned=35 hits=375 locked=2694935 sets=64 fallback_allocs=294826 fallback_workers=8 after_world_sweeps=119
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=1 ring=512 lazy_sweep=false headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=141 claims_released=8899 sets_pinned=28 hits=333 locked=3233440 sets=64 fallback_allocs=355787 fallback_workers=8 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=2 ring=512 lazy_sweep=true headers=false fallback=false
+  collections=389 claims_released=795145 sets_pinned=113 hits=6726819 locked=1005998 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=386
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=2 ring=512 lazy_sweep=false headers=false fallback=false
+  collections=402 claims_released=866078 sets_pinned=103 hits=8643624 locked=919984 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=2 ring=512 lazy_sweep=true headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=122 claims_released=8896 sets_pinned=40 hits=337 locked=3370548 sets=64 fallback_allocs=369628 fallback_workers=8 after_world_sweeps=114
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=2 ring=512 lazy_sweep=false headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=169 claims_released=8891 sets_pinned=45 hits=342 locked=3260602 sets=64 fallback_allocs=354993 fallback_workers=8 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=3 ring=512 lazy_sweep=true headers=false fallback=false
+  collections=401 claims_released=785591 sets_pinned=99 hits=10101254 locked=1048975 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=393
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=3 ring=512 lazy_sweep=false headers=false fallback=false
+  collections=423 claims_released=779625 sets_pinned=112 hits=8735459 locked=1153126 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=3 ring=512 lazy_sweep=true headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=143 claims_released=8888 sets_pinned=32 hits=464 locked=4702671 sets=64 fallback_allocs=510539 fallback_workers=8 after_world_sweeps=136
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=3 ring=512 lazy_sweep=false headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=195 claims_released=8904 sets_pinned=49 hits=777 locked=5391090 sets=64 fallback_allocs=586101 fallback_workers=8 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=4 ring=512 lazy_sweep=true headers=false fallback=false
+  collections=400 claims_released=714900 sets_pinned=96 hits=13258003 locked=1825127 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=381
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=4 ring=512 lazy_sweep=false headers=false fallback=false
+  collections=449 claims_released=721867 sets_pinned=111 hits=18961849 locked=278526 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=4 ring=512 lazy_sweep=true headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=143 claims_released=8863 sets_pinned=33 hits=434 locked=4907035 sets=64 fallback_allocs=531392 fallback_workers=8 after_world_sweeps=134
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=4 ring=512 lazy_sweep=false headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=198 claims_released=8891 sets_pinned=43 hits=342 locked=5248827 sets=64 fallback_allocs=567925 fallback_workers=8 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=5 ring=512 lazy_sweep=true headers=false fallback=false
+  collections=422 claims_released=741962 sets_pinned=97 hits=14876734 locked=630028 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=406
+RESULT: PASS
+claim_stress seconds=5.0 workers=4 seed=5 ring=512 lazy_sweep=false headers=false fallback=false
+  collections=441 claims_released=796828 sets_pinned=118 hits=11486258 locked=926944 sets=7 fallback_allocs=0 fallback_workers=0 after_world_sweeps=0
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=5 ring=512 lazy_sweep=true headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=148 claims_released=8895 sets_pinned=34 hits=466 locked=5108399 sets=64 fallback_allocs=556714 fallback_workers=8 after_world_sweeps=137
+RESULT: PASS
+claim_stress seconds=5.0 workers=8 seed=5 ring=512 lazy_sweep=false headers=false fallback=true
+  filled the cursor-set table with 63 parked thread(s): true
+  collections=172 claims_released=8852 sets_pinned=48 hits=1277 locked=3246242 sets=64 fallback_allocs=354340 fallback_workers=8 after_world_sweeps=0
+RESULT: PASS

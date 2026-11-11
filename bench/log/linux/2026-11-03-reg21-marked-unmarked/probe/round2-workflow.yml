@@ -1,0 +1,114 @@
+name: probe ci21b
+
+# Probe only, on `probe/ci21b`: test-crystal-next's step
+# (`GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec`)
+# looped on the fix (21462240) and on its base (96956b42), with the main
+# fiber moved off the initial thread (a 60 ms `Fiber.syscall` the execution
+# context's monitor hands away):
+#
+#   *early*: a `Spec.before_suite` in the parent only (it deletes
+#   `GCRY_PROBE_MOVE` first, so no child process inherits it), before the
+#   first example;
+#   *late*: an example of its own just ahead of regression 21's examples.
+#
+# Round 1 (d7c6f89f) put the early mover in every child process too, which
+# broke regressions 63, 69, 85, 99 and 103's children; this round does not.
+on:
+  push:
+    branches: ["probe/ci21b"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [fixearly, fixlate, baseearly, baselate]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        exclude:
+          - { arm: baseearly, shard: 6 }
+          - { arm: baseearly, shard: 7 }
+          - { arm: baseearly, shard: 8 }
+          - { arm: baseearly, shard: 9 }
+          - { arm: baseearly, shard: 10 }
+          - { arm: baselate, shard: 6 }
+          - { arm: baselate, shard: 7 }
+          - { arm: baselate, shard: 8 }
+          - { arm: baselate, shard: 9 }
+          - { arm: baselate, shard: 10 }
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    name: probe (${{ matrix.arm }}, ${{ matrix.shard }})
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ startsWith(matrix.arm, 'base') && '96956b420e652e9f60a06e229bb380ab97a64ede' || '21462240811394ff3f22d388b52f331bb6e5e5c6' }}
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: ./.github/actions/apt-update
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.22.2"
+      - run: mkdir -p bin probe-out && git log --oneline -1
+      - name: Early mover
+        if: endsWith(matrix.arm, 'early')
+        run: |
+          cat >> process_spec/regression/21_boehm_c_abi_spec.cr <<'EOF'
+
+          Spec.before_suite do
+            if ENV.delete("GCRY_PROBE_MOVE")
+              ts = LibC::Timespec.new(tv_sec: 0, tv_nsec: 60_000_000)
+              initial = Gcry::Platform.current_thread_id
+              10.times do
+                break unless Gcry::Platform.current_thread_id == initial
+                Fiber.syscall { LibC.nanosleep(pointerof(ts), nil) }
+              end
+            end
+          end
+          EOF
+          git diff --stat
+      - name: Late mover
+        if: endsWith(matrix.arm, 'late')
+        run: |
+          python3 - <<'EOF'
+          p = "process_spec/regression/21_boehm_c_abi_spec.cr"
+          s = open(p).read()
+          mover = '''describe "probe mover" do
+            it "moves the main fiber off the initial thread" do
+              ts = LibC::Timespec.new(tv_sec: 0, tv_nsec: 60_000_000)
+              initial = Gcry::Platform.current_thread_id
+              10.times do
+                break unless Gcry::Platform.current_thread_id == initial
+                Fiber.syscall { LibC.nanosleep(pointerof(ts), nil) }
+              end
+            end
+          end
+
+          '''
+          i = s.index('describe "Boehm')
+          open(p, "w").write(s[:i] + mover + s[i:])
+          EOF
+          git diff --stat
+      - name: Spec order
+        run: crystal eval 'Dir.glob("process_spec/**/*_spec.cr").each { |f| puts f }' | tee probe-out/order.txt
+      - name: Loop the step
+        run: |
+          set +e
+          for i in 1 2 3 4; do
+            GCRY_PROBE_MOVE=1 GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace > probe-out/run$i.log 2>&1
+            rc=$?
+            moved=0; grep -q "tracking the main thread's stack bottom" probe-out/run$i.log && moved=1
+            f21=0; grep -q "^crystal spec process_spec/regression/21_" probe-out/run$i.log && f21=1
+            echo "PROBE arm=${{ matrix.arm }} shard=${{ matrix.shard }} run=$i rc=$rc f21=$f21 moved=$moved $(grep -E '^[0-9]+ examples' probe-out/run$i.log | tail -1) fails=[$(grep -E '^crystal spec ' probe-out/run$i.log | sed 's#^crystal spec process_spec/regression/##; s# .*##' | tr '\n' ' ')]"
+            if [ $f21 = 1 ] || [ $rc != 0 ]; then
+              sed -n '/^Failures:/,$p' probe-out/run$i.log
+            fi
+          done
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.arm }}-${{ matrix.shard }}
+          path: probe-out

@@ -1,0 +1,91 @@
+DBG burst thread stack base=0x71348e7fe000 bottom=0x71348effe000
+DBG watch enter collections=1 collector=(nil) slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch exit collections=2 collector=(nil) slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=2 collector=(nil) slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch exit collections=3 collector=(nil) slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=3 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG big stack seed user=0x71347fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffeef540000 bottom=0x7ffeefd3e000 sp=0x7ffeefd3bb98 entry_sp=0x7ffeefd3caa8 collections=3
+DBG   holder slot=0x7ffeefd3ba10 below_bottom=9712 above_sp=-392 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffeefd3bc60 below_bottom=9120 above_sp=200 above_entry_sp=-3656 value=user+0
+DBG   holder slot=0x7ffeefd3bce0 below_bottom=8992 above_sp=328 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffeefd3c5f8 below_bottom=6664 above_sp=2656 above_entry_sp=-1200 value=user+1872890
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x7ffeefd3c608 below_bottom=6648 above_sp=2672 above_entry_sp=-1184 value=user+1872890
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holders in stack window: 5
+DBG watch exit collections=4 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=4 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG big stack seed user=0x71347fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffeef540000 bottom=0x7ffeefd3e000 sp=0x7ffeefd3bb98 entry_sp=0x7ffeefd3caa8 collections=4
+DBG   holder slot=0x7ffeefd3ba10 below_bottom=9712 above_sp=-392 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffeefd3bc60 below_bottom=9120 above_sp=200 above_entry_sp=-3656 value=user+0
+DBG   holder slot=0x7ffeefd3bce0 below_bottom=8992 above_sp=328 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffeefd3c5f8 below_bottom=6664 above_sp=2656 above_entry_sp=-1200 value=user+1873016
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x7ffeefd3c608 below_bottom=6648 above_sp=2672 above_entry_sp=-1184 value=user+1873016
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holders in stack window: 5
+DBG watch exit collections=5 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=5 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG big stack seed user=0x71347fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffeef540000 bottom=0x7ffeefd3e000 sp=0x7ffeefd3bb98 entry_sp=0x7ffeefd3caa8 collections=5
+DBG   holder slot=0x7ffeefd3ba10 below_bottom=9712 above_sp=-392 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffeefd3bc60 below_bottom=9120 above_sp=200 above_entry_sp=-3656 value=user+0
+DBG   holder slot=0x7ffeefd3bce0 below_bottom=8992 above_sp=328 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffeefd3c5f8 below_bottom=6664 above_sp=2656 above_entry_sp=-1200 value=user+1873144
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x7ffeefd3c608 below_bottom=6648 above_sp=2672 above_entry_sp=-1184 value=user+1873144
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holders in stack window: 5
+DBG watch exit collections=6 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=6 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG big stack seed user=0x71347fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffeef540000 bottom=0x7ffeefd3e000 sp=0x7ffeefd3bb98 entry_sp=0x7ffeefd3caa8 collections=6
+DBG   holder slot=0x7ffeefd3ba10 below_bottom=9712 above_sp=-392 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffeefd3bc60 below_bottom=9120 above_sp=200 above_entry_sp=-3656 value=user+0
+DBG   holder slot=0x7ffeefd3bce0 below_bottom=8992 above_sp=328 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffeefd3c5f8 below_bottom=6664 above_sp=2656 above_entry_sp=-1200 value=user+1873294
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x7ffeefd3c608 below_bottom=6648 above_sp=2672 above_entry_sp=-1184 value=user+1873294
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holders in stack window: 5
+DBG watch exit collections=7 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=7 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG big stack seed user=0x71347fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffeef540000 bottom=0x7ffeefd3e000 sp=0x7ffeefd3bb98 entry_sp=0x7ffeefd3caa8 collections=7
+DBG   holder slot=0x7ffeefd3ba10 below_bottom=9712 above_sp=-392 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffeefd3bc60 below_bottom=9120 above_sp=200 above_entry_sp=-3656 value=user+0
+DBG   holder slot=0x7ffeefd3bce0 below_bottom=8992 above_sp=328 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffeefd3c5f8 below_bottom=6664 above_sp=2656 above_entry_sp=-1200 value=user+1873446
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x7ffeefd3c608 below_bottom=6648 above_sp=2672 above_entry_sp=-1184 value=user+1873446
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holders in stack window: 5
+DBG watch exit collections=8 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=8 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG big stack seed user=0x71347fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffeef540000 bottom=0x7ffeefd3e000 sp=0x7ffeefd3bb98 entry_sp=0x7ffeefd3caa8 collections=8
+DBG   holder slot=0x7ffeefd3ba10 below_bottom=9712 above_sp=-392 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffeefd3bc60 below_bottom=9120 above_sp=200 above_entry_sp=-3656 value=user+0
+DBG   holder slot=0x7ffeefd3bce0 below_bottom=8992 above_sp=328 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffeefd3c5f8 below_bottom=6664 above_sp=2656 above_entry_sp=-1200 value=user+1873568
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x7ffeefd3c608 below_bottom=6648 above_sp=2672 above_entry_sp=-1184 value=user+1873568
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holders in stack window: 5
+DBG watch exit collections=9 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG watch enter collections=9 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+DBG big stack seed user=0x71347fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffeef540000 bottom=0x7ffeefd3e000 sp=0x7ffeefd3bb98 entry_sp=0x7ffeefd3caa8 collections=9
+DBG   holder slot=0x7ffeefd3ba10 below_bottom=9712 above_sp=-392 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffeefd3bc60 below_bottom=9120 above_sp=200 above_entry_sp=-3656 value=user+0
+DBG   holder slot=0x7ffeefd3bce0 below_bottom=8992 above_sp=328 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffeefd3c5f8 below_bottom=6664 above_sp=2656 above_entry_sp=-1200 value=user+1873722
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holder slot=0x7ffeefd3c608 below_bottom=6648 above_sp=2672 above_entry_sp=-1184 value=user+1873722
+DBG     chunk base=0x71347fbff000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   holders in stack window: 5
+DBG watch exit collections=10 collector=DEFAULT-0 slot=0x71348cc78c88 value=0x713400fdf190 parked_sp=0x71348cc78c68
+parallel_dormant: threads=3 retain=65536KiB ordinary collect
+  RSS peak 72 MB, after collect 68 MB; empty chunks 18 MB, dormant 0 MB
+  seeded by stack 3715 KiB, parked 0 KiB, thread 3 KiB, static 3 KiB
+  the collects: 7 major, 0 minor; last major sweep: after the world, multi-mutator, release on; empties warm 18 MB, grace 0 MB, dormant 0 MB, unmapped 0 MB, kept 0 MB, header-blocked 0 MB
+  warm budget / threshold, MB: 69/69 -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36)
+DBG gc-idle stack base=0x71348c47a000 bottom=0x71348cc7a000
+DBG grow 24 buffer=0x71347fbff040 bytes=1241912
+DBG grow 25 buffer=0x71347cdff040 bytes=4754784
+FAIL: no empty chunk went dormant (18 MB of them kept mapped) — the opt-in is inert

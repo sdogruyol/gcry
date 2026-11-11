@@ -1,0 +1,3 @@
+macos-latest      JsonParseSerializable  ok                                                      var-code var=0.573 prepad16=0.565 prepad64=0.566 | base-code base=0.560 baseprepad16=0.562 baseprepad64=0.566  PEAK +9.9% [+6.1, +11.6]
+macos-latest      JsonParsePull          ok                                                      var-code var=0.561 prepad16=0.541 prepad64=0.561 | base-code base=0.551 baseprepad16=0.535 baseprepad64=0.557  PEAK +8.0% [+6.4, +10.5]
+macos-latest      JsonGenerate           ok                                                      var-code var=0.946 prepad16=0.931 prepad64=0.919 | base-code base=0.909 baseprepad16=0.945 baseprepad64=0.915

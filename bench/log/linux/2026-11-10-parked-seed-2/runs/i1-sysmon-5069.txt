@@ -1,0 +1,629 @@
+DBG big parked seed user=0x746300899040 bytes=3802600 fiber=0x74630aaef0d0 name=main running=1 base=0x746309a00000 bottom=0x74630a200000 stack_top=0x74630a1fec64 scan_top=0x74630a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffcaff2e018
+DBG   thread=0x74630b8480d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x74630b848190
+DBG   thread=0x74630b848310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x74630aaef0d0
+DBG   thread=0x74630b848490 name=(nil) current_is=0 main_is=0 sp=0x746308ffecb8 exempt=0 current_fiber=0x74630aaaf0d0
+DBG   thread=0x74630b848550 name=(nil) current_is=0 main_is=0 sp=0x746303ffecb8 exempt=0 current_fiber=0x74630aa8f0d0
+DBG   thread=0x74630aa6f190 name=gc-idle current_is=0 main_is=0 sp=0x7463016f9c68 exempt=1 current_fiber=0x74630aa8f190
+DBG   holder slot=0x74630a1feb60 below_bottom=5280 above_stack_top=-260 value=user+978600
+DBG     chunk base=0x746300899000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7463016f9c68
+DBG     word 0x74630a1feae0 (+-128) = 0x100000000
+DBG     word 0x74630a1feae8 (+-120) = 0x74630a1ff6c0
+DBG     word 0x74630a1feaf0 (+-112) = 0x74630a1feb10
+DBG     word 0x74630a1feaf8 (+-104) = 0x74630baf5af2
+DBG     word 0x74630a1feb00 (+-96) = 0xe6
+DBG     word 0x74630a1feb08 (+-88) = 0
+DBG     word 0x74630a1feb10 (+-80) = 0x74630a1feb20
+DBG     word 0x74630a1feb18 (+-72) = 0x74630bb03707
+DBG     word 0x74630a1feb20 (+-64) = 0x74630a1feef0
+DBG     word 0x74630a1feb28 (+-56) = 0x5f57ba2acc2b
+DBG     word 0x74630a1feb30 (+-48) = 0x987ee80a1fec80
+DBG     word 0x74630a1feb38 (+-40) = 0
+DBG     word 0x74630a1feb40 (+-32) = 0
+DBG     word 0x74630a1feb48 (+-24) = 0
+DBG     word 0x74630a1feb50 (+-16) = 0
+DBG     word 0x74630a1feb58 (+-8) = 0
+DBG     word 0x74630a1feb60 (+0) = 0x746300987ee8
+DBG     word 0x74630a1feb68 (+8) = 0
+DBG     word 0x74630a1feb70 (+16) = 0x987ee8
+DBG     word 0x74630a1feb78 (+24) = 0x5f57ba2a9b0d
+DBG     word 0x74630a1feb80 (+32) = 0x987ee8
+DBG     word 0x74630a1feb88 (+40) = 0x987ee800000000
+DBG     word 0x74630a1feb90 (+48) = 0
+DBG     word 0x74630a1feb98 (+56) = 0
+DBG     word 0x74630a1feba0 (+64) = 0x987ee8
+DBG     word 0x74630a1feba8 (+72) = 0x5f57ba355dbb
+DBG     word 0x74630a1febb0 (+80) = 0
+DBG     word 0x74630a1febb8 (+88) = 0
+DBG     word 0x74630a1febc0 (+96) = 0
+DBG     word 0x74630a1febc8 (+104) = 0x987ee800000000
+DBG     word 0x74630a1febd0 (+112) = 0
+DBG     word 0x74630a1febd8 (+120) = 0x2dd9710600000000
+DBG     word 0x74630a1febe0 (+128) = 0x1f8b16
+DBG     word 0x74630a1febe8 (+136) = 0x2d40f21e00000000
+DBG     word 0x74630a1febf0 (+144) = 0x1f8b16
+DBG     word 0x74630a1febf8 (+152) = 0x2d40da8600000000
+DBG     word 0x74630a1fec00 (+160) = 0x1f8b16
+DBG     word 0x74630a1fec08 (+168) = 0
+DBG     word 0x74630a1fec10 (+176) = 0x74630ab0f220
+DBG     word 0x74630a1fec18 (+184) = 0
+DBG     word 0x74630a1fec20 (+192) = 0
+DBG     word 0x74630a1fec28 (+200) = 0
+DBG     word 0x74630a1fec30 (+208) = 0x390
+DBG     word 0x74630a1fec38 (+216) = 0
+DBG     word 0x74630a1fec40 (+224) = 0x987ee8
+DBG     word 0x74630a1fec48 (+232) = 0
+DBG     word 0x74630a1fec50 (+240) = 0x987ee8
+DBG     word 0x74630a1fec58 (+248) = 0
+DBG     word 0x74630a1fec60 (+256) = 0
+DBG     word 0x74630a1fec68 (+264) = 0
+DBG     word 0x74630a1fec70 (+272) = 0
+DBG     word 0x74630a1fec78 (+280) = 0
+DBG     word 0x74630a1fec80 (+288) = 0
+DBG     word 0x74630a1fec88 (+296) = 0x987ee8
+DBG     word 0x74630a1fec90 (+304) = 0x1f8b16
+DBG     word 0x74630a1fec98 (+312) = 0x2dd97106
+DBG     word 0x74630a1feca0 (+320) = 0x1f8b16
+DBG     word 0x74630a1feca8 (+328) = 0x2d40f21e
+DBG     word 0x74630a1fecb0 (+336) = 0x1f8b16
+DBG     word 0x74630a1fecb8 (+344) = 0x2d40da86
+DBG     word 0x74630a1fecc0 (+352) = 0
+DBG     word 0x74630a1fecc8 (+360) = 0x1f8b16
+DBG     word 0x74630a1fecd0 (+368) = 0x2d40f21e
+DBG     word 0x74630a1fecd8 (+376) = 0x1f8b16
+DBG     word 0x74630a1fece0 (+384) = 0x2d40da86
+DBG     word 0x74630a1fece8 (+392) = 0
+DBG     word 0x74630a1fecf0 (+400) = 0x987ee8
+DBG     word 0x74630a1fecf8 (+408) = 0x1f8b16
+DBG     word 0x74630a1fed00 (+416) = 0x2d40da86
+DBG     word 0x74630a1fed08 (+424) = 0x5f57ba355d76
+DBG     word 0x74630a1fed10 (+432) = 0
+DBG     word 0x74630a1fed18 (+440) = 0x5f57ba355d6a
+DBG     word 0x74630a1fed20 (+448) = 0x74630ab0f220
+DBG     word 0x74630a1fed28 (+456) = 0x5f57ba1aaeb9
+DBG     word 0x74630a1fed30 (+464) = 0x5f57ba1aaeb0
+DBG     word 0x74630a1fed38 (+472) = 0x5f57ba2a9282
+DBG     word 0x74630a1fed40 (+480) = 0
+DBG     word 0x74630a1fed48 (+488) = 0
+DBG     word 0x74630a1fed50 (+496) = 0
+DBG     word 0x74630a1fed58 (+504) = 0x5f57ba1aaeb0
+DBG big parked seed user=0x746300899040 bytes=3802600 fiber=0x74630aaef0d0 name=main running=1 base=0x746309a00000 bottom=0x74630a200000 stack_top=0x74630a1fec64 scan_top=0x74630a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffcaff2e018
+DBG   thread=0x74630b8480d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x74630b848190
+DBG   thread=0x74630b848310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x74630aaef0d0
+DBG   thread=0x74630b848490 name=(nil) current_is=0 main_is=0 sp=0x746308ffecb8 exempt=0 current_fiber=0x74630aaaf0d0
+DBG   thread=0x74630b848550 name=(nil) current_is=0 main_is=0 sp=0x746303ffecb8 exempt=0 current_fiber=0x74630aa8f0d0
+DBG   thread=0x74630aa6f190 name=gc-idle current_is=0 main_is=0 sp=0x7463016f9c68 exempt=1 current_fiber=0x74630aa8f190
+DBG   holder slot=0x74630a1feb60 below_bottom=5280 above_stack_top=-260 value=user+978730
+DBG     chunk base=0x746300899000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7463016f9c68
+DBG     word 0x74630a1feae0 (+-128) = 0x100000000
+DBG     word 0x74630a1feae8 (+-120) = 0x74630a1ff6c0
+DBG     word 0x74630a1feaf0 (+-112) = 0x74630a1feb10
+DBG     word 0x74630a1feaf8 (+-104) = 0x74630baf5af2
+DBG     word 0x74630a1feb00 (+-96) = 0xe6
+DBG     word 0x74630a1feb08 (+-88) = 0
+DBG     word 0x74630a1feb10 (+-80) = 0x74630a1feb20
+DBG     word 0x74630a1feb18 (+-72) = 0x74630bb03707
+DBG     word 0x74630a1feb20 (+-64) = 0x74630a1feef0
+DBG     word 0x74630a1feb28 (+-56) = 0x5f57ba2acc2b
+DBG     word 0x74630a1feb30 (+-48) = 0x987f6a0a1fec80
+DBG     word 0x74630a1feb38 (+-40) = 0
+DBG     word 0x74630a1feb40 (+-32) = 0
+DBG     word 0x74630a1feb48 (+-24) = 0
+DBG     word 0x74630a1feb50 (+-16) = 0
+DBG     word 0x74630a1feb58 (+-8) = 0
+DBG     word 0x74630a1feb60 (+0) = 0x746300987f6a
+DBG     word 0x74630a1feb68 (+8) = 0
+DBG     word 0x74630a1feb70 (+16) = 0x987f6a
+DBG     word 0x74630a1feb78 (+24) = 0x5f57ba2a9b0d
+DBG     word 0x74630a1feb80 (+32) = 0x987f6a
+DBG     word 0x74630a1feb88 (+40) = 0x987f6a00000000
+DBG     word 0x74630a1feb90 (+48) = 0
+DBG     word 0x74630a1feb98 (+56) = 0
+DBG     word 0x74630a1feba0 (+64) = 0x987f6a
+DBG     word 0x74630a1feba8 (+72) = 0x5f57ba355dbb
+DBG     word 0x74630a1febb0 (+80) = 0
+DBG     word 0x74630a1febb8 (+88) = 0
+DBG     word 0x74630a1febc0 (+96) = 0
+DBG     word 0x74630a1febc8 (+104) = 0x987f6a00000000
+DBG     word 0x74630a1febd0 (+112) = 0
+DBG     word 0x74630a1febd8 (+120) = 0x35afda2400000000
+DBG     word 0x74630a1febe0 (+128) = 0x1f8b16
+DBG     word 0x74630a1febe8 (+136) = 0x35175aba00000000
+DBG     word 0x74630a1febf0 (+144) = 0x1f8b16
+DBG     word 0x74630a1febf8 (+152) = 0x351743a400000000
+DBG     word 0x74630a1fec00 (+160) = 0x1f8b16
+DBG     word 0x74630a1fec08 (+168) = 0
+DBG     word 0x74630a1fec10 (+176) = 0x74630ab0f220
+DBG     word 0x74630a1fec18 (+184) = 0
+DBG     word 0x74630a1fec20 (+192) = 0
+DBG     word 0x74630a1fec28 (+200) = 0
+DBG     word 0x74630a1fec30 (+208) = 0x390
+DBG     word 0x74630a1fec38 (+216) = 0
+DBG     word 0x74630a1fec40 (+224) = 0x987f6a
+DBG     word 0x74630a1fec48 (+232) = 0
+DBG     word 0x74630a1fec50 (+240) = 0x987f6a
+DBG     word 0x74630a1fec58 (+248) = 0
+DBG     word 0x74630a1fec60 (+256) = 0
+DBG     word 0x74630a1fec68 (+264) = 0
+DBG     word 0x74630a1fec70 (+272) = 0
+DBG     word 0x74630a1fec78 (+280) = 0
+DBG     word 0x74630a1fec80 (+288) = 0
+DBG     word 0x74630a1fec88 (+296) = 0x987f6a
+DBG     word 0x74630a1fec90 (+304) = 0x1f8b16
+DBG     word 0x74630a1fec98 (+312) = 0x35afda24
+DBG     word 0x74630a1feca0 (+320) = 0x1f8b16
+DBG     word 0x74630a1feca8 (+328) = 0x35175aba
+DBG     word 0x74630a1fecb0 (+336) = 0x1f8b16
+DBG     word 0x74630a1fecb8 (+344) = 0x351743a4
+DBG     word 0x74630a1fecc0 (+352) = 0
+DBG     word 0x74630a1fecc8 (+360) = 0x1f8b16
+DBG     word 0x74630a1fecd0 (+368) = 0x35175aba
+DBG     word 0x74630a1fecd8 (+376) = 0x1f8b16
+DBG     word 0x74630a1fece0 (+384) = 0x351743a4
+DBG     word 0x74630a1fece8 (+392) = 0
+DBG     word 0x74630a1fecf0 (+400) = 0x987f6a
+DBG     word 0x74630a1fecf8 (+408) = 0x1f8b16
+DBG     word 0x74630a1fed00 (+416) = 0x351743a4
+DBG     word 0x74630a1fed08 (+424) = 0x5f57ba355d76
+DBG     word 0x74630a1fed10 (+432) = 0
+DBG     word 0x74630a1fed18 (+440) = 0x5f57ba355d6a
+DBG     word 0x74630a1fed20 (+448) = 0x74630ab0f220
+DBG     word 0x74630a1fed28 (+456) = 0x5f57ba1aaeb9
+DBG     word 0x74630a1fed30 (+464) = 0x5f57ba1aaeb0
+DBG     word 0x74630a1fed38 (+472) = 0x5f57ba2a9282
+DBG     word 0x74630a1fed40 (+480) = 0
+DBG     word 0x74630a1fed48 (+488) = 0
+DBG     word 0x74630a1fed50 (+496) = 0
+DBG     word 0x74630a1fed58 (+504) = 0x5f57ba1aaeb0
+DBG big parked seed user=0x746300899040 bytes=3802600 fiber=0x74630aaef0d0 name=main running=1 base=0x746309a00000 bottom=0x74630a200000 stack_top=0x74630a1fec64 scan_top=0x74630a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffcaff2e018
+DBG   thread=0x74630b8480d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x74630b848190
+DBG   thread=0x74630b848310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x74630aaef0d0
+DBG   thread=0x74630b848490 name=(nil) current_is=0 main_is=0 sp=0x746308ffecb8 exempt=0 current_fiber=0x74630aaaf0d0
+DBG   thread=0x74630b848550 name=(nil) current_is=0 main_is=0 sp=0x746303ffecb8 exempt=0 current_fiber=0x74630aa8f0d0
+DBG   thread=0x74630aa6f190 name=gc-idle current_is=0 main_is=0 sp=0x7463016f9c68 exempt=1 current_fiber=0x74630aa8f190
+DBG   holder slot=0x74630a1feb60 below_bottom=5280 above_stack_top=-260 value=user+977500
+DBG     chunk base=0x746300899000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7463016f9c68
+DBG     word 0x74630a1feae0 (+-128) = 0x100000000
+DBG     word 0x74630a1feae8 (+-120) = 0x74630a1ff6c0
+DBG     word 0x74630a1feaf0 (+-112) = 0x74630a1feb10
+DBG     word 0x74630a1feaf8 (+-104) = 0x74630baf5af2
+DBG     word 0x74630a1feb00 (+-96) = 0xe6
+DBG     word 0x74630a1feb08 (+-88) = 0
+DBG     word 0x74630a1feb10 (+-80) = 0x74630a1feb20
+DBG     word 0x74630a1feb18 (+-72) = 0x74630bb03707
+DBG     word 0x74630a1feb20 (+-64) = 0x74630a1feef0
+DBG     word 0x74630a1feb28 (+-56) = 0x5f57ba2acc2b
+DBG     word 0x74630a1feb30 (+-48) = 0x987a9c0a1fec80
+DBG     word 0x74630a1feb38 (+-40) = 0
+DBG     word 0x74630a1feb40 (+-32) = 0
+DBG     word 0x74630a1feb48 (+-24) = 0
+DBG     word 0x74630a1feb50 (+-16) = 0
+DBG     word 0x74630a1feb58 (+-8) = 0
+DBG     word 0x74630a1feb60 (+0) = 0x746300987a9c
+DBG     word 0x74630a1feb68 (+8) = 0
+DBG     word 0x74630a1feb70 (+16) = 0x987a9c
+DBG     word 0x74630a1feb78 (+24) = 0x5f57ba2a9b0d
+DBG     word 0x74630a1feb80 (+32) = 0x987a9c
+DBG     word 0x74630a1feb88 (+40) = 0x987a9c00000000
+DBG     word 0x74630a1feb90 (+48) = 0
+DBG     word 0x74630a1feb98 (+56) = 0
+DBG     word 0x74630a1feba0 (+64) = 0x987a9c
+DBG     word 0x74630a1feba8 (+72) = 0x5f57ba355dbb
+DBG     word 0x74630a1febb0 (+80) = 0
+DBG     word 0x74630a1febb8 (+88) = 0
+DBG     word 0x74630a1febc0 (+96) = 0
+DBG     word 0x74630a1febc8 (+104) = 0x987a9c00000000
+DBG     word 0x74630a1febd0 (+112) = 0
+DBG     word 0x74630a1febd8 (+120) = 0x9bf94100000000
+DBG     word 0x74630a1febe0 (+128) = 0x1f8b17
+DBG     word 0x74630a1febe8 (+136) = 0x37ea500000000
+DBG     word 0x74630a1febf0 (+144) = 0x1f8b17
+DBG     word 0x74630a1febf8 (+152) = 0x362c100000000
+DBG     word 0x74630a1fec00 (+160) = 0x1f8b17
+DBG     word 0x74630a1fec08 (+168) = 0
+DBG     word 0x74630a1fec10 (+176) = 0x74630ab0f220
+DBG     word 0x74630a1fec18 (+184) = 0
+DBG     word 0x74630a1fec20 (+192) = 0
+DBG     word 0x74630a1fec28 (+200) = 0
+DBG     word 0x74630a1fec30 (+208) = 0x390
+DBG     word 0x74630a1fec38 (+216) = 0
+DBG     word 0x74630a1fec40 (+224) = 0x987a9c
+DBG     word 0x74630a1fec48 (+232) = 0
+DBG     word 0x74630a1fec50 (+240) = 0x987a9c
+DBG     word 0x74630a1fec58 (+248) = 0
+DBG     word 0x74630a1fec60 (+256) = 0
+DBG     word 0x74630a1fec68 (+264) = 0
+DBG     word 0x74630a1fec70 (+272) = 0
+DBG     word 0x74630a1fec78 (+280) = 0
+DBG     word 0x74630a1fec80 (+288) = 0
+DBG     word 0x74630a1fec88 (+296) = 0x987a9c
+DBG     word 0x74630a1fec90 (+304) = 0x1f8b17
+DBG     word 0x74630a1fec98 (+312) = 0x9bf941
+DBG     word 0x74630a1feca0 (+320) = 0x1f8b17
+DBG     word 0x74630a1feca8 (+328) = 0x37ea5
+DBG     word 0x74630a1fecb0 (+336) = 0x1f8b17
+DBG     word 0x74630a1fecb8 (+344) = 0x362c1
+DBG     word 0x74630a1fecc0 (+352) = 0
+DBG     word 0x74630a1fecc8 (+360) = 0x1f8b17
+DBG     word 0x74630a1fecd0 (+368) = 0x37ea5
+DBG     word 0x74630a1fecd8 (+376) = 0x1f8b17
+DBG     word 0x74630a1fece0 (+384) = 0x362c1
+DBG     word 0x74630a1fece8 (+392) = 0
+DBG     word 0x74630a1fecf0 (+400) = 0x987a9c
+DBG     word 0x74630a1fecf8 (+408) = 0x1f8b17
+DBG     word 0x74630a1fed00 (+416) = 0x362c1
+DBG     word 0x74630a1fed08 (+424) = 0x5f57ba355d76
+DBG     word 0x74630a1fed10 (+432) = 0
+DBG     word 0x74630a1fed18 (+440) = 0x5f57ba355d6a
+DBG     word 0x74630a1fed20 (+448) = 0x74630ab0f220
+DBG     word 0x74630a1fed28 (+456) = 0x5f57ba1aaeb9
+DBG     word 0x74630a1fed30 (+464) = 0x5f57ba1aaeb0
+DBG     word 0x74630a1fed38 (+472) = 0x5f57ba2a9282
+DBG     word 0x74630a1fed40 (+480) = 0
+DBG     word 0x74630a1fed48 (+488) = 0
+DBG     word 0x74630a1fed50 (+496) = 0
+DBG     word 0x74630a1fed58 (+504) = 0x5f57ba1aaeb0
+DBG big parked seed user=0x746300899040 bytes=3802600 fiber=0x74630aaef0d0 name=main running=1 base=0x746309a00000 bottom=0x74630a200000 stack_top=0x74630a1fec64 scan_top=0x74630a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffcaff2e018
+DBG   thread=0x74630b8480d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x74630b848190
+DBG   thread=0x74630b848310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x74630aaef0d0
+DBG   thread=0x74630b848490 name=(nil) current_is=0 main_is=0 sp=0x746308ffecb8 exempt=0 current_fiber=0x74630aaaf0d0
+DBG   thread=0x74630b848550 name=(nil) current_is=0 main_is=0 sp=0x746303ffecb8 exempt=0 current_fiber=0x74630aa8f0d0
+DBG   thread=0x74630aa6f190 name=gc-idle current_is=0 main_is=0 sp=0x7463016f9c68 exempt=1 current_fiber=0x74630aa8f190
+DBG   holder slot=0x74630a1feb60 below_bottom=5280 above_stack_top=-260 value=user+980130
+DBG     chunk base=0x746300899000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7463016f9c68
+DBG     word 0x74630a1feae0 (+-128) = 0x100000000
+DBG     word 0x74630a1feae8 (+-120) = 0x74630a1ff6c0
+DBG     word 0x74630a1feaf0 (+-112) = 0x74630a1feb10
+DBG     word 0x74630a1feaf8 (+-104) = 0x74630baf5af2
+DBG     word 0x74630a1feb00 (+-96) = 0xe6
+DBG     word 0x74630a1feb08 (+-88) = 0
+DBG     word 0x74630a1feb10 (+-80) = 0x74630a1feb20
+DBG     word 0x74630a1feb18 (+-72) = 0x74630bb03707
+DBG     word 0x74630a1feb20 (+-64) = 0x74630a1feef0
+DBG     word 0x74630a1feb28 (+-56) = 0x5f57ba2acc2b
+DBG     word 0x74630a1feb30 (+-48) = 0x9884e20a1fec80
+DBG     word 0x74630a1feb38 (+-40) = 0
+DBG     word 0x74630a1feb40 (+-32) = 0
+DBG     word 0x74630a1feb48 (+-24) = 0
+DBG     word 0x74630a1feb50 (+-16) = 0
+DBG     word 0x74630a1feb58 (+-8) = 0
+DBG     word 0x74630a1feb60 (+0) = 0x7463009884e2
+DBG     word 0x74630a1feb68 (+8) = 0
+DBG     word 0x74630a1feb70 (+16) = 0x9884e2
+DBG     word 0x74630a1feb78 (+24) = 0x5f57ba2a9b0d
+DBG     word 0x74630a1feb80 (+32) = 0x9884e2
+DBG     word 0x74630a1feb88 (+40) = 0x9884e200000000
+DBG     word 0x74630a1feb90 (+48) = 0
+DBG     word 0x74630a1feb98 (+56) = 0
+DBG     word 0x74630a1feba0 (+64) = 0x9884e2
+DBG     word 0x74630a1feba8 (+72) = 0x5f57ba355dbb
+DBG     word 0x74630a1febb0 (+80) = 0
+DBG     word 0x74630a1febb8 (+88) = 0
+DBG     word 0x74630a1febc0 (+96) = 0
+DBG     word 0x74630a1febc8 (+104) = 0x9884e200000000
+DBG     word 0x74630a1febd0 (+112) = 0
+DBG     word 0x74630a1febd8 (+120) = 0xc9ad57c00000000
+DBG     word 0x74630a1febe0 (+128) = 0x1f8b17
+DBG     word 0x74630a1febe8 (+136) = 0xc02509a00000000
+DBG     word 0x74630a1febf0 (+144) = 0x1f8b17
+DBG     word 0x74630a1febf8 (+152) = 0xc023efc00000000
+DBG     word 0x74630a1fec00 (+160) = 0x1f8b17
+DBG     word 0x74630a1fec08 (+168) = 0
+DBG     word 0x74630a1fec10 (+176) = 0x74630ab0f220
+DBG     word 0x74630a1fec18 (+184) = 0
+DBG     word 0x74630a1fec20 (+192) = 0
+DBG     word 0x74630a1fec28 (+200) = 0
+DBG     word 0x74630a1fec30 (+208) = 0x390
+DBG     word 0x74630a1fec38 (+216) = 0
+DBG     word 0x74630a1fec40 (+224) = 0x9884e2
+DBG     word 0x74630a1fec48 (+232) = 0
+DBG     word 0x74630a1fec50 (+240) = 0x9884e2
+DBG     word 0x74630a1fec58 (+248) = 0
+DBG     word 0x74630a1fec60 (+256) = 0
+DBG     word 0x74630a1fec68 (+264) = 0
+DBG     word 0x74630a1fec70 (+272) = 0
+DBG     word 0x74630a1fec78 (+280) = 0
+DBG     word 0x74630a1fec80 (+288) = 0
+DBG     word 0x74630a1fec88 (+296) = 0x9884e2
+DBG     word 0x74630a1fec90 (+304) = 0x1f8b17
+DBG     word 0x74630a1fec98 (+312) = 0xc9ad57c
+DBG     word 0x74630a1feca0 (+320) = 0x1f8b17
+DBG     word 0x74630a1feca8 (+328) = 0xc02509a
+DBG     word 0x74630a1fecb0 (+336) = 0x1f8b17
+DBG     word 0x74630a1fecb8 (+344) = 0xc023efc
+DBG     word 0x74630a1fecc0 (+352) = 0
+DBG     word 0x74630a1fecc8 (+360) = 0x1f8b17
+DBG     word 0x74630a1fecd0 (+368) = 0xc02509a
+DBG     word 0x74630a1fecd8 (+376) = 0x1f8b17
+DBG     word 0x74630a1fece0 (+384) = 0xc023efc
+DBG     word 0x74630a1fece8 (+392) = 0
+DBG     word 0x74630a1fecf0 (+400) = 0x9884e2
+DBG     word 0x74630a1fecf8 (+408) = 0x1f8b17
+DBG     word 0x74630a1fed00 (+416) = 0xc023efc
+DBG     word 0x74630a1fed08 (+424) = 0x5f57ba355d76
+DBG     word 0x74630a1fed10 (+432) = 0
+DBG     word 0x74630a1fed18 (+440) = 0x5f57ba355d6a
+DBG     word 0x74630a1fed20 (+448) = 0x74630ab0f220
+DBG     word 0x74630a1fed28 (+456) = 0x5f57ba1aaeb9
+DBG     word 0x74630a1fed30 (+464) = 0x5f57ba1aaeb0
+DBG     word 0x74630a1fed38 (+472) = 0x5f57ba2a9282
+DBG     word 0x74630a1fed40 (+480) = 0
+DBG     word 0x74630a1fed48 (+488) = 0
+DBG     word 0x74630a1fed50 (+496) = 0
+DBG     word 0x74630a1fed58 (+504) = 0x5f57ba1aaeb0
+DBG big parked seed user=0x746300899040 bytes=3802600 fiber=0x74630aaef0d0 name=main running=1 base=0x746309a00000 bottom=0x74630a200000 stack_top=0x74630a1fec64 scan_top=0x74630a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffcaff2e018
+DBG   thread=0x74630b8480d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x74630b848190
+DBG   thread=0x74630b848310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x74630aaef0d0
+DBG   thread=0x74630b848490 name=(nil) current_is=0 main_is=0 sp=0x746308ffecb8 exempt=0 current_fiber=0x74630aaaf0d0
+DBG   thread=0x74630b848550 name=(nil) current_is=0 main_is=0 sp=0x746303ffecb8 exempt=0 current_fiber=0x74630aa8f0d0
+DBG   thread=0x74630aa6f190 name=gc-idle current_is=0 main_is=0 sp=0x7463016f9c68 exempt=1 current_fiber=0x74630aa8f190
+DBG   holder slot=0x74630a1feb60 below_bottom=5280 above_stack_top=-260 value=user+980491
+DBG     chunk base=0x746300899000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7463016f9c68
+DBG     word 0x74630a1feae0 (+-128) = 0x100000000
+DBG     word 0x74630a1feae8 (+-120) = 0x74630a1ff6c0
+DBG     word 0x74630a1feaf0 (+-112) = 0x74630a1feb10
+DBG     word 0x74630a1feaf8 (+-104) = 0x74630baf5af2
+DBG     word 0x74630a1feb00 (+-96) = 0xe6
+DBG     word 0x74630a1feb08 (+-88) = 0
+DBG     word 0x74630a1feb10 (+-80) = 0x74630a1feb20
+DBG     word 0x74630a1feb18 (+-72) = 0x74630bb03707
+DBG     word 0x74630a1feb20 (+-64) = 0x74630a1feef0
+DBG     word 0x74630a1feb28 (+-56) = 0x5f57ba2acc2b
+DBG     word 0x74630a1feb30 (+-48) = 0x98864b0a1fec80
+DBG     word 0x74630a1feb38 (+-40) = 0
+DBG     word 0x74630a1feb40 (+-32) = 0
+DBG     word 0x74630a1feb48 (+-24) = 0
+DBG     word 0x74630a1feb50 (+-16) = 0
+DBG     word 0x74630a1feb58 (+-8) = 0
+DBG     word 0x74630a1feb60 (+0) = 0x74630098864b
+DBG     word 0x74630a1feb68 (+8) = 0
+DBG     word 0x74630a1feb70 (+16) = 0x98864b
+DBG     word 0x74630a1feb78 (+24) = 0x5f57ba2a9b0d
+DBG     word 0x74630a1feb80 (+32) = 0x98864b
+DBG     word 0x74630a1feb88 (+40) = 0x98864b00000000
+DBG     word 0x74630a1feb90 (+48) = 0
+DBG     word 0x74630a1feb98 (+56) = 0
+DBG     word 0x74630a1feba0 (+64) = 0x98864b
+DBG     word 0x74630a1feba8 (+72) = 0x5f57ba355dbb
+DBG     word 0x74630a1febb0 (+80) = 0
+DBG     word 0x74630a1febb8 (+88) = 0
+DBG     word 0x74630a1febc0 (+96) = 0
+DBG     word 0x74630a1febc8 (+104) = 0x98864b00000000
+DBG     word 0x74630a1febd0 (+112) = 0
+DBG     word 0x74630a1febd8 (+120) = 0x13ce24ca00000000
+DBG     word 0x74630a1febe0 (+128) = 0x1f8b17
+DBG     word 0x74630a1febe8 (+136) = 0x13359e7f00000000
+DBG     word 0x74630a1febf0 (+144) = 0x1f8b17
+DBG     word 0x74630a1febf8 (+152) = 0x13358e4a00000000
+DBG     word 0x74630a1fec00 (+160) = 0x1f8b17
+DBG     word 0x74630a1fec08 (+168) = 0
+DBG     word 0x74630a1fec10 (+176) = 0x74630ab0f220
+DBG     word 0x74630a1fec18 (+184) = 0
+DBG     word 0x74630a1fec20 (+192) = 0
+DBG     word 0x74630a1fec28 (+200) = 0
+DBG     word 0x74630a1fec30 (+208) = 0x390
+DBG     word 0x74630a1fec38 (+216) = 0
+DBG     word 0x74630a1fec40 (+224) = 0x98864b
+DBG     word 0x74630a1fec48 (+232) = 0
+DBG     word 0x74630a1fec50 (+240) = 0x98864b
+DBG     word 0x74630a1fec58 (+248) = 0
+DBG     word 0x74630a1fec60 (+256) = 0
+DBG     word 0x74630a1fec68 (+264) = 0
+DBG     word 0x74630a1fec70 (+272) = 0
+DBG     word 0x74630a1fec78 (+280) = 0
+DBG     word 0x74630a1fec80 (+288) = 0
+DBG     word 0x74630a1fec88 (+296) = 0x98864b
+DBG     word 0x74630a1fec90 (+304) = 0x1f8b17
+DBG     word 0x74630a1fec98 (+312) = 0x13ce24ca
+DBG     word 0x74630a1feca0 (+320) = 0x1f8b17
+DBG     word 0x74630a1feca8 (+328) = 0x13359e7f
+DBG     word 0x74630a1fecb0 (+336) = 0x1f8b17
+DBG     word 0x74630a1fecb8 (+344) = 0x13358e4a
+DBG     word 0x74630a1fecc0 (+352) = 0
+DBG     word 0x74630a1fecc8 (+360) = 0x1f8b17
+DBG     word 0x74630a1fecd0 (+368) = 0x13359e7f
+DBG     word 0x74630a1fecd8 (+376) = 0x1f8b17
+DBG     word 0x74630a1fece0 (+384) = 0x13358e4a
+DBG     word 0x74630a1fece8 (+392) = 0
+DBG     word 0x74630a1fecf0 (+400) = 0x98864b
+DBG     word 0x74630a1fecf8 (+408) = 0x1f8b17
+DBG     word 0x74630a1fed00 (+416) = 0x13358e4a
+DBG     word 0x74630a1fed08 (+424) = 0x5f57ba355d76
+DBG     word 0x74630a1fed10 (+432) = 0
+DBG     word 0x74630a1fed18 (+440) = 0x5f57ba355d6a
+DBG     word 0x74630a1fed20 (+448) = 0x74630ab0f220
+DBG     word 0x74630a1fed28 (+456) = 0x5f57ba1aaeb9
+DBG     word 0x74630a1fed30 (+464) = 0x5f57ba1aaeb0
+DBG     word 0x74630a1fed38 (+472) = 0x5f57ba2a9282
+DBG     word 0x74630a1fed40 (+480) = 0
+DBG     word 0x74630a1fed48 (+488) = 0
+DBG     word 0x74630a1fed50 (+496) = 0
+DBG     word 0x74630a1fed58 (+504) = 0x5f57ba1aaeb0
+DBG big parked seed user=0x746300899040 bytes=3802600 fiber=0x74630aaef0d0 name=main running=1 base=0x746309a00000 bottom=0x74630a200000 stack_top=0x74630a1fec64 scan_top=0x74630a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffcaff2e018
+DBG   thread=0x74630b8480d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x74630b848190
+DBG   thread=0x74630b848310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x74630aaef0d0
+DBG   thread=0x74630b848490 name=(nil) current_is=0 main_is=0 sp=0x746308ffecb8 exempt=0 current_fiber=0x74630aaaf0d0
+DBG   thread=0x74630b848550 name=(nil) current_is=0 main_is=0 sp=0x746303ffecb8 exempt=0 current_fiber=0x74630aa8f0d0
+DBG   thread=0x74630aa6f190 name=gc-idle current_is=0 main_is=0 sp=0x7463016f9c68 exempt=1 current_fiber=0x74630aa8f190
+DBG   holder slot=0x74630a1feb60 below_bottom=5280 above_stack_top=-260 value=user+980690
+DBG     chunk base=0x746300899000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7463016f9c68
+DBG     word 0x74630a1feae0 (+-128) = 0x100000000
+DBG     word 0x74630a1feae8 (+-120) = 0x74630a1ff6c0
+DBG     word 0x74630a1feaf0 (+-112) = 0x74630a1feb10
+DBG     word 0x74630a1feaf8 (+-104) = 0x74630baf5af2
+DBG     word 0x74630a1feb00 (+-96) = 0xe6
+DBG     word 0x74630a1feb08 (+-88) = 0
+DBG     word 0x74630a1feb10 (+-80) = 0x74630a1feb20
+DBG     word 0x74630a1feb18 (+-72) = 0x74630bb03707
+DBG     word 0x74630a1feb20 (+-64) = 0x74630a1feef0
+DBG     word 0x74630a1feb28 (+-56) = 0x5f57ba2acc2b
+DBG     word 0x74630a1feb30 (+-48) = 0x9887120a1fec80
+DBG     word 0x74630a1feb38 (+-40) = 0
+DBG     word 0x74630a1feb40 (+-32) = 0
+DBG     word 0x74630a1feb48 (+-24) = 0
+DBG     word 0x74630a1feb50 (+-16) = 0
+DBG     word 0x74630a1feb58 (+-8) = 0
+DBG     word 0x74630a1feb60 (+0) = 0x746300988712
+DBG     word 0x74630a1feb68 (+8) = 0
+DBG     word 0x74630a1feb70 (+16) = 0x988712
+DBG     word 0x74630a1feb78 (+24) = 0x5f57ba2a9b0d
+DBG     word 0x74630a1feb80 (+32) = 0x988712
+DBG     word 0x74630a1feb88 (+40) = 0x98871200000000
+DBG     word 0x74630a1feb90 (+48) = 0
+DBG     word 0x74630a1feb98 (+56) = 0
+DBG     word 0x74630a1feba0 (+64) = 0x988712
+DBG     word 0x74630a1feba8 (+72) = 0x5f57ba355dbb
+DBG     word 0x74630a1febb0 (+80) = 0
+DBG     word 0x74630a1febb8 (+88) = 0
+DBG     word 0x74630a1febc0 (+96) = 0
+DBG     word 0x74630a1febc8 (+104) = 0x98871200000000
+DBG     word 0x74630a1febd0 (+112) = 0
+DBG     word 0x74630a1febd8 (+120) = 0x194cd35400000000
+DBG     word 0x74630a1febe0 (+128) = 0x1f8b17
+DBG     word 0x74630a1febe8 (+136) = 0x18b44c4200000000
+DBG     word 0x74630a1febf0 (+144) = 0x1f8b17
+DBG     word 0x74630a1febf8 (+152) = 0x18b43cd400000000
+DBG     word 0x74630a1fec00 (+160) = 0x1f8b17
+DBG     word 0x74630a1fec08 (+168) = 0
+DBG     word 0x74630a1fec10 (+176) = 0x74630ab0f220
+DBG     word 0x74630a1fec18 (+184) = 0
+DBG     word 0x74630a1fec20 (+192) = 0
+DBG     word 0x74630a1fec28 (+200) = 0
+DBG     word 0x74630a1fec30 (+208) = 0x390
+DBG     word 0x74630a1fec38 (+216) = 0
+DBG     word 0x74630a1fec40 (+224) = 0x988712
+DBG     word 0x74630a1fec48 (+232) = 0
+DBG     word 0x74630a1fec50 (+240) = 0x988712
+DBG     word 0x74630a1fec58 (+248) = 0
+DBG     word 0x74630a1fec60 (+256) = 0
+DBG     word 0x74630a1fec68 (+264) = 0
+DBG     word 0x74630a1fec70 (+272) = 0
+DBG     word 0x74630a1fec78 (+280) = 0
+DBG     word 0x74630a1fec80 (+288) = 0
+DBG     word 0x74630a1fec88 (+296) = 0x988712
+DBG     word 0x74630a1fec90 (+304) = 0x1f8b17
+DBG     word 0x74630a1fec98 (+312) = 0x194cd354
+DBG     word 0x74630a1feca0 (+320) = 0x1f8b17
+DBG     word 0x74630a1feca8 (+328) = 0x18b44c42
+DBG     word 0x74630a1fecb0 (+336) = 0x1f8b17
+DBG     word 0x74630a1fecb8 (+344) = 0x18b43cd4
+DBG     word 0x74630a1fecc0 (+352) = 0
+DBG     word 0x74630a1fecc8 (+360) = 0x1f8b17
+DBG     word 0x74630a1fecd0 (+368) = 0x18b44c42
+DBG     word 0x74630a1fecd8 (+376) = 0x1f8b17
+DBG     word 0x74630a1fece0 (+384) = 0x18b43cd4
+DBG     word 0x74630a1fece8 (+392) = 0
+DBG     word 0x74630a1fecf0 (+400) = 0x988712
+DBG     word 0x74630a1fecf8 (+408) = 0x1f8b17
+DBG     word 0x74630a1fed00 (+416) = 0x18b43cd4
+DBG     word 0x74630a1fed08 (+424) = 0x5f57ba355d76
+DBG     word 0x74630a1fed10 (+432) = 0
+DBG     word 0x74630a1fed18 (+440) = 0x5f57ba355d6a
+DBG     word 0x74630a1fed20 (+448) = 0x74630ab0f220
+DBG     word 0x74630a1fed28 (+456) = 0x5f57ba1aaeb9
+DBG     word 0x74630a1fed30 (+464) = 0x5f57ba1aaeb0
+DBG     word 0x74630a1fed38 (+472) = 0x5f57ba2a9282
+DBG     word 0x74630a1fed40 (+480) = 0
+DBG     word 0x74630a1fed48 (+488) = 0
+DBG     word 0x74630a1fed50 (+496) = 0
+DBG     word 0x74630a1fed58 (+504) = 0x5f57ba1aaeb0
+DBG big parked seed user=0x746300899040 bytes=3802600 fiber=0x74630aaef0d0 name=main running=1 base=0x746309a00000 bottom=0x74630a200000 stack_top=0x74630a1fec64 scan_top=0x74630a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffcaff2e018
+DBG   thread=0x74630b8480d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x74630b848190
+DBG   thread=0x74630b848310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x74630aaef0d0
+DBG   thread=0x74630b848490 name=(nil) current_is=0 main_is=0 sp=0x746308ffecb8 exempt=0 current_fiber=0x74630aaaf0d0
+DBG   thread=0x74630b848550 name=(nil) current_is=0 main_is=0 sp=0x746303ffecb8 exempt=0 current_fiber=0x74630aa8f0d0
+DBG   thread=0x74630aa6f190 name=gc-idle current_is=0 main_is=0 sp=0x7463016f9c68 exempt=1 current_fiber=0x74630aa8f190
+DBG   holder slot=0x74630a1feb60 below_bottom=5280 above_stack_top=-260 value=user+980820
+DBG     chunk base=0x746300899000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7463016f9c68
+DBG     word 0x74630a1feae0 (+-128) = 0x100000000
+DBG     word 0x74630a1feae8 (+-120) = 0x74630a1ff6c0
+DBG     word 0x74630a1feaf0 (+-112) = 0x74630a1feb10
+DBG     word 0x74630a1feaf8 (+-104) = 0x74630baf5af2
+DBG     word 0x74630a1feb00 (+-96) = 0xe6
+DBG     word 0x74630a1feb08 (+-88) = 0
+DBG     word 0x74630a1feb10 (+-80) = 0x74630a1feb20
+DBG     word 0x74630a1feb18 (+-72) = 0x74630bb03707
+DBG     word 0x74630a1feb20 (+-64) = 0x74630a1feef0
+DBG     word 0x74630a1feb28 (+-56) = 0x5f57ba2acc2b
+DBG     word 0x74630a1feb30 (+-48) = 0x9887940a1fec80
+DBG     word 0x74630a1feb38 (+-40) = 0
+DBG     word 0x74630a1feb40 (+-32) = 0
+DBG     word 0x74630a1feb48 (+-24) = 0
+DBG     word 0x74630a1feb50 (+-16) = 0
+DBG     word 0x74630a1feb58 (+-8) = 0
+DBG     word 0x74630a1feb60 (+0) = 0x746300988794
+DBG     word 0x74630a1feb68 (+8) = 0
+DBG     word 0x74630a1feb70 (+16) = 0x988794
+DBG     word 0x74630a1feb78 (+24) = 0x5f57ba2a9b0d
+DBG     word 0x74630a1feb80 (+32) = 0x988794
+DBG     word 0x74630a1feb88 (+40) = 0x98879400000000
+DBG     word 0x74630a1feb90 (+48) = 0
+DBG     word 0x74630a1feb98 (+56) = 0
+DBG     word 0x74630a1feba0 (+64) = 0x988794
+DBG     word 0x74630a1feba8 (+72) = 0x5f57ba355dbb
+DBG     word 0x74630a1febb0 (+80) = 0
+DBG     word 0x74630a1febb8 (+88) = 0
+DBG     word 0x74630a1febc0 (+96) = 0
+DBG     word 0x74630a1febc8 (+104) = 0x98879400000000
+DBG     word 0x74630a1febd0 (+112) = 0
+DBG     word 0x74630a1febd8 (+120) = 0x1f6e765500000000
+DBG     word 0x74630a1febe0 (+128) = 0x1f8b17
+DBG     word 0x74630a1febe8 (+136) = 0x1ed5eec100000000
+DBG     word 0x74630a1febf0 (+144) = 0x1f8b17
+DBG     word 0x74630a1febf8 (+152) = 0x1ed5dfd500000000
+DBG     word 0x74630a1fec00 (+160) = 0x1f8b17
+DBG     word 0x74630a1fec08 (+168) = 0
+DBG     word 0x74630a1fec10 (+176) = 0x74630ab0f220
+DBG     word 0x74630a1fec18 (+184) = 0
+DBG     word 0x74630a1fec20 (+192) = 0
+DBG     word 0x74630a1fec28 (+200) = 0
+DBG     word 0x74630a1fec30 (+208) = 0x390
+DBG     word 0x74630a1fec38 (+216) = 0
+DBG     word 0x74630a1fec40 (+224) = 0x988794
+DBG     word 0x74630a1fec48 (+232) = 0
+DBG     word 0x74630a1fec50 (+240) = 0x988794
+DBG     word 0x74630a1fec58 (+248) = 0
+DBG     word 0x74630a1fec60 (+256) = 0
+DBG     word 0x74630a1fec68 (+264) = 0
+DBG     word 0x74630a1fec70 (+272) = 0
+DBG     word 0x74630a1fec78 (+280) = 0
+DBG     word 0x74630a1fec80 (+288) = 0
+DBG     word 0x74630a1fec88 (+296) = 0x988794
+DBG     word 0x74630a1fec90 (+304) = 0x1f8b17
+DBG     word 0x74630a1fec98 (+312) = 0x1f6e7655
+DBG     word 0x74630a1feca0 (+320) = 0x1f8b17
+DBG     word 0x74630a1feca8 (+328) = 0x1ed5eec1
+DBG     word 0x74630a1fecb0 (+336) = 0x1f8b17
+DBG     word 0x74630a1fecb8 (+344) = 0x1ed5dfd5
+DBG     word 0x74630a1fecc0 (+352) = 0
+DBG     word 0x74630a1fecc8 (+360) = 0x1f8b17
+DBG     word 0x74630a1fecd0 (+368) = 0x1ed5eec1
+DBG     word 0x74630a1fecd8 (+376) = 0x1f8b17
+DBG     word 0x74630a1fece0 (+384) = 0x1ed5dfd5
+DBG     word 0x74630a1fece8 (+392) = 0
+DBG     word 0x74630a1fecf0 (+400) = 0x988794
+DBG     word 0x74630a1fecf8 (+408) = 0x1f8b17
+DBG     word 0x74630a1fed00 (+416) = 0x1ed5dfd5
+DBG     word 0x74630a1fed08 (+424) = 0x5f57ba355d76
+DBG     word 0x74630a1fed10 (+432) = 0
+DBG     word 0x74630a1fed18 (+440) = 0x5f57ba355d6a
+DBG     word 0x74630a1fed20 (+448) = 0x74630ab0f220
+DBG     word 0x74630a1fed28 (+456) = 0x5f57ba1aaeb9
+DBG     word 0x74630a1fed30 (+464) = 0x5f57ba1aaeb0
+DBG     word 0x74630a1fed38 (+472) = 0x5f57ba2a9282
+DBG     word 0x74630a1fed40 (+480) = 0
+DBG     word 0x74630a1fed48 (+488) = 0
+DBG     word 0x74630a1fed50 (+496) = 0
+DBG     word 0x74630a1fed58 (+504) = 0x5f57ba1aaeb0
+parallel_dormant: threads=3 retain=65536KiB ordinary collect
+  RSS peak 72 MB, after collect 68 MB; empty chunks 18 MB, dormant 0 MB
+  seeded by stack 2 KiB, parked 3713 KiB, thread 3 KiB, static 2 KiB
+  the collects: 7 major, 0 minor; last major sweep: after the world, multi-mutator, release on; empties warm 18 MB, grace 0 MB, dormant 0 MB, unmapped 0 MB, kept 0 MB, header-blocked 0 MB
+  warm budget / threshold, MB: 69/69 -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36)
+FAIL: no empty chunk went dormant (18 MB of them kept mapped) — the opt-in is inert

@@ -1,0 +1,174 @@
+hl122 new 1 rc=0 128s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 1 rc=0 147s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 2 rc=0 109s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 2 rc=0 110s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 3 rc=0 131s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 3 rc=0 213s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 4 rc=0 102s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 4 rc=0 100s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 5 rc=0 111s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 5 rc=0 90s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 6 rc=0 107s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 6 rc=0 95s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 7 rc=0 101s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 7 rc=0 106s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 8 rc=0 101s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 8 rc=0 107s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 9 rc=0 110s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 9 rc=0 96s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 10 rc=0 96s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 10 rc=0 102s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 11 rc=0 97s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 11 rc=0 111s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 12 rc=0 95s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 12 rc=0 115s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 13 rc=0 107s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 13 rc=0 97s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 14 rc=0 98s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 14 rc=1 95s reg1=[1_live_objects_dormant_spec.cr:137 1_live_objects_dormant_spec.cr:97 ] {count=10000 drift=-1881 | count=1000 drift=0} {} other=[] 294 examples, 1 failures, 0 errors, 2 pending
+hl122 new 15 rc=0 106s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 15 rc=0 175s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 16 rc=0 128s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 16 rc=0 122s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 17 rc=0 124s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 17 rc=0 94s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 18 rc=0 94s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 18 rc=0 111s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 19 rc=0 109s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 19 rc=0 95s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 20 rc=0 105s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 20 rc=0 95s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 21 rc=0 100s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 21 rc=0 104s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 22 rc=0 97s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 22 rc=0 95s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 23 rc=0 106s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 23 rc=0 98s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 24 rc=0 138s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 24 rc=0 148s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 25 rc=0 141s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 25 rc=0 165s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 26 rc=1 69s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] 295 examples, 1 failures, 0 errors, 2 pending
+hl122 old 26 rc=1 45s reg1=[] {} {} other=[crystal spec ../tip/process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] 294 examples, 1 failures, 0 errors, 2 pending
+hl122 new 27 rc=0 68s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 27 rc=1 78s reg1=[] {} {} other=[crystal spec ../tip/process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] 294 examples, 1 failures, 0 errors, 2 pending
+hl122 new 28 rc=0 67s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 28 rc=1 46s reg1=[] {} {} other=[crystal spec ../tip/process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] 294 examples, 1 failures, 0 errors, 2 pending
+hl122 new 29 rc=0 21s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 29 rc=0 27s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 30 rc=0 35s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 30 rc=0 24s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 31 rc=0 29s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 31 rc=0 28s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 32 rc=0 38s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 32 rc=0 118s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 33 rc=0 25s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 33 rc=0 28s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 34 rc=0 38s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 34 rc=0 40s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 35 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 35 rc=0 33s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 36 rc=0 34s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 36 rc=0 38s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 37 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 37 rc=0 38s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 38 rc=0 35s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 38 rc=0 34s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 39 rc=0 35s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 39 rc=0 36s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 40 rc=0 23s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 40 rc=0 35s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 41 rc=0 44s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 41 rc=0 43s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 42 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 42 rc=0 33s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 43 rc=0 117s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 43 rc=0 37s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 44 rc=0 35s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 44 rc=0 34s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 45 rc=0 38s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 45 rc=0 39s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 3 pending
+hl122 new 46 rc=0 29s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 46 rc=0 50s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 47 rc=0 38s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 47 rc=0 51s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 48 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 48 rc=0 56s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 49 rc=0 29s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 49 rc=0 33s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 50 rc=0 49s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 50 rc=0 26s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 51 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 51 rc=0 46s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 52 rc=0 39s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 52 rc=0 40s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 53 rc=0 41s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 53 rc=0 34s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 54 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 54 rc=0 28s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 55 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 55 rc=0 47s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 56 rc=0 29s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 56 rc=0 31s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 57 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 57 rc=0 45s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 58 rc=0 29s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 58 rc=0 49s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 59 rc=1 30s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[crystal spec process_spec/regression/21_boehm_c_abi_spec.cr:115 ] 295 examples, 1 failures, 0 errors, 3 pending
+hl122 old 59 rc=0 26s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 60 rc=0 30s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 60 rc=0 48s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 61 rc=0 40s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 61 rc=0 32s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 62 rc=0 32s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 62 rc=0 29s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 63 rc=0 43s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 63 rc=0 26s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 64 rc=0 38s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 64 rc=0 28s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 65 rc=0 26s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 65 rc=0 30s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 66 rc=0 30s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 66 rc=0 46s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 67 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 67 rc=0 29s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 68 rc=0 37s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 68 rc=0 51s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 69 rc=0 41s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 69 rc=0 27s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 70 rc=0 30s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 70 rc=0 48s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 71 rc=0 40s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 71 rc=0 44s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 72 rc=0 36s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 72 rc=0 45s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 73 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 73 rc=0 24s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 74 rc=0 37s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 old 74 rc=0 43s reg1=[] {} {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 75 rc=0 35s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 76 rc=0 34s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 77 rc=0 35s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 78 rc=0 44s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 79 rc=0 40s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 80 rc=0 41s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 81 rc=0 40s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 82 rc=0 42s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 83 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 84 rc=0 41s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 85 rc=0 41s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 86 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 87 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 88 rc=0 25s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 89 rc=0 37s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 90 rc=0 117s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 91 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 92 rc=0 30s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 93 rc=0 28s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 94 rc=0 43s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 95 rc=0 25s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 96 rc=0 29s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 97 rc=0 26s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 98 rc=0 26s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 99 rc=0 26s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending
+hl122 new 100 rc=0 27s reg1=[] {count=10000 drift=0 | count=1000 drift=0} {live1 verdict: 0 0 count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 0 errors, 2 pending

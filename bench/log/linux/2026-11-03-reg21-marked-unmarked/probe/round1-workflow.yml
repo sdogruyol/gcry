@@ -1,0 +1,99 @@
+name: probe ci21b
+
+# Probe only, on `probe/ci21b`: test-crystal-next's step
+# (`GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec`)
+# looped on the fix (823ca9ed) and on its base (96956b42). The `moved` arms
+# append a `Spec.before_suite` to regression 21's file that moves the main
+# fiber off the initial thread (a syscall the execution context's monitor
+# hands away) before the first example.
+on:
+  push:
+    branches: ["probe/ci21b"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [fix, fixmoved, basemoved]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        exclude:
+          - { arm: fixmoved, shard: 11 }
+          - { arm: fixmoved, shard: 12 }
+          - { arm: fixmoved, shard: 13 }
+          - { arm: fixmoved, shard: 14 }
+          - { arm: fixmoved, shard: 15 }
+          - { arm: fixmoved, shard: 16 }
+          - { arm: fixmoved, shard: 17 }
+          - { arm: fixmoved, shard: 18 }
+          - { arm: fixmoved, shard: 19 }
+          - { arm: fixmoved, shard: 20 }
+          - { arm: basemoved, shard: 6 }
+          - { arm: basemoved, shard: 7 }
+          - { arm: basemoved, shard: 8 }
+          - { arm: basemoved, shard: 9 }
+          - { arm: basemoved, shard: 10 }
+          - { arm: basemoved, shard: 11 }
+          - { arm: basemoved, shard: 12 }
+          - { arm: basemoved, shard: 13 }
+          - { arm: basemoved, shard: 14 }
+          - { arm: basemoved, shard: 15 }
+          - { arm: basemoved, shard: 16 }
+          - { arm: basemoved, shard: 17 }
+          - { arm: basemoved, shard: 18 }
+          - { arm: basemoved, shard: 19 }
+          - { arm: basemoved, shard: 20 }
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    name: probe (${{ matrix.arm }}, ${{ matrix.shard }})
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.arm == 'basemoved' && '96956b420e652e9f60a06e229bb380ab97a64ede' || '823ca9ed29c29a99c7bea5bc64d76880ee79f015' }}
+      - if: runner.os == 'Linux'
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: ./.github/actions/apt-update
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.22.2"
+      - run: mkdir -p bin probe-out && git log --oneline -1
+      - name: Move the main fiber before the first example
+        if: matrix.arm != 'fix'
+        run: |
+          cat >> process_spec/regression/21_boehm_c_abi_spec.cr <<'EOF'
+
+          Spec.before_suite do
+            ts = LibC::Timespec.new(tv_sec: 0, tv_nsec: 60_000_000)
+            initial = Gcry::Platform.current_thread_id
+            10.times do
+              break unless Gcry::Platform.current_thread_id == initial
+              Fiber.syscall { LibC.nanosleep(pointerof(ts), nil) }
+            end
+          end
+          EOF
+          git diff --stat
+      - name: Spec order
+        run: crystal eval 'Dir.glob("process_spec/**/*_spec.cr").each { |f| puts f }' | tee probe-out/order.txt
+      - name: Loop the step
+        run: |
+          set +e
+          for i in 1 2 3 4; do
+            GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace > probe-out/run$i.log 2>&1
+            rc=$?
+            moved=0; grep -q "tracking the main thread's stack bottom" probe-out/run$i.log && moved=1
+            f21=0; grep -q "^crystal spec process_spec/regression/21_" probe-out/run$i.log && f21=1
+            echo "PROBE arm=${{ matrix.arm }} shard=${{ matrix.shard }} run=$i rc=$rc f21=$f21 moved=$moved $(grep -E '^[0-9]+ examples' probe-out/run$i.log | tail -1) fails=[$(grep -E '^crystal spec ' probe-out/run$i.log | sed 's# .*regression/##; s# .*##' | tr '\n' ' ')]"
+            grep -E "^(fixed|control|unplanted): pstack103: [a-z]+: " probe-out/run$i.log || true
+            if [ $f21 = 1 ] || [ $rc != 0 ]; then
+              sed -n '/^Failures:/,$p' probe-out/run$i.log
+            fi
+          done
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.arm }}-${{ matrix.shard }}
+          path: probe-out

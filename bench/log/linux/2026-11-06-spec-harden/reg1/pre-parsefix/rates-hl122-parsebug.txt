@@ -1,0 +1,4 @@
+hl122 new 1 rc=1 38s reg1=[1_live_objects_dormant_spec.cr:151 1_live_objects_dormant_spec.cr:161 ] {count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 1 errors, 2 pending
+hl122 old 1 rc=0 62s reg1=[] {} other=[] 294 examples, 0 failures, 0 errors, 2 pending
+hl122 new 2 rc=1 44s reg1=[1_live_objects_dormant_spec.cr:151 1_live_objects_dormant_spec.cr:161 ] {count=10000 drift=0 | count=1000 drift=0} other=[] 295 examples, 0 failures, 1 errors, 2 pending
+hl122 old 2 rc=0 36s reg1=[] {} other=[] 294 examples, 0 failures, 0 errors, 2 pending

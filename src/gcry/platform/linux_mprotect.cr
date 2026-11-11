@@ -191,6 +191,39 @@ module Gcry
     # False lets a handler that finds the page already claimed return without
     # making it writable, trusting the claimer to.
     class_property mprotect_claim_unprotects : Bool = true
+    # Research only, the control arms of regression 99, each restoring the
+    # code before 2026-11-02 for one of the two ways the dirty-page scan
+    # (`Heap#scan_mprotect_pages`) went wrong on a chunk set that had moved
+    # since the arm. False here: `mprotect_protect_range` protects the whole
+    # range asked for, inside the cards or not, and the re-protect after the
+    # scan keeps the arm's cards however far the heap has grown past them.
+    class_property mprotect_cards_cover_protection : Bool = true
+    # False: the scan reads every dirty page in the cards, chunk under it
+    # or not.
+    class_property mprotect_dirty_scan_by_chunk : Bool = true
+    # False: an arm or a rebuild that leaves no cards keeps the backend
+    # `Mprotect` (`Heap#drop_mprotect_without_cards`), the code before.
+    class_property mprotect_drop_without_cards : Bool = true
+    # False: an incremental slice's scan keeps cards the heap has outgrown,
+    # and only the clip in `mprotect_protect_range` stands; a chunk mapped
+    # outside them goes untracked until the cycle ends.
+    class_property mprotect_rebuild_outgrown_cards : Bool = true
+    # Research only: true makes `mprotect_set_heap_range` give up as on a
+    # span past its page limit or a refused `malloc`, leaving no cards.
+    class_property mprotect_refuse_cards : Bool = false
+    # Research only: false makes an incremental termination scan read the
+    # dirty pages alone, the code before 2026-11-02 — a chunk mapped since
+    # the arm goes unread until the cycle ends (`Heap#scan_mprotect_pages`,
+    # `each_mprotect_untracked_page`). The control arm of
+    # `process_spec/regression/100_incremental_stack_rescan_spec.cr`'s
+    # *newchunk* window.
+    class_property mprotect_scan_untracked : Bool = true
+    # Research only: false makes that scan trust the cards' bits for a chunk
+    # the barrier never protected (`ChunkHeader::Flags::BARRIER_ARMED` unset),
+    # the code before — a chunk mapped mid-cycle where one unmapped since the
+    # arm left its pages marked protected and clean goes unread. The control
+    # arm of regression 100's *remap* window.
+    class_property mprotect_scan_unarmed_chunks : Bool = true
 
     # Install SEGV handler that re-enables write + marks page dirty.
     # Faults the barrier did not cause are forwarded to the previous handler.
@@ -259,11 +292,9 @@ module Gcry
     # that no longer covers it faults with nothing to claim it.
     def self.mprotect_set_heap_range(low : UInt64, high : UInt64) : Nil
       clear_mprotect_cards
-      return if high <= low
+      pages = mprotect_span_pages(low, high)
+      return unless pages
       page_lo = low & ~(PAGE - 1)
-      page_hi = (high + PAGE - 1) & ~(PAGE - 1)
-      pages = ((page_hi - page_lo) // PAGE).to_i32
-      return if pages <= 0 || pages > 16_777_216 # sanity
 
       nwords = (pages + 63) // 64
       bytes = sizeof(MprotectCards).to_u64 + (nwords * 2 * 8).to_u64
@@ -272,6 +303,32 @@ module Gcry
       ptr.as(UInt8*).clear(bytes)
       ptr.value = MprotectCards.new(page_lo, pages, nwords)
       @@mp_state.set(ptr)
+    end
+
+    # The pages cards for [low, high) would hold, or nil where
+    # `mprotect_set_heap_range` gives up before asking `malloc`: an empty
+    # range, a span over 16 Mi pages (64 GiB at 4 KiB), or the research
+    # refusal. `Heap#incremental_barrier_possible?` asks it before starting a
+    # cycle, so a heap that cannot have cards is told so without a stop.
+    def self.mprotect_span_pages(low : UInt64, high : UInt64) : Int32?
+      return nil if high <= low
+      return nil if @@mprotect_refuse_cards
+      page_lo = low & ~(PAGE - 1)
+      page_hi = (high + PAGE - 1) & ~(PAGE - 1)
+      # Compared before it is narrowed: `to_i32` of a span past 2^31 pages
+      # would raise, inside the stop.
+      span = (page_hi - page_lo) // PAGE
+      return nil if span == 0 || span > 16_777_216 # sanity
+      span.to_i32
+    end
+
+    # Whether the current cards cover every page of [low, high). Collector
+    # only. False with no cards at all.
+    def self.mprotect_cards_cover?(low : UInt64, high : UInt64) : Bool
+      st = @@mp_state.get
+      return false if st.null?
+      base = st.value.base
+      low >= base && high <= base + st.value.pages.to_u64 * PAGE
     end
 
     # Unpublish the card state and retire it. Collector only. What is
@@ -358,11 +415,34 @@ module Gcry
     # Protect old (non-nursery) size-class / large chunk pages as read-only.
     # The protected bits are set before the pages are: a write in between
     # faults onto a page the handler already owns.
+    #
+    # Only pages the current cards cover are protected. A protection fault
+    # outside them has no card to claim it: the handler retries it once and
+    # then hands it to the previous action, which for a Crystal program is
+    # "Invalid memory access". Until 2026-11-02 the re-protect after a
+    # dirty-page scan (`Heap#scan_mprotect_pages`) protected a chunk mapped
+    # since the arm below or above the arm's cards — a large allocation, in
+    # a new mapping — with no protected bit anywhere, and the sweep that
+    # followed died on its first write to it (the chunk-list link in its
+    # header). That re-protect now replaces cards the heap has outgrown;
+    # this keeps the rule for every caller, and with no cards at all (the
+    # heap span past the sanity limit in `mprotect_set_heap_range`, or
+    # `malloc` refused them) protects nothing.
+    # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
     def self.mprotect_protect_range(low : UInt64, high : UInt64) : Nil
       return unless @@mp_enabled
       return if high <= low
       page_lo = (low + PAGE - 1) & ~(PAGE - 1)
       page_hi = high & ~(PAGE - 1)
+      if @@mprotect_cards_cover_protection
+        # Collector only, as every swap of the state: it cannot change here.
+        st = @@mp_state.get
+        return if st.null?
+        base = st.value.base
+        limit = base + st.value.pages.to_u64 * PAGE
+        page_lo = base if page_lo < base
+        page_hi = limit if page_hi > limit
+      end
       return if page_hi <= page_lo
       note_protected(page_lo, page_hi, true)
       if hook = @@mprotect_protect_hook
@@ -510,16 +590,63 @@ module Gcry
       @@mp_enabled = false
     end
 
-    def self.each_mprotect_dirty_page(& : UInt64 ->) : Nil
+    # Each dirty page whole inside [low, high) and the cards, the same
+    # rounding as `mprotect_protect_range`: only such a page can have been
+    # protected, and so dirtied. A word with no bit set is passed over whole.
+    def self.each_mprotect_dirty_page(low : UInt64, high : UInt64, & : UInt64 ->) : Nil
       st = @@mp_state.get
       return if st.null?
+      base = st.value.base
+      limit = base + st.value.pages.to_u64 * PAGE
+      page_lo = (low + PAGE - 1) & ~(PAGE - 1)
+      page_lo = base if page_lo < base
+      page_hi = high & ~(PAGE - 1)
+      page_hi = limit if page_hi > limit
+      return if page_hi <= page_lo
       words = dirty_words(st)
-      i = 0
-      while i < st.value.pages
-        if ((words + (i >> 6)).value & (1_u64 << (i & 63))) != 0
-          yield st.value.base + i.to_u64 * PAGE
+      i = ((page_lo - base) // PAGE).to_i32
+      last = ((page_hi - base) // PAGE).to_i32
+      while i < last
+        word = (words + (i >> 6)).value
+        if word == 0
+          i = (i | 63) + 1
+          next
         end
+        yield base + i.to_u64 * PAGE if (word & (1_u64 << (i & 63))) != 0
         i += 1
+      end
+    end
+
+    # Each page whole inside [low, high) that the cards cannot vouch for:
+    # outside them, or inside them and neither protected nor dirty. A page
+    # protected and clean has seen no write since it was protected; a dirty
+    # one is read by `each_mprotect_dirty_page`. Anything else has been
+    # writable with nothing recording its writes — a chunk mapped since the
+    # arm (inside the cards or past them), a dormant chunk revived since,
+    # a nursery chunk (never protected). Collector only, world stopped, as
+    # every reader of the bits: no handler is inside.
+    def self.each_mprotect_untracked_page(low : UInt64, high : UInt64, & : UInt64 ->) : Nil
+      page = (low + PAGE - 1) & ~(PAGE - 1)
+      page_hi = high & ~(PAGE - 1)
+      return if page_hi <= page
+      st = @@mp_state.get
+      base = st.null? ? 0_u64 : st.value.base
+      limit = st.null? ? 0_u64 : base + st.value.pages.to_u64 * PAGE
+      while page < page_hi
+        if page < base || page >= limit
+          yield page
+          page += PAGE
+          next
+        end
+        i = ((page - base) // PAGE).to_i32
+        vouched = (dirty_words(st) + (i >> 6)).value | (protected_words(st) + (i >> 6)).value
+        if vouched == UInt64::MAX
+          # The whole word is protected or dirty: on to the next one.
+          page = base + ((i | 63) + 1).to_u64 * PAGE
+          next
+        end
+        yield page if (vouched & (1_u64 << (i & 63))) == 0
+        page += PAGE
       end
     end
 

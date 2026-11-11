@@ -1,0 +1,322 @@
+diff --git a/Makefile b/Makefile
+index 62c2ecf5..cb59e039 100644
+--- a/Makefile
++++ b/Makefile
+@@ -669,7 +669,10 @@ poison-freed: $(BIN)
+ # mark stop short of) and requires the audit to name it — an audit that only
+ # ever reports zero is worth nothing.
+ # `clean` requires a non-trivial edge count with zero misses on the same
+-# workload; `--control` shows nothing is walked with the knob off. ~3 s.
++# workload; `hold-unrolled` and `clean-unrolled` repeat both with 1 MiB of
++# pointer slots held, so the batch scan's unrolled loop runs them, not its
++# one-copy loop (each child reports which); `--control` shows nothing is
++# walked with the knob off. ~3 s.
+ mark-audit: $(BIN)
+ 	$(CRYSTAL) build -Dgc_none bench/mark_audit.cr -o $(BIN)/mark_audit --error-trace
+ 	$(BIN)/mark_audit
+diff --git a/bench/mark_audit.cr b/bench/mark_audit.cr
+index 21dd0f30..c8b5462b 100644
+--- a/bench/mark_audit.cr
++++ b/bench/mark_audit.cr
+@@ -31,6 +31,14 @@
+ #   --control the knob off: zero edges walked, so the other arms' numbers are
+ #             attributable to it.
+ #
++# The batch scan has two word loops (`scan_batch_prefetched`): one copy of the
++# candidate code for a cycle after a major that scanned under
++# `MARK_UNROLL_MIN_SCANNED`, as these small heaps do, and the unrolled loop
++# otherwise. `hold-unrolled` and `clean-unrolled` repeat the two arms with
++# 1 MiB of pointer slots held, so the collections that see the planted
++# pointers run the unrolled loop; each child reports which loop its first of
++# them ran, and the parent checks it.
++#
+ #   crystal build -Dgc_none bench/mark_audit.cr -o bin/mark_audit
+ #   GCRY_MARK_AUDIT=1 bin/mark_audit
+ #   bin/mark_audit --control
+@@ -64,26 +72,33 @@ end
+ def run_child(arm : String) : NoReturn
+   heap = Gcry.default_heap
+   keeper = [] of Slacker
++  # Null slots, read word by word: the next major's loop choice comes from
++  # this collection's scanned bytes.
++  ballast = arm.ends_with?("-unrolled") ? Array(Void*).new(131_072, Pointer(Void).null) : [] of Void*
++  GC.collect
+ 
+   200.times do
+     s = Slacker.new
+     child = GC.malloc(48)
+-    case arm
+-    when "hold"
++    if arm.starts_with?("hold")
+       # Reachable only through the slack: the mark cannot see it, the audit can.
+       s.plant(child)
+-    when "clean"
++    else
+       # Reachable through a real ivar: both see it.
+       s.keep(child)
+     end
+     keeper << s
+   end
+ 
+-  3.times { GC.collect }
++  # The planted children are missed, and freed, in the first of these.
++  GC.collect
++  unrolled = heap.mark_scan_unrolled?
++  2.times { GC.collect }
+ 
+-  STDERR.puts "edges=#{heap.mark_audit_edges} misses=#{heap.mark_audit_misses}"
+-  # Keep the keeper alive across the collections above.
++  STDERR.puts "edges=#{heap.mark_audit_edges} misses=#{heap.mark_audit_misses} unrolled=#{unrolled}"
++  # Keep the keeper and the ballast alive across the collections above.
+   Gcry::Roots.keep_alive(keeper.as(Void*))
++  Gcry::Roots.keep_alive(ballast.as(Void*))
+   exit 0
+ end
+ 
+@@ -100,10 +115,10 @@ puts "mode: #{control ? "control (GCRY_MARK_AUDIT unset; nothing may be walked)"
+ exe = Process.executable_path.not_nil!
+ failures = [] of String
+ 
+-["hold", "clean"].each do |arm|
++["hold", "clean", "hold-unrolled", "clean-unrolled"].each do |arm|
+   env = control ? {"GCRY_MARK_AUDIT" => "0"} : {"GCRY_MARK_AUDIT" => "1"}
+   # The planted miss is what makes the slack unreachable to the mark; see the header.
+-  env["GCRY_MARK_TEST_SHORT_TID"] = Slacker.crystal_instance_type_id.to_s if arm == "hold"
++  env["GCRY_MARK_TEST_SHORT_TID"] = Slacker.crystal_instance_type_id.to_s if arm.starts_with?("hold")
+   captured = IO::Memory.new
+   Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
+   text = captured.to_s
+@@ -112,9 +127,16 @@ failures = [] of String
+     failures << "#{arm}: the child did not report its counters. What it said:\n#{text.lines.first(6).join("\n")}"
+     next
+   end
+-  edges = line.split(' ')[0].split('=')[1].to_u64
+-  misses = line.split(' ')[1].split('=')[1].to_u64
+-  puts "#{arm}: #{edges} edges walked, #{misses} missed"
++  fields = line.split(' ').to_h { |f| {f.split('=')[0], f.split('=')[1]} }
++  edges = fields["edges"].to_u64
++  misses = fields["misses"].to_u64
++  unrolled = fields["unrolled"]? == "true"
++  puts "#{arm}: #{edges} edges walked, #{misses} missed, #{unrolled ? "unrolled" : "one-copy"} loop"
++
++  if unrolled != arm.ends_with?("-unrolled")
++    failures << "#{arm}: the planted collection ran the #{unrolled ? "unrolled" : "one-copy"} loop, " \
++                "so this arm does not test the loop it is named for"
++  end
+ 
+   if control
+     failures << "#{arm}: the knob is off but #{edges} edges were walked" if edges > 0
+@@ -127,14 +149,14 @@ failures = [] of String
+   end
+ 
+   case arm
+-  when "hold"
++  when .starts_with?("hold")
+     if misses == 0
+-      failures << "hold: a pointer the mark was made to stop short of is an edge it does not " \
++      failures << "#{arm}: a pointer the mark was made to stop short of is an edge it does not " \
+                   "follow, and the audit did not name it — it cannot detect a missed edge"
+     end
+-  when "clean"
++  else
+     if misses > 0
+-      failures << "clean: #{misses} missed edge(s) with nothing planted. Either the mark is " \
++      failures << "#{arm}: #{misses} missed edge(s) with nothing planted. Either the mark is " \
+                   "incomplete on this workload, or the audit reports edges that are not real"
+     end
+   end
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 62061e39..412c2295 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -73,6 +73,29 @@ module Gcry
+     # cycle (`take_parallel_scanned_bytes`).
+     getter mark_scanned_bytes : UInt64 = 0_u64
+ 
++    # Whether this cycle's batch scan (`scan_batch_prefetched`) runs the
++    # unrolled word loop: only after a major that scanned at least
++    # `MARK_UNROLL_MIN_SCANNED`. The unrolled loop saves about a tenth of the
++    # batch scan's instructions and costs a fixed number of cold instruction
++    # lines per cycle, about 1 µs on the x86 host and 2–3 µs on
++    # `ubuntu-latest`; at 0.09 ns a scanned byte (JsonGenerate) that breaks
++    # even near 100–300 KiB. On crystal-metric, Revcomp, RegexDna
++    # and the Base64 rows scan 71–73 KiB every cycle, Primes' and the JSON
++    # rows' short cycles under 240 KiB and their long ones from 2.6 MiB;
++    # Binarytrees (71 KiB–8 MiB) and Knuckeotide cross the floor
++    # (`bench/log/linux/2026-11-02-mark-short/`). Read by `make mark-audit`,
++    # which runs its planted miss through both loops.
++    getter? mark_scan_unrolled : Bool = false
++
++    MARK_UNROLL_MIN_SCANNED = 512_u64 * 1024
++
++    # Starts a major's count of scanned bytes, after taking the last one's
++    # for `@mark_scan_unrolled`.
++    private def reset_mark_scanned_bytes : Nil
++      @mark_scan_unrolled = @mark_scanned_bytes >= MARK_UNROLL_MIN_SCANNED
++      @mark_scanned_bytes = 0_u64
++    end
++
+     # The cap grows with the bytes the mark has to *read*, a third of them
+     # × factor once that passes the floor, so the schedule stays geometric
+     # where marking is what a major costs. Atomic bytes (strings, buffers)
+@@ -2988,7 +3011,7 @@ module Gcry
+             # chunks that clear will reach.
+             audit_chunk_list
+             clear_all_marks
+-            @mark_scanned_bytes = 0_u64
++            reset_mark_scanned_bytes
+           else
+             clear_nursery_marks
+           end
+@@ -3587,7 +3610,7 @@ module Gcry
+         note_collection_begin
+         @mark_stack.clear
+         clear_all_marks
+-        @mark_scanned_bytes = 0_u64
++        reset_mark_scanned_bytes
+         # Settle first, as in `run_collection_body`: it zeroes pinned chunks'
+         # marks, and a root marked before it there would be swept.
+         bitmap_settle_cursor_sets
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index d7e5e021..542f9fb1 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -667,9 +667,16 @@ module Gcry
+     # `occ` line is never touched. Every candidate this does not handle in
+     # full — not in the table, outside the chunk's blocks, a large or nursery
+     # chunk — goes to `mark_impl`, which stays the authority.
++    #
++    # Always unrolled, short cycle or not: the payloads that come here are
++    # the large and untagged ones, and on a long run of words below the span
++    # the one-copy loop is a taken branch per word. Following the cycle's
++    # choice (`@mark_scan_unrolled`) put 30–37% on Base64Encode's and
++    # Base64Decode's Σ mark on `ubuntu-latest` (393 and 224 collections of
++    # 72 KiB, about 64 KiB of it scanned here; Perf A/B 41294029368).
+     private def scan_edges_inline(cursor : UInt64*, words : UInt64, base_only : Bool, shard : MarkShard?) : Nil
+       hits = scan_edges_run(cursor, cursor + words, base_only, shard,
+-        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask)
++        @heap_min, @heap_max, @radix_l1, @radix_granule_shift, @radix_l2_mask, unrolled: true)
+       # `radix_note_fast_hit`, once per payload.
+       @radix_fast_hits &+= hits unless @mark_parallel
+     end
+@@ -687,12 +694,13 @@ module Gcry
+     @[AlwaysInline]
+     private def scan_edges_run(p : UInt64*, finish : UInt64*, base_only : Bool, shard : MarkShard?,
+                                lo : UInt64, hi : UInt64, l1 : Pointer(Pointer(ChunkHeader*)),
+-                               shift : Int32, l2_mask : UInt64) : UInt64
++                               shift : Int32, l2_mask : UInt64, unrolled : Bool) : UInt64
+       hits = 0_u64
+-      # Four words a turn: the end is tested once per four words instead of
+-      # once per word (crystal-metric's pointer payloads average ten words),
+-      # each word's low-end test first and the rest in `scan_edge_word`. With
+-      # one unsigned tag test per batch entry (`scan_batch_prefetched`,
++      # Four words a turn when `unrolled` (a constant at every caller): the end
++      # is tested once per four words instead of once per word
++      # (crystal-metric's pointer payloads average ten words), each word's
++      # low-end test first and the rest in `scan_edge_word`. With one
++      # unsigned tag test per batch entry (`scan_batch_prefetched`,
+       # `prefetch_mark_entry`) that is 7.2% fewer instructions in
+       # JsonGenerate's batch scans (callgrind, one marker), and Σ mark −4% to
+       # −12% on arm64 Linux's pointer-heavy rows, −1% to −5% on Windows,
+@@ -701,20 +709,35 @@ module Gcry
+       # candidate and was 3–15% slower; gathering every in-span word
+       # branch-free into a buffer first cost 46% more instructions and 28–31%
+       # more time (`bench/log/linux/2026-10-31-mark-cost/`).
+-      # From `quad_end` on fewer than four words are left. Compared as
+-      # addresses, so a payload of under three words never forms a pointer
+-      # before `p`.
+-      quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
+-      while p < quad_end
+-        w = p[0]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[1]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[2]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[3]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        p += 4
++      #
++      # The unrolled loop inlines the candidate code five times, and a mark
++      # that scans little pays for that in instruction fetch: on Revcomp
++      # (about 100 small objects and 72 KiB a collection, the code evicted
++      # by the program between collections) the batch scan took 25 more
++      # instruction-cache misses a collection than the one-copy loop, 22 of
++      # them from memory (callgrind), Σ mark +9% to +15%. Keeping one copy
++      # behind an unrolled search for the next candidate cost 10% to 39%
++      # more instructions than the one-copy loop on a parsed JSON graph,
++      # against the unrolled loop's −10%, in all three shapes tried. So the
++      # batch scan of a cycle after a major that scanned under
++      # `MARK_UNROLL_MIN_SCANNED` runs the one-copy loop instead
++      # (`@mark_scan_unrolled`, `bench/log/linux/2026-11-02-mark-short/`).
++      if unrolled
++        # From `quad_end` on fewer than four words are left. Compared as
++        # addresses, so a payload of under three words never forms a
++        # pointer before `p`.
++        quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
++        while p < quad_end
++          w = p[0]
++          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
++          w = p[1]
++          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
++          w = p[2]
++          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
++          w = p[3]
++          hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
++          p += 4
++        end
+       end
+       while p < finish
+         w = p.value
+diff --git a/src/gcry/parallel_mark.cr b/src/gcry/parallel_mark.cr
+index a11c6ea2..ba341dff 100644
+--- a/src/gcry/parallel_mark.cr
++++ b/src/gcry/parallel_mark.cr
+@@ -561,10 +561,35 @@ module Gcry
+     # Without them, ns per marked object with one marker: Primes −14% to
+     # −16%, JsonParsePure −11% to −12%, JsonGenerate −7% to −14%,
+     # Binarytrees −18% to −20% (three sessions,
+-    # `bench/log/linux/2026-10-23-mark-cost/`). Out of line, so the
+-    # collector's own frame (`run_collection_body`) does not carry the loop.
+-    @[NoInline]
++    # `bench/log/linux/2026-10-23-mark-cost/`).
++    #
++    # Two copies, out of line so the collector's own frame
++    # (`run_collection_body`) does not carry the loop: `scan_edges_run`
++    # unrolled, and with one copy of the candidate code for a cycle that
++    # follows a major which scanned less than `MARK_UNROLL_MIN_SCANNED`
++    # (`@mark_scan_unrolled`, `reset_mark_scanned_bytes`). Each copy only
++    # costs instruction fetch on the cycles that run it.
++    @[AlwaysInline]
+     private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
++      if @mark_scan_unrolled
++        scan_batch_unrolled(batch, m, shard)
++      else
++        scan_batch_compact(batch, m, shard)
++      end
++    end
++
++    @[NoInline]
++    private def scan_batch_unrolled(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
++      scan_batch_body(batch, m, shard, unrolled: true)
++    end
++
++    @[NoInline]
++    private def scan_batch_compact(batch : Pointer(Void*), m : Int32, shard : MarkShard?) : Nil
++      scan_batch_body(batch, m, shard, unrolled: false)
++    end
++
++    @[AlwaysInline]
++    private def scan_batch_body(batch : Pointer(Void*), m : Int32, shard : MarkShard?, unrolled : Bool) : Nil
+       unless @mark_prefetch
+         i = 0
+         while i < m
+@@ -618,7 +643,7 @@ module Gcry
+           words -= 1
+         end
+         cursor = user.as(UInt64*)
+-        hits &+= scan_edges_run(cursor, cursor + words, base_only, shard, lo, hi, l1, shift, l2_mask)
++        hits &+= scan_edges_run(cursor, cursor + words, base_only, shard, lo, hi, l1, shift, l2_mask, unrolled)
+       end
+       if @mark_parallel
+         count_parallel_scanned_bytes(bytes, shard)

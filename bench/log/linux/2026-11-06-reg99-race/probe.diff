@@ -1,0 +1,82 @@
+diff --git a/process_spec/regression/99_mprotect_protect_outside_cards_spec.cr b/process_spec/regression/99_mprotect_protect_outside_cards_spec.cr
+index c41fd624..2c394fb0 100644
+--- a/process_spec/regression/99_mprotect_protect_outside_cards_spec.cr
++++ b/process_spec/regression/99_mprotect_protect_outside_cards_spec.cr
+@@ -451,6 +451,7 @@ private def mprotect99_race(arm : String) : Nil
+     heap.inc_barrier_lost_collections.should eq(1)
+     Mprotect99Race.queued?.should be_true
+     result = Mprotect99Race.result
++    mprotect99_say("DBG main=#{Gcry::Platform.current_thread_id & 0xfff} log=#{Gcry::Heap.dbg_dump}")
+     mprotect99_say("mprotect99 race: the queued slice returned #{result == 2}")
+     if arm == "control"
+       result.should eq(2)
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 783f7a0f..9c4e6874 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -1002,6 +1002,20 @@ module Gcry
+     # after it takes the collection section, before anything else; must not
+     # allocate (regression 99's *race* queues a second slice there).
+     class_property inc_slice_locked_hook : Proc(Nil)? = nil
++    @@dbg_log = StaticArray(Int64, 256).new(0_i64)
++    @@dbg_n = 0
++
++    def self.dbg(v : Int64) : Nil
++      return unless @@inc_slice_locked_hook
++      if @@dbg_n < 256
++        @@dbg_log[@@dbg_n] = v
++        @@dbg_n += 1
++      end
++    end
++
++    def self.dbg_dump : String
++      String.build { |io| @@dbg_n.times { |i| io << @@dbg_log[i] << ' ' } }
++    end
+     # Research only: false leaves the roots out of the incremental
+     # terminating stop, the code before 2026-11-02 — the finish marks from
+     # the begin stop's root scan and the dirty pages alone, and sweeps an
+@@ -2165,6 +2179,7 @@ module Gcry
+       return if monitor_thread?
+       return if thread_not_ready_for_collect?
+ 
++      Heap.dbg(@inc_active ? -21_i64 : -20_i64)
+       abort_incremental
+       Trace.collect_start(major: true)
+       @warm_released_collects &+= 1 if release_warm
+@@ -2227,6 +2242,10 @@ module Gcry
+       if hook = @@inc_slice_locked_hook
+         hook.call
+       end
++      Heap.dbg(-1_i64)
++      Heap.dbg((Gcry::Platform.current_thread_id & 0xfff).to_i64)
++      Heap.dbg(@inc_active ? 1_i64 : 0_i64)
++      Heap.dbg(@mark_stack.size.to_i64)
+       # Read again under the section: the checks above were made before
+       # this thread queued for it, and the slice ahead of it may have ended
+       # the cycle — one whose scan lost the barrier ends it inside its stop
+@@ -2270,7 +2289,9 @@ module Gcry
+           # and 96 static-array loads.
+           mark_large_alloc_in_flight
+           mark_bitmap_alloc_in_flight
++          Heap.dbg(@mark_stack.size.to_i64)
+           mark_loop_budget(work_units)
++          Heap.dbg(@mark_stack.size.to_i64)
+           if @mark_stack.empty?
+             # Sound termination: rematerialize edges from dirty pages, then continue.
+             armed = !@barrier_backend.none?
+@@ -2298,6 +2319,7 @@ module Gcry
+                            end
+             abort_incremental if barrier_lost && @inc_lost_cycle_ends_in_stop
+           end
++          Heap.dbg(100_i64 + ((barrier_lost ? 1_i64 : 0_i64) | (@mark_stack.empty? ? 2_i64 : 0_i64) | (@barrier_backend.none? ? 4_i64 : 0_i64)))
+           if @mark_stack.empty? && !barrier_lost && @@inc_finish_rescan_roots
+             # And the roots again, the begin stop's whole set. The barrier
+             # records stores into heap pages and nothing else: a pointer a
+@@ -2318,6 +2340,7 @@ module Gcry
+             # `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+             mark_incremental_roots(scan_stack: true, roots: nil)
+             mark_loop_budget(work_units)
++            Heap.dbg(200_i64 + @mark_stack.size.to_i64)
+           end
+           if @mark_stack.empty? && !barrier_lost
+             collection_event(CollectionEvent::MarkEnd)

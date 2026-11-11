@@ -1,0 +1,45 @@
+macos-15-intel    Primes                 UNEXCUSED time +8.0% [+4.2, +15.5]; wall +7.6% [+3.9, +14.7] var-code var=2.526 prepad16=2.521 | base-code base=2.222 baseprepad16=2.182
+macos-15-intel    JsonParsePure          ok                                                      var-code var=1.710 prepad16=1.759 | base-code base=1.867 baseprepad16=1.879
+macos-15-intel    Binarytrees            ok                                                      var-code var=2.044 prepad16=2.027 | base-code base=1.985 baseprepad16=2.030
+macos-15-intel    JsonGenerate           placement wall +5.2% [+0.4, +12.4]                      var-code var=2.736 prepad16=2.318 | base-code base=2.373 baseprepad16=2.564
+macos-15-intel    JsonParseSerializable  ok                                                      var-code var=1.803 prepad16=1.819 | base-code base=1.727 baseprepad16=1.850  PEAK +9.0% [+1.1, +15.2]
+macos-15-intel    JsonParsePull          ok                                                      var-code var=1.749 prepad16=1.960 | base-code base=1.833 baseprepad16=1.912  PEAK +0.9% [+0.4, +4.8]
+macos-15-intel    Revcomp                ok                                                      var-code var=2.747 prepad16=2.987 | base-code base=2.641 baseprepad16=2.827
+macos-15-intel    RegexDna               ok                                                      var-code var=3.972 prepad16=4.026 | base-code base=3.885 baseprepad16=4.090
+macos-15-intel    Knuckeotide            ok                                                      var-code var=3.023 prepad16=3.068 | base-code base=3.133 baseprepad16=3.076
+macos-latest      Primes                 ok                                                      var-code var=0.842 prepad16=0.885 | base-code base=0.805 baseprepad16=0.897
+macos-latest      JsonParsePure          ok                                                      var-code var=0.538 prepad16=0.532 | base-code base=0.539 baseprepad16=0.584
+macos-latest      Binarytrees            ok                                                      var-code var=0.815 prepad16=0.791 | base-code base=0.796 baseprepad16=0.797
+macos-latest      JsonGenerate           ok                                                      var-code var=0.848 prepad16=0.861 | base-code base=0.831 baseprepad16=0.852
+macos-latest      JsonParseSerializable  ok                                                      var-code var=0.497 prepad16=0.499 | base-code base=0.502 baseprepad16=0.509
+macos-latest      JsonParsePull          ok                                                      var-code var=0.485 prepad16=0.496 | base-code base=0.498 baseprepad16=0.486
+macos-latest      Revcomp                ok                                                      var-code var=1.027 prepad16=1.001 | base-code base=0.994 baseprepad16=1.002
+macos-latest      RegexDna               placement time +1.0% [+0.2, +4.4]                       var-code var=2.360 prepad16=2.375 | base-code base=2.336 baseprepad16=2.439
+macos-latest      Knuckeotide            ok                                                      var-code var=0.916 prepad16=0.960 | base-code base=0.913 baseprepad16=0.926
+ubuntu-24.04-arm  Primes                 placement time +1.6% [+0.2, +3.6]; wall +1.8% [+0.3, +3.6] var-code var=1.225 prepad16=1.244 | base-code base=1.219 baseprepad16=1.245  PEAK +0.1% [+0.1, +0.1]
+ubuntu-24.04-arm  JsonParsePure          ok                                                      var-code var=0.777 prepad16=0.775 | base-code base=0.779 baseprepad16=0.779
+ubuntu-24.04-arm  Binarytrees            placement time +1.1% [+0.6, +3.3]; wall +1.2% [+0.5, +3.4] var-code var=1.082 prepad16=1.072 | base-code base=1.052 baseprepad16=1.073  PEAK +0.4% [+0.3, +0.4]
+ubuntu-24.04-arm  JsonGenerate           UNEXCUSED time +0.9% [+0.6, +1.2]; wall +1.1% [+0.8, +1.5] var-code var=1.082 prepad16=1.086 | base-code base=1.073 baseprepad16=1.071  PEAK +0.0% [+0.0, +0.0]
+ubuntu-24.04-arm  JsonParseSerializable  ok                                                      var-code var=0.649 prepad16=0.643 | base-code base=0.649 baseprepad16=0.648
+ubuntu-24.04-arm  JsonParsePull          placement time +0.8% [+0.5, +0.9]; wall +0.5% [+0.1, +0.6] var-code var=0.640 prepad16=0.635 | base-code base=0.635 baseprepad16=0.635
+ubuntu-24.04-arm  Revcomp                ok                                                      var-code var=1.235 prepad16=1.235 | base-code base=1.246 baseprepad16=1.230  PEAK +0.0% [+0.0, +0.0]
+ubuntu-24.04-arm  RegexDna               placement time +0.2% [+0.1, +0.2]                       var-code var=2.289 prepad16=2.281 | base-code base=2.285 baseprepad16=2.279  PEAK +0.1% [+0.0, +0.1]
+ubuntu-24.04-arm  Knuckeotide            ok                                                      var-code var=1.223 prepad16=1.233 | base-code base=1.233 baseprepad16=1.228
+ubuntu-latest     Primes                 ok                                                      var-code var=1.331 prepad16=1.327 | base-code base=1.334 baseprepad16=1.354  PEAK +0.2% [+0.1, +0.2]
+ubuntu-latest     JsonParsePure          placement time +0.9% [+0.2, +1.6]                       var-code var=0.802 prepad16=0.782 | base-code base=0.797 baseprepad16=0.796
+ubuntu-latest     Binarytrees            ok                                                      var-code var=1.187 prepad16=1.172 | base-code base=1.165 baseprepad16=1.166
+ubuntu-latest     JsonGenerate           ok                                                      var-code var=1.266 prepad16=1.254 | base-code base=1.264 baseprepad16=1.321
+ubuntu-latest     JsonParseSerializable  placement time +1.7% [+1.2, +2.0]; wall +0.6% [+0.1, +0.8] var-code var=0.669 prepad16=0.642 | base-code base=0.658 baseprepad16=0.651
+ubuntu-latest     JsonParsePull          placement time +1.6% [+1.3, +2.6]                       var-code var=0.644 prepad16=0.621 | base-code base=0.630 baseprepad16=0.627
+ubuntu-latest     Revcomp                ok                                                      var-code var=1.339 prepad16=1.304 | base-code base=1.340 baseprepad16=1.301
+ubuntu-latest     RegexDna               ok                                                      var-code var=2.523 prepad16=2.490 | base-code base=2.521 baseprepad16=2.492
+ubuntu-latest     Knuckeotide            ok                                                      var-code var=1.289 prepad16=1.298 | base-code base=1.304 baseprepad16=1.300
+windows-latest    Primes                 UNEXCUSED time +3.6% [+1.3, +8.9]; wall +6.3% [+1.6, +9.0] var-code var=1.586 prepad16=1.562 | base-code base=1.501 baseprepad16=1.475
+windows-latest    JsonParsePure          UNEXCUSED time +4.0% [+2.7, +6.0]; wall +2.0% [+0.3, +3.1] var-code var=0.858 prepad16=0.873 | base-code base=0.829 baseprepad16=0.843
+windows-latest    Binarytrees            ok                                                      var-code var=1.310 prepad16=1.317 | base-code base=1.314 baseprepad16=1.304
+windows-latest    JsonGenerate           placement time +2.6% [+1.9, +3.5]; wall +2.5% [+1.0, +4.1] var-code var=1.382 prepad16=1.292 | base-code base=1.345 baseprepad16=1.306
+windows-latest    JsonParseSerializable  UNEXCUSED time +5.5% [+4.5, +6.7]; wall +2.9% [+2.2, +3.9] var-code var=0.730 prepad16=0.732 | base-code base=0.690 baseprepad16=0.695
+windows-latest    JsonParsePull          UNEXCUSED time +5.0% [+4.4, +6.6]; wall +2.5% [+2.0, +3.1] var-code var=0.720 prepad16=0.732 | base-code base=0.686 baseprepad16=0.676
+windows-latest    Revcomp                UNEXCUSED time +18.8% [+18.1, +19.8]; wall +7.3% [+7.1, +7.7] var-code var=1.506 prepad16=1.388 | base-code base=1.264 baseprepad16=1.270
+windows-latest    RegexDna               UNEXCUSED time +0.7% [+0.6, +1.1]; wall +1.4% [+1.1, +1.8] var-code var=3.471 prepad16=3.475 | base-code base=3.442 baseprepad16=3.455
+windows-latest    Knuckeotide            ok                                                      var-code var=1.446 prepad16=1.484 | base-code base=1.485 baseprepad16=1.485

@@ -1,0 +1,68 @@
+name: Probe winbt
+
+# Probe only, deleted afterwards. Windows Binarytrees on EPYC 9V74 runners:
+# round 1 (693d32bb) arms of the tip 2c6a3aa4 with the pre-scan scrub
+# reverted or off, the band wipe off, all collector scrubs off and the
+# pthread scan clamp reverted; round 2 walks 0.40's src history from v0.39.0
+# to the tip, each checkpoint unpadded and prepadded 16. Sessions on another
+# CPU stop after the machine step. Round 3 splits 19cf3a60 on the tip: its
+# full revert, the word advance inline again, the hot fields declared last.
+# Round 4: the word advance inline again on every windows-latest CPU and on
+# macos-15-intel, with pads. Round 5: the same arms, nine benches, on the
+# five runners.
+on:
+  push:
+    branches: [probe/winbt]
+
+jobs:
+  ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {session: u1, os: ubuntu-latest}
+          - {session: u2, os: ubuntu-latest}
+          - {session: a1, os: ubuntu-24.04-arm}
+          - {session: ml1, os: macos-latest}
+          - {session: mi1, os: macos-15-intel}
+          - {session: w1, os: windows-latest}
+          - {session: w2, os: windows-latest}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - env:
+          AB_BASE: c0d570c52793cfa144d88f3f4b600c839f7a40ce
+          AB_REPS: "15"
+          AB_BENCHES: "Primes JsonParsePure Binarytrees JsonGenerate JsonParseSerializable JsonParsePull Revcomp RegexDna Knuckeotide"
+          AB_BOEHM: "0"
+          AB_PADS: "p16 p64 bp16 bp64"
+          AB_PATCHES: >-
+            inline=bench/runner_ab/probe/inline.patch
+            inline=bench/runner_ab/probe/inline.patch:p16
+            inline=bench/runner_ab/probe/inline.patch:p64
+          AB_OUT: bench/log/_ab
+        run: |
+          case "$RUNNER_OS" in
+            Windows) pwsh -c '(Get-CimInstance Win32_Processor).Name' > cpu.txt ;;
+            macOS) sysctl -n machdep.cpu.brand_string > cpu.txt ;;
+            *) { grep -m1 'model name' /proc/cpuinfo || uname -m; } > cpu.txt ;;
+          esac
+          cat cpu.txt
+          bench/runner_ab/ab.sh
+          cp cpu.txt bench/log/_ab/
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-winbt-${{ matrix.session }}
+          path: bench/log/_ab/
+          if-no-files-found: ignore
+          retention-days: 30

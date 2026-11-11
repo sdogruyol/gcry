@@ -1,0 +1,10 @@
+rba0b 1 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 2 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 3 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 4 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 5 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 6 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 7 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 8 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 9 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending
+rba0b 10 rc=0 fail=[] {} 295 examples, 0 failures, 0 errors, 2 pending

@@ -1,0 +1,29 @@
+--- wt/process_spec/regression/21_boehm_c_abi_spec.cr	2026-11-07 01:45:14.183481701 +0300
++++ diag/21_boehm_c_abi_spec.cr	2026-11-07 01:49:27.049534322 +0300
+@@ -1,5 +1,6 @@
+-require "../../src/gcry"
++require "../wt/src/gcry"
+ require "spec"
++require "./d21h"
+ 
+ # Readiness B4 / M8: code compiled against Boehm's C API inside a gcry process.
+ # `crystal i` runs its program with the Boehm prelude and resolves `LibGC` from
+@@ -123,8 +124,16 @@
+       LibGC.add_roots(rooted.as(Void*), (rooted + 1).as(Void*))
+       hidden
+     end
+-    collect
+-    controls.count { |h| live_and_intact?(h) }.should be <= 1
++    D21.arm(controls)
++    LibGC.collect
++    D21.snap(2, controls)
++    LibGC.collect
++    D21.snap(3, controls)
++    LibGC.collect
++    D21.snap(0, controls)
++    D21.counted(controls.count { |h| live_and_intact?(h) })
++    D21.report(controls, ->(h : UInt64) { live_and_intact?(h) })
++    D21.count0.should be <= 1
+     kept.each { |h| live_and_intact?(h).should be_true }
+   end
+ 

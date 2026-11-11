@@ -1,0 +1,204 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index a7b04479..378f7666 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -300,8 +300,8 @@ module Gcry
+     # sees it nonzero sees the whole key, never a key written apart from its
+     # "ready" flag. `@cursor_tsd_refused` is set if the check ever fails, and
+     # the hit path then stays on the Crystal thread-local for good.
+-    # `@cursor_tsd_slot` is declared in `heap_hot.cr`.
+     {% if flag?(:darwin) %}
++      @cursor_tsd_slot = 0_u64
+       @cursor_tsd_refused = false
+     {% end %}
+ 
+@@ -313,6 +313,11 @@ module Gcry
+     # the locked one. Plain increments, best-effort across threads, exact for
+     # one mutator — the same standing as `bitmap_locked_allocations`.
+     getter cursor_word_advances : UInt64 = 0_u64
++    getter fast_miss_collecting : UInt64 = 0_u64
++    getter fast_miss_size : UInt64 = 0_u64
++    getter fast_miss_no_set : UInt64 = 0_u64
++    getter fast_miss_refill : UInt64 = 0_u64
++    getter fast_miss_threshold : UInt64 = 0_u64
+     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
+     getter bitmap_dormant_revives : UInt64 = 0_u64
+     # Claimed blocks a retiring cursor gave back unused (`cursor_release_claim`):
+@@ -1244,27 +1249,7 @@ module Gcry
+     # Measured before this: 96% of locked refills (`bitmap_alloc_refills`
+     # 705 k against `bitmap_alloc_chunk_advances` 29 k per 15 s of Kemal
+     # `/json`) were exactly this word advance, taken under the class lock.
+-    #
+-    # Out of line: it runs once per word, up to 64 hand-outs, and inlined its
+-    # loop shared registers with the hit path (`Heap#fast_alloc`). With
+-    # FREEING added, macos-15-intel's `Heap#malloc` spilled the hit path's
+-    # `bytes_local` and size-class index to the stack and back on every
+-    # allocation (frame 0x88 → 0x98); out of line, 5 stack stores in place of
+-    # 19 and a 0x28 frame (`bench/log/macos/2026-11-02-intel-binarytrees/`).
+-    #
+-    # Inline on x86-64 Windows. There the out-of-line advance made
+-    # Binarytrees 3–5% slower than 0.39.0 on the EPYC 9V74 runners, in every
+-    # placement and in every session, and inline it reads level with 0.39.0.
+-    # On the EPYC 7763 runners out of line reads 1–2% faster than 0.39.0 and
+-    # inline level with it, placement averaged out. ubuntu-latest on the same
+-    # 9V74 shows no such cost, so the other targets keep it out of line. The
+-    # Win64 copy saves eight registers and takes a 0xa8 frame, the SysV one
+-    # six and 0x58 (`bench/log/windows/2026-11-03-binarytrees/`).
+-    {% if flag?(:win32) && flag?(:x86_64) %}
+-      @[AlwaysInline]
+-    {% else %}
+-      @[NoInline]
+-    {% end %}
++    @[AlwaysInline]
+     protected def cursor_advance_word(s : CursorSlot*, index : Int32) : UInt64
+       chunk = s.value.chunk
+       return 0_u64 if chunk.null?
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 783f7a0f..429c8acc 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -304,7 +304,7 @@ module Gcry
+     end
+ 
+     getter? enabled : Bool = true
+-    # (`gc_threshold`, declared in `heap_hot.cr`.)
++    property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
+     # Library tests free manually — auto minor is opt-in (process GC enables it).
+     property nursery_threshold : UInt64 = UInt64::MAX
+     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
+@@ -952,7 +952,7 @@ module Gcry
+     @mark_stack = MarkStack.new
+     @finalizers = Finalizers::Registry.new
+     @before_collect_callbacks = [] of -> Nil
+-    # `@collecting`, `@incremental_marking`, `@lazy_sweep_pending`: `heap_hot.cr`.
++    @collecting = false
+     # Who is inside a collection, while `@collecting` says one is happening.
+     #
+     # The two are read together and neither is enough alone: `@collecting` says
+@@ -974,6 +974,7 @@ module Gcry
+     # the guard learned to tell a peer from itself. `make explicit-collect-barrier`
+     # needs this arm to lose the guarantee.
+     property collect_skip_when_busy : Bool = false
++    @incremental_marking = false
+     @inc_active = false
+     # Research only: false leaves TLABs and allocation-batch stashes
+     # unflushed in the incremental finishing slice (`collect_a_little`), the
+@@ -1837,6 +1838,8 @@ module Gcry
+     getter live_walk_spans : UInt64 = 0_u64
+     getter live_walk_queued : UInt64 = 0_u64
+     getter live_walk_direct : UInt64 = 0_u64
++    # Set during STW when sweep will run after start_world (see sweep_after_world?).
++    @lazy_sweep_pending = false
+     getter? soft_dirty_armed : Bool = false
+     @soft_dirty_probed = false
+     @soft_dirty_works = false
+diff --git a/src/gcry/heap.cr b/src/gcry/heap.cr
+index f69a61aa..8e758a25 100644
+--- a/src/gcry/heap.cr
++++ b/src/gcry/heap.cr
+@@ -1,4 +1,3 @@
+-require "./heap_hot"
+ require "./block"
+ require "./os_memory"
+ require "./crystal_trace"
+@@ -68,6 +67,7 @@ module Gcry
+     # still serialise on SpinLock.
+     @free_bytes = Atomic(UInt64).new(0_u64)
+     @total_bytes = Atomic(UInt64).new(0_u64)
++    @bytes_since_gc = Atomic(UInt64).new(0_u64)
+     @live_objects = Atomic(UInt64).new(0_u64)
+     getter large_free_bytes : UInt64 = 0_u64
+ 
+@@ -196,7 +196,10 @@ module Gcry
+     # Mark-loop prefetch pipeline (`GCRY_PREFETCH`, default on). See
+     # `serial_mark_drain`.
+     property mark_prefetch : Bool = true
+-    # `alloc_pfw` (prefetch-for-write distance) is in `heap_hot.cr`.
++    # Bytes ahead of the allocation cursor to prefetch-for-write
++    # (`GCRY_ALLOC_PFW`, default 2 KiB, 0 = off). simdgc measured 7.1 -> 4.2 ns
++    # on fresh memory; the sweet spot is machine-dependent, so it is a knob.
++    property alloc_pfw : UInt64 = 2048_u64
+     # Ask the kernel for transparent huge pages on GC chunks instead of the
+     # default MADV_NOHUGEPAGE (`GCRY_HUGEPAGES=1`).
+     #
+@@ -223,6 +226,7 @@ module Gcry
+     @freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
+     @nursery_freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
+     @large_freelists = uninitialized StaticArray(Void*, LARGE_FREE_BUCKETS)
++    @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+     # Magic reciprocals for `offset / block_bytes` — see `Heap.block_magic`.
+     @block_magic = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+     @destroyed = false
+@@ -1743,8 +1747,9 @@ module Gcry
+     end
+ 
+     FAST_PATH_MAX = 32768_u64
+-
+-    # `@fast_path`, `@fit_index`, `@fit_payload`: `heap_hot.cr`.
++    @fast_path = false
++    @fit_index = uninitialized StaticArray(UInt8, 257)
++    @fit_payload = uninitialized StaticArray(UInt32, 257)
+ 
+     private def refresh_fast_path : Nil
+       @fast_path = @bitmap_alloc && !@nursery_enabled && !@destroyed &&
+diff --git a/src/gcry/heap_hot.cr b/src/gcry/heap_hot.cr
+deleted file mode 100644
+index a50f5c9d..00000000
+--- a/src/gcry/heap_hot.cr
++++ /dev/null
+@@ -1,55 +0,0 @@
+-# The heap fields the allocation hit path reads (`Heap#fast_alloc`, inlined
+-# into `Heap#malloc` and `Heap#malloc_atomic`), declared first.
+-#
+-# Crystal lays out a class's instance variables with every typed declaration
+-# first, in the order the program declares them, and every inferred one
+-# (`@x = value`) after, in the order it meets them. Declared typed here, and
+-# this file required before anything else that opens `Heap`, these fields
+-# take the lowest offsets, so a field added anywhere else never moves them.
+-# In 0.40 three typed fields added to `bitmap_alloc.cr` moved them by 32
+-# bytes, and the pace's and the barrier's by 8 to 32 more; on macos-15-intel
+-# that shift was one of the two causes of Binarytrees reading 3–6% slower
+-# than 0.39.0 (`bench/log/macos/2026-11-02-intel-binarytrees/`).
+-# `spec/heap_hot_fields_spec.cr` checks that every field here sits below
+-# every other. A field the hit path starts reading belongs here; one it stops
+-# reading goes back where it is used.
+-module Gcry
+-  class Heap
+-    # Whether the hit path may run at all (`refresh_fast_path`).
+-    @fast_path : Bool = false
+-    # A collection or an incremental cycle is under way, or a lazy sweep is
+-    # due: the hit path stands aside (`collect.cr`).
+-    @collecting : Bool = false
+-    @incremental_marking : Bool = false
+-    @lazy_sweep_pending : Bool = false
+-
+-    {% if flag?(:darwin) %}
+-      # This thread's cursor set through the heap's pthread key slot; see
+-      # `bitmap_alloc.cr`, "Darwin: the hit path reads this thread's set".
+-      @cursor_tsd_slot : UInt64 = 0_u64
+-    {% end %}
+-
+-    # Bytes allocated since the last collection, against which the hit path
+-    # weighs its set's uncredited bytes (`bytes_since_gc_now`).
+-    @bytes_since_gc : Atomic(UInt64) = Atomic(UInt64).new(0_u64)
+-    property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
+-    # Bytes ahead of the allocation cursor to prefetch-for-write
+-    # (`GCRY_ALLOC_PFW`, default 2 KiB, 0 = off). simdgc measured 7.1 -> 4.2 ns
+-    # on fresh memory; the sweet spot is machine-dependent, so it is a knob.
+-    property alloc_pfw : UInt64 = 2048_u64
+-
+-    # Why an allocation left the hit path for the locked one (`bitmap_alloc.cr`,
+-    # with `cursor_word_advances`).
+-    getter fast_miss_collecting : UInt64 = 0_u64
+-    getter fast_miss_size : UInt64 = 0_u64
+-    getter fast_miss_no_set : UInt64 = 0_u64
+-    getter fast_miss_refill : UInt64 = 0_u64
+-    getter fast_miss_threshold : UInt64 = 0_u64
+-
+-    # Per size class, the block size, and per 8-byte request size up to
+-    # 2 KiB, the class and its payload (`init_fast_path_tables`).
+-    @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+-    @fit_index = uninitialized StaticArray(UInt8, 257)
+-    @fit_payload = uninitialized StaticArray(UInt32, 257)
+-  end
+-end

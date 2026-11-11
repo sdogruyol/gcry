@@ -1,0 +1,26 @@
+# ld121 run 1 (diag v1): D21 lines
+D21 live=0 cols=3 moved=true threads=5 records=0 roots_seen=111252 marks_seen=1057 base=0x56f7cc2fe000 own_thread=134498291283648 initial=134498356766656 main_stackbottom=0x7ffcce451d50
+D21 control 0 user=0x7a532427e1f0 live=false
+D21 control 1 user=0x7a532427e340 live=true
+D21 control 2 user=0x7a532427e490 live=true
+D21 control 3 user=0x7a532427e5e0 live=true
+D21 control 4 user=0x7a532427e730 live=true
+D21 control 5 user=0x7a532427e880 live=true
+D21 control 6 user=0x7a532427e9d0 live=true
+D21 control 7 user=0x7a532427eb20 live=true
+D21 thread 0 name="DEFAULT-0" map=0x7ffccdc54000..0x7ffcce452000 cur_fiber="staging-spec-0:loop" 0x7a535362ed00 stack=0x7a534a600000..0x7a534ae00000
+D21 thread 1 name="SYSMON" map=0x7a5354200000..0x7a5354a00000 cur_fiber="main" 0x7a53552200d0 stack=0x7a5354200000..0x7a5354a00000
+D21 thread 2 name="DEFAULT-0" map=0x7a5352600000..0x7a5352e00000 cur_fiber="main" 0x7a53560851a0 stack=0x7ffccdc54000..0x7ffcce452000
+D21 thread 3 name="gc-idle" map=0x7a534afff000..0x7a534b7ff000 cur_fiber="main" 0x7a53560854e0 stack=0x7a534afff000..0x7a534b7ff000
+D21 thread 4 name="staging-spec-1" map=0x7a533f800000..0x7a5340000000 cur_fiber="staging-spec-1:loop" 0x7a535362edd0 stack=0x7a5349c00000..0x7a534a400000
+D21 fiber "main" 0x7a53560851a0 stack=0x7ffccdc54000..0x7ffcce452000 top=0x7ffcce4510c0 running=true dead=false
+D21 fiber "DEFAULT-0:loop" 0x7a5356085270 stack=0x7a5354a00000..0x7a5355200000 top=0x7a53551ffd30 running=false dead=false
+D21 fiber "signal-loop" 0x7a5356085410 stack=0x7a5353800000..0x7a5354000000 top=0x7a5353fff430 running=false dead=false
+D21 fiber "main" 0x7a53552200d0 stack=0x7a5354200000..0x7a5354a00000 top=0x7a53549fec64 running=true dead=false
+D21 fiber nil 0x7a5356085b60 stack=0x7a5352e00000..0x7a5353600000 top=0x7a53535ff6c0 running=false dead=false
+D21 fiber "main" 0x7a535362e0d0 stack=0x7a5352600000..0x7a5352e00000 top=0x7a5352dfe9f0 running=false dead=false
+D21 fiber nil 0x7a5356085c30 stack=0x7a5351400000..0x7a5351c00000 top=0x7a5351bffac0 running=false dead=false
+D21 fiber "main" 0x7a53560854e0 stack=0x7a534afff000..0x7a534b7ff000 top=0x7a534b7fdc64 running=true dead=false
+D21 fiber "staging-spec-0:loop" 0x7a535362ed00 stack=0x7a534a600000..0x7a534ae00000 top=0x7a534adffd30 running=true dead=false
+D21 fiber "staging-spec-1:loop" 0x7a535362edd0 stack=0x7a5349c00000..0x7a534a400000 top=0x7a534a3fffb8 running=true dead=false
+D21 fiber "main" 0x7a53560855b0 stack=0x7a533f800000..0x7a5340000000 top=0x7a533fffe9f0 running=false dead=false

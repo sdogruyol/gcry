@@ -1,0 +1,30 @@
+barrier-only 654 0 rc=0 noprobe dropped=0 resends=0
+base 754 0 rc=0 noprobe nocounts
+tip-instr 900 0 rc=0 gcry-probe: waited=0 spun=0 spins=0 nocounts
+tip-instr 912 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+tip 933 0 rc=0 noprobe nocounts
+base 961 0 rc=0 noprobe nocounts
+base-instr 967 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+tip-instr 967 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+tip 971 0 rc=0 noprobe nocounts
+tip-instr 978 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+tip 984 0 rc=0 noprobe nocounts
+tip 997 0 rc=0 noprobe nocounts
+barrier-only 1002 0 rc=0 noprobe dropped=0 resends=0
+tip 1016 0 rc=0 noprobe nocounts
+base 1030 0 rc=0 noprobe nocounts
+tip 1038 0 rc=0 noprobe nocounts
+base-instr 1041 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+barrier-only 1042 0 rc=0 noprobe dropped=0 resends=0
+base-instr 1053 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+base 1060 0 rc=0 noprobe nocounts
+base 1189 0 rc=0 noprobe nocounts
+barrier-only 1296 0 rc=0 noprobe dropped=0 resends=0
+barrier-only 1449 0 rc=0 noprobe dropped=0 resends=0
+base-instr 1456 0 rc=0 gcry-probe: waited=1 spun=0 spins=0 nocounts
+tip 1704 0 rc=0 noprobe nocounts
+tip-instr 1969 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+barrier-only 2013 0 rc=0 noprobe dropped=0 resends=0
+base 2016 0 rc=0 noprobe nocounts
+barrier-only 2255 0 rc=0 noprobe dropped=0 resends=0
+barrier-only 2538 0 rc=0 noprobe dropped=0 resends=0

@@ -1,0 +1,10 @@
+[taskset -c 0] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -1 1728 1 124 124 121 104 -21  mprotect99 race: the queued slice returned false 
+[taskset -c 0] DBG main=1984 log=-1 1984 1 77 77 76 100 -1 1984 1 76 76 0 105 -1 1728 1 128 128 125 104 -21  mprotect99 race: the queued slice returned false 
+[taskset -c 0] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -1 1728 1 124 124 121 104 -21  mprotect99 race: the queued slice returned false 
+[taskset -c 0] DBG main=1984 log=-1 1984 1 77 77 76 100 -1 1984 1 76 76 0 105 -1 1728 1 128 128 125 104 -21  mprotect99 race: the queued slice returned false 
+[taskset -c 0] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -1 1728 1 124 124 121 104 -21  mprotect99 race: the queued slice returned false 
+[all CPUs] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -21 -1 1728 0 0 0 0 106 200  mprotect99 race: the queued slice returned true 
+[all CPUs] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -21 -1 1728 0 0 0 0 106 200  mprotect99 race: the queued slice returned true 
+[all CPUs] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -21 -1 1728 0 0 0 0 106 200  mprotect99 race: the queued slice returned true 
+[all CPUs] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -21 -1 1728 0 0 0 0 106 200  mprotect99 race: the queued slice returned true 
+[all CPUs] DBG main=1984 log=-1 1984 1 82 82 81 100 -1 1984 1 81 81 0 105 -21 -1 1728 0 0 0 0 106 200  mprotect99 race: the queued slice returned true 

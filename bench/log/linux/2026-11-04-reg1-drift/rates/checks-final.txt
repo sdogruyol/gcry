@@ -1,0 +1,30 @@
+=== windows-typecheck
+crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o bin/windows_typecheck_proc_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o bin/windows_typecheck_proc_arm64 >/dev/null
+ok — the Windows build type-checks on both targets
+exit=0
+=== darwin-typecheck
+crystal build --cross-compile --target aarch64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o bin/darwin_typecheck_stw_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o bin/darwin_typecheck_stw_x86 >/dev/null
+ok — the Darwin build and its STW resume gate type-check on both targets
+exit=0
+=== alloc-entry-frame
+
+Finished in 11.52 milliseconds
+5 examples, 0 failures, 0 errors, 0 pending
+exit=0
+=== ps122 hl
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 1:49 minutes
+442 examples, 0 failures, 0 errors, 2 pending
+=== ps122 hdr
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 2:18 minutes
+443 examples, 0 failures, 0 errors, 2 pending
+=== ps122 ba0
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 2:58 minutes
+443 examples, 0 failures, 0 errors, 2 pending

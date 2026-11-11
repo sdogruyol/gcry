@@ -1,0 +1,9 @@
+tip-instr 1 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+tip-instr 71 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+tip 102 0 rc=0 noprobe nocounts
+tip-instr 147 0 rc=0 gcry-probe: waited=0 spun=0 spins=0 nocounts
+tip-instr 265 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+tip-instr 288 0 rc=0 gcry-probe: waited=1 spun=0 spins=0 nocounts
+tip-instr 360 0 rc=0 gcry-probe: waited=4 spun=0 spins=0 nocounts
+base 364 0 rc=0 noprobe nocounts
+tip 364 0 rc=0 noprobe nocounts

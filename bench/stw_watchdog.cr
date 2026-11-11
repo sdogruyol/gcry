@@ -39,16 +39,25 @@ QUIET_THRESHOLD_MS = 5000
 if ARGV.includes?("--child")
   # The suspend arm needs mutator threads, or `n of m already have` is `0 of 0`
   # and the count proves nothing. Cheap and harmless for the other arms.
+  # Started, not just created: `Thread#start` puts a thread on the list the
+  # stop walks, and a collection that runs first has nobody to wait for.
   stop = Atomic(Int32).new(0)
+  started = Atomic(Int32).new(0)
   4.times do
     Thread.new do
+      started.add(1)
       while stop.get == 0
         Thread.sleep(2.milliseconds)
       end
     end
   end
+  until started.get == 4
+    Thread.sleep(1.millisecond)
+  end
   GC.collect
   stop.set(1)
+  heap = Gcry.default_heap.not_nil!
+  STDERR.puts "dropped=#{heap.stw_suspend_dropped_for_test} resends=#{heap.stw_suspend_resends}"
   puts "collected"
   exit 0
 end
@@ -96,9 +105,22 @@ armed_suspend = SIGNAL_STOP ? run_child(self_path, {
 # is the only one that can ask whether the thread being waited for is still
 # there. Fired by lowering its spin threshold, since arranging a thread that
 # genuinely never answers is the defect itself.
+#
+# One spin is still a race on its own: a thread that answers before the
+# collector first looks costs the wait no spin at all, and with every thread
+# that quick the report has nothing to fire in. CI run 43004997072 lost it that
+# way; instrumented, every miss was a stop whose wait never spun, at 2 to 3 in
+# 1 000 runs on both sides of 44b75704
+# (bench/log/linux/2026-11-11-watchdog-in-spin/). So the first suspend signal
+# is dropped (`GCRY_STW_TEST_DROP_SUSPENDS`): that thread cannot answer until
+# the wait has spun long enough to resend, and the resend is what lets the stop
+# finish. Resend spins lowered as `bench/stw_epoch.cr`'s FAST. The child waits
+# for its threads to start, or the drop can fall on a stop with nobody in it.
 armed_inspin = SIGNAL_STOP ? run_child(self_path, {
-  "GCRY_STW_WATCHDOG_MS"     => THRESHOLD_MS.to_s,
-  "GCRY_SUSPEND_STALL_SPINS" => "1",
+  "GCRY_STW_WATCHDOG_MS"        => THRESHOLD_MS.to_s,
+  "GCRY_SUSPEND_STALL_SPINS"    => "1",
+  "GCRY_STW_TEST_DROP_SUSPENDS" => "1",
+  "GCRY_STW_RESEND_SPINS"       => "200000",
 }) : ""
 
 # The same phase, stalled *after* the wait loop instead of before it. CI showed
@@ -233,6 +255,16 @@ if SIGNAL_STOP
   unless armed_inspin.includes?("SUSPEND STALLED on thread 0x")
     failures << "the in-spin report never fired with its threshold at one spin — the line that " \
                 "names the thread a stop is waiting for is unproven"
+  end
+  # What makes the arm deterministic, checked rather than assumed: a signal was
+  # dropped and a resend answered it, so the wait spun on that thread.
+  if m = armed_inspin.match(/dropped=(\d+) resends=(\d+)/)
+    if m[1].to_i == 0 || m[2].to_i == 0
+      failures << "the in-spin arm's wait was not shown to spin (#{m[0]}) — " \
+                  "whether the report fires is down to timing again"
+    end
+  else
+    failures << "the in-spin arm's child printed no dropped/resends counts"
   end
 end
 # With every thread healthy the handle must read live; the other branch is the

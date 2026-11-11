@@ -1,0 +1,15 @@
+new_hl122_on 1 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 2 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 3 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 4 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 5 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 6 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 7 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 8 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 9 rc=1 fail=[1_live_objects_dormant_spec.cr ] other=[] 236 examples, 1 failures, 0 errors, 2 pending
+new_hl122_on 10 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 11 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 12 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 13 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 14 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending
+new_hl122_on 15 rc=0 fail=[] other=[] 236 examples, 0 failures, 0 errors, 2 pending

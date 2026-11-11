@@ -1,0 +1,200 @@
+This GDB supports auto-downloading debuginfo from the following URLs:
+Program stopped.
+0x00007ffff7fe3340 in _start () from /lib64/ld-linux-x86-64.so.2
+Hardware watchpoint 1: -location *(unsigned int*)0x7ffff63feb64
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+WRITE high=0x7fff thread 2
+#0  0x00007ffff7d32f8e in __GI___mmap64 (addr=addr@entry=0x0, len=len@entry=134217728, prot=prot@entry=0, flags=flags@entry=34, fd=fd@entry=-1, offset=offset@entry=0) at ../sysdeps/unix/sysv/linux/mmap64.c:47
+#1  0x00007ffff7cb12e7 in alloc_new_heap (size=135168, top_pad=<optimized out>, pagesize=pagesize@entry=4096, mmap_flags=mmap_flags@entry=0) at ./malloc/arena.c:405
+#2  0x00007ffff7cb1775 in new_heap (size=<optimized out>, top_pad=<optimized out>) at ./malloc/arena.c:464
+#3  _int_new_arena (size=<optimized out>) at ./malloc/arena.c:637
+#4  arena_get2 (avoid_arena=<optimized out>, size=<optimized out>) at ./malloc/arena.c:856
+#5  arena_get2 (size=<optimized out>, avoid_arena=<optimized out>) at ./malloc/arena.c:817
+WRITE high=0 thread 2
+#0  __memset_sse2_unaligned_erms () at ../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S:303
+#1  0x000055555562de38 in clear () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:625
+#2  0x000055555572d8ff in scrub_loop_stack () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:361
+#3  0x00005555557bcd27 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0x7fff thread 2
+#0  0x000055555572dc6d in scrub_dead_stack () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:296
+#1  0x000055555572dbf6 in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#2  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#4  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0 thread 2
+#0  0x000055555573cce7 in wipe_below_sp () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/roots.cr:170
+#1  0x000055555572dc0b in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#2  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#4  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0x5555 thread 2
+#0  __crystal_once () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/once.cr:124
+#1  0x000055555560be34 in ~Gcry::MonitorGate::busy:read () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:32
+#2  0x000055555572dc10 in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:263
+#3  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#5  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0 thread 2
+#0  leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#1  0x00005555557bd756 in increase_parallelism () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#2  0x00005555557bce58 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:43
+#3  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+WRITE high=0xff88d7fd thread 2
+#0  0x0000555555760914 in - () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/time/instant.cr:53
+#1  0x00005555557bcf13 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0 thread 2
+#0  0x0000555555763261 in new () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/range.cr:89
+#1  0x00005555557bcf74 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0x7fff thread 2
+#0  0x0000555555761898 in clamp () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:98
+#1  0x00005555557bcfb0 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0 thread 2
+#0  0x000055555573cce7 in wipe_below_sp () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/roots.cr:170
+#1  0x000055555572dc0b in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#2  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#4  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0x5555 thread 2
+#0  __crystal_once () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/once.cr:124
+#1  0x000055555560be34 in ~Gcry::MonitorGate::busy:read () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:32
+#2  0x000055555572dc10 in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:263
+#3  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#5  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0 thread 2
+#0  leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#1  0x00005555557bd756 in increase_parallelism () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#2  0x00005555557bce58 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:43
+#3  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+WRITE high=0x1266d1 thread 2
+#0  0x0000555555760914 in - () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/time/instant.cr:53
+#1  0x00005555557bcf13 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0 thread 2
+#0  0x0000555555763261 in new () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/range.cr:89
+#1  0x00005555557bcf74 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0x7fff thread 2
+#0  0x0000555555761898 in clamp () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:98
+#1  0x00005555557bcfb0 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0 thread 2
+#0  0x000055555573cce7 in wipe_below_sp () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/roots.cr:170
+#1  0x000055555572dc0b in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#2  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#4  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0x5555 thread 2
+#0  __crystal_once () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/once.cr:124
+#1  0x000055555560be34 in ~Gcry::MonitorGate::busy:read () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:32
+#2  0x000055555572dc10 in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:263
+#3  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#5  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0 thread 2
+#0  __memset_sse2_unaligned_erms () at ../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S:308
+#1  0x000055555562e078 in clear () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/pointer.cr:625
+#2  0x000055555573d4d8 in capture_registers () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/roots.cr:407
+#3  0x000055555572da3b in enter () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:206
+#4  0x00005555557bd71e in increase_parallelism () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x00005555557bce58 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:43
+WRITE high=0x7fff thread 2
+#0  0x000055555573d53d in capture_registers () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/roots.cr:407
+#1  0x000055555572da3b in enter () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:206
+#2  0x00005555557bd71e in increase_parallelism () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bce58 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:43
+#4  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0 thread 2
+#0  leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#1  0x00005555557bd756 in increase_parallelism () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#2  0x00005555557bce58 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:43
+#3  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+WRITE high=0xfd9b4fb3 thread 2
+#0  0x0000555555760914 in - () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/time/instant.cr:53
+#1  0x00005555557bcf13 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0 thread 2
+#0  0x0000555555763261 in new () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/range.cr:89
+#1  0x00005555557bcf74 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0x7fff thread 2
+#0  0x0000555555761898 in clamp () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/comparable.cr:98
+#1  0x00005555557bcfb0 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0 thread 2
+#0  0x000055555573cce7 in wipe_below_sp () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/roots.cr:170
+#1  0x000055555572dc0b in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#2  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#4  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0x5555 thread 2
+#0  __crystal_once () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/once.cr:124
+#1  0x000055555560be34 in ~Gcry::MonitorGate::busy:read () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:32
+#2  0x000055555572dc10 in leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:263
+#3  0x00005555557bd0a9 in transfer_schedulers_blocked_on_syscall () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bce3d in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:42
+#5  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+WRITE high=0 thread 2
+#0  leave () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:255
+#1  0x00005555557bd756 in increase_parallelism () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#2  0x00005555557bce58 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:43
+#3  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#5  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+WRITE high=0xfff6a646 thread 2
+#0  0x0000555555760914 in - () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/time/instant.cr:53
+#1  0x00005555557bcf13 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#5  0x0000555555710282 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+WRITE high=0 thread 2
+#0  0x0000555555763261 in new () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/range.cr:89
+#1  0x00005555557bcf74 in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:63
+#2  0x00005555557bcd76 in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#3  0x00005555557bcd6a in run_loop () at /home/naruto/playground/.scratch/Parked2/wt/src/gcry/monitor_gate.cr:426
+#4  0x0000555555611eb9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19

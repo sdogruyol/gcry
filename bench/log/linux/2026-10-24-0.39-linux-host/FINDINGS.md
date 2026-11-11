@@ -70,6 +70,15 @@ Revcomp is 1–2% slower in 0.39 and not attributed (`ubuntu-latest`'s pad arm
 covered it, `../2026-10-22-0.39-keep-rule/`). Brainfuck, which allocates
 nothing, spans 15% across 0.38.0's pads. Knuckeotide's peak 1.75× → 1.37×.
 
+Attributed 2026-10-31 (`../2026-10-31-revcomp-host-placement/`): code
+placement. `GC::malloc_atomic` starts ≡ 16 mod 64 in 0.39's binary and ≡ 0
+in 0.38.0's, and Revcomp is slowest at ≡ 16 whichever tree is built there.
+Rebuilt, the 16- and 64-byte pads put 0.39 at ≡ 0 and 48 and 0.38.0 at
+≡ 48 and 32, so this session's pads never showed 0.38.0 at the slow phase
+[INFERENCE: this session built `c8e9ecdc`, not v0.39.0; every build from
+`9e89fddc` to v0.39.0 has the entry at the same address]. Over eight
+placements per tree 0.39 is level (+0.05% [−0.38, +0.23]).
+
 Kemal (`clean-kemal-summary.txt`): `/json` 0.39 at 99.3% of 0.38.0 and 104.0%
 of Boehm (46 983 against 45 157 req/s), peak 19.9 MB against Boehm's 16.1
 (1.24×, 0.38.0 the same); `/` 0.39 at 97.3% of 0.38.0 and 100.6% of Boehm.

@@ -1,0 +1,6 @@
+fixhdr 1 rc=0 fail=[] {} 281 examples, 0 failures, 0 errors, 2 pending
+fixhdr 2 rc=0 fail=[] {} 281 examples, 0 failures, 0 errors, 2 pending
+fixhdr 3 rc=0 fail=[] {} 281 examples, 0 failures, 0 errors, 2 pending
+fixhdr 4 rc=0 fail=[] {} 281 examples, 0 failures, 0 errors, 2 pending
+fixhdr 5 rc=0 fail=[] {} 281 examples, 0 failures, 0 errors, 2 pending
+fixhdr 6 rc=0 fail=[] {} 281 examples, 0 failures, 0 errors, 2 pending

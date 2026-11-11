@@ -1,0 +1,16 @@
+# JsonParsePure, MiB scanned by each collection (GCRY_TRACE collect_end scanned_bytes),
+# first three reps of each tree's unpadded arm, artifact probe-win-phases-s1 of run 42256500844.
+# The 42.9 MiB scan is crystal-metric's GC.collect before the timer (metric.cr `_run`);
+# the trees differ before it (the setup: JsonGenerate 600 000 and its to_s) and run the same collections from it on.
+base  time 0.814 collections 14: 2.6 5.2 12.0 21.1 44.5 80.9 119.9 119.9 42.9 82.4 155.5 287.6 350.1 350.1
+base  time 0.815 collections 14: 2.6 5.2 11.7 20.7 44.5 79.3 119.9 119.9 42.9 82.4 149.4 282.3 350.1 350.1
+base  time 0.811 collections 14: 2.6 5.2 11.8 21.3 44.4 80.5 119.9 119.9 42.9 82.4 150.3 277.5 350.1 350.1
+var   time 0.841 collections 13: 2.6 5.2 12.7 24.9 53.4 96.5 119.9 42.9 82.4 146.8 279.7 350.1 350.1
+var   time 0.878 collections 13: 2.6 5.2 11.9 22.0 48.7 100.1 119.9 42.9 82.4 143.7 277.5 350.1 350.1
+var   time 0.833 collections 14: 2.6 5.2 11.8 21.8 48.7 85.7 119.9 119.9 42.9 82.4 144.6 277.5 350.1 350.1
+c2c   time 0.840 collections 14: 2.6 5.2 11.4 20.2 41.7 76.1 119.9 119.9 42.9 82.4 147.6 266.4 350.1 350.1
+c2c   time 0.848 collections 14: 2.6 5.2 11.3 19.9 41.2 76.1 119.9 119.9 42.9 82.4 147.6 267.3 350.1 350.1
+c2c   time 0.827 collections 14: 2.6 5.2 11.5 20.3 41.2 76.1 119.9 119.9 42.9 82.4 145.4 260.7 350.1 350.1
+ce7   time 0.811 collections 13: 2.6 5.2 12.7 24.9 53.4 90.4 119.9 42.9 82.4 149.4 282.3 350.1 350.1
+ce7   time 0.817 collections 13: 2.6 5.2 11.8 22.2 49.0 100.6 119.9 42.9 82.4 149.4 282.3 350.1 350.1
+ce7   time 0.828 collections 13: 2.6 5.2 12.7 23.1 50.9 89.8 119.9 42.9 82.4 145.9 278.8 350.1 350.1

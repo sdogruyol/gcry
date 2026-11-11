@@ -1,0 +1,154 @@
+diff -r ../../Reg1/dwt2/src/gcry/collect_mark.cr src/gcry/collect_mark.cr
+--- ../../Reg1/dwt2/src/gcry/collect_mark.cr	2026-11-02 21:39:04.120116786 +0300
++++ src/gcry/collect_mark.cr	2026-11-03 00:27:42.299749368 +0300
+@@ -10,6 +10,39 @@
+       class_property n = 0
+       class_property dropped = 0
+ 
++      # Reg1b: every first mark while `mon` is set: header, parent (the block
++      # being scanned, 0 for a root, 1 for metadata roots), source, type id.
++      MCAP = 4 << 20
++      class_property mon = false
++      class_property mrecs = Pointer(UInt64).null
++      @@mn = Atomic(Int64).new(0)
++      @[ThreadLocal]
++      @@cur = 0_u64
++
++      def self.cur : UInt64
++        @@cur
++      end
++
++      def self.cur=(v : UInt64) : UInt64
++        @@cur = v
++      end
++
++      def self.mn : Int64
++        @@mn.get
++      end
++
++      def self.mreset : Nil
++        @@mrecs = LibC.malloc(MCAP * 32).as(UInt64*) if @@mrecs.null?
++        @@mn.set(0)
++      end
++
++      def self.madd(hdr : UInt64, src : UInt64, tid : UInt64) : Nil
++        i = @@mn.add(1)
++        return if i >= MCAP
++        r = @@mrecs + i * 4
++        r[0] = hdr; r[1] = @@cur; r[2] = src; r[3] = tid
++      end
++
+       def self.add(col : UInt64, src : UInt64, slot : UInt64, val : UInt64, hdr : UInt64, chunk : UInt64 = 0_u64) : Nil
+         if @@recs.null?
+           @@recs = LibC.malloc(CAP * 48).as(UInt64*)
+@@ -96,8 +129,11 @@
+           end
+         end
+         Roots.hl_slot = 0_u64
++        saved_cur = Reg1Diag.cur
++        Reg1Diag.cur = 0_u64
+       {% end %}
+       mark_impl(pointer, gate_type_id: gate, base_only: !@allow_interior_pointers, source: source)
++      {% if flag?(:reg1_diag) %} Reg1Diag.cur = saved_cur {% end %}
+     end
+ 
+     {% if flag?(:gcry_hl_assert) %}
+@@ -120,7 +156,12 @@
+           end
+         end
+       {% end %}
++      {% if flag?(:reg1_diag) %}
++        saved_cur = Reg1Diag.cur
++        Reg1Diag.cur = 0_u64
++      {% end %}
+       mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Stack)
++      {% if flag?(:reg1_diag) %} Reg1Diag.cur = saved_cur {% end %}
+     end
+ 
+     # Compiler stack-map / precise-root entry (docs/STACK_MAPS.md). Same mark
+@@ -145,6 +186,23 @@
+     # idempotent) and the mark-stack push, which is the one thing that still
+     # takes the lock.
+     @[AlwaysInline]
++    {% if flag?(:reg1_diag) %}
++      def diag_alive?(addr : UInt64) : Bool
++        found = find_block_with_chunk(Pointer(Void).new(addr))
++        return false unless found
++        h, c = found
++        h.address == addr && block_allocated?(c, h)
++      end
++
++      # {user address, payload bytes} of the block at *addr*, or nil.
++      def diag_payload(addr : UInt64) : {UInt64, UInt64}?
++        found = find_block_with_chunk(Pointer(Void).new(addr))
++        return nil unless found
++        h, c = found
++        {user_of(c, h).address, block_payload(c, h)}
++      end
++    {% end %}
++
+     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
+       mark_impl_unlocked(pointer, gate_type_id, base_only, source)
+     end
+@@ -274,6 +332,11 @@
+ 
+       set_block_mark_in(chunk, header)
+       note_first_mark(chunk, header, source) if @live_attr_roots
++      {% if flag?(:reg1_diag) %}
++        if Reg1Diag.mon
++          Reg1Diag.madd(header.address, source.value.to_u64, user_of(chunk, header).as(UInt32*).value.to_u64)
++        end
++      {% end %}
+       # Atomic payloads have no edges. The chunk is already resolved here;
+       # preserve its mark and attribution without a queue round trip.
+       return if atomic_of(chunk, header)
+@@ -577,6 +640,17 @@
+     end
+ 
+     private def scan_object(entry : BlockHeader*, shard : MarkShard? = nil) : Nil
++      {% if flag?(:reg1_diag) %}
++        saved_cur = Reg1Diag.cur
++        Reg1Diag.cur = mark_entry_header(entry).address
++        scan_object_real(entry, shard)
++        Reg1Diag.cur = saved_cur
++      {% else %}
++        scan_object_real(entry, shard)
++      {% end %}
++    end
++
++    private def scan_object_real(entry : BlockHeader*, shard : MarkShard? = nil) : Nil
+       # A tagged entry is a small, non-atomic block of a known class (see
+       # `mark_entry`): its payload and length need no chunk. The rest tag is
+       # the unscanned tail of a large payload.
+@@ -880,6 +954,11 @@
+       return 1_u64 if base_only && w != BlockHeader.user_from(header).address
+       # `chunk_set_mark` with its relaxed pre-check already done above.
+       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
++      {% if flag?(:reg1_diag) %}
++        if Reg1Diag.mon
++          Reg1Diag.madd(header_addr, 77_u64, BlockHeader.user_from(header).as(UInt32*).value.to_u64)
++        end
++      {% end %}
+       return 1_u64 if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+       mark_stack_push(mark_entry(chunk, header), shard)
+       1_u64
+diff -r ../../Reg1/dwt2/src/gcry/collect_scan.cr src/gcry/collect_scan.cr
+--- ../../Reg1/dwt2/src/gcry/collect_scan.cr	2026-11-02 18:52:30.000000000 +0300
++++ src/gcry/collect_scan.cr	2026-11-03 00:19:02.882144200 +0300
+@@ -2051,6 +2051,16 @@
+     end
+ 
+     private def mark_metadata_roots : Nil
++      {% if flag?(:reg1_diag) %}
++        Reg1Diag.cur = 1_u64
++        mark_metadata_roots_real
++        Reg1Diag.cur = 0_u64
++      {% else %}
++        mark_metadata_roots_real
++      {% end %}
++    end
++
++    private def mark_metadata_roots_real : Nil
+       # Finalizer/link tables are LibC storage (not GC roots for Entry.object).
+       # Only mark callback closure_data so Proc captures stay alive, and the
+       # objects queued for finalization (`mark_pending_finalizers`). Marking the

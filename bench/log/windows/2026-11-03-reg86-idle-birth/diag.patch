@@ -1,0 +1,35 @@
+diff --git a/process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr b/process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr
+index 8b9f0b48..5cb92c17 100644
+--- a/process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr
++++ b/process_spec/regression/86_alloc_slow_path_clean_frames_spec.cr
+@@ -120,8 +120,18 @@ private def stale86_count(wipe : Bool, gap : Bool = true) : {Int32, UInt64, UInt
+     heap.slow_wipe_sp = 0_u64
+     heap.slow_wipe_watch = Gcry::Roots.hardware_stack_pointer.address
+     stale86_fill_below
++    d_bsg = heap.@bytes_since_gc.get
++    d_ops = heap.@alloc_ops
++    d_coll = heap.collections
++    d_en = heap.@enabled
++    d_cing = heap.@collecting
++    d_sup = heap.@suppress_collect.get
++    d_inc = heap.@inc_active
++    d_thr = saved_threshold
+     heap.gc_threshold = 1_u64
+     stale86_alloc_collecting(pointerof(caller_sp))
++    a_ops = heap.@alloc_ops
++    a_bsg = heap.@bytes_since_gc.get
+   ensure
+     heap.gc_threshold = saved_threshold
+     heap.post_stw_hook = nil
+@@ -129,6 +139,11 @@ private def stale86_count(wipe : Bool, gap : Bool = true) : {Int32, UInt64, UInt
+     heap.slow_wipe_gap = false
+     heap.slow_wipe_watch = 0_u64
+   end
++    if heap.collections <= collections_before
++      STDERR.puts "diag86: nocollect wipe=#{wipe} gap=#{gap} before=#{collections_before} coll_pre=#{d_coll} bsg_pre=#{d_bsg} bsg_post=#{a_bsg} ops #{d_ops}->#{a_ops} enabled=#{d_en} collecting=#{d_cing} suppress=#{d_sup} inc=#{d_inc} thr=#{d_thr} idle=#{heap.idle_collections}"
++    else
++      STDERR.puts "diag86: ok wipe=#{wipe} gap=#{gap} bsg_pre=#{d_bsg} ops #{d_ops}->#{a_ops} coll #{collections_before}->#{heap.collections}"
++    end
+   heap.collections.should be > collections_before
+   caller_sp.should_not eq(0)
+   {stale, stale86_entry_sp(caller_sp), heap.slow_wipe_sp}

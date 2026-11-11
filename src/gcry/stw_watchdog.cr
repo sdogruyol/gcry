@@ -58,7 +58,9 @@ module Gcry
 
     POLL_NS = 50_000_000_u64 # 50 ms
 
-    @@phase = PHASE_NONE
+    # Literal, `PHASE_NONE`: a constant initializer is a `once`, which the
+    # watchdog's thread must never wait in (`StaticAtomic`).
+    @@phase : Int32 = 0
     # `@@suspend_*` are written only by `note_suspend`, so without this they
     # survive from one stop to the next. A stop that hangs *before* it reaches
     # the wait loop then reports the previous stop's cleared breadcrumb —
@@ -77,7 +79,7 @@ module Gcry
     STEP_THREAD_LOCK  = 3
     STEP_BOUNDS_DONE  = 4
     STEP_SIGNALS_SENT = 5
-    @@suspend_step = STEP_ENTER
+    @@suspend_step : Int32 = 0 # STEP_ENTER, literal as `@@phase`
 
     def self.note_suspend_step(step : Int32) : Nil
       @@suspend_step = step

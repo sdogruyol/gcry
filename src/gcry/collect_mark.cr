@@ -446,7 +446,9 @@ module Gcry
       a = mark_entry_header(entry).address
       Kernels.prefetch_read(Pointer(Void).new(a))
       tag = entry.address >> MARK_ENTRY_TAG_SHIFT
-      if tag == 0 || tag == MARK_ENTRY_TAG_REST
+      # Untagged (0) and rest (`MARK_ENTRY_TAG_REST`) entries in one unsigned
+      # test: both fall outside `1..SIZE_CLASS_COUNT`.
+      if tag &- 1 >= SIZE_CLASS_COUNT
         Kernels.prefetch_read(Pointer(Void).new(a &+ BlockHeader::SIZE))
         return
       end
@@ -460,12 +462,77 @@ module Gcry
       end
     end
 
+    # The incremental drain, `collect_a_little`'s only one. Its entries can
+    # be older than the stop that pops them: the begin stop pushes the roots'
+    # blocks and a slice leaves what its budget did not reach, and between
+    # stops the program runs. A block it frees meanwhile keeps its entry —
+    # nothing searches the stack — and the free can hand the block out
+    # again, or unmap its chunk (a large free trims the cache), or a new
+    # mapping can take the address. `scan_object` trusts an entry: a tagged
+    # one is read with no chunk at all, and on the header layout an untagged
+    # one's header is read before the chunk lookup, so a large block freed
+    # grey and unmapped was a read of unmapped memory in the slice that
+    # popped it, and a freed block left mapped had its dead payload traced,
+    # keeping what only it had pointed to through the cycle. Here each entry
+    # is resolved before anything at its address is read and scanned only if
+    # it still names an allocated block's start in a chunk of its kind (a
+    # tagged entry's class; the large payload a rest entry resumes in). A
+    # block handed out again at the address is allocated black and passes:
+    # its scan marks what it holds when popped, floating garbage of the
+    # cycle like any live block's, swept by the next. The check costs 5–8%
+    # of a slice's marking on a heap of small blocks; resolving every entry
+    # through `find_object_with_chunk` cost 27%, hence the inline path for
+    # the common one. The stop-the-world mark pushes and pops within one
+    # stop and keeps `mark_loop`.
+    # `process_spec/regression/102_incremental_free_grey_spec.cr`.
     private def mark_loop_budget(work_units : Int32) : Nil
+      check = @@inc_scan_checks_entries
       units = 0
       while units < work_units && !@mark_stack.empty?
-        scan_object(@mark_stack.pop)
+        entry = @mark_stack.pop
+        if !check || incremental_entry_current?(entry)
+          scan_object(entry)
+        else
+          @@inc_stale_entries_skipped &+= 1
+        end
         units += 1
       end
+    end
+
+    # Whether a mark-stack entry still names the block it was pushed for.
+    private def incremental_entry_current?(entry : BlockHeader*) : Bool
+      header = mark_entry_header(entry)
+      addr = header.address
+      tag = entry.address >> MARK_ENTRY_TAG_SHIFT
+      # A tagged entry on a bitmap chunk, the common case, inline: the
+      # radix entry, the chunk's class and data range, the block's start and
+      # its `occ` bit, as `resolve_candidate` reads them.
+      l1 = @radix_l1
+      if tag &- 1 < SIZE_CLASS_COUNT && @bitmap_alloc && !l1.null? && addr >= @heap_min && addr < @heap_max
+        chunk = Heap.radix_entry(l1, @radix_granule_shift, @radix_l2_mask, addr)
+        unless chunk.null?
+          cls = chunk.value.size_class
+          bitmap_words = chunk.value.bitmap_words.to_u64
+          data_start = chunk.address &+ chunk.value.data_offset
+          chunk_end = chunk.address &+ chunk.value.mapped_bytes
+          if cls &+ 1 == tag && bitmap_words != 0 && (chunk.value.flags & ChunkHeader::Flags::NURSERY) == 0 &&
+             addr >= data_start && addr < chunk_end
+            index = cls.to_i32
+            ordinal = Heap.block_ordinal(addr &- data_start, @block_magic.unsafe_fetch(index))
+            block_bytes = @block_bytes.unsafe_fetch(index)
+            start = data_start &+ ordinal &* block_bytes
+            return false unless start == addr && start &+ block_bytes <= chunk_end
+            occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+            return (occ.value & (1_u64 << (ordinal & 63))) != 0
+          end
+        end
+      end
+      found = find_object_with_chunk(header.as(Void*))
+      return false unless found
+      block, chunk = found
+      return ChunkHeader.large?(chunk) if tag == MARK_ENTRY_TAG_REST
+      return false unless block == header
+      tag == 0 || chunk.value.size_class.to_u64 &+ 1 == tag
     end
 
     private def scan_object(entry : BlockHeader*, shard : MarkShard? = nil) : Nil
@@ -687,45 +754,94 @@ module Gcry
                                lo : UInt64, hi : UInt64, l1 : Pointer(Pointer(ChunkHeader*)),
                                shift : Int32, l2_mask : UInt64) : UInt64
       hits = 0_u64
+      # Four words a turn: the end is tested once per four words instead of
+      # once per word (crystal-metric's pointer payloads average ten words),
+      # each word's low-end test first and the rest in `scan_edge_word`. With
+      # one unsigned tag test per batch entry (`scan_batch_prefetched`,
+      # `prefetch_mark_entry`) that is 7.2% fewer instructions in
+      # JsonGenerate's batch scans (callgrind, one marker), and Σ mark −4% to
+      # −12% on arm64 Linux's pointer-heavy rows, −1% to −5% on Windows,
+      # level elsewhere (Perf A/B 41213949301). A one-copy loop that skipped
+      # four words below the span at a time read twice the quads holding a
+      # candidate and was 3–15% slower; gathering every in-span word
+      # branch-free into a buffer first cost 46% more instructions and 28–31%
+      # more time (`bench/log/linux/2026-10-31-mark-cost/`).
+      # From `quad_end` on fewer than four words are left. Compared as
+      # addresses, so a payload of under three words never forms a pointer
+      # before `p`.
+      quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
+      while p < quad_end
+        w = p[0]
+        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+        w = p[1]
+        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+        w = p[2]
+        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+        w = p[3]
+        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+        p += 4
+      end
       while p < finish
         w = p.value
         p += 1
-        next if w < lo || w >= hi
-        chunk = Heap.radix_entry(l1, shift, l2_mask, w)
-        if chunk.null?
-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
-          next
-        end
-        cls = chunk.value.size_class
-        bitmap_words = chunk.value.bitmap_words.to_u64
-        data_start = chunk.address &+ chunk.value.data_offset
-        chunk_end = chunk.address &+ chunk.value.mapped_bytes
-        # `size_class` past the table covers large chunks (`UInt32::MAX`).
-        if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
-           (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
-          mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
-          next
-        end
-        hits &+= 1
-        index = cls.to_i32
-        ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
-        block_bytes = @block_bytes.unsafe_fetch(index)
-        header_addr = data_start &+ ordinal &* block_bytes
-        # The chunk's tail past its last whole block.
-        next if header_addr &+ block_bytes > chunk_end
-        occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
-        bit = 1_u64 << (ordinal & 63)
-        mark = occ + bitmap_words
-        next if (mark.value & bit) != 0
-        next if (occ.value & bit) == 0
-        header = Pointer(BlockHeader).new(header_addr)
-        next if base_only && w != BlockHeader.user_from(header).address
-        # `chunk_set_mark` with its relaxed pre-check already done above.
-        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
-        next if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
-        mark_stack_push(mark_entry(chunk, header), shard)
+        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
       end
       hits
+    end
+
+    # One word at or above the span's low end. The high end is tested here,
+    # apart from the low one, on purpose: written as one `w >= lo && w < hi`
+    # condition LLVM evaluated both compares on every word and combined them
+    # with `setcc`/`and` — eight instructions a word with the bounds reloaded
+    # from the stack, 18% more instructions in the whole batch scan
+    # (callgrind, `bench/log/linux/2026-10-31-mark-cost/`).
+    @[AlwaysInline]
+    private def scan_edge_word(w : UInt64, base_only : Bool, shard : MarkShard?, hi : UInt64,
+                               l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64) : UInt64
+      return 0_u64 if w >= hi
+      resolve_candidate(w, base_only, shard, l1, shift, l2_mask)
+    end
+
+    # One word inside the heap span `[@heap_min, @heap_max)`: mark the block
+    # it points into and push it if it holds pointers. 1 when the word was
+    # resolved in place (a fast hit for `@radix_fast_hits`), 0 when it went to
+    # `mark_impl`.
+    @[AlwaysInline]
+    private def resolve_candidate(w : UInt64, base_only : Bool, shard : MarkShard?,
+                                  l1 : Pointer(Pointer(ChunkHeader*)), shift : Int32, l2_mask : UInt64) : UInt64
+      chunk = Heap.radix_entry(l1, shift, l2_mask, w)
+      if chunk.null?
+        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+        return 0_u64
+      end
+      cls = chunk.value.size_class
+      bitmap_words = chunk.value.bitmap_words.to_u64
+      data_start = chunk.address &+ chunk.value.data_offset
+      chunk_end = chunk.address &+ chunk.value.mapped_bytes
+      # `size_class` past the table covers large chunks (`UInt32::MAX`).
+      if cls >= SIZE_CLASS_COUNT || bitmap_words == 0 ||
+         (chunk.value.flags & ChunkHeader::Flags::NURSERY) != 0 || w < data_start || w >= chunk_end
+        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+        return 0_u64
+      end
+      index = cls.to_i32
+      ordinal = Heap.block_ordinal(w &- data_start, @block_magic.unsafe_fetch(index))
+      block_bytes = @block_bytes.unsafe_fetch(index)
+      header_addr = data_start &+ ordinal &* block_bytes
+      # The chunk's tail past its last whole block.
+      return 1_u64 if header_addr &+ block_bytes > chunk_end
+      occ = (chunk.as(UInt8*) + ChunkHeader::SIZE).as(UInt64*) + (ordinal >> 6)
+      bit = 1_u64 << (ordinal & 63)
+      mark = occ + bitmap_words
+      return 1_u64 if (mark.value & bit) != 0
+      return 1_u64 if (occ.value & bit) == 0
+      header = Pointer(BlockHeader).new(header_addr)
+      return 1_u64 if base_only && w != BlockHeader.user_from(header).address
+      # `chunk_set_mark` with its relaxed pre-check already done above.
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, mark, bit, LLVM::AtomicOrdering::Monotonic, false)
+      return 1_u64 if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+      mark_stack_push(mark_entry(chunk, header), shard)
+      1_u64
     end
 
     # Scan length for one object, derived from its **chunk** (Phase 7.6).

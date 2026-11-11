@@ -13,13 +13,17 @@
 # and the link failed.
 #
 # Grow by the terminator's byte when the content fills the buffer, before the
-# stdlib writes it. Shard-only workaround until Crystal reserves that byte.
-# `process_spec/regression/22_string_builder_terminator_spec.cr`.
-class String::Builder
-  def to_s : String
-    if !@finished && real_bytesize >= @capacity
-      resize_to_capacity(real_bytesize + 1)
+# stdlib writes it. Crystal 1.22.1 reserves that byte itself
+# (crystal-lang/crystal#17650, for #17645; on master too), so the reopen
+# applies only below it. `process_spec/regression/22_string_builder_terminator_spec.cr`
+# checks the terminator on both sides of the gate.
+{% if compare_versions(Crystal::VERSION, "1.22.1") < 0 %}
+  class String::Builder
+    def to_s : String
+      if !@finished && real_bytesize >= @capacity
+        resize_to_capacity(real_bytesize + 1)
+      end
+      previous_def
     end
-    previous_def
   end
-end
+{% end %}

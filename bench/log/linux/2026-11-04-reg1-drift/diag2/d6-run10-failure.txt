@@ -1,0 +1,36 @@
+D1 c1 pre1 live=996963 cols=206 fin=149 t=0
+D1 c1 pre2 live=996963 cols=207 fin=149 t=0
+D1 c1 pre3 live=996963 cols=208 fin=149 t=0
+D1 c1 freed live=996963 cols=208 fin=149 t=156737488
+D1 c1 post0 live=994812 cols=209 fin=149 t=0
+D1 c1 post1 live=994812 cols=210 fin=149 t=0
+D1 c1 post2 live=994812 cols=211 fin=149 t=0
+D1 c1 post3 live=994812 cols=212 fin=149 t=0
+D1 c1 ROOTS records=2770 dropped=0
+D1 c1 ROOTS gone=0 main stack [0x7ffde61c5000,0x7ffde69c2000) stack events=16
+D1 TASK 3384206 d6full_hl122 syscall=202 0x717c58c0ca88 0x189 0x0 0x0 0x0 0xffffffff 0x717bff7ff978 0x717c5b2ac802
+D1 TASK 3384208 SYSMON syscall=230 0x0 0x0 0x717c595fdba8 0x717c595fdb98 0x0 0x0 0x717c595fdaf8 0x717c5b2ac802
+D1 TASK 3384209 gcry-mark syscall=202 0x583bf84e6bcc 0x80 0x5b1 0x717c537fec60 0x0 0x0 0x717c537fec08 0x717c5b334acd
+D1 TASK 3384210 gcry-mark syscall=202 0x583bf84e6bcc 0x80 0x5b1 0x717c52ffdc60 0x0 0x0 0x717c52ffdc08 0x717c5b334acd
+D1 TASK 3384211 gcry-mark syscall=202 0x583bf84e6bcc 0x80 0x5b1 0x717c527fcc60 0x0 0x0 0x717c527fcc08 0x717c5b334acd
+D1 TASK 3384212 gc-idle syscall=230 0x0 0x0 0x717c51ffbd10 0x717c51ffbd00 0x0 0x0 0x717c51ffbc28 0x717c5b2ac802
+D1 TASK 3384217 staging-spec-0 syscall=232 0xa 0x717c515ff698 0x80 0xffffffffffffffff 0x0 0x0 0x717c515fec78 0x717c5b2ac802
+D1 TASK 3384218 staging-spec-1 syscall=202 0x717c5abc0588 0x189 0x0 0x0 0x0 0xffffffff 0x717c50bffbb8 0x717c5b2ac802
+D1 TASK 3389939 DEFAULT-0 syscall=0 0xe 0x7ffde69b7718 0x8000 0x0 0x0 0x0 0x7ffde69b73f8 0x717c5b2ac802
+D1 THREAD ? main=[0x7ffde61c5000,0x7ffde69c2000) current=[0x717bff000000,0x717bff800000)
+D1 THREAD SYSMON main=[0x717c58dff000,0x717c595ff000) current=[0x717c58dff000,0x717c595ff000)
+D1 THREAD gc-idle main=[0x717c517fd000,0x717c51ffd000) current=[0x717c517fd000,0x717c51ffd000)
+D1 THREAD staging-spec-0 main=[0x717c4b800000,0x717c4c000000) current=[0x717c50e00000,0x717c51600000)
+D1 THREAD staging-spec-1 main=[0x717c49600000,0x717c49e00000) current=[0x717c50400000,0x717c50c00000)
+D1 THREAD DEFAULT-0 main=[0x717be3800000,0x717be4000000) current=[0x7ffde61c5000,0x7ffde69c2000)
+D1 c1 SITES pre3_records=346 changed=0
+D1 c1 report drift=-2151 words=1082 frame=0x7ffde69c0d28 lo=0x7ffde69bfe60
+D1 c1 summary gone_words=0 gone_fin=0
+D1 c2 report drift=0 words=1082 frame=0x7ffde69c0d28 lo=0x7ffde69bfe60
+D1 c3 report drift=-19 words=1082 frame=0x7ffde69c0d28 lo=0x7ffde69bfe60
+D1 c4 report drift=0 words=1082 frame=0x7ffde69c0d28 lo=0x7ffde69bfe60
+D1 c5 report drift=0 words=1082 frame=0x7ffde69c0d28 lo=0x7ffde69bfe60
+D1 c6 report drift=0 words=1082 frame=0x7ffde69c0d28 lo=0x7ffde69bfe60
+       count=10000 drift=-2151 | count=1000 drift=0
+428 examples, 1 failures, 0 errors, 2 pending
+Failed examples:

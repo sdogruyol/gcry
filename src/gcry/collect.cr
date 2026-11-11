@@ -160,37 +160,96 @@ module Gcry
     getter threshold_pace_pct : UInt64 = 100_u64
     @last_major_end_ns = 0_u64
 
-    # The pace (percent, 100..max_pct) that holds a cycle costing `cycle_ns`
-    # after `mutator_ns` of allocating `allocated` bytes to the target, for a
-    # live-sized threshold `base`.
+    # The pace (percent, 100..max_pct) that holds the next cycle to the
+    # target after this one cost `cycle_ns` following `mutator_ns` of
+    # allocating `allocated` bytes, for a live-sized threshold `base`.
+    #
+    # The next cycle reads what this one read (`scanned`) plus what survives
+    # of the next stretch. If `survived` bytes of every `allocated` keep
+    # surviving, a stretch of T bytes costs the next cycle T × survived /
+    # (allocated × scanned) more than this one, and holding that cost to the
+    # target gives T = P / (1 − P × survived / (allocated × scanned)), where
+    # P is the threshold that holds this cycle's own cost to it; at or past
+    # a zero denominator, the maximum. A steady live set keeps P. Pricing the
+    # next cycle at this one's cost undershot a growing heap's by its growth:
+    # Primes, whose every allocation survives, spent 18–36% of each stretch
+    # collecting against the 10% target, and a few percent of mark time
+    # either way stepped it from 9 collections to 10
+    # (`bench/log/macos/2026-11-01-primes-collections/`).
+    #
+    # `scanned` counts as at least `PACE_GROWTH_SCAN_FLOOR`, the cap's floor.
+    # A smaller scan is marked in a few milliseconds, and pricing its growth
+    # in full let one step of Knuckeotide's (its table rebuilt, 0.8 → 6 MiB
+    # scanned) set the pace off a sub-millisecond mark: peak +23–26% on Linux
+    # (`bench/log/linux/2026-11-02-pace-growth/`).
     def self.threshold_pace_pct(allocated : UInt64, mutator_ns : UInt64, cycle_ns : UInt64,
-                                base : UInt64, max_pct : UInt64) : UInt64
+                                base : UInt64, max_pct : UInt64,
+                                scanned : UInt64 = 0_u64, survived : UInt64 = 0_u64) : UInt64
       return 100_u64 if mutator_ns == 0_u64 || base == 0_u64
       paced = allocated.to_f64 * cycle_ns.to_f64 * 100.0 / (mutator_ns.to_f64 * THRESHOLD_PACE_TARGET_PCT)
+      if survived > 0_u64 && allocated > 0_u64
+        read = scanned < PACE_GROWTH_SCAN_FLOOR ? PACE_GROWTH_SCAN_FLOOR : scanned
+        grows = paced * Math.min(survived, allocated).to_f64 / (allocated.to_f64 * read.to_f64)
+        return max_pct if grows >= 1.0
+        paced /= 1.0 - grows
+      end
       pct = paced * 100.0 / base.to_f64
       return max_pct if pct >= max_pct.to_f64
       pct <= 100.0 ? 100_u64 : pct.to_u64
     end
 
+    PACE_GROWTH_SCAN_FLOOR = ADAPTIVE_THRESHOLD_MAX
+
+    # The survival the pace prices: this stretch's `survived` of `allocated`,
+    # at most the previous stretch's rate (`prev_survived` of
+    # `prev_allocated`). One stretch's growth is a step, two in a row a
+    # trend: Knuckeotide's scanned set returns from a dip to its 6 MiB in
+    # one stretch and then holds, where Primes' and the JSON rows' grow
+    # stretch after stretch.
+    def self.pace_survived(survived : UInt64, allocated : UInt64,
+                           prev_survived : UInt64, prev_allocated : UInt64) : UInt64
+      return 0_u64 if prev_allocated == 0_u64
+      trend = prev_survived.to_f64 * allocated.to_f64 / prev_allocated.to_f64
+      trend < survived.to_f64 ? trend.to_u64 : survived
+    end
+
+    # The last major's `mark_scanned_bytes`, and the stretch before it: the
+    # growth `pace_survived` reads.
+    @pace_scanned_bytes = 0_u64
+    @pace_survived_bytes = 0_u64
+    @pace_allocated_bytes = 0_u64
+
     private def update_threshold_pace(base : UInt64, cycle_started_ns : UInt64) : UInt64
       now = monotonic_ns
       last = @last_major_end_ns
       @last_major_end_ns = now
+      scanned_before = @pace_scanned_bytes
+      @pace_scanned_bytes = @mark_scanned_bytes
+      survived = @mark_scanned_bytes > scanned_before ? @mark_scanned_bytes - scanned_before : 0_u64
+      prev_survived = @pace_survived_bytes
+      prev_allocated = @pace_allocated_bytes
+      @pace_survived_bytes = survived
+      @pace_allocated_bytes = @bytes_before_gc
       # A releasing collection (`GC.collect`, the idle collector, the one
       # before an `OutOfMemoryError`) asks for the footprint back, as it does
       # of the warm budget. Keeping the pace across it carried a setup phase's
       # 3× into JsonParseSerializable's timed run, which then went 0.3 s
       # without collecting what the setup left: peak RSS +26%, wall unchanged.
-      # The next automatic cycle measures the pace afresh.
-      return @threshold_pace_pct = 100_u64 if @release_warm_this_collect
+      # The next automatic cycle measures the pace afresh, and its growth is
+      # not a trend yet: the release's stretch is not the program's.
+      if @release_warm_this_collect
+        @pace_survived_bytes = 0_u64
+        return @threshold_pace_pct = 100_u64
+      end
       # Unmeasurable: the first major, an incremental cycle (its start is the
       # last slice's), a clock step, or a cycle that did not follow a
       # threshold's worth of allocation, whose rate says little.
       return @threshold_pace_pct if cycle_started_ns == 0_u64 || last == 0_u64
       return @threshold_pace_pct unless last < cycle_started_ns && cycle_started_ns < now
       return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
+      survived = Heap.pace_survived(survived, @bytes_before_gc, prev_survived, prev_allocated)
       @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
-        now - cycle_started_ns, base, @threshold_pace_max_pct)
+        now - cycle_started_ns, base, @threshold_pace_max_pct, @mark_scanned_bytes, survived)
     end
 
     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.
@@ -245,7 +304,7 @@ module Gcry
     end
 
     getter? enabled : Bool = true
-    property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
+    # (`gc_threshold`, declared in `heap_hot.cr`.)
     # Library tests free manually — auto minor is opt-in (process GC enables it).
     property nursery_threshold : UInt64 = UInt64::MAX
     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
@@ -774,7 +833,11 @@ module Gcry
     # `:before_relink_store` — the after-world sweep has walked `@chunks` and
     # not yet published its rebuild, no lock held; a chunk mapped here is a
     # prepend inside that window (`make chunk-list-drift`, on a process heap,
-    # so the hook must not capture: its closure would be unrooted).
+    # so the hook must not capture: its closure would be unrooted). And two
+    # pairs around the large-cache counters' resets after the flushes, no lock
+    # held between either pair: `:before_large_take`/`:after_large_take` (the
+    # per-major counts taken) and `:before_large_budget`/`:after_large_budget`
+    # (the recycling budget set), for process_spec/regression/89.
     property post_stw_hook : Proc(Symbol, Nil)? = nil
     # Research only, and it restores a defect: an unreachable object with a
     # finalizer is queued and *not* marked, so the sweep reclaims it and the
@@ -889,7 +952,7 @@ module Gcry
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
-    @collecting = false
+    # `@collecting`, `@incremental_marking`, `@lazy_sweep_pending`: `heap_hot.cr`.
     # Who is inside a collection, while `@collecting` says one is happening.
     #
     # The two are read together and neither is enough alone: `@collecting` says
@@ -911,7 +974,6 @@ module Gcry
     # the guard learned to tell a peer from itself. `make explicit-collect-barrier`
     # needs this arm to lose the guarantee.
     property collect_skip_when_busy : Bool = false
-    @incremental_marking = false
     @inc_active = false
     # Research only: false leaves TLABs and allocation-batch stashes
     # unflushed in the incremental finishing slice (`collect_a_little`), the
@@ -919,6 +981,70 @@ module Gcry
     # `process_spec/regression/85_frozen_class_gaps_spec.cr`'s *slice-stash*
     # and *slice-tlab* windows.
     property inc_finish_flush : Bool = true
+    # Research only: false makes the incremental finishing slice trim the
+    # large cache and nothing more, the code before 2026-11-01: the per-major
+    # large-cache counts are not taken, the recycling budget is not set and
+    # the adaptive retain does not move (`settle_large_cache`) — the control
+    # arm of `process_spec/regression/95_incremental_large_counters_spec.cr`.
+    property inc_finish_large_settle : Bool = true
+    # Research only. False: a slice whose scan lost the barrier leaves the
+    # cycle open until its full collection, and a slice does not re-read
+    # `@inc_active` after queueing for the section — the code before
+    # 2026-11-02, the control arm of regression 99's *race* window.
+    property inc_lost_cycle_ends_in_stop : Bool = true
+    # Research only. False: only a termination scan that took the backend
+    # down to `None` ends the cycle in a full collection; one that returned
+    # false with the backend still up (soft-dirty's too-dirty fallback) lets
+    # the slice finish on the mark — the code before 2026-11-02, the control
+    # arm of regression 99's *softdirty* window.
+    property inc_scan_false_is_lost : Bool = true
+    # Research only: called by `collect_a_little` on the slicing thread just
+    # after it takes the collection section and has read `@inc_active` again
+    # (or begun the cycle there), before it sets `@collecting` or stops the
+    # world for its slice; must not allocate (regression 99's *race* queues
+    # a second slice there, regression 108 a full collection).
+    class_property inc_slice_locked_hook : Proc(Nil)? = nil
+    # Research only: false makes `collect` and `minor_collect` drop an open
+    # incremental cycle (`abort_incremental`) before they queue for the
+    # collection section, the code before 2026-11-07 — the control arm of
+    # `process_spec/regression/108_collect_drops_cycle_in_section_spec.cr`.
+    # A class property, not a field: a `Heap` field here would move every
+    # field after it.
+    class_property collect_drops_cycle_in_section : Bool = true
+    # Research only: false makes `collect_a_little` begin a cycle
+    # (`begin_incremental`) before it queues for the collection section,
+    # the code before 2026-11-07 — the control arm of
+    # `process_spec/regression/110_incremental_begin_in_section_spec.cr`.
+    # A class property, as the knob above.
+    class_property inc_begins_in_section : Bool = true
+    # Research only: false keeps the collection section held, and the
+    # half-begun cycle open, when a begin under the section raises — the
+    # first version of the fix above, the control arm of regression 110's
+    # *raise* window.
+    class_property inc_begin_raise_releases_section : Bool = true
+    # Research only: called by `collect_a_little` on the slicing thread
+    # after its entry checks (`@collecting` read false among them), before
+    # it queues for the section or begins a cycle; must not allocate
+    # (regression 110 holds a slice there until a full collection is past
+    # its stop).
+    class_property inc_begin_hook : Proc(Nil)? = nil
+    # Research only: false leaves the roots out of the incremental
+    # terminating stop, the code before 2026-11-02 — the finish marks from
+    # the begin stop's root scan and the dirty pages alone, and sweeps an
+    # object a mutator moved from a heap field to a root meanwhile. The
+    # control arm of `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+    # A class property, not a field: a `Heap` field here would move every
+    # field after it.
+    class_property inc_finish_rescan_roots : Bool = true
+    # Research only: false scans every incremental mark-stack entry as it is
+    # popped, unresolved — the code before 2026-11-03, which read a block
+    # freed while grey, unmapped or not (`mark_loop_budget`). The control arm
+    # of `process_spec/regression/102_incremental_free_grey_spec.cr`. A
+    # class property, as the knob above.
+    class_property inc_scan_checks_entries : Bool = true
+    # Incremental mark-stack entries popped and not scanned because their
+    # block was freed after the push (`mark_loop_budget`), process-wide.
+    class_getter inc_stale_entries_skipped : UInt64 = 0_u64
     @world_stopped = false
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
@@ -1737,8 +1863,6 @@ module Gcry
     getter live_walk_spans : UInt64 = 0_u64
     getter live_walk_queued : UInt64 = 0_u64
     getter live_walk_direct : UInt64 = 0_u64
-    # Set during STW when sweep will run after start_world (see sweep_after_world?).
-    @lazy_sweep_pending = false
     getter? soft_dirty_armed : Bool = false
     @soft_dirty_probed = false
     @soft_dirty_works = false
@@ -2067,7 +2191,9 @@ module Gcry
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
-      abort_incremental
+      # The open incremental cycle, if any, is dropped inside the section
+      # (`run_collection_body`), not here.
+      abort_incremental unless @@collect_drops_cycle_in_section
       Trace.collect_start(major: true)
       @warm_released_collects &+= 1 if release_warm
       run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce,
@@ -2097,7 +2223,7 @@ module Gcry
       return if thread_not_ready_for_collect?
       return unless @nursery_enabled
 
-      abort_incremental
+      abort_incremental unless @@collect_drops_cycle_in_section
       Trace.collect_start(major: false)
       run_collection(major: false, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
       Trace.collect_end(self, major: false)
@@ -2116,15 +2242,85 @@ module Gcry
       return false if thread_not_ready_for_collect?
 
       started = monotonic_ns
-      unless @inc_active
-        begin_incremental(scan_stack: true, roots: nil)
+      collections = @collections
+      if hook = @@inc_begin_hook
+        hook.call
+      end
+      # A cycle is begun holding the collection section, where every other
+      # stop is made; Boehm begins one under the allocation lock
+      # (`GC_collect_a_little_inner`). The checks above are not enough: a
+      # full collection sets `@collecting` only once it holds the section
+      # and is past its prelude. Begun before the section (the code before
+      # 2026-11-07), a cycle whose thread had read `@collecting` false
+      # stopped the world inside that collection: its `lock_write` waited
+      # out the collection's stop and took the world in the post-stop
+      # passes, ahead of the sweep after the world, and cleared the marks
+      # that sweep reads — the collection then swept everything a root does
+      # not point at directly, its re-arm took the new cycle's barrier down
+      # and the begin's `@collecting = false` ended the collection's flag.
+      # A begin that landed while the collection dropped an open cycle had
+      # its grey entries and its barrier undone by the rest of the drop.
+      # `process_spec/regression/110_incremental_begin_in_section_spec.cr`.
+      begins = !@inc_active
+      unless @@inc_begins_in_section
+        begin_incremental(scan_stack: true, roots: nil) if begins
+        # If begin_incremental couldn't arm a barrier, inc_active stays false
+        # and we bail out so the alloc path falls through to a full STW collect.
+        return false unless @inc_active
+        begins = false
       end
 
-      # If begin_incremental couldn't arm a barrier, inc_active stays false
-      # and we bail out so the alloc path falls through to a full STW collect.
-      return false unless @inc_active
-
+      barrier_lost = false
       lock_post_stw
+      if begins
+        # Holding the section: no collection is running and none can begin
+        # until this thread releases it. One that ran while this thread
+        # queued — a peer's finishing slice, a full or minor collection —
+        # paid the debt that sent it here, as `run_collection_body`'s
+        # coalesce check reads it: a new cycle now would be one no
+        # allocation asked for. A slice queued ahead of this one may have
+        # begun a cycle already (no collection counted); this one runs a
+        # slice of it.
+        if @collections != collections
+          unlock_post_stw
+          return true
+        end
+        unless @inc_active
+          begin
+            begin_incremental(scan_stack: true, roots: nil)
+          rescue ex
+            # A before-collect callback, the event hook or the stop raised.
+            # The section is released, as every other holder releases it on
+            # a raise, and the half-begun cycle — `@inc_active` set, its
+            # marks and barrier not, or not all — is dropped. Kept (the
+            # research knob off), every later `lock_post_stw` waited for
+            # ever. `process_spec/regression/110_incremental_begin_in_section_spec.cr`.
+            if @@inc_begin_raise_releases_section
+              abort_incremental
+              unlock_post_stw
+            end
+            raise ex
+          end
+        end
+        # If begin_incremental couldn't arm a barrier, inc_active stays false
+        # and we bail out so the alloc path falls through to a full STW collect.
+        unless @inc_active
+          unlock_post_stw
+          return false
+        end
+      elsif @inc_lost_cycle_ends_in_stop && !@inc_active
+        # Read again under the section: the checks above were made before
+        # this thread queued for it, and what ran ahead of it may have ended
+        # the cycle — a slice whose scan lost the barrier ends it inside its
+        # stop (below), a full or minor collection as it takes the section
+        # (`run_collection_body`). Running on would sweep that cycle's marks,
+        # made blind.
+        unlock_post_stw
+        return false
+      end
+      if hook = @@inc_slice_locked_hook
+        hook.call
+      end
       finished = false
       begin
         # Owner first, then the flag, with a release fence between them: the
@@ -2163,11 +2359,53 @@ module Gcry
           mark_loop_budget(work_units)
           if @mark_stack.empty?
             # Sound termination: rematerialize edges from dirty pages, then continue.
-            if scan_dirty_pages_for_pointers(nursery_only: false)
-              mark_loop_budget(work_units)
-            end
+            armed = !@barrier_backend.none?
+            scanned = scan_dirty_pages_for_pointers(nursery_only: false)
+            mark_loop_budget(work_units) if scanned
+            # A scan that returns false read no dirty set, or not all of it:
+            # soft-dirty found too many dirty pages, none at all (which it
+            # does not trust), or no pagemap; mprotect found too many, or had
+            # to rebuild its cards and could not, and took the backend down.
+            # Either way stores into objects already scanned went unseen —
+            # every one since the arm, or every one from here on — and
+            # finishing on this mark (the code before 2026-11-02) swept
+            # objects only such a store kept. The cycle ends in a full
+            # collection instead, below, once this stop is over, and it is
+            # dropped here, inside the stop, so that no slice queued behind
+            # this one finds it still open and finishes it on these marks
+            # first (the re-check after `lock_post_stw`). An unarmed heap (a
+            # library heap running incremental without a barrier) is not
+            # covered: its scans always return false.
+            # `process_spec/regression/99_mprotect_protect_outside_cards_spec.cr`.
+            barrier_lost = if @inc_scan_false_is_lost
+                             armed && (!scanned || @barrier_backend.none?)
+                           else
+                             armed && @barrier_backend.none?
+                           end
+            abort_incremental if barrier_lost && @inc_lost_cycle_ends_in_stop
           end
-          if @mark_stack.empty?
+          if @mark_stack.empty? && !barrier_lost && @@inc_finish_rescan_roots
+            # And the roots again, the begin stop's whole set. The barrier
+            # records stores into heap pages and nothing else: a pointer a
+            # mutator loads out of a field into a local, a register, a
+            # static or another thread's stack — and then clears or
+            # overwrites the field — leaves the object reachable from a root
+            # alone, and nothing reports it. Until 2026-11-02 no stop after
+            # the first scanned a root, and the finish swept such an object
+            # while the program held it, as Boehm's incremental mode does not
+            # (`GC_stopped_mark` pushes the roots again). The sweep below
+            # runs only in a stop that rescanned the roots and the dirty
+            # pages and drained what they found within this slice's budget;
+            # a slice that cannot drain it leaves the cycle open, and the
+            # next one to empty the stack rescans both. A slice stays
+            # bounded: the dirty-page scan, one root scan (the begin stop's
+            # cost) and at most three budgets of marking.
+            # `collect_a_little` begins every cycle with these arguments.
+            # `process_spec/regression/100_incremental_stack_rescan_spec.cr`.
+            mark_incremental_roots(scan_stack: true, roots: nil)
+            mark_loop_budget(work_units)
+          end
+          if @mark_stack.empty? && !barrier_lost
             collection_event(CollectionEvent::MarkEnd)
             enqueue_unreachable_finalizers
             collection_event(CollectionEvent::ReclaimStart)
@@ -2231,10 +2469,22 @@ module Gcry
         if finished
           @suppress_collect.add(1)
           begin
+            # The large-cache half of a major's post-stop passes
+            # (`run_collection_body`), in its order: recycling first returns
+            # what the previous major left and nothing reused, before this
+            # cycle's frees join the cache, and after the flushes the counts
+            # are taken, the cache kept or trimmed and the budget set
+            # (`settle_large_cache`).
+            settle = @inc_finish_large_settle
+            trim_large_cache(0_u64, defer: false) if settle && @large_recycle
             flush_pending_empty_chunks
             flush_pending_large_cache
             flush_pending_large_release
-            trim_large_cache(defer: false)
+            if settle
+              settle_large_cache(true)
+            else
+              trim_large_cache(defer: false)
+            end
           ensure
             @suppress_collect.sub(1)
           end
@@ -2247,6 +2497,13 @@ module Gcry
         unlock_post_stw
       end
 
+      if barrier_lost
+        # `collect` drops the cycle (`abort_incremental`) and runs a full
+        # stop-the-world collection, which marks from every root again.
+        @inc_barrier_lost_collections &+= 1
+        collect
+        return true
+      end
       @finalizers.run_pending if finished
       finished
     end
@@ -2453,6 +2710,31 @@ module Gcry
       {header, chunk}
     end
 
+    # `find_object_with_chunk` less a block a cursor has claimed and not
+    # handed out (`block_allocated_exact?`): the live block a pointer names,
+    # for the lookups that answer "live" to a program — `GC_base`, `GC_size`,
+    # a finalizer's registration. The raw lookup is right for the pointers a
+    # program holds, which a claim never covers; a pointer it keeps after the
+    # block was freed is another matter. A claim takes every free block of a
+    # bitmap word at once, so the first allocation after a sweep in that
+    # block's class, on any thread, made every freed block of the word read
+    # live again, with its old bytes intact: regression 21's eight control
+    # blocks, freed by its three collections, were all answered by `GC_base`
+    # once one 256-byte atomic allocation had claimed their word
+    # (`bench/log/linux/2026-11-04-reg21-claimed-controls/FINDINGS.md`).
+    # `process_spec/regression/106_claimed_block_not_live_spec.cr`.
+    def find_live_object_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
+      found = find_object_with_chunk(pointer)
+      return nil unless found
+      return found unless @live_lookup_exact
+      header, chunk = found
+      block_allocated_exact?(chunk, header) ? found : nil
+    end
+
+    # Off only for regression 106's control arm: the live lookups answer a
+    # claimed block as live again, as before (`find_live_object_with_chunk`).
+    property live_lookup_exact : Bool = true
+
     protected def maybe_collect : Nil
       return unless @enabled
       return if @collecting
@@ -2565,6 +2847,7 @@ module Gcry
       @barrier_backend = Platform::BarrierBackend::None
       @barrier_dirty_rescans = 0_u64
       @barrier_full_fallbacks = 0_u64
+      @inc_barrier_lost_collections = 0_u64
       destroy_blacklist
       reset_pause_stats
     end
@@ -2867,12 +3150,15 @@ module Gcry
                                idle : Bool = false, release_warm : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
       # Everything below the SP is dead here, and it is last cycle's collector
-      # residue. Zero it before this cycle's scan chain overlays and scans it.
+      # residue. Zero it before this cycle's scan chain overlays and scans it,
+      # then the band the scrub's own call left (`collect_band_wipe`).
       collect_scrub
+      collect_band_wipe_here
       run_collection_body(major, scan_stack, roots, coalesce, idle, release_warm)
       # The frames this cycle just used are dead below the SP again. Zero them
       # so nothing between now and the next entry scans them as live.
       collect_scrub
+      collect_band_wipe_here
     end
 
     @[NoInline]
@@ -2903,6 +3189,20 @@ module Gcry
         # writing it then changed whether the cycle in flight released, and
         # the next caller's write could clear it before this one ran.
         @release_warm_this_collect = release_warm
+        # An open incremental cycle is dropped here, holding the section,
+        # where no slice can be inside its own. `collect` and `minor_collect`
+        # dropped it before they queued, until 2026-11-07: a slice holding
+        # the section between its re-read of `@inc_active` and its stop then
+        # ran on with the cycle gone — its grey entries cleared, the backend
+        # `None`, so no lost barrier — rescanned the roots, marked nothing
+        # new from them and swept what only the cleared entries reached,
+        # objects a root still held. With the re-read off a slice queued
+        # ahead of the collection did the same (the interleaving that made
+        # regression 99's *race* control flaky). Boehm finishes the cycle in
+        # progress, under the allocation lock, before a full collection
+        # (`GC_try_to_collect_inner`).
+        # `process_spec/regression/108_collect_drops_cycle_in_section_spec.cr`.
+        abort_incremental if @@collect_drops_cycle_in_section
         # The idle thread's cycle re-checks `GC.disable` here, holding the
         # lock, because the check it made before asking can be long stale: it
         # may have waited on this lock through the program's own collections
@@ -3067,7 +3367,10 @@ module Gcry
           end
 
           t0 = monotonic_ns
-          scan_mutator_stack if scan_stack
+          if scan_stack
+            pre_mutator_scan_scrub
+            scan_mutator_stack
+          end
           scan_other_thread_stacks if other_stacks
           @last_phase_stacks_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_MARK)
@@ -3239,31 +3542,8 @@ module Gcry
             end
             # Anything a mutator queued while the walks were running.
             flush_pending_large_release
-            if @large_recycle && !@release_warm_this_collect
-              # This cycle's frees stay for `Heap#recycle_large_mapping`, as
-              # they are: an `MADV_FREE` now would cost a page walk here and
-              # a dirtying write per page on reuse. The budget is what they
-              # hold, and every fresh mapping spends it.
-              release_moved_large
-              if major
-                # No more than the large bytes allocated since the last
-                # major: a program that stopped allocating large blocks will
-                # not take them, and the rest goes back here, as without
-                # recycling. Kept, Primes' dead 40 MB sieve was unmapped by
-                # the budget on the mutator instead; the pace, which times
-                # the cycle, then read collections as cheaper and fitted one
-                # more major into the run (`bench/log/linux/2026-10-06-large-recycle/`).
-                keep = @large_alloc_since_major
-                trim_large_cache(keep, defer: false, cap: UInt64::MAX) if @large_free_bytes > keep
-              end
-              @large_recycle_budget = @large_free_bytes
-            else
-              # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
-              release_large_freelist_pages
-              trim_large_cache(defer: false)
-              @large_recycle_budget = 0_u64
-            end
-            @large_alloc_since_major = 0_u64 if major
+
+            settle_large_cache(major)
             @last_phase_flush_ns = monotonic_ns - t_flush
           ensure
             if ec1_lazy
@@ -3273,24 +3553,6 @@ module Gcry
           end
 
           if major
-            # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
-            # Resets counters each major so the policy tracks the current working set.
-            total_large = @large_cache_hits + @large_cache_misses
-            if total_large > 0
-              hit_pct = (@large_cache_hits * 100) // total_large
-              current = @large_cache_retain
-              # current == 0 means cache disabled (Linux process default); do not
-              # grow from zero — 0×2 would stay 0 anyway, but skip makes intent clear.
-              if hit_pct > 50 && current > 0 && current < LARGE_CACHE_LIMIT
-                # Good reuse: double retain (capped at limit).
-                @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
-              elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
-                # Poor reuse: halve retain (floor at 1 MiB).
-                @large_cache_retain = {current >> 1, 1048576_u64}.max
-              end
-            end
-            @large_cache_hits = 0_u64
-            @large_cache_misses = 0_u64
             # Inside the post-STW section on purpose: after `unlock_post_stw`
             # a peer collection can begin and overwrite `@size_class_live_bytes`
             # and `@gc_threshold` before this thread's late write, which then
@@ -3330,6 +3592,108 @@ module Gcry
       # and this is the first point where a mutator may do that without
       # re-entering a collection it is itself running.
       IdleRelease.ensure_started if @stop_the_world
+    end
+
+    # The large cache's part of a collection's post-stop passes, after the
+    # flushes: the per-major counts taken, the cache trimmed or kept for
+    # recycling, the recycling budget set and, for a major, the adaptive
+    # retain moved. Both kinds of major run it — `run_collection_body`'s and
+    # the incremental cycle's finishing slice (`collect_a_little`), which
+    # until 2026-11-01 only trimmed the cache, so under `GCRY_INCREMENTAL=1`
+    # the counts carried over from cycle to cycle and the budget stayed the
+    # last stop-the-world major's (process_spec/regression/95).
+    #
+    # The counters are read and reset with the world running and no lock:
+    # allocating threads count (`@alloc_lock`) and spend the recycling budget
+    # (`@alloc_lock`, or a class lock in `map_chunk`) all through here. Each
+    # was a plain store, and a mutator's plain read-modify-write that had
+    # loaded before it stored the old cycle's value back over the reset. They
+    # are atomic now, the per-major counts are taken in one swap each, and a
+    # subtraction that loaded first fails its compare-and-set against the
+    # reset (`def_shared_counter`). The two `post_stw_hook` pairs bracket the
+    # resets for process_spec/regression/89, which parks a mutator in each
+    # window; nothing between a pair takes a lock
+    # (`bench/log/linux/2026-11-01-large-cache-counters/`).
+    @[AlwaysInline]
+    private def settle_large_cache(major : Bool) : Nil
+      if hook = @post_stw_hook
+        hook.call(:before_large_take)
+      end
+      # Taken before the trims, so what is allocated while they run counts
+      # toward the next major.
+      large_since = 0_u64
+      large_hits = 0_u64
+      large_misses = 0_u64
+      if major
+        large_since = large_since_take
+        large_hits = large_hits_take
+        large_misses = large_misses_take
+      end
+      if hook = @post_stw_hook
+        hook.call(:after_large_take)
+      end
+
+      # A major keeps them only when `Heap#recycle_large_mapping` can take
+      # them before the next collection: it refuses while a page barrier is
+      # armed, which the stop has decided by now
+      # (`arm_page_barrier_after_major`), and under `GCRY_INCREMENTAL=1` or
+      # the nursery one is armed from collection to collection. A major's
+      # cache holds only what this cycle swept (it was trimmed to 0 before
+      # the flushes), which nothing else takes; kept anyway, Revcomp's
+      # sliced cycles held 37 MiB more at peak and recycled nothing. A minor
+      # trims nothing first, and its cache holds the program's own frees,
+      # which `alloc_large` takes back in place under any barrier
+      # (`take_large_free(freed_only: true)`), so a minor keeps them as it
+      # always has (`bench/log/linux/2026-11-02-large-cache-incr/`).
+      if @large_recycle && !@release_warm_this_collect && (!major || @barrier_backend.none?)
+        # This cycle's frees stay for `Heap#recycle_large_mapping`, as they
+        # are: an `MADV_FREE` now would cost a page walk here and a dirtying
+        # write per page on reuse. The budget is what they hold, and every
+        # fresh mapping spends it.
+        release_moved_large
+        if major
+          # No more than the large bytes allocated since the last major: a
+          # program that stopped allocating large blocks will not take them,
+          # and the rest goes back here, as without recycling. Kept, Primes'
+          # dead 40 MB sieve was unmapped by the budget on the mutator
+          # instead; the pace, which times the cycle, then read collections
+          # as cheaper and fitted one more major into the run
+          # (`bench/log/linux/2026-10-06-large-recycle/`).
+          keep = large_since
+          trim_large_cache(keep, defer: false, cap: UInt64::MAX) if @large_free_bytes > keep
+        end
+        budget = @large_free_bytes
+      else
+        # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
+        release_large_freelist_pages
+        trim_large_cache(defer: false)
+        budget = 0_u64
+      end
+      if hook = @post_stw_hook
+        hook.call(:before_large_budget)
+      end
+      @large_recycle_budget.set(budget)
+      if hook = @post_stw_hook
+        hook.call(:after_large_budget)
+      end
+
+      return unless major
+      # Adaptive large-cache retain: grow when hit rate is high, shrink when
+      # low. The counts are this major's, taken (and zeroed) above, so the
+      # policy tracks the current working set.
+      total_large = large_hits + large_misses
+      return unless total_large > 0
+      hit_pct = (large_hits * 100) // total_large
+      current = @large_cache_retain
+      # current == 0 means cache disabled (Linux process default); do not
+      # grow from zero — 0×2 would stay 0 anyway, but skip makes intent clear.
+      if hit_pct > 50 && current > 0 && current < LARGE_CACHE_LIMIT
+        # Good reuse: double retain (capped at limit).
+        @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
+      elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
+        # Poor reuse: halve retain (floor at 1 MiB).
+        @large_cache_retain = {current >> 1, 1048576_u64}.max
+      end
     end
 
     # The idle thread's collection (src/gcry/idle_release.cr): an explicit
@@ -3515,7 +3879,18 @@ module Gcry
     # Incremental mark is unsound without barrier re-scan — live objects
     # written into already-scanned pages between slices would be swept.
     private def incremental_barrier_possible? : Bool
-      !select_barrier_backend.none?
+      backend = select_barrier_backend
+      return false if backend.none?
+      {% if flag?(:linux) %}
+        # An mprotect arm over a span no cards can hold would leave no
+        # barrier (`drop_mprotect_without_cards`); answered here, without
+        # the stop `begin_incremental` would make to find out. A refused
+        # `malloc` is still found by the arm itself.
+        if backend.mprotect? && Platform.mprotect_drop_without_cards
+          return false unless Platform.mprotect_span_pages(@heap_min, @heap_max)
+        end
+      {% end %}
+      true
     end
 
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
@@ -3552,22 +3927,18 @@ module Gcry
         # marks, and a root marked before it there would be swept.
         bitmap_settle_cursor_sets
         mark_bitmap_alloc_in_flight
-        @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_explicit_root(ptr) }
-        mark_large_alloc_in_flight
-        roots.try &.each { |ptr| mark_explicit_root(ptr) }
-        mark_metadata_roots
-        other_stacks = other_stacks_are_roots?(scan_stack)
-        scrub_parked_fiber_stacks if other_stacks
-        scan_all_fiber_roots if other_stacks
-        scan_thread_roots if other_stacks && @stop_the_world
-        if @scan_static_roots
-          scan_static_ranges
-        end
-        scan_mutator_stack if scan_stack
-        scan_other_thread_stacks if other_stacks
+        mark_incremental_roots(scan_stack, roots)
         # Arm page-dirty barrier for mutator writes between incremental slices.
         arm_page_barrier_after_collect
+        # The check above chose a backend; the arm can still leave none
+        # (mprotect with no cards, `drop_mprotect_without_cards`). Then the
+        # cycle is dropped as if it had never begun, under the same rule:
+        # the caller falls through to a full collection.
+        if @stop_the_world && @barrier_backend.none?
+          @inc_active = false
+          @incremental_marking = false
+          @mark_stack.clear
+        end
       ensure
         collection_event(CollectionEvent::PreStartWorld) if stw_reported
         start_world
@@ -3575,6 +3946,29 @@ module Gcry
         unlock_write
         @collecting = false
       end
+    end
+
+    # The root set of an incremental cycle, marked by its begin stop and
+    # again by every terminating stop (`collect_a_little`): the explicit and
+    # in-flight roots, the before-collect callbacks (Boehm's `GC_add_roots`
+    # ranges and push-other-roots), static data, and every thread's and
+    # fiber's stack and registers. Marks are idempotent, so a second pass
+    # pushes only what the first did not reach.
+    private def mark_incremental_roots(scan_stack : Bool, roots : Array(Void*)?) : Nil
+      @before_collect_callbacks.each(&.call)
+      @roots.each { |ptr| mark_explicit_root(ptr) }
+      mark_large_alloc_in_flight
+      roots.try &.each { |ptr| mark_explicit_root(ptr) }
+      mark_metadata_roots
+      other_stacks = other_stacks_are_roots?(scan_stack)
+      scrub_parked_fiber_stacks if other_stacks
+      scan_all_fiber_roots if other_stacks
+      scan_thread_roots if other_stacks && @stop_the_world
+      if @scan_static_roots
+        scan_static_ranges
+      end
+      scan_mutator_stack if scan_stack
+      scan_other_thread_stacks if other_stacks
     end
 
     private def abort_incremental : Nil

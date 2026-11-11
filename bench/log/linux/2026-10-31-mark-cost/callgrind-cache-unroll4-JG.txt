@@ -1,0 +1,860 @@
+total Ir 3,684,994,910  Dr 831,227,955  Dw 208,071,265  I1mr 523  D1mr 29,127,238  D1mw 727,271  ILmr 474  DLmr 27,000,397  DLmw 44
+          Ir           Dr           Dw         D1mr         D1mw         DLmr         DLmw
+      21,374            0       21,374            0            0            0            0 66450: push   %rbp
+      21,374            0       21,374            0            2            0            2 66451: push   %r15
+      21,374            0       21,374            0            0            0            0 66453: push   %r14
+      21,374            0       21,374            0            0            0            0 66455: push   %r13
+      21,374            0       21,374            0            0            0            0 66457: push   %r12
+      21,374            0       21,374            0            0            0            0 66459: push   %rbx
+      21,374            0            0            0            0            0            0 6645a: sub    $0x88,%rsp
+      21,374            0            0            0            0            0            0 66461: mov    %edx,%r10d
+      21,374            0            0            0            0            0            0 66464: mov    %rsi,%r14
+      21,374            0            0            0            0            0            0 66467: mov    %rdi,%rbx
+      21,374       21,374            0       21,369            0            9            0 6646a: cmpb   $0x0,0x19d0(%rdi)
+      21,374            0            0            0            0            0            0 66471: je     6655e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+      21,374            0            0            0            0            0            0 66477: test   %r10d,%r10d
+      21,374            0            0            0            0            0            0 6647a: jle    67088 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+      21,374       21,374            0       21,357            0            3            0 66480: movzbl 0x4258(%rbx),%eax
+      21,374       21,374            0       21,357            0            3            0 66487: mov    0x3920(%rbx),%ecx
+      21,374            0       21,374            0            2            0            2 6648d: mov    %ecx,0x58(%rsp)
+      21,374       21,374            0       21,344            0            2            0 66491: movzbl 0x38ba(%rbx),%r11d
+      21,374       21,374            0       21,345            0            2            0 66499: mov    0x4058(%rbx),%rcx
+      21,374            0       21,374            0            2            0            2 664a0: mov    %rcx,0x8(%rsp)
+      21,374       21,374            0            0            0            0            0 664a5: mov    0x4060(%rbx),%rcx
+      21,374            0       21,374            0            0            0            0 664ac: mov    %rcx,0x50(%rsp)
+      21,374       21,374            0            2            0            0            0 664b1: mov    0x8(%rbx),%rcx
+      21,374            0       21,374            0            0            0            0 664b5: mov    %rcx,0x48(%rsp)
+      21,374       21,374            0            0            0            0            0 664ba: mov    0x10(%rbx),%ecx
+      21,374            0       21,374            0            0            0            0 664bd: mov    %rcx,0x40(%rsp)
+      21,374       21,374            0            0            0            0            0 664c2: mov    0x18(%rbx),%rcx
+      21,374            0       21,374            0            0            0            0 664c6: mov    %rcx,0x38(%rsp)
+      21,374            0            0            0            0            0            0 664cb: movabs $0xffffffffffffff,%r15
+      21,374            0            0            0            0            0            0 664d5: mov    $0xffffffff,%r9d
+      21,374            0            0            0            0            0            0 664db: cmp    $0x10,%r10d
+      21,374            0            0            0            0            0            0 664df: mov    $0x10,%ecx
+      21,374            0            0            0            0            0            0 664e4: cmovb  %r10d,%ecx
+      21,374            0            0            0            0            0            0 664e8: xor    %edx,%edx
+      21,374            0            0            0            0            0            0 664ea: mov    $0x100,%esi
+      21,374            0            0            0            0            0            0 664ef: jmp    6650b <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 664f1: cs nopw 0x0(%rax,%rax,1)
+           0            0            0            0            0            0            0 664fb: nopl   0x0(%rax,%rax,1)
+          19            0            0            0            0            0            0 66500: prefetcht0 (%rdi)
+     341,984            0            0            0            0            0            0 66503: inc    %rdx
+     341,984            0            0            0            0            0            0 66506: cmp    %rcx,%rdx
+     341,984            0            0            0            0            0            0 66509: je     66589 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+     341,984      341,984            0            4            0            0            0 6650b: mov    (%r14,%rdx,8),%r8
+     341,984            0            0            0            0            0            0 6650f: mov    %r8,%rdi
+     341,984            0            0            0            0            0            0 66512: and    %r15,%rdi
+     341,984            0            0            0            0            0            0 66515: prefetcht0 (%rdi)
+     341,984            0            0            0            0            0            0 66518: shr    $0x38,%r8
+     341,984            0            0            0            0            0            0 6651c: cmp    $0xff,%r8
+     341,984            0            0            0            0            0            0 66523: je     66500 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+     341,984            0            0            0            0            0            0 66525: test   %r8d,%r8d
+     341,984            0            0            0            0            0            0 66528: je     66500 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+     341,965            0            0            0            0            0            0 6652a: add    %r9d,%r8d
+     341,965      341,965            0        1,015            0            4            0 6652d: mov    0x2118(%rbx,%r8,8),%r8
+     341,965            0            0            0            0            0            0 66535: cmp    $0x100,%r8
+     341,965            0            0            0            0            0            0 6653c: cmovae %rsi,%r8
+     341,965            0            0            0            0            0            0 66540: add    %rdi,%r8
+     341,965            0            0            0            0            0            0 66543: or     $0x3f,%rdi
+     341,965            0            0            0            0            0            0 66547: inc    %rdi
+     341,965            0            0            0            0            0            0 6654a: cmp    %r8,%rdi
+     341,965            0            0            0            0            0            0 6654d: jae    66503 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+     341,783            0            0            0            0            0            0 6654f: nop
+     341,789            0            0            0            0            0            0 66550: prefetcht0 (%rdi)
+     341,789            0            0            0            0            0            0 66553: add    $0x40,%rdi
+     341,789            0            0            0            0            0            0 66557: cmp    %r8,%rdi
+     341,789            0            0            0            0            0            0 6655a: jb     66550 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+     341,783            0            0            0            0            0            0 6655c: jmp    66503 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6655e: test   %r10d,%r10d
+           0            0            0            0            0            0            0 66561: jle    67198 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66567: mov    %r10d,%r15d
+           0            0            0            0            0            0            0 6656a: nopw   0x0(%rax,%rax,1)
+           0            0            0            0            0            0            0 66570: mov    (%r14),%rsi
+           0            0            0            0            0            0            0 66573: mov    %rbx,%rdi
+           0            0            0            0            0            0            0 66576: call   671b0 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>
+           0            0            0            0            0            0            0 6657b: add    $0x8,%r14
+           0            0            0            0            0            0            0 6657f: dec    %r15
+           0            0            0            0            0            0            0 66582: jne    66570 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66584: jmp    67198 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+      21,374            0            0            0            0            0            0 66589: test   $0x1,%al
+      21,374            0            0            0            0            0            0 6658b: je     670a5 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+      21,374            0       21,374            0            0            0            0 66591: mov    %r11b,0x23(%rsp)
+      21,374            0            0            0            0            0            0 66596: xor    %r13d,%r13d
+      21,374            0            0            0            0            0            0 66599: xor    %eax,%eax
+      21,374            0       21,374            0            0            0            0 6659b: movq   $0x0,0x60(%rsp)
+      21,374            0       21,374            0            0            0            0 665a4: mov    %r10d,0x5c(%rsp)
+  21,863,870            0   21,863,870            0            3            0            3 665a9: mov    %rax,0x68(%rsp)
+  21,863,870            0            0            0            0            0            0 665ae: xchg   %ax,%ax
+  21,863,900            0            0            0            0            0            0 665b0: lea    0x10(%r13),%eax
+  21,863,900            0            0            0            0            0            0 665b4: cmp    %r10d,%eax
+  21,863,900            0            0            0            0            0            0 665b7: jge    665dc <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,521,916            0            0            0            0            0            0 665b9: cltq
+  21,521,916   21,521,916            0    1,429,104            0           24            0 665bb: mov    (%r14,%rax,8),%rcx
+  21,521,916            0            0            0            0            0            0 665bf: mov    %rcx,%rax
+  21,521,916            0            0            0            0            0            0 665c2: and    %r15,%rax
+  21,521,916            0            0            0            0            0            0 665c5: prefetcht0 (%rax)
+  21,521,916            0            0            0            0            0            0 665c8: shr    $0x38,%rcx
+  21,521,916            0            0            0            0            0            0 665cc: cmp    $0xff,%rcx
+  21,521,916            0            0            0            0            0            0 665d3: je     665d9 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,521,916            0            0            0            0            0            0 665d5: test   %ecx,%ecx
+  21,521,916            0            0            0            0            0            0 665d7: jne    66617 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          14            0            0            0            0            0            0 665d9: prefetcht0 (%rax)
+  21,863,900            0            0            0            0            0            0 665dc: movslq %r13d,%rax
+  21,863,900   21,863,900            0           72            0           11            0 665df: mov    (%r14,%rax,8),%r12
+  21,863,900            0            0            0            0            0            0 665e3: inc    %r13d
+  21,863,900            0            0            0            0            0            0 665e6: cmp    %r15,%r12
+  21,863,900            0            0            0            0            0            0 665e9: seta   %cl
+  21,863,900            0            0            0            0            0            0 665ec: mov    %r12,%rax
+  21,863,900            0            0            0            0            0            0 665ef: shr    $0x38,%rax
+  21,863,900            0            0            0            0            0            0 665f3: cmp    $0x29,%eax
+  21,863,900            0            0            0            0            0            0 665f6: setb   %dl
+  21,863,900            0            0            0            0            0            0 665f9: test   %dl,%cl
+  21,863,900            0            0            0            0            0            0 665fb: jne    66661 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          33            0            0            0            0            0            0 665fd: mov    %rbx,%rdi
+          33            0            0            0            0            0            0 66600: mov    %r12,%rsi
+          33            0           33            0            2            0            0 66603: call   671b0 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>
+          33           33            0           33            0            8            0 66608: mov    0x5c(%rsp),%r10d
+          33            0            0            0            0            0            0 6660d: cmp    %r10d,%r13d
+          33            0            0            0            0            0            0 66610: jl     665b0 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           3            0            0            0            0            0            0 66612: jmp    6717a <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,521,902            0            0            0            0            0            0 66617: mov    $0xffffffff,%edx
+  21,521,902            0            0            0            0            0            0 6661c: add    %edx,%ecx
+  21,521,902   21,521,902            0        9,690            0           11            0 6661e: mov    0x2118(%rbx,%rcx,8),%rcx
+  21,521,902            0            0            0            0            0            0 66626: cmp    $0x100,%rcx
+  21,521,902            0            0            0            0            0            0 6662d: mov    $0x100,%edx
+  21,521,902            0            0            0            0            0            0 66632: cmovae %rdx,%rcx
+  21,521,902            0            0            0            0            0            0 66636: add    %rax,%rcx
+  21,521,902            0            0            0            0            0            0 66639: or     $0x3f,%rax
+  21,521,902            0            0            0            0            0            0 6663d: inc    %rax
+  21,521,902            0            0            0            0            0            0 66640: cmp    %rcx,%rax
+  21,521,902            0            0            0            0            0            0 66643: jae    665dc <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,521,631            0            0            0            0            0            0 66645: cs nopw 0x0(%rax,%rax,1)
+  21,521,631            0            0            0            0            0            0 6664f: nop
+  21,521,969            0            0            0            0            0            0 66650: prefetcht0 (%rax)
+  21,521,969            0            0            0            0            0            0 66653: add    $0x40,%rax
+  21,521,969            0            0            0            0            0            0 66657: cmp    %rcx,%rax
+  21,521,969            0            0            0            0            0            0 6665a: jb     66650 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,521,631            0            0            0            0            0            0 6665c: jmp    665dc <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,863,867            0            0            0            0            0            0 66661: and    %r15,%r12
+  21,863,867   21,863,867            0           13            0            7            0 66664: testb  $0x1,0x23(%rsp)
+  21,863,867            0            0            0            0            0            0 66669: je     6666f <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,863,867            0            0            0            0            0            0 6666b: xor    %edi,%edi
+  21,863,867            0            0            0            0            0            0 6666d: jmp    66684 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6666f: mov    (%r12),%ecx
+           0            0            0            0            0            0            0 66673: mov    $0xfff0bdbf,%edx
+           0            0            0            0            0            0            0 66678: add    %edx,%ecx
+           0            0            0            0            0            0            0 6667a: cmp    $0xfff0bdc0,%ecx
+           0            0            0            0            0            0            0 66680: setb   %dil
+  21,863,867   21,863,867            0            0            0            0            0 66684: mov    0x8(%rsp),%rdx
+  21,863,867            0            0            0            0            0            0 66689: movabs $0x8000000000000000,%rsi
+  21,863,867            0            0            0            0            0            0 66693: mov    $0xffffffff,%ecx
+  21,863,867            0            0            0            0            0            0 66698: add    %ecx,%eax
+  21,863,867   21,863,867            0           14            0            1            0 6669a: mov    0x2118(%rbx,%rax,8),%r8
+  21,863,867            0            0            0            0            0            0 666a2: mov    %r8,%rax
+  21,863,867            0            0            0            0            0            0 666a5: shr    $0x3,%rax
+  21,863,867   21,863,867            0            1            0            1            0 666a9: cmpl   $0x0,0x58(%rsp)
+  21,863,867            0            0            0            0            0            0 666ae: je     666cf <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 666b0: cmp    $0x8,%r8
+           0            0            0            0            0            0            0 666b4: jb     666cf <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 666b6: mov    0x58(%rsp),%ecx
+           0            0            0            0            0            0            0 666ba: cmp    %ecx,(%r12)
+           0            0            0            0            0            0            0 666be: jne    666cf <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 666c0: or     %rsi,%rax
+           0            0            0            0            0            0            0 666c3: dec    %rax
+           0            0            0            0            0            0            0 666c6: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 666cc: xor    %rsi,%rax
+  21,863,867            0   21,863,867            0           22            0            9 666cf: mov    %r8,0x78(%rsp)
+  21,863,867            0            0            0            0            0            0 666d4: lea    (%r12,%rax,8),%rsi
+  21,863,867            0            0            0            0            0            0 666d8: lea    0x18(%r12),%rcx
+  21,863,867            0   21,863,867            0            0            0            0 666dd: mov    %rsi,0x70(%rsp)
+  21,863,867            0            0            0            0            0            0 666e2: cmp    %rsi,%rcx
+  21,863,867            0            0            0            0            0            0 666e5: lea    -0x18(%r12,%rax,8),%rax
+  21,863,867            0            0            0            0            0            0 666ea: cmova  %r12,%rax
+  21,863,867            0   21,863,867            0            0            0            0 666ee: mov    %rax,0x30(%rsp)
+  21,863,867            0            0            0            0            0            0 666f3: cmp    %r12,%rax
+  21,863,867            0   21,863,867            0            0            0            0 666f6: mov    %edi,0x24(%rsp)
+  21,863,867            0            0            0            0            0            0 666fa: movzbl %dil,%eax
+  21,863,867            0   21,863,867            0            0            0            0 666fe: mov    %eax,0x1c(%rsp)
+  21,863,867            0            0            0            0            0            0 66702: jbe    66e82 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,863,771            0            0            0            0            0            0 66708: xor    %r15d,%r15d
+  21,863,771            0            0            0            0            0            0 6670b: jmp    66724 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6670d: nopl   (%rax)
+          77            0            0            0            0            0            0 66710: xor    %ebp,%ebp
+         395            0            0            0            0            0            0 66712: add    %rbp,%r15
+  54,660,283            0            0            0            0            0            0 66715: add    $0x20,%r12
+  54,660,283   54,660,283            0            6            0            3            0 66719: cmp    0x30(%rsp),%r12
+  54,660,283            0            0            0            0            0            0 6671e: jae    66e99 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  54,660,283   54,660,283            0   27,359,825            0   26,915,671            0 66724: mov    (%r12),%rsi
+  54,660,283            0            0            0            0            0            0 66728: cmp    %rdx,%rsi
+  54,660,283            0            0            0            0            0            0 6672b: jb     667b5 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,945   10,931,945            0            0            0            0            0 66731: cmp    0x50(%rsp),%rsi
+  10,931,945            0            0            0            0            0            0 66736: jae    667b0 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         157            0            0            0            0            0            0 66738: mov    %rsi,%rax
+         157            0            0            0            0            0            0 6673b: shr    $0x20,%rax
+         157            0            0            0            0            0            0 6673f: movzwl %ax,%eax
+         157          157            0            0            0            0            0 66742: mov    0x48(%rsp),%rcx
+         157          157            0           31            0            0            0 66747: mov    (%rcx,%rax,8),%rax
+         157            0            0            0            0            0            0 6674b: test   %rax,%rax
+         157            0            0            0            0            0            0 6674e: je     6678c <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         157            0            0            0            0            0            0 66750: mov    %rsi,%rdx
+         157          157            0            0            0            0            0 66753: mov    0x40(%rsp),%rcx
+         157            0            0            0            0            0            0 66758: shr    %cl,%rdx
+         157          157            0            0            0            0            0 6675b: and    0x38(%rsp),%rdx
+         157            0            0            0            0            0            0 66760: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         157          157            0           24            0            4            0 66766: mov    (%rax,%rdx,8),%r8
+         157            0            0            0            0            0            0 6676a: test   %r8,%r8
+         157            0            0            0            0            0            0 6676d: je     6678c <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         121          121            0           32            0            0            0 6676f: mov    0x10(%r8),%edi
+         121            0            0            0            0            0            0 66773: cmp    $0x28,%rdi
+         121            0            0            0            0            0            0 66777: setae  %al
+         121          121            0            0            0            0            0 6677a: mov    0x1c(%r8),%r10d
+         121            0            0            0            0            0            0 6677e: test   %r10d,%r10d
+         121            0            0            0            0            0            0 66781: sete   %cl
+         121            0            0            0            0            0            0 66784: or     %al,%cl
+         121            0            0            0            0            0            0 66786: je     66962 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          47            0            0            0            0            0            0 6678c: mov    %rbx,%rdi
+          47            0            0            0            0            0            0 6678f: xor    %edx,%edx
+          47           47            0            0            0            0            0 66791: mov    0x1c(%rsp),%ecx
+          47            0            0            0            0            0            0 66795: mov    $0x3,%r8d
+          47            0           47            0            0            0            0 6679b: call   40570 <*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool
+          47            0            0            0            0            0            0 667a0: xor    %ebp,%ebp
+         157          157            0            0            0            0            0 667a2: mov    0x8(%rsp),%rdx
+         157            0            0            0            0            0            0 667a7: jmp    667b2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 667a9: nopl   0x0(%rax)
+  10,931,788            0            0            0            0            0            0 667b0: xor    %ebp,%ebp
+  10,931,945            0            0            0            0            0            0 667b2: add    %rbp,%r15
+  54,660,283   54,660,283            0            0            0            0            0 667b5: mov    0x8(%r12),%rsi
+  54,660,283            0            0            0            0            0            0 667ba: cmp    %rdx,%rsi
+  54,660,283            0            0            0            0            0            0 667bd: jb     66845 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,945   10,931,945            0            0            0            0            0 667c3: cmp    0x50(%rsp),%rsi
+  10,931,945            0            0            0            0            0            0 667c8: jae    66840 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,852            0            0            0            0            0            0 667ca: mov    %rsi,%rax
+  10,931,852            0            0            0            0            0            0 667cd: shr    $0x20,%rax
+  10,931,852            0            0            0            0            0            0 667d1: movzwl %ax,%eax
+  10,931,852   10,931,852            0            0            0            0            0 667d4: mov    0x48(%rsp),%rcx
+  10,931,852   10,931,852            0       10,683            0            3            0 667d9: mov    (%rcx,%rax,8),%rax
+  10,931,852            0            0            0            0            0            0 667dd: test   %rax,%rax
+  10,931,852            0            0            0            0            0            0 667e0: je     6681e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,852            0            0            0            0            0            0 667e2: mov    %rsi,%rdx
+  10,931,852   10,931,852            0            0            0            0            0 667e5: mov    0x40(%rsp),%rcx
+  10,931,852            0            0            0            0            0            0 667ea: shr    %cl,%rdx
+  10,931,852   10,931,852            0            0            0            0            0 667ed: and    0x38(%rsp),%rdx
+  10,931,852            0            0            0            0            0            0 667f2: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,852   10,931,852            0       48,651            0       36,189            0 667f8: mov    (%rax,%rdx,8),%r8
+  10,931,852            0            0            0            0            0            0 667fc: test   %r8,%r8
+  10,931,852            0            0            0            0            0            0 667ff: je     6681e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,780   10,931,780            0       18,814            0        7,908            0 66801: mov    0x10(%r8),%edi
+  10,931,780            0            0            0            0            0            0 66805: cmp    $0x28,%rdi
+  10,931,780            0            0            0            0            0            0 66809: setae  %al
+  10,931,780   10,931,780            0            0            0            0            0 6680c: mov    0x1c(%r8),%r10d
+  10,931,780            0            0            0            0            0            0 66810: test   %r10d,%r10d
+  10,931,780            0            0            0            0            0            0 66813: sete   %cl
+  10,931,780            0            0            0            0            0            0 66816: or     %al,%cl
+  10,931,780            0            0            0            0            0            0 66818: je     66a4d <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          74            0            0            0            0            0            0 6681e: mov    %rbx,%rdi
+          74            0            0            0            0            0            0 66821: xor    %edx,%edx
+          74           74            0            0            0            0            0 66823: mov    0x1c(%rsp),%ecx
+          74            0            0            0            0            0            0 66827: mov    $0x3,%r8d
+          74            0           74            0            0            0            0 6682d: call   40570 <*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool
+          74            0            0            0            0            0            0 66832: xor    %ebp,%ebp
+  10,931,852   10,931,852            0            0            0            0            0 66834: mov    0x8(%rsp),%rdx
+  10,931,852            0            0            0            0            0            0 66839: jmp    66842 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6683b: nopl   0x0(%rax,%rax,1)
+          93            0            0            0            0            0            0 66840: xor    %ebp,%ebp
+  10,931,945            0            0            0            0            0            0 66842: add    %rbp,%r15
+  54,660,283   54,660,283            0          782            0          584            0 66845: mov    0x10(%r12),%rsi
+  54,660,283            0            0            0            0            0            0 6684a: cmp    %rdx,%rsi
+  54,660,283            0            0            0            0            0            0 6684d: jb     668d5 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,995   10,931,995            0            0            0            0            0 66853: cmp    0x50(%rsp),%rsi
+  10,931,995            0            0            0            0            0            0 66858: jae    668d0 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         398            0            0            0            0            0            0 6685a: mov    %rsi,%rax
+         398            0            0            0            0            0            0 6685d: shr    $0x20,%rax
+         398            0            0            0            0            0            0 66861: movzwl %ax,%eax
+         398          398            0            0            0            0            0 66864: mov    0x48(%rsp),%rcx
+         398          398            0           12            0            0            0 66869: mov    (%rcx,%rax,8),%rax
+         398            0            0            0            0            0            0 6686d: test   %rax,%rax
+         398            0            0            0            0            0            0 66870: je     668ae <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         398            0            0            0            0            0            0 66872: mov    %rsi,%rdx
+         398          398            0            0            0            0            0 66875: mov    0x40(%rsp),%rcx
+         398            0            0            0            0            0            0 6687a: shr    %cl,%rdx
+         398          398            0            0            0            0            0 6687d: and    0x38(%rsp),%rdx
+         398            0            0            0            0            0            0 66882: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         398          398            0          205            0          125            0 66888: mov    (%rax,%rdx,8),%r8
+         398            0            0            0            0            0            0 6688c: test   %r8,%r8
+         398            0            0            0            0            0            0 6688f: je     668ae <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         389          389            0          272            0           70            0 66891: mov    0x10(%r8),%edi
+         389            0            0            0            0            0            0 66895: cmp    $0x28,%rdi
+         389            0            0            0            0            0            0 66899: setae  %al
+         389          389            0            0            0            0            0 6689c: mov    0x1c(%r8),%r10d
+         389            0            0            0            0            0            0 668a0: test   %r10d,%r10d
+         389            0            0            0            0            0            0 668a3: sete   %cl
+         389            0            0            0            0            0            0 668a6: or     %al,%cl
+         389            0            0            0            0            0            0 668a8: je     66b38 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          36            0            0            0            0            0            0 668ae: mov    %rbx,%rdi
+          36            0            0            0            0            0            0 668b1: xor    %edx,%edx
+          36           36            0            0            0            0            0 668b3: mov    0x1c(%rsp),%ecx
+          36            0            0            0            0            0            0 668b7: mov    $0x3,%r8d
+          36            0           36            0            0            0            0 668bd: call   40570 <*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool
+          36            0            0            0            0            0            0 668c2: xor    %ebp,%ebp
+         398          398            0            0            0            0            0 668c4: mov    0x8(%rsp),%rdx
+         398            0            0            0            0            0            0 668c9: jmp    668d2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 668cb: nopl   0x0(%rax,%rax,1)
+  10,931,597            0            0            0            0            0            0 668d0: xor    %ebp,%ebp
+  10,931,995            0            0            0            0            0            0 668d2: add    %rbp,%r15
+  54,660,283   54,660,283            0            0            0            0            0 668d5: mov    0x18(%r12),%rsi
+  54,660,283            0            0            0            0            0            0 668da: cmp    %rdx,%rsi
+  54,660,283            0            0            0            0            0            0 668dd: jb     66715 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         395          395            0            0            0            0            0 668e3: cmp    0x50(%rsp),%rsi
+         395            0            0            0            0            0            0 668e8: jae    66710 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         318            0            0            0            0            0            0 668ee: mov    %rsi,%rax
+         318            0            0            0            0            0            0 668f1: shr    $0x20,%rax
+         318            0            0            0            0            0            0 668f5: movzwl %ax,%eax
+         318          318            0            0            0            0            0 668f8: mov    0x48(%rsp),%rcx
+         318          318            0           37            0            0            0 668fd: mov    (%rcx,%rax,8),%rax
+         318            0            0            0            0            0            0 66901: test   %rax,%rax
+         318            0            0            0            0            0            0 66904: je     66942 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         318            0            0            0            0            0            0 66906: mov    %rsi,%rdx
+         318          318            0            0            0            0            0 66909: mov    0x40(%rsp),%rcx
+         318            0            0            0            0            0            0 6690e: shr    %cl,%rdx
+         318          318            0            0            0            0            0 66911: and    0x38(%rsp),%rdx
+         318            0            0            0            0            0            0 66916: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         318          318            0          108            0           40            0 6691c: mov    (%rax,%rdx,8),%r8
+         318            0            0            0            0            0            0 66920: test   %r8,%r8
+         318            0            0            0            0            0            0 66923: je     66942 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         259          259            0          108            0           17            0 66925: mov    0x10(%r8),%edi
+         259            0            0            0            0            0            0 66929: cmp    $0x28,%rdi
+         259            0            0            0            0            0            0 6692d: setae  %al
+         259          259            0            0            0            0            0 66930: mov    0x1c(%r8),%r10d
+         259            0            0            0            0            0            0 66934: test   %r10d,%r10d
+         259            0            0            0            0            0            0 66937: sete   %cl
+         259            0            0            0            0            0            0 6693a: or     %al,%cl
+         259            0            0            0            0            0            0 6693c: je     66c23 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          59            0            0            0            0            0            0 66942: mov    %rbx,%rdi
+          59            0            0            0            0            0            0 66945: xor    %edx,%edx
+          59           59            0            0            0            0            0 66947: mov    0x1c(%rsp),%ecx
+          59            0            0            0            0            0            0 6694b: mov    $0x3,%r8d
+          59            0           59            0            0            0            0 66951: call   40570 <*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool
+          59            0            0            0            0            0            0 66956: xor    %ebp,%ebp
+         318          318            0            0            0            0            0 66958: mov    0x8(%rsp),%rdx
+         318            0            0            0            0            0            0 6695d: jmp    66712 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         121          121            0            0            0            0            0 66962: mov    0x14(%r8),%ecx
+         121            0            0            0            0            0            0 66966: test   $0x1,%cl
+         121            0            0            0            0            0            0 66969: jne    6678c <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         121          121            0            0            0            0            0 6696f: mov    0x18(%r8),%r11d
+         121            0            0            0            0            0            0 66973: add    %r8,%r11
+         121            0            0            0            0            0            0 66976: mov    %rsi,%rax
+         121            0            0            0            0            0            0 66979: sub    %r11,%rax
+         121            0            0            0            0            0            0 6697c: jb     6678c <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         110          110            0            0            0            0            0 66982: mov    0x8(%r8),%r9
+         110            0            0            0            0            0            0 66986: add    %r8,%r9
+         110            0            0            0            0            0            0 66989: cmp    %r9,%rsi
+         110            0            0            0            0            0            0 6698c: jae    6678c <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         110            0          110            0            0            0            0 66992: mov    %ecx,0x10(%rsp)
+         110          110            0            0            0            0            0 66996: mulq   0x2258(%rbx,%rdi,8)
+         110            0            0            0            0            0            0 6699e: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         110            0            0            0            0            0            0 669a4: mov    %rax,%rcx
+         110            0            0            0            0            0            0 669a7: shr    $0x28,%rcx
+         110          110            0            0            0            0            0 669ab: mov    0x2118(%rbx,%rdi,8),%rdx
+         110            0            0            0            0            0            0 669b3: mov    %rdx,%rbp
+         110            0            0            0            0            0            0 669b6: imul   %rcx,%rbp
+         110            0            0            0            0            0            0 669ba: add    %r11,%rbp
+         110            0            0            0            0            0            0 669bd: mov    %rbp,%r11
+         110            0            0            0            0            0            0 669c0: add    %rbp,%rdx
+         110            0            0            0            0            0            0 669c3: mov    $0x1,%ebp
+         110            0            0            0            0            0            0 669c8: cmp    %r9,%rdx
+         110          110            0            0            0            0            0 669cb: mov    0x8(%rsp),%rdx
+         110            0            0            0            0            0            0 669d0: ja     667b2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         110            0            0            0            0            0            0 669d6: mov    %r10d,%edx
+         110            0            0            0            0            0            0 669d9: shr    $0x2e,%rax
+         110            0            0            0            0            0            0 669dd: lea    (%r8,%rax,8),%r10
+         110            0            0            0            0            0            0 669e1: mov    $0x1,%r9d
+         110            0            0            0            0            0            0 669e7: shl    %cl,%r9
+         110          110            0            2            0            0            0 669ea: mov    0x20(%r10,%rdx,8),%r10
+         110          110          110            0            0            0            0 669ef: bt     %rcx,%r10
+         110            0            0            0            0            0            0 669f3: jb     667a2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           1            0            0            0            0            0            0 669f9: lea    0x20(%r8,%rax,8),%rax
+           1            0            0            0            0            0            0 669fe: cmp    %r11,%rsi
+           1            0            0            0            0            0            0 66a01: setne  %cl
+           1            1            0            0            0            0            0 66a04: test   %r9,(%rax)
+           1            0            0            0            0            0            0 66a07: je     667a2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           1            1            0            0            0            0            0 66a0d: and    0x24(%rsp),%cl
+           1            0            0            0            0            0            0 66a11: jne    667a2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           1            1            1            0            0            0            0 66a17: lock or %r9,(%rax,%rdx,8)
+           1            1            0            0            0            0            0 66a1c: testb  $0x10,0x10(%rsp)
+           1            0            0            0            0            0            0 66a21: jne    667a2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           1            0            0            0            0            0            0 66a27: inc    %edi
+           1            0            0            0            0            0            0 66a29: shl    $0x38,%rdi
+           1            0            0            0            0            0            0 66a2d: or     %rdi,%r11
+           1            1            0            0            0            0            0 66a30: cmpb   $0x0,0x15024(%rbx)
+           1            0            0            0            0            0            0 66a37: je     66d0e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66a3d: mov    %rbx,%rdi
+           0            0            0            0            0            0            0 66a40: mov    %r11,%rsi
+           0            0            0            0            0            0            0 66a43: call   411a0 <*Gcry::Heap#push_to_own_shard<Pointer(Gcry::BlockHeader)
+           0            0            0            0            0            0            0 66a48: jmp    667a2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,778   10,931,778            0            0            0            0            0 66a4d: mov    0x14(%r8),%ecx
+  10,931,778            0            0            0            0            0            0 66a51: test   $0x1,%cl
+  10,931,778            0            0            0            0            0            0 66a54: jne    6681e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,778   10,931,778            0            0            0            0            0 66a5a: mov    0x18(%r8),%r11d
+  10,931,778            0            0            0            0            0            0 66a5e: add    %r8,%r11
+  10,931,778            0            0            0            0            0            0 66a61: mov    %rsi,%rax
+  10,931,778            0            0            0            0            0            0 66a64: sub    %r11,%rax
+  10,931,778            0            0            0            0            0            0 66a67: jb     6681e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,778   10,931,778            0            0            0            0            0 66a6d: mov    0x8(%r8),%r9
+  10,931,778            0            0            0            0            0            0 66a71: add    %r8,%r9
+  10,931,778            0            0            0            0            0            0 66a74: cmp    %r9,%rsi
+  10,931,778            0            0            0            0            0            0 66a77: jae    6681e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,778            0   10,931,778            0            0            0            0 66a7d: mov    %ecx,0x10(%rsp)
+  10,931,778   10,931,778            0       10,693            0           10            0 66a81: mulq   0x2258(%rbx,%rdi,8)
+  10,931,778            0            0            0            0            0            0 66a89: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,778            0            0            0            0            0            0 66a8f: mov    %rax,%rcx
+  10,931,778            0            0            0            0            0            0 66a92: shr    $0x28,%rcx
+  10,931,778   10,931,778            0           24            0            9            0 66a96: mov    0x2118(%rbx,%rdi,8),%rdx
+  10,931,778            0            0            0            0            0            0 66a9e: mov    %rdx,%rbp
+  10,931,778            0            0            0            0            0            0 66aa1: imul   %rcx,%rbp
+  10,931,778            0            0            0            0            0            0 66aa5: add    %r11,%rbp
+  10,931,778            0            0            0            0            0            0 66aa8: mov    %rbp,%r11
+  10,931,778            0            0            0            0            0            0 66aab: add    %rbp,%rdx
+  10,931,778            0            0            0            0            0            0 66aae: mov    $0x1,%ebp
+  10,931,778            0            0            0            0            0            0 66ab3: cmp    %r9,%rdx
+  10,931,778   10,931,778            0            0            0            0            0 66ab6: mov    0x8(%rsp),%rdx
+  10,931,778            0            0            0            0            0            0 66abb: ja     66842 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,778            0            0            0            0            0            0 66ac1: mov    %r10d,%edx
+  10,931,778            0            0            0            0            0            0 66ac4: shr    $0x2e,%rax
+  10,931,778            0            0            0            0            0            0 66ac8: lea    (%r8,%rax,8),%r10
+  10,931,778            0            0            0            0            0            0 66acc: mov    $0x1,%r9d
+  10,931,778            0            0            0            0            0            0 66ad2: shl    %cl,%r9
+  10,931,778   10,931,778            0       34,824            0       15,773            0 66ad5: mov    0x20(%r10,%rdx,8),%r10
+  10,931,778   10,931,778   10,931,778            0       10,680            0            3 66ada: bt     %rcx,%r10
+  10,931,778            0            0            0            0            0            0 66ade: jb     66834 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,567            0            0            0            0            0            0 66ae4: lea    0x20(%r8,%rax,8),%rax
+  10,931,567            0            0            0            0            0            0 66ae9: cmp    %r11,%rsi
+  10,931,567            0            0            0            0            0            0 66aec: setne  %cl
+  10,931,567   10,931,567            0       32,745            0       23,717            0 66aef: test   %r9,(%rax)
+  10,931,567            0            0            0            0            0            0 66af2: je     66834 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,567   10,931,567            0            0            0            0            0 66af8: and    0x24(%rsp),%cl
+  10,931,567            0            0            0            0            0            0 66afc: jne    66834 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,567   10,931,567   10,931,567            0            0            0            0 66b02: lock or %r9,(%rax,%rdx,8)
+  10,931,567   10,931,567            0            0            0            0            0 66b07: testb  $0x10,0x10(%rsp)
+  10,931,567            0            0            0            0            0            0 66b0c: jne    66834 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,537            0            0            0            0            0            0 66b12: inc    %edi
+  10,931,537            0            0            0            0            0            0 66b14: shl    $0x38,%rdi
+  10,931,537            0            0            0            0            0            0 66b18: or     %rdi,%r11
+  10,931,537   10,931,537            0        9,657            0            0            0 66b1b: cmpb   $0x0,0x15024(%rbx)
+  10,931,537            0            0            0            0            0            0 66b22: je     66d6b <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66b28: mov    %rbx,%rdi
+           0            0            0            0            0            0            0 66b2b: mov    %r11,%rsi
+           0            0            0            0            0            0            0 66b2e: call   411a0 <*Gcry::Heap#push_to_own_shard<Pointer(Gcry::BlockHeader)
+           0            0            0            0            0            0            0 66b33: jmp    66834 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         362          362            0            0            0            0            0 66b38: mov    0x14(%r8),%ecx
+         362            0            0            0            0            0            0 66b3c: test   $0x1,%cl
+         362            0            0            0            0            0            0 66b3f: jne    668ae <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         362          362            0            0            0            0            0 66b45: mov    0x18(%r8),%r11d
+         362            0            0            0            0            0            0 66b49: add    %r8,%r11
+         362            0            0            0            0            0            0 66b4c: mov    %rsi,%rax
+         362            0            0            0            0            0            0 66b4f: sub    %r11,%rax
+         362            0            0            0            0            0            0 66b52: jb     668ae <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         362          362            0            0            0            0            0 66b58: mov    0x8(%r8),%r9
+         362            0            0            0            0            0            0 66b5c: add    %r8,%r9
+         362            0            0            0            0            0            0 66b5f: cmp    %r9,%rsi
+         362            0            0            0            0            0            0 66b62: jae    668ae <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         362            0          362            0            0            0            0 66b68: mov    %ecx,0x10(%rsp)
+         362          362            0           35            0           15            0 66b6c: mulq   0x2258(%rbx,%rdi,8)
+         362            0            0            0            0            0            0 66b74: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         362            0            0            0            0            0            0 66b7a: mov    %rax,%rcx
+         362            0            0            0            0            0            0 66b7d: shr    $0x28,%rcx
+         362          362            0           16            0            8            0 66b81: mov    0x2118(%rbx,%rdi,8),%rdx
+         362            0            0            0            0            0            0 66b89: mov    %rdx,%rbp
+         362            0            0            0            0            0            0 66b8c: imul   %rcx,%rbp
+         362            0            0            0            0            0            0 66b90: add    %r11,%rbp
+         362            0            0            0            0            0            0 66b93: mov    %rbp,%r11
+         362            0            0            0            0            0            0 66b96: add    %rbp,%rdx
+         362            0            0            0            0            0            0 66b99: mov    $0x1,%ebp
+         362            0            0            0            0            0            0 66b9e: cmp    %r9,%rdx
+         362          362            0            0            0            0            0 66ba1: mov    0x8(%rsp),%rdx
+         362            0            0            0            0            0            0 66ba6: ja     668d2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         362            0            0            0            0            0            0 66bac: mov    %r10d,%edx
+         362            0            0            0            0            0            0 66baf: shr    $0x2e,%rax
+         362            0            0            0            0            0            0 66bb3: lea    (%r8,%rax,8),%r10
+         362            0            0            0            0            0            0 66bb7: mov    $0x1,%r9d
+         362            0            0            0            0            0            0 66bbd: shl    %cl,%r9
+         362          362            0          108            0           40            0 66bc0: mov    0x20(%r10,%rdx,8),%r10
+         362          362          362            0            9            0            3 66bc5: bt     %rcx,%r10
+         362            0            0            0            0            0            0 66bc9: jb     668c4 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         254            0            0            0            0            0            0 66bcf: lea    0x20(%r8,%rax,8),%rax
+         254            0            0            0            0            0            0 66bd4: cmp    %r11,%rsi
+         254            0            0            0            0            0            0 66bd7: setne  %cl
+         254          254            0            1            0            0            0 66bda: test   %r9,(%rax)
+         254            0            0            0            0            0            0 66bdd: je     668c4 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         254          254            0            0            0            0            0 66be3: and    0x24(%rsp),%cl
+         254            0            0            0            0            0            0 66be7: jne    668c4 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         254          254          254            0            0            0            0 66bed: lock or %r9,(%rax,%rdx,8)
+         254          254            0            0            0            0            0 66bf2: testb  $0x10,0x10(%rsp)
+         254            0            0            0            0            0            0 66bf7: jne    668c4 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         126            0            0            0            0            0            0 66bfd: inc    %edi
+         126            0            0            0            0            0            0 66bff: shl    $0x38,%rdi
+         126            0            0            0            0            0            0 66c03: or     %rdi,%r11
+         126          126            0            0            0            0            0 66c06: cmpb   $0x0,0x15024(%rbx)
+         126            0            0            0            0            0            0 66c0d: je     66dc8 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66c13: mov    %rbx,%rdi
+           0            0            0            0            0            0            0 66c16: mov    %r11,%rsi
+           0            0            0            0            0            0            0 66c19: call   411a0 <*Gcry::Heap#push_to_own_shard<Pointer(Gcry::BlockHeader)
+           0            0            0            0            0            0            0 66c1e: jmp    668c4 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         259          259            0            0            0            0            0 66c23: mov    0x14(%r8),%ecx
+         259            0            0            0            0            0            0 66c27: test   $0x1,%cl
+         259            0            0            0            0            0            0 66c2a: jne    66942 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         259          259            0            0            0            0            0 66c30: mov    0x18(%r8),%r11d
+         259            0            0            0            0            0            0 66c34: add    %r8,%r11
+         259            0            0            0            0            0            0 66c37: mov    %rsi,%rax
+         259            0            0            0            0            0            0 66c3a: sub    %r11,%rax
+         259            0            0            0            0            0            0 66c3d: jb     66942 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         259          259            0            0            0            0            0 66c43: mov    0x8(%r8),%r9
+         259            0            0            0            0            0            0 66c47: add    %r8,%r9
+         259            0            0            0            0            0            0 66c4a: cmp    %r9,%rsi
+         259            0            0            0            0            0            0 66c4d: jae    66942 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         259            0          259            0            0            0            0 66c53: mov    %ecx,0x10(%rsp)
+         259          259            0            0            0            0            0 66c57: mulq   0x2258(%rbx,%rdi,8)
+         259            0            0            0            0            0            0 66c5f: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         259            0            0            0            0            0            0 66c65: mov    %rax,%rcx
+         259            0            0            0            0            0            0 66c68: shr    $0x28,%rcx
+         259          259            0            0            0            0            0 66c6c: mov    0x2118(%rbx,%rdi,8),%rdx
+         259            0            0            0            0            0            0 66c74: mov    %rdx,%rbp
+         259            0            0            0            0            0            0 66c77: imul   %rcx,%rbp
+         259            0            0            0            0            0            0 66c7b: add    %r11,%rbp
+         259            0            0            0            0            0            0 66c7e: mov    %rbp,%r11
+         259            0            0            0            0            0            0 66c81: add    %rbp,%rdx
+         259            0            0            0            0            0            0 66c84: mov    $0x1,%ebp
+         259            0            0            0            0            0            0 66c89: cmp    %r9,%rdx
+         259          259            0            0            0            0            0 66c8c: mov    0x8(%rsp),%rdx
+         259            0            0            0            0            0            0 66c91: ja     66712 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         259            0            0            0            0            0            0 66c97: mov    %r10d,%edx
+         259            0            0            0            0            0            0 66c9a: shr    $0x2e,%rax
+         259            0            0            0            0            0            0 66c9e: lea    (%r8,%rax,8),%r10
+         259            0            0            0            0            0            0 66ca2: mov    $0x1,%r9d
+         259            0            0            0            0            0            0 66ca8: shl    %cl,%r9
+         259          259            0           40            0           17            0 66cab: mov    0x20(%r10,%rdx,8),%r10
+         259          259          259            0            0            0            0 66cb0: bt     %rcx,%r10
+         259            0            0            0            0            0            0 66cb4: jb     66958 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          63            0            0            0            0            0            0 66cba: lea    0x20(%r8,%rax,8),%rax
+          63            0            0            0            0            0            0 66cbf: cmp    %r11,%rsi
+          63            0            0            0            0            0            0 66cc2: setne  %cl
+          63           63            0            2            0            2            0 66cc5: test   %r9,(%rax)
+          63            0            0            0            0            0            0 66cc8: je     66958 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          63           63            0            0            0            0            0 66cce: and    0x24(%rsp),%cl
+          63            0            0            0            0            0            0 66cd2: jne    66958 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          63           63           63            0            0            0            0 66cd8: lock or %r9,(%rax,%rdx,8)
+          63           63            0            0            0            0            0 66cdd: testb  $0x10,0x10(%rsp)
+          63            0            0            0            0            0            0 66ce2: jne    66958 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          27            0            0            0            0            0            0 66ce8: inc    %edi
+          27            0            0            0            0            0            0 66cea: shl    $0x38,%rdi
+          27            0            0            0            0            0            0 66cee: or     %rdi,%r11
+          27           27            0            0            0            0            0 66cf1: cmpb   $0x0,0x15024(%rbx)
+          27            0            0            0            0            0            0 66cf8: je     66e25 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66cfe: mov    %rbx,%rdi
+           0            0            0            0            0            0            0 66d01: mov    %r11,%rsi
+           0            0            0            0            0            0            0 66d04: call   411a0 <*Gcry::Heap#push_to_own_shard<Pointer(Gcry::BlockHeader)
+           0            0            0            0            0            0            0 66d09: jmp    66958 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           1            1            0            0            0            0            0 66d0e: mov    0x151c8(%rbx),%rdx
+           1            1            0            0            0            0            0 66d15: mov    0x14(%rdx),%eax
+           1            1            0            0            0            0            0 66d18: cmp    0x10(%rdx),%eax
+           1            0            0            0            0            0            0 66d1b: jl     66d4e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66d1d: mov    %r11,0x28(%rsp)
+           0            0            0            0            0            0            0 66d22: mov    0x18(%rdx),%rsi
+           0            0            0            0            0            0            0 66d26: test   %rsi,%rsi
+           0            0            0            0            0            0            0 66d29: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66d2f: add    %rsi,%rsi
+           0            0            0            0            0            0            0 66d32: mov    %rdx,0x10(%rsp)
+           0            0            0            0            0            0            0 66d37: mov    0x10(%rsp),%rdi
+           0            0            0            0            0            0            0 66d3c: call   20aa0 <*Gcry::MarkStack#grow<UInt64>:Nil>
+           0            0            0            0            0            0            0 66d41: mov    0x10(%rsp),%rdx
+           0            0            0            0            0            0            0 66d46: mov    0x14(%rdx),%eax
+           0            0            0            0            0            0            0 66d49: mov    0x28(%rsp),%r11
+           1            1            0            0            0            0            0 66d4e: mov    0x8(%rdx),%rcx
+           1            0            0            0            0            0            0 66d52: cltq
+           1            0            1            0            0            0            0 66d54: mov    %r11,(%rcx,%rax,8)
+           1            1            0            0            0            0            0 66d58: mov    0x14(%rdx),%eax
+           1            0            0            0            0            0            0 66d5b: inc    %eax
+           1            0            0            0            0            0            0 66d5d: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           1            0            1            0            0            0            0 66d63: mov    %eax,0x14(%rdx)
+           1            0            0            0            0            0            0 66d66: jmp    667a2 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,537   10,931,537            0       10,676            0            2            0 66d6b: mov    0x151c8(%rbx),%rdx
+  10,931,537   10,931,537            0        9,664            0            0            0 66d72: mov    0x14(%rdx),%eax
+  10,931,537   10,931,537            0            0            0            0            0 66d75: cmp    0x10(%rdx),%eax
+  10,931,537            0            0            0            0            0            0 66d78: jl     66dab <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66d7a: mov    %r11,0x28(%rsp)
+           0            0            0            0            0            0            0 66d7f: mov    0x18(%rdx),%rsi
+           0            0            0            0            0            0            0 66d83: test   %rsi,%rsi
+           0            0            0            0            0            0            0 66d86: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66d8c: add    %rsi,%rsi
+           0            0            0            0            0            0            0 66d8f: mov    %rdx,0x10(%rsp)
+           0            0            0            0            0            0            0 66d94: mov    0x10(%rsp),%rdi
+           0            0            0            0            0            0            0 66d99: call   20aa0 <*Gcry::MarkStack#grow<UInt64>:Nil>
+           0            0            0            0            0            0            0 66d9e: mov    0x10(%rsp),%rdx
+           0            0            0            0            0            0            0 66da3: mov    0x14(%rdx),%eax
+           0            0            0            0            0            0            0 66da6: mov    0x28(%rsp),%r11
+  10,931,537   10,931,537            0        9,664            0            0            0 66dab: mov    0x8(%rdx),%rcx
+  10,931,537            0            0            0            0            0            0 66daf: cltq
+  10,931,537            0   10,931,537            0      673,797            0            4 66db1: mov    %r11,(%rcx,%rax,8)
+  10,931,537   10,931,537            0            0            0            0            0 66db5: mov    0x14(%rdx),%eax
+  10,931,537            0            0            0            0            0            0 66db8: inc    %eax
+  10,931,537            0            0            0            0            0            0 66dba: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  10,931,537            0   10,931,537            0            0            0            0 66dc0: mov    %eax,0x14(%rdx)
+  10,931,537            0            0            0            0            0            0 66dc3: jmp    66834 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         126          126            0           11            0            1            0 66dc8: mov    0x151c8(%rbx),%rdx
+         126          126            0           13            0            2            0 66dcf: mov    0x14(%rdx),%eax
+         126          126            0            0            0            0            0 66dd2: cmp    0x10(%rdx),%eax
+         126            0            0            0            0            0            0 66dd5: jl     66e08 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66dd7: mov    %r11,0x28(%rsp)
+           0            0            0            0            0            0            0 66ddc: mov    0x18(%rdx),%rsi
+           0            0            0            0            0            0            0 66de0: test   %rsi,%rsi
+           0            0            0            0            0            0            0 66de3: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66de9: add    %rsi,%rsi
+           0            0            0            0            0            0            0 66dec: mov    %rdx,0x10(%rsp)
+           0            0            0            0            0            0            0 66df1: mov    0x10(%rsp),%rdi
+           0            0            0            0            0            0            0 66df6: call   20aa0 <*Gcry::MarkStack#grow<UInt64>:Nil>
+           0            0            0            0            0            0            0 66dfb: mov    0x10(%rsp),%rdx
+           0            0            0            0            0            0            0 66e00: mov    0x14(%rdx),%eax
+           0            0            0            0            0            0            0 66e03: mov    0x28(%rsp),%r11
+         126          126            0           49            0            2            0 66e08: mov    0x8(%rdx),%rcx
+         126            0            0            0            0            0            0 66e0c: cltq
+         126            0          126            0           31            0           12 66e0e: mov    %r11,(%rcx,%rax,8)
+         126          126            0            0            0            0            0 66e12: mov    0x14(%rdx),%eax
+         126            0            0            0            0            0            0 66e15: inc    %eax
+         126            0            0            0            0            0            0 66e17: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         126            0          126            0            0            0            0 66e1d: mov    %eax,0x14(%rdx)
+         126            0            0            0            0            0            0 66e20: jmp    668c4 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          27           27            0            0            0            0            0 66e25: mov    0x151c8(%rbx),%rdx
+          27           27            0            0            0            0            0 66e2c: mov    0x14(%rdx),%eax
+          27           27            0            0            0            0            0 66e2f: cmp    0x10(%rdx),%eax
+          27            0            0            0            0            0            0 66e32: jl     66e65 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66e34: mov    %r11,0x28(%rsp)
+           0            0            0            0            0            0            0 66e39: mov    0x18(%rdx),%rsi
+           0            0            0            0            0            0            0 66e3d: test   %rsi,%rsi
+           0            0            0            0            0            0            0 66e40: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66e46: add    %rsi,%rsi
+           0            0            0            0            0            0            0 66e49: mov    %rdx,0x10(%rsp)
+           0            0            0            0            0            0            0 66e4e: mov    0x10(%rsp),%rdi
+           0            0            0            0            0            0            0 66e53: call   20aa0 <*Gcry::MarkStack#grow<UInt64>:Nil>
+           0            0            0            0            0            0            0 66e58: mov    0x10(%rsp),%rdx
+           0            0            0            0            0            0            0 66e5d: mov    0x14(%rdx),%eax
+           0            0            0            0            0            0            0 66e60: mov    0x28(%rsp),%r11
+          27           27            0            3            0            0            0 66e65: mov    0x8(%rdx),%rcx
+          27            0            0            0            0            0            0 66e69: cltq
+          27            0           27            0            2            0            0 66e6b: mov    %r11,(%rcx,%rax,8)
+          27           27            0            0            0            0            0 66e6f: mov    0x14(%rdx),%eax
+          27            0            0            0            0            0            0 66e72: inc    %eax
+          27            0            0            0            0            0            0 66e74: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          27            0           27            0            0            0            0 66e7a: mov    %eax,0x14(%rdx)
+          27            0            0            0            0            0            0 66e7d: jmp    66958 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          96            0            0            0            0            0            0 66e82: xor    %r15d,%r15d
+          96            0            0            0            0            0            0 66e85: jmp    66e99 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66e87: nopw   0x0(%rax,%rax,1)
+          48            0            0            0            0            0            0 66e90: xor    %ebp,%ebp
+         185            0            0            0            0            0            0 66e92: add    %rbp,%r15
+         498            0            0            0            0            0            0 66e95: add    $0x8,%r12
+  21,864,365   21,864,365            0            6            0            3            0 66e99: cmp    0x70(%rsp),%r12
+  21,864,365            0            0            0            0            0            0 66e9e: jae    6705c <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         498          498            0           74            0           35            0 66ea4: mov    (%r12),%rsi
+         498            0            0            0            0            0            0 66ea8: cmp    %rdx,%rsi
+         498            0            0            0            0            0            0 66eab: jb     66e95 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         185          185            0            0            0            0            0 66ead: cmp    0x50(%rsp),%rsi
+         185            0            0            0            0            0            0 66eb2: jae    66e90 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         137            0            0            0            0            0            0 66eb4: mov    %rsi,%rax
+         137            0            0            0            0            0            0 66eb7: shr    $0x20,%rax
+         137            0            0            0            0            0            0 66ebb: movzwl %ax,%eax
+         137          137            0            0            0            0            0 66ebe: mov    0x48(%rsp),%rcx
+         137          137            0           10            0            0            0 66ec3: mov    (%rcx,%rax,8),%rax
+         137            0            0            0            0            0            0 66ec7: test   %rax,%rax
+         137            0            0            0            0            0            0 66eca: je     66f04 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         137            0            0            0            0            0            0 66ecc: mov    %rsi,%rdx
+         137          137            0            0            0            0            0 66ecf: mov    0x40(%rsp),%rcx
+         137            0            0            0            0            0            0 66ed4: shr    %cl,%rdx
+         137          137            0            0            0            0            0 66ed7: and    0x38(%rsp),%rdx
+         137            0            0            0            0            0            0 66edc: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         137          137            0           60            0           18            0 66ee2: mov    (%rax,%rdx,8),%r8
+         137            0            0            0            0            0            0 66ee6: test   %r8,%r8
+         137            0            0            0            0            0            0 66ee9: je     66f04 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         137          137            0          107            0           15            0 66eeb: mov    0x10(%r8),%edi
+         137            0            0            0            0            0            0 66eef: cmp    $0x28,%rdi
+         137            0            0            0            0            0            0 66ef3: setae  %al
+         137          137            0            0            0            0            0 66ef6: mov    0x1c(%r8),%r10d
+         137            0            0            0            0            0            0 66efa: test   %r10d,%r10d
+         137            0            0            0            0            0            0 66efd: sete   %cl
+         137            0            0            0            0            0            0 66f00: or     %al,%cl
+         137            0            0            0            0            0            0 66f02: je     66f24 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          12            0            0            0            0            0            0 66f04: mov    %rbx,%rdi
+          12            0            0            0            0            0            0 66f07: xor    %edx,%edx
+          12           12            0            0            0            0            0 66f09: mov    0x1c(%rsp),%ecx
+          12            0            0            0            0            0            0 66f0d: mov    $0x3,%r8d
+          12            0           12            0            0            0            0 66f13: call   40570 <*Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool
+          12            0            0            0            0            0            0 66f18: xor    %ebp,%ebp
+         137          137            0            0            0            0            0 66f1a: mov    0x8(%rsp),%rdx
+         137            0            0            0            0            0            0 66f1f: jmp    66e92 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         125          125            0            0            0            0            0 66f24: mov    0x14(%r8),%ecx
+         125            0            0            0            0            0            0 66f28: test   $0x1,%cl
+         125            0            0            0            0            0            0 66f2b: jne    66f04 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         125          125            0            0            0            0            0 66f2d: mov    0x18(%r8),%r11d
+         125            0            0            0            0            0            0 66f31: add    %r8,%r11
+         125            0            0            0            0            0            0 66f34: mov    %rsi,%rax
+         125            0            0            0            0            0            0 66f37: sub    %r11,%rax
+         125            0            0            0            0            0            0 66f3a: jb     66f04 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         125          125            0            0            0            0            0 66f3c: mov    0x8(%r8),%r9
+         125            0            0            0            0            0            0 66f40: add    %r8,%r9
+         125            0            0            0            0            0            0 66f43: cmp    %r9,%rsi
+         125            0            0            0            0            0            0 66f46: jae    66f04 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         125            0          125            0            0            0            0 66f48: mov    %ecx,0x30(%rsp)
+         125          125            0           10            0            6            0 66f4c: mulq   0x2258(%rbx,%rdi,8)
+         125            0            0            0            0            0            0 66f54: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         125            0            0            0            0            0            0 66f5a: mov    %rax,%rcx
+         125            0            0            0            0            0            0 66f5d: shr    $0x28,%rcx
+         125          125            0            0            0            0            0 66f61: mov    0x2118(%rbx,%rdi,8),%rdx
+         125            0            0            0            0            0            0 66f69: mov    %rdx,%rbp
+         125            0            0            0            0            0            0 66f6c: imul   %rcx,%rbp
+         125            0            0            0            0            0            0 66f70: add    %r11,%rbp
+         125            0            0            0            0            0            0 66f73: mov    %rbp,%r11
+         125            0            0            0            0            0            0 66f76: add    %rbp,%rdx
+         125            0            0            0            0            0            0 66f79: mov    $0x1,%ebp
+         125            0            0            0            0            0            0 66f7e: cmp    %r9,%rdx
+         125          125            0            0            0            0            0 66f81: mov    0x8(%rsp),%rdx
+         125            0            0            0            0            0            0 66f86: ja     66e92 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+         125            0            0            0            0            0            0 66f8c: mov    %r10d,%edx
+         125            0            0            0            0            0            0 66f8f: shr    $0x2e,%rax
+         125            0            0            0            0            0            0 66f93: lea    (%r8,%rax,8),%r10
+         125            0            0            0            0            0            0 66f97: mov    $0x1,%r9d
+         125            0            0            0            0            0            0 66f9d: shl    %cl,%r9
+         125          125            0           49            0           13            0 66fa0: mov    0x20(%r10,%rdx,8),%r10
+         125          125          125            0           10            0            1 66fa5: bt     %rcx,%r10
+         125            0            0            0            0            0            0 66fa9: jb     66f1a <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          39            0            0            0            0            0            0 66faf: lea    0x20(%r8,%rax,8),%rax
+          39            0            0            0            0            0            0 66fb4: cmp    %r11,%rsi
+          39            0            0            0            0            0            0 66fb7: setne  %cl
+          39           39            0            0            0            0            0 66fba: test   %r9,(%rax)
+          39            0            0            0            0            0            0 66fbd: je     66f1a <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          39           39            0            0            0            0            0 66fc3: and    0x24(%rsp),%cl
+          39            0            0            0            0            0            0 66fc7: jne    66f1a <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+          39           39           39            0            0            0            0 66fcd: lock or %r9,(%rax,%rdx,8)
+          39           39            0            0            0            0            0 66fd2: testb  $0x10,0x30(%rsp)
+          39            0            0            0            0            0            0 66fd7: jne    66f1a <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66fdd: inc    %edi
+           0            0            0            0            0            0            0 66fdf: shl    $0x38,%rdi
+           0            0            0            0            0            0            0 66fe3: or     %rdi,%r11
+           0            0            0            0            0            0            0 66fe6: cmpb   $0x0,0x15024(%rbx)
+           0            0            0            0            0            0            0 66fed: je     66fff <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66fef: mov    %rbx,%rdi
+           0            0            0            0            0            0            0 66ff2: mov    %r11,%rsi
+           0            0            0            0            0            0            0 66ff5: call   411a0 <*Gcry::Heap#push_to_own_shard<Pointer(Gcry::BlockHeader)
+           0            0            0            0            0            0            0 66ffa: jmp    66f1a <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 66fff: mov    0x151c8(%rbx),%rdx
+           0            0            0            0            0            0            0 67006: mov    0x14(%rdx),%eax
+           0            0            0            0            0            0            0 67009: cmp    0x10(%rdx),%eax
+           0            0            0            0            0            0            0 6700c: jl     6703f <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6700e: mov    %r11,0x10(%rsp)
+           0            0            0            0            0            0            0 67013: mov    0x18(%rdx),%rsi
+           0            0            0            0            0            0            0 67017: test   %rsi,%rsi
+           0            0            0            0            0            0            0 6701a: js     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 67020: add    %rsi,%rsi
+           0            0            0            0            0            0            0 67023: mov    %rdx,0x30(%rsp)
+           0            0            0            0            0            0            0 67028: mov    0x30(%rsp),%rdi
+           0            0            0            0            0            0            0 6702d: call   20aa0 <*Gcry::MarkStack#grow<UInt64>:Nil>
+           0            0            0            0            0            0            0 67032: mov    0x30(%rsp),%rdx
+           0            0            0            0            0            0            0 67037: mov    0x14(%rdx),%eax
+           0            0            0            0            0            0            0 6703a: mov    0x10(%rsp),%r11
+           0            0            0            0            0            0            0 6703f: mov    0x8(%rdx),%rcx
+           0            0            0            0            0            0            0 67043: cltq
+           0            0            0            0            0            0            0 67045: mov    %r11,(%rcx,%rax,8)
+           0            0            0            0            0            0            0 67049: mov    0x14(%rdx),%eax
+           0            0            0            0            0            0            0 6704c: inc    %eax
+           0            0            0            0            0            0            0 6704e: jo     671aa <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 67054: mov    %eax,0x14(%rdx)
+           0            0            0            0            0            0            0 67057: jmp    66f1a <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+  21,863,867   21,863,867            0            0            0            0            0 6705c: mov    0x68(%rsp),%rax
+  21,863,867   21,863,867            0            0            0            0            0 67061: add    0x78(%rsp),%rax
+  21,863,867            0   21,863,867            0            0            0            0 67066: add    %r15,0x60(%rsp)
+  21,863,867   21,863,867            0            0            0            0            0 6706b: mov    0x5c(%rsp),%r10d
+  21,863,867            0            0            0            0            0            0 67070: cmp    %r10d,%r13d
+  21,863,867            0            0            0            0            0            0 67073: movabs $0xffffffffffffff,%r15
+  21,863,867            0            0            0            0            0            0 6707d: jl     665a9 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+      21,371            0            0            0            0            0            0 67083: jmp    67140 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 67088: movq   $0x0,0x60(%rsp)
+           0            0            0            0            0            0            0 67091: xor    %eax,%eax
+           0            0            0            0            0            0            0 67093: cmpb   $0x0,0x15024(%rbx)
+           0            0            0            0            0            0            0 6709a: jne    67149 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 670a0: jmp    67188 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 670a5: mov    %r15,%rbp
+           0            0            0            0            0            0            0 670a8: mov    %r10d,%r15d
+           0            0            0            0            0            0            0 670ab: movq   $0x0,0x60(%rsp)
+           0            0            0            0            0            0            0 670b4: mov    $0x100,%r12d
+           0            0            0            0            0            0            0 670ba: xor    %r13d,%r13d
+           0            0            0            0            0            0            0 670bd: jmp    670d7 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 670bf: nop
+           0            0            0            0            0            0            0 670c0: prefetcht0 (%rax)
+           0            0            0            0            0            0            0 670c3: mov    (%r14,%r13,8),%rsi
+           0            0            0            0            0            0            0 670c7: inc    %r13
+           0            0            0            0            0            0            0 670ca: mov    %rbx,%rdi
+           0            0            0            0            0            0            0 670cd: call   671b0 <*Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader), Nil>
+           0            0            0            0            0            0            0 670d2: cmp    %r15,%r13
+           0            0            0            0            0            0            0 670d5: je     6713e <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 670d7: lea    0x10(%r13),%rax
+           0            0            0            0            0            0            0 670db: cmp    %r15,%rax
+           0            0            0            0            0            0            0 670de: jae    670c3 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 670e0: mov    0x80(%r14,%r13,8),%rcx
+           0            0            0            0            0            0            0 670e8: mov    %rcx,%rax
+           0            0            0            0            0            0            0 670eb: and    %rbp,%rax
+           0            0            0            0            0            0            0 670ee: prefetcht0 (%rax)
+           0            0            0            0            0            0            0 670f1: shr    $0x38,%rcx
+           0            0            0            0            0            0            0 670f5: cmp    $0xff,%rcx
+           0            0            0            0            0            0            0 670fc: je     670c0 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 670fe: test   %ecx,%ecx
+           0            0            0            0            0            0            0 67100: je     670c0 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 67102: mov    $0xffffffff,%edx
+           0            0            0            0            0            0            0 67107: add    %edx,%ecx
+           0            0            0            0            0            0            0 67109: mov    0x2118(%rbx,%rcx,8),%rcx
+           0            0            0            0            0            0            0 67111: cmp    $0x100,%rcx
+           0            0            0            0            0            0            0 67118: cmovae %r12,%rcx
+           0            0            0            0            0            0            0 6711c: add    %rax,%rcx
+           0            0            0            0            0            0            0 6711f: or     $0x3f,%rax
+           0            0            0            0            0            0            0 67123: inc    %rax
+           0            0            0            0            0            0            0 67126: cmp    %rcx,%rax
+           0            0            0            0            0            0            0 67129: jae    670c3 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6712b: nopl   0x0(%rax,%rax,1)
+           0            0            0            0            0            0            0 67130: prefetcht0 (%rax)
+           0            0            0            0            0            0            0 67133: add    $0x40,%rax
+           0            0            0            0            0            0            0 67137: cmp    %rcx,%rax
+           0            0            0            0            0            0            0 6713a: jb     67130 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6713c: jmp    670c3 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 6713e: xor    %eax,%eax
+      21,371       21,371            0        1,018            0            0            0 67140: cmpb   $0x0,0x15024(%rbx)
+      21,371            0            0            0            0            0            0 67147: je     67188 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           0            0            0            0            0            0            0 67149: lea    0x80(%rsp),%rdi
+           0            0            0            0            0            0            0 67151: mov    %rax,%r14
+           0            0            0            0            0            0            0 67154: call   3e100 <*Gcry::Heap::mark_worker>
+           0            0            0            0            0            0            0 67159: mov    0x80(%rsp),%rax
+           0            0            0            0            0            0            0 67161: mov    (%rax),%eax
+           0            0            0            0            0            0            0 67163: xor    %ecx,%ecx
+           0            0            0            0            0            0            0 67165: test   %eax,%eax
+           0            0            0            0            0            0            0 67167: cmovg  %eax,%ecx
+           0            0            0            0            0            0            0 6716a: shl    $0x4,%ecx
+           0            0            0            0            0            0            0 6716d: movslq %ecx,%rax
+           0            0            0            0            0            0            0 67170: add    %r14,0x27d8(%rbx,%rax,8)
+           0            0            0            0            0            0            0 67178: jmp    67198 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+           3            3            0            0            0            0            0 6717a: mov    0x68(%rsp),%rax
+           3            3            0            0            0            0            0 6717f: cmpb   $0x0,0x15024(%rbx)
+           3            0            0            0            0            0            0 67186: jne    67149 <*Gcry::Heap#scan_batch_prefetched<Pointer(Pointer(Void))
+      21,374            0       21,374            0       21,367            0            3 67188: add    %rax,0x3798(%rbx)
+      21,374       21,374            0            0            0            0            0 6718f: mov    0x60(%rsp),%rax
+      21,374            0       21,374            0       21,342            0            0 67194: add    %rax,0x28(%rbx)
+      21,374            0            0            0            0            0            0 67198: add    $0x88,%rsp
+      21,374       21,374            0          713            0            2            0 6719f: pop    %rbx
+      21,374       21,374            0            0            0            0            0 671a0: pop    %r12
+      21,374       21,374            0            0            0            0            0 671a2: pop    %r13
+      21,374       21,374            0           26            0            0            0 671a4: pop    %r14
+      21,374       21,374            0            0            0            0            0 671a6: pop    %r15
+      21,374       21,374            0       20,628            0            7            0 671a8: pop    %rbp
+      21,374       21,374            0            0            0            0            0 671a9: ret
+           0            0            0            0            0            0            0 671aa: call   1b950 <__crystal_raise_overflow>
+           0            0            0            0            0            0            0 671af: nop
+           0            0            0            0            0            0            0 671b0: push   %rbp
+           0            0            0            0            0            0            0 671b1: push   %r15
+           0            0            0            0            0            0            0 671b3: push   %r14
+           0            0            0            0            0            0            0 671b5: push   %r13
+           0            0            0            0            0            0            0 671b7: push   %r12

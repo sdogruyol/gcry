@@ -1,0 +1,59 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index d7e5e021..cc9eb930 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -705,21 +705,40 @@ module Gcry
+       # addresses, so a payload of under three words never forms a pointer
+       # before `p`.
+       quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
+-      while p < quad_end
+-        w = p[0]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[1]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[2]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[3]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        p += 4
+-      end
+-      while p < finish
+-        w = p.value
++      while true
++        # 0 is below any heap address, so a quad loop that does not run
++        # leaves `w` under `lo`.
++        w = 0_u64
++        while p < quad_end
++          w = p[0]
++          break if w >= lo
++          w = p[1]
++          if w >= lo
++            p += 1
++            break
++          end
++          w = p[2]
++          if w >= lo
++            p += 2
++            break
++          end
++          w = p[3]
++          if w >= lo
++            p += 3
++            break
++          end
++          p += 4
++        end
++        if w < lo
++          while true
++            return hits if p >= finish
++            w = p.value
++            break if w >= lo
++            p += 1
++          end
++        end
+         p += 1
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
++        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask)
+       end
+       hits
+     end

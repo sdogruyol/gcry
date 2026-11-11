@@ -1,0 +1,536 @@
+DBG burst thread stack base=0x70ac8e7fe000 bottom=0x70ac8effe000
+DBG big stack seed user=0x70ac7fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffc317dc000 bottom=0x7ffc31fda000 sp=0x7ffc31fd7d88 entry_sp=0x7ffc31fd8cf8 collections=3
+DBG   holder slot=0x7ffc31fd7c60 below_bottom=9120 above_sp=-296 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffc31fd7e98 below_bottom=8552 above_sp=272 above_entry_sp=-3680 value=user+0
+DBG   holder slot=0x7ffc31fd7f30 below_bottom=8400 above_sp=424 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffc31fd8848 below_bottom=6072 above_sp=2752 above_entry_sp=-1200 value=user+2181184
+DBG   holder slot=0x7ffc31fd8858 below_bottom=6056 above_sp=2768 above_entry_sp=-1184 value=user+2181184
+DBG   holders in stack window: 5
+DBG   code? slot=entry-3952 value=0x61c7dd48d9dc
+DBG   code? slot=entry-3904 value=0x61c7dd462a5c
+DBG   code? slot=entry-3896 value=0x61c8195b0b40
+DBG   code? slot=entry-3856 value=0x61c7dd5e4fbc
+DBG   code? slot=entry-3784 value=0x61c7dd5e4f1c
+DBG   code? slot=entry-3712 value=0x61c7dd5e9c7c
+DBG   code? slot=entry-3688 value=0x61c7dd5e4e6c
+DBG   code? slot=entry-3656 value=0x61c8195b0b40
+DBG   code? slot=entry-3576 value=0x61c7dd5e9c70
+DBG   code? slot=entry-3504 value=0x61c7dd48a146
+DBG   code? slot=entry-2688 value=0x61c8195cca20
+DBG   code? slot=entry-2664 value=0x61c8195b0b40
+DBG   code? slot=entry-2536 value=0x61c8195b0b40
+DBG   code? slot=entry-2464 value=0x61c8195b0b40
+DBG   code? slot=entry-2320 value=0x61c7dd4f2d73
+DBG   code? slot=entry-2200 value=0x61c8195b32c8
+DBG   code? slot=entry-2096 value=0x61c7dd53cb54
+DBG   code? slot=entry-2016 value=0x61c7dd53c88f
+DBG   code? slot=entry-1808 value=0x61c7dd6297f8
+DBG   code? slot=entry-1680 value=0x61c7dd6297f8
+DBG   code? slot=entry-1664 value=0x61c7dd489055
+DBG   code? slot=entry-1608 value=0x61c8195b0b40
+DBG   code? slot=entry-1560 value=0x61c8195b0b40
+DBG   code? slot=entry-1480 value=0x61c8195b0b40
+DBG   code? slot=entry-1440 value=0x61c7dd461de0
+DBG   code? slot=entry-1400 value=0x61c8000001e9
+DBG   code? slot=entry-1360 value=0x61c8195b0b40
+DBG   code? slot=entry-1352 value=0x61c8195b0bfe
+DBG   code? slot=entry-1344 value=0x61c7dd476cb4
+DBG   code? slot=entry-1320 value=0x61c8195b0b40
+DBG   code? slot=entry-1296 value=0x61c7dd47cdf4
+DBG   code? slot=entry-1256 value=0x61c7dd5e4a90
+DBG   code? slot=entry-1136 value=0x61c7dd4e2b03
+DBG   code? slot=entry-1056 value=0x61c7dd45da3b
+DBG   code? slot=entry-496 value=0x61c7dd3fe930
+DBG   code? slot=entry-472 value=0x61c7dd3fe930
+DBG   code? slot=entry-464 value=0x61c8195c6150
+DBG   code? slot=entry-272 value=0x61c8195b0b40
+DBG   code? slot=entry-232 value=0x61c7dd3fe930
+DBG   code? slot=entry+0 value=0x61c7dd45be6c
+DBG   code? slot=entry+24 value=0x61c8195b0b40
+DBG   code? slot=entry+32 value=0x61c7dd4bc4ff
+DBG   code? slot=entry+56 value=0x61c8195b0b40
+DBG   code? slot=entry+80 value=0x61c7dd3fcca6
+DBG   code? slot=entry+112 value=0x61c7dd5735a6
+DBG   code? slot=entry+128 value=0x61c7dd3f04b5
+DBG   code? slot=entry+184 value=0x61c8195c5ad8
+DBG   code? slot=entry+208 value=0x61c7dd4c0e08
+DBG   code? slot=entry+224 value=0x61c8195b0b40
+DBG   code? slot=entry+240 value=0x61c7dd4c4541
+DBG   code? slot=entry+248 value=0x61c8195c5ad8
+DBG   word entry-1264 = 0x70ac9737a000
+DBG   word entry-1256 = 0x61c7dd5e4a90
+DBG   word entry-1248 = 0x1d3000001d3
+DBG   word entry-1240 = 0x70ac9739a730
+DBG   word entry-1232 = 0x70ac9749dc76
+DBG   word entry-1224 = 0x70ac9739a730
+DBG   word entry-1216 = 0x70ac9749dc76
+DBG   word entry-1208 = 0x70ac00000001
+DBG   word entry-1200 = 0x70ac7fe13880
+DBG   word entry-1192 = 0x1
+DBG   word entry-1184 = 0x70ac7fe13880
+DBG   word entry-1176 = 0
+DBG   word entry-1168 = 0x70ac974dc000
+DBG   word entry-1160 = 0x7ffc31fd8880
+DBG   word entry-1152 = 0x70ac970f5a0d
+DBG   word entry-1144 = 0x7ffc31fd9400
+DBG   word entry-1136 = 0x61c7dd4e2b03
+DBG   word entry-1128 = 0x358c31b8
+DBG big stack seed user=0x70ac7fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffc317dc000 bottom=0x7ffc31fda000 sp=0x7ffc31fd7d88 entry_sp=0x7ffc31fd8cf8 collections=4
+DBG   holder slot=0x7ffc31fd7c60 below_bottom=9120 above_sp=-296 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffc31fd7e98 below_bottom=8552 above_sp=272 above_entry_sp=-3680 value=user+0
+DBG   holder slot=0x7ffc31fd7f30 below_bottom=8400 above_sp=424 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffc31fd8848 below_bottom=6072 above_sp=2752 above_entry_sp=-1200 value=user+2181322
+DBG   holder slot=0x7ffc31fd8858 below_bottom=6056 above_sp=2768 above_entry_sp=-1184 value=user+2181322
+DBG   holders in stack window: 5
+DBG   code? slot=entry-3952 value=0x61c7dd48d9dc
+DBG   code? slot=entry-3904 value=0x61c7dd462a5c
+DBG   code? slot=entry-3896 value=0x61c8195b0b40
+DBG   code? slot=entry-3856 value=0x61c7dd5e4fbc
+DBG   code? slot=entry-3784 value=0x61c7dd5e4f1c
+DBG   code? slot=entry-3712 value=0x61c7dd5e9c7c
+DBG   code? slot=entry-3688 value=0x61c7dd5e4e6c
+DBG   code? slot=entry-3656 value=0x61c8195b0b40
+DBG   code? slot=entry-3576 value=0x61c7dd5e9c70
+DBG   code? slot=entry-3504 value=0x61c7dd48a146
+DBG   code? slot=entry-2688 value=0x61c8195cca20
+DBG   code? slot=entry-2664 value=0x61c8195b0b40
+DBG   code? slot=entry-2536 value=0x61c8195b0b40
+DBG   code? slot=entry-2464 value=0x61c8195b0b40
+DBG   code? slot=entry-2320 value=0x61c7dd4f2d73
+DBG   code? slot=entry-2200 value=0x61c8195b32c8
+DBG   code? slot=entry-2096 value=0x61c7dd53cb54
+DBG   code? slot=entry-2016 value=0x61c7dd53c88f
+DBG   code? slot=entry-1808 value=0x61c7dd6297f8
+DBG   code? slot=entry-1680 value=0x61c7dd6297f8
+DBG   code? slot=entry-1664 value=0x61c7dd489055
+DBG   code? slot=entry-1608 value=0x61c8195b0b40
+DBG   code? slot=entry-1560 value=0x61c8195b0b40
+DBG   code? slot=entry-1480 value=0x61c8195b0b40
+DBG   code? slot=entry-1440 value=0x61c7dd461de0
+DBG   code? slot=entry-1400 value=0x61c8000001e9
+DBG   code? slot=entry-1360 value=0x61c8195b0b40
+DBG   code? slot=entry-1352 value=0x61c8195b0bfe
+DBG   code? slot=entry-1344 value=0x61c7dd476cb4
+DBG   code? slot=entry-1320 value=0x61c8195b0b40
+DBG   code? slot=entry-1296 value=0x61c7dd47cdf4
+DBG   code? slot=entry-1256 value=0x61c7dd5e4a90
+DBG   code? slot=entry-1136 value=0x61c7dd4e2b03
+DBG   code? slot=entry-1056 value=0x61c7dd45da3b
+DBG   code? slot=entry-496 value=0x61c7dd3fe930
+DBG   code? slot=entry-472 value=0x61c7dd3fe930
+DBG   code? slot=entry-464 value=0x61c8195c6150
+DBG   code? slot=entry-272 value=0x61c8195b0b40
+DBG   code? slot=entry-232 value=0x61c7dd3fe930
+DBG   code? slot=entry+0 value=0x61c7dd45be6c
+DBG   code? slot=entry+24 value=0x61c8195b0b40
+DBG   code? slot=entry+32 value=0x61c7dd4bc4ff
+DBG   code? slot=entry+56 value=0x61c8195b0b40
+DBG   code? slot=entry+80 value=0x61c7dd3fcca6
+DBG   code? slot=entry+128 value=0x61c7dd3f04b5
+DBG   code? slot=entry+184 value=0x61c8195c5ad8
+DBG   code? slot=entry+208 value=0x61c7dd4c0e08
+DBG   code? slot=entry+224 value=0x61c8195b0b40
+DBG   code? slot=entry+240 value=0x61c7dd4c4541
+DBG   code? slot=entry+248 value=0x61c8195c5ad8
+DBG   word entry-1264 = 0x70ac9737a000
+DBG   word entry-1256 = 0x61c7dd5e4a90
+DBG   word entry-1248 = 0x1d3000001d3
+DBG   word entry-1240 = 0x70ac9739a730
+DBG   word entry-1232 = 0x70ac9749dc76
+DBG   word entry-1224 = 0x70ac9739a730
+DBG   word entry-1216 = 0x70ac9749dc76
+DBG   word entry-1208 = 0x70ac00000001
+DBG   word entry-1200 = 0x70ac7fe1390a
+DBG   word entry-1192 = 0x1
+DBG   word entry-1184 = 0x70ac7fe1390a
+DBG   word entry-1176 = 0
+DBG   word entry-1168 = 0x70ac974dc000
+DBG   word entry-1160 = 0x7ffc31fd8880
+DBG   word entry-1152 = 0x70ac970f5a0d
+DBG   word entry-1144 = 0x7ffc31fd9400
+DBG   word entry-1136 = 0x61c7dd4e2b03
+DBG   word entry-1128 = 0x39af4697
+DBG big stack seed user=0x70ac7fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffc317dc000 bottom=0x7ffc31fda000 sp=0x7ffc31fd7d88 entry_sp=0x7ffc31fd8cf8 collections=5
+DBG   holder slot=0x7ffc31fd7c60 below_bottom=9120 above_sp=-296 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffc31fd7e98 below_bottom=8552 above_sp=272 above_entry_sp=-3680 value=user+0
+DBG   holder slot=0x7ffc31fd7f30 below_bottom=8400 above_sp=424 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffc31fd8848 below_bottom=6072 above_sp=2752 above_entry_sp=-1200 value=user+2181466
+DBG   holder slot=0x7ffc31fd8858 below_bottom=6056 above_sp=2768 above_entry_sp=-1184 value=user+2181466
+DBG   holders in stack window: 5
+DBG   code? slot=entry-3952 value=0x61c7dd48d9dc
+DBG   code? slot=entry-3904 value=0x61c7dd462a5c
+DBG   code? slot=entry-3896 value=0x61c8195b0b40
+DBG   code? slot=entry-3856 value=0x61c7dd5e4fbc
+DBG   code? slot=entry-3784 value=0x61c7dd5e4f1c
+DBG   code? slot=entry-3712 value=0x61c7dd5e9c7c
+DBG   code? slot=entry-3688 value=0x61c7dd5e4e6c
+DBG   code? slot=entry-3656 value=0x61c8195b0b40
+DBG   code? slot=entry-3576 value=0x61c7dd5e9c70
+DBG   code? slot=entry-3504 value=0x61c7dd48a146
+DBG   code? slot=entry-2688 value=0x61c8195cca20
+DBG   code? slot=entry-2664 value=0x61c8195b0b40
+DBG   code? slot=entry-2536 value=0x61c8195b0b40
+DBG   code? slot=entry-2464 value=0x61c8195b0b40
+DBG   code? slot=entry-2320 value=0x61c7dd4f2d73
+DBG   code? slot=entry-2200 value=0x61c8195b32c8
+DBG   code? slot=entry-2096 value=0x61c7dd53cb54
+DBG   code? slot=entry-2016 value=0x61c7dd53c88f
+DBG   code? slot=entry-1808 value=0x61c7dd6297f8
+DBG   code? slot=entry-1680 value=0x61c7dd6297f8
+DBG   code? slot=entry-1664 value=0x61c7dd489055
+DBG   code? slot=entry-1608 value=0x61c8195b0b40
+DBG   code? slot=entry-1560 value=0x61c8195b0b40
+DBG   code? slot=entry-1480 value=0x61c8195b0b40
+DBG   code? slot=entry-1440 value=0x61c7dd461de0
+DBG   code? slot=entry-1400 value=0x61c8000001e9
+DBG   code? slot=entry-1360 value=0x61c8195b0b40
+DBG   code? slot=entry-1352 value=0x61c8195b0bfe
+DBG   code? slot=entry-1344 value=0x61c7dd476cb4
+DBG   code? slot=entry-1320 value=0x61c8195b0b40
+DBG   code? slot=entry-1296 value=0x61c7dd47cdf4
+DBG   code? slot=entry-1256 value=0x61c7dd5e4a90
+DBG   code? slot=entry-1136 value=0x61c7dd4e2b03
+DBG   code? slot=entry-1056 value=0x61c7dd45da3b
+DBG   code? slot=entry-496 value=0x61c7dd3fe930
+DBG   code? slot=entry-472 value=0x61c7dd3fe930
+DBG   code? slot=entry-464 value=0x61c8195c6150
+DBG   code? slot=entry-272 value=0x61c8195b0b40
+DBG   code? slot=entry-232 value=0x61c7dd3fe930
+DBG   code? slot=entry+0 value=0x61c7dd45be6c
+DBG   code? slot=entry+24 value=0x61c8195b0b40
+DBG   code? slot=entry+32 value=0x61c7dd4bc4ff
+DBG   code? slot=entry+56 value=0x61c8195b0b40
+DBG   code? slot=entry+80 value=0x61c7dd3fcca6
+DBG   code? slot=entry+128 value=0x61c7dd3f04b5
+DBG   code? slot=entry+184 value=0x61c8195c5ad8
+DBG   code? slot=entry+208 value=0x61c7dd4c0e08
+DBG   code? slot=entry+224 value=0x61c8195b0b40
+DBG   code? slot=entry+240 value=0x61c7dd4c4541
+DBG   code? slot=entry+248 value=0x61c8195c5ad8
+DBG   word entry-1264 = 0x70ac9737a000
+DBG   word entry-1256 = 0x61c7dd5e4a90
+DBG   word entry-1248 = 0x1d3000001d3
+DBG   word entry-1240 = 0x70ac9739a730
+DBG   word entry-1232 = 0x70ac9749dc76
+DBG   word entry-1224 = 0x70ac9739a730
+DBG   word entry-1216 = 0x70ac9749dc76
+DBG   word entry-1208 = 0x70ac00000001
+DBG   word entry-1200 = 0x70ac7fe1399a
+DBG   word entry-1192 = 0x1
+DBG   word entry-1184 = 0x70ac7fe1399a
+DBG   word entry-1176 = 0
+DBG   word entry-1168 = 0x70ac974dc000
+DBG   word entry-1160 = 0x7ffc31fd8880
+DBG   word entry-1152 = 0x70ac970f5a0d
+DBG   word entry-1144 = 0x7ffc31fd9400
+DBG   word entry-1136 = 0x61c7dd4e2b03
+DBG   word entry-1128 = 0x2546fcb
+DBG big stack seed user=0x70ac7fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffc317dc000 bottom=0x7ffc31fda000 sp=0x7ffc31fd7d88 entry_sp=0x7ffc31fd8cf8 collections=6
+DBG   holder slot=0x7ffc31fd7c60 below_bottom=9120 above_sp=-296 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffc31fd7e98 below_bottom=8552 above_sp=272 above_entry_sp=-3680 value=user+0
+DBG   holder slot=0x7ffc31fd7f30 below_bottom=8400 above_sp=424 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffc31fd8848 below_bottom=6072 above_sp=2752 above_entry_sp=-1200 value=user+2181614
+DBG   holder slot=0x7ffc31fd8858 below_bottom=6056 above_sp=2768 above_entry_sp=-1184 value=user+2181614
+DBG   holders in stack window: 5
+DBG   code? slot=entry-3952 value=0x61c7dd48d9dc
+DBG   code? slot=entry-3904 value=0x61c7dd462a5c
+DBG   code? slot=entry-3896 value=0x61c8195b0b40
+DBG   code? slot=entry-3856 value=0x61c7dd5e4fbc
+DBG   code? slot=entry-3784 value=0x61c7dd5e4f1c
+DBG   code? slot=entry-3712 value=0x61c7dd5e9c7c
+DBG   code? slot=entry-3688 value=0x61c7dd5e4e6c
+DBG   code? slot=entry-3656 value=0x61c8195b0b40
+DBG   code? slot=entry-3576 value=0x61c7dd5e9c70
+DBG   code? slot=entry-3504 value=0x61c7dd48a146
+DBG   code? slot=entry-2688 value=0x61c8195cca20
+DBG   code? slot=entry-2664 value=0x61c8195b0b40
+DBG   code? slot=entry-2536 value=0x61c8195b0b40
+DBG   code? slot=entry-2464 value=0x61c8195b0b40
+DBG   code? slot=entry-2320 value=0x61c7dd4f2d73
+DBG   code? slot=entry-2200 value=0x61c8195b32c8
+DBG   code? slot=entry-2096 value=0x61c7dd53cb54
+DBG   code? slot=entry-2016 value=0x61c7dd53c88f
+DBG   code? slot=entry-1808 value=0x61c7dd6297f8
+DBG   code? slot=entry-1680 value=0x61c7dd6297f8
+DBG   code? slot=entry-1664 value=0x61c7dd489055
+DBG   code? slot=entry-1608 value=0x61c8195b0b40
+DBG   code? slot=entry-1560 value=0x61c8195b0b40
+DBG   code? slot=entry-1480 value=0x61c8195b0b40
+DBG   code? slot=entry-1440 value=0x61c7dd461de0
+DBG   code? slot=entry-1400 value=0x61c8000001e9
+DBG   code? slot=entry-1360 value=0x61c8195b0b40
+DBG   code? slot=entry-1352 value=0x61c8195b0bfe
+DBG   code? slot=entry-1344 value=0x61c7dd476cb4
+DBG   code? slot=entry-1320 value=0x61c8195b0b40
+DBG   code? slot=entry-1296 value=0x61c7dd47cdf4
+DBG   code? slot=entry-1256 value=0x61c7dd5e4a90
+DBG   code? slot=entry-1136 value=0x61c7dd4e2b03
+DBG   code? slot=entry-1056 value=0x61c7dd45da3b
+DBG   code? slot=entry-496 value=0x61c7dd3fe930
+DBG   code? slot=entry-472 value=0x61c7dd3fe930
+DBG   code? slot=entry-464 value=0x61c8195c6150
+DBG   code? slot=entry-272 value=0x61c8195b0b40
+DBG   code? slot=entry-232 value=0x61c7dd3fe930
+DBG   code? slot=entry+0 value=0x61c7dd45be6c
+DBG   code? slot=entry+24 value=0x61c8195b0b40
+DBG   code? slot=entry+32 value=0x61c7dd4bc4ff
+DBG   code? slot=entry+56 value=0x61c8195b0b40
+DBG   code? slot=entry+80 value=0x61c7dd3fcca6
+DBG   code? slot=entry+128 value=0x61c7dd3f04b5
+DBG   code? slot=entry+184 value=0x61c8195c5ad8
+DBG   code? slot=entry+208 value=0x61c7dd4c0e08
+DBG   code? slot=entry+224 value=0x61c8195b0b40
+DBG   code? slot=entry+240 value=0x61c7dd4c4541
+DBG   code? slot=entry+248 value=0x61c8195c5ad8
+DBG   word entry-1264 = 0x70ac9737a000
+DBG   word entry-1256 = 0x61c7dd5e4a90
+DBG   word entry-1248 = 0x1d3000001d3
+DBG   word entry-1240 = 0x70ac9739a730
+DBG   word entry-1232 = 0x70ac9749dc76
+DBG   word entry-1224 = 0x70ac9739a730
+DBG   word entry-1216 = 0x70ac9749dc76
+DBG   word entry-1208 = 0x70ac00000001
+DBG   word entry-1200 = 0x70ac7fe13a2e
+DBG   word entry-1192 = 0x1
+DBG   word entry-1184 = 0x70ac7fe13a2e
+DBG   word entry-1176 = 0
+DBG   word entry-1168 = 0x70ac974dc000
+DBG   word entry-1160 = 0x7ffc31fd8880
+DBG   word entry-1152 = 0x70ac970f5a0d
+DBG   word entry-1144 = 0x7ffc31fd9400
+DBG   word entry-1136 = 0x61c7dd4e2b03
+DBG   word entry-1128 = 0x6c676d9
+DBG big stack seed user=0x70ac7fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffc317dc000 bottom=0x7ffc31fda000 sp=0x7ffc31fd7d88 entry_sp=0x7ffc31fd8cf8 collections=7
+DBG   holder slot=0x7ffc31fd7c60 below_bottom=9120 above_sp=-296 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffc31fd7e98 below_bottom=8552 above_sp=272 above_entry_sp=-3680 value=user+0
+DBG   holder slot=0x7ffc31fd7f30 below_bottom=8400 above_sp=424 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffc31fd8848 below_bottom=6072 above_sp=2752 above_entry_sp=-1200 value=user+2181760
+DBG   holder slot=0x7ffc31fd8858 below_bottom=6056 above_sp=2768 above_entry_sp=-1184 value=user+2181760
+DBG   holders in stack window: 5
+DBG   code? slot=entry-3952 value=0x61c7dd48d9dc
+DBG   code? slot=entry-3904 value=0x61c7dd462a5c
+DBG   code? slot=entry-3896 value=0x61c8195b0b40
+DBG   code? slot=entry-3856 value=0x61c7dd5e4fbc
+DBG   code? slot=entry-3784 value=0x61c7dd5e4f1c
+DBG   code? slot=entry-3712 value=0x61c7dd5e9c7c
+DBG   code? slot=entry-3688 value=0x61c7dd5e4e6c
+DBG   code? slot=entry-3656 value=0x61c8195b0b40
+DBG   code? slot=entry-3576 value=0x61c7dd5e9c70
+DBG   code? slot=entry-3504 value=0x61c7dd48a146
+DBG   code? slot=entry-2688 value=0x61c8195cca20
+DBG   code? slot=entry-2664 value=0x61c8195b0b40
+DBG   code? slot=entry-2536 value=0x61c8195b0b40
+DBG   code? slot=entry-2464 value=0x61c8195b0b40
+DBG   code? slot=entry-2320 value=0x61c7dd4f2d73
+DBG   code? slot=entry-2200 value=0x61c8195b32c8
+DBG   code? slot=entry-2096 value=0x61c7dd53cb54
+DBG   code? slot=entry-2016 value=0x61c7dd53c88f
+DBG   code? slot=entry-1808 value=0x61c7dd6297f8
+DBG   code? slot=entry-1680 value=0x61c7dd6297f8
+DBG   code? slot=entry-1664 value=0x61c7dd489055
+DBG   code? slot=entry-1608 value=0x61c8195b0b40
+DBG   code? slot=entry-1560 value=0x61c8195b0b40
+DBG   code? slot=entry-1480 value=0x61c8195b0b40
+DBG   code? slot=entry-1440 value=0x61c7dd461de0
+DBG   code? slot=entry-1400 value=0x61c8000001e9
+DBG   code? slot=entry-1360 value=0x61c8195b0b40
+DBG   code? slot=entry-1352 value=0x61c8195b0bfe
+DBG   code? slot=entry-1344 value=0x61c7dd476cb4
+DBG   code? slot=entry-1320 value=0x61c8195b0b40
+DBG   code? slot=entry-1296 value=0x61c7dd47cdf4
+DBG   code? slot=entry-1256 value=0x61c7dd5e4a90
+DBG   code? slot=entry-1136 value=0x61c7dd4e2b03
+DBG   code? slot=entry-1056 value=0x61c7dd45da3b
+DBG   code? slot=entry-496 value=0x61c7dd3fe930
+DBG   code? slot=entry-472 value=0x61c7dd3fe930
+DBG   code? slot=entry-464 value=0x61c8195c6150
+DBG   code? slot=entry-272 value=0x61c8195b0b40
+DBG   code? slot=entry-232 value=0x61c7dd3fe930
+DBG   code? slot=entry+0 value=0x61c7dd45be6c
+DBG   code? slot=entry+24 value=0x61c8195b0b40
+DBG   code? slot=entry+32 value=0x61c7dd4bc4ff
+DBG   code? slot=entry+56 value=0x61c8195b0b40
+DBG   code? slot=entry+80 value=0x61c7dd3fcca6
+DBG   code? slot=entry+128 value=0x61c7dd3f04b5
+DBG   code? slot=entry+184 value=0x61c8195c5ad8
+DBG   code? slot=entry+208 value=0x61c7dd4c0e08
+DBG   code? slot=entry+224 value=0x61c8195b0b40
+DBG   code? slot=entry+240 value=0x61c7dd4c4541
+DBG   code? slot=entry+248 value=0x61c8195c5ad8
+DBG   word entry-1264 = 0x70ac9737a000
+DBG   word entry-1256 = 0x61c7dd5e4a90
+DBG   word entry-1248 = 0x1d3000001d3
+DBG   word entry-1240 = 0x70ac9739a730
+DBG   word entry-1232 = 0x70ac9749dc76
+DBG   word entry-1224 = 0x70ac9739a730
+DBG   word entry-1216 = 0x70ac9749dc76
+DBG   word entry-1208 = 0x70ac00000001
+DBG   word entry-1200 = 0x70ac7fe13ac0
+DBG   word entry-1192 = 0x1
+DBG   word entry-1184 = 0x70ac7fe13ac0
+DBG   word entry-1176 = 0
+DBG   word entry-1168 = 0x70ac974dc000
+DBG   word entry-1160 = 0x7ffc31fd8880
+DBG   word entry-1152 = 0x70ac970f5a0d
+DBG   word entry-1144 = 0x7ffc31fd9400
+DBG   word entry-1136 = 0x61c7dd4e2b03
+DBG   word entry-1128 = 0xb171da6
+DBG big stack seed user=0x70ac7fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffc317dc000 bottom=0x7ffc31fda000 sp=0x7ffc31fd7d88 entry_sp=0x7ffc31fd8cf8 collections=8
+DBG   holder slot=0x7ffc31fd7c60 below_bottom=9120 above_sp=-296 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffc31fd7e98 below_bottom=8552 above_sp=272 above_entry_sp=-3680 value=user+0
+DBG   holder slot=0x7ffc31fd7f30 below_bottom=8400 above_sp=424 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffc31fd8848 below_bottom=6072 above_sp=2752 above_entry_sp=-1200 value=user+2181866
+DBG   holder slot=0x7ffc31fd8858 below_bottom=6056 above_sp=2768 above_entry_sp=-1184 value=user+2181866
+DBG   holders in stack window: 5
+DBG   code? slot=entry-3952 value=0x61c7dd48d9dc
+DBG   code? slot=entry-3904 value=0x61c7dd462a5c
+DBG   code? slot=entry-3896 value=0x61c8195b0b40
+DBG   code? slot=entry-3856 value=0x61c7dd5e4fbc
+DBG   code? slot=entry-3784 value=0x61c7dd5e4f1c
+DBG   code? slot=entry-3712 value=0x61c7dd5e9c7c
+DBG   code? slot=entry-3688 value=0x61c7dd5e4e6c
+DBG   code? slot=entry-3656 value=0x61c8195b0b40
+DBG   code? slot=entry-3576 value=0x61c7dd5e9c70
+DBG   code? slot=entry-3504 value=0x61c7dd48a146
+DBG   code? slot=entry-2688 value=0x61c8195cca20
+DBG   code? slot=entry-2664 value=0x61c8195b0b40
+DBG   code? slot=entry-2536 value=0x61c8195b0b40
+DBG   code? slot=entry-2464 value=0x61c8195b0b40
+DBG   code? slot=entry-2320 value=0x61c7dd4f2d73
+DBG   code? slot=entry-2200 value=0x61c8195b32c8
+DBG   code? slot=entry-2096 value=0x61c7dd53cb54
+DBG   code? slot=entry-2016 value=0x61c7dd53c88f
+DBG   code? slot=entry-1808 value=0x61c7dd6297f8
+DBG   code? slot=entry-1680 value=0x61c7dd6297f8
+DBG   code? slot=entry-1664 value=0x61c7dd489055
+DBG   code? slot=entry-1608 value=0x61c8195b0b40
+DBG   code? slot=entry-1560 value=0x61c8195b0b40
+DBG   code? slot=entry-1480 value=0x61c8195b0b40
+DBG   code? slot=entry-1440 value=0x61c7dd461de0
+DBG   code? slot=entry-1400 value=0x61c8000001e9
+DBG   code? slot=entry-1360 value=0x61c8195b0b40
+DBG   code? slot=entry-1352 value=0x61c8195b0bfe
+DBG   code? slot=entry-1344 value=0x61c7dd476cb4
+DBG   code? slot=entry-1320 value=0x61c8195b0b40
+DBG   code? slot=entry-1296 value=0x61c7dd47cdf4
+DBG   code? slot=entry-1256 value=0x61c7dd5e4a90
+DBG   code? slot=entry-1136 value=0x61c7dd4e2b03
+DBG   code? slot=entry-1056 value=0x61c7dd45da3b
+DBG   code? slot=entry-496 value=0x61c7dd3fe930
+DBG   code? slot=entry-472 value=0x61c7dd3fe930
+DBG   code? slot=entry-464 value=0x61c8195c6150
+DBG   code? slot=entry-272 value=0x61c8195b0b40
+DBG   code? slot=entry-232 value=0x61c7dd3fe930
+DBG   code? slot=entry+0 value=0x61c7dd45be6c
+DBG   code? slot=entry+24 value=0x61c8195b0b40
+DBG   code? slot=entry+32 value=0x61c7dd4bc4ff
+DBG   code? slot=entry+56 value=0x61c8195b0b40
+DBG   code? slot=entry+80 value=0x61c7dd3fcca6
+DBG   code? slot=entry+128 value=0x61c7dd3f04b5
+DBG   code? slot=entry+184 value=0x61c8195c5ad8
+DBG   code? slot=entry+208 value=0x61c7dd4c0e08
+DBG   code? slot=entry+224 value=0x61c8195b0b40
+DBG   code? slot=entry+240 value=0x61c7dd4c4541
+DBG   code? slot=entry+248 value=0x61c8195c5ad8
+DBG   word entry-1264 = 0x70ac9737a000
+DBG   word entry-1256 = 0x61c7dd5e4a90
+DBG   word entry-1248 = 0x1d3000001d3
+DBG   word entry-1240 = 0x70ac9739a730
+DBG   word entry-1232 = 0x70ac9749dc76
+DBG   word entry-1224 = 0x70ac9739a730
+DBG   word entry-1216 = 0x70ac9749dc76
+DBG   word entry-1208 = 0x70ac00000001
+DBG   word entry-1200 = 0x70ac7fe13b2a
+DBG   word entry-1192 = 0x1
+DBG   word entry-1184 = 0x70ac7fe13b2a
+DBG   word entry-1176 = 0
+DBG   word entry-1168 = 0x70ac974dc000
+DBG   word entry-1160 = 0x7ffc31fd8880
+DBG   word entry-1152 = 0x70ac970f5a0d
+DBG   word entry-1144 = 0x7ffc31fd9400
+DBG   word entry-1136 = 0x61c7dd4e2b03
+DBG   word entry-1128 = 0xe481a69
+DBG big stack seed user=0x70ac7fbff040 bytes=3802600 thread=DEFAULT-0 fiber=main base=0x7ffc317dc000 bottom=0x7ffc31fda000 sp=0x7ffc31fd7d88 entry_sp=0x7ffc31fd8cf8 collections=9
+DBG   holder slot=0x7ffc31fd7c60 below_bottom=9120 above_sp=-296 above_entry_sp=-4248 value=user+0
+DBG   holder slot=0x7ffc31fd7e98 below_bottom=8552 above_sp=272 above_entry_sp=-3680 value=user+0
+DBG   holder slot=0x7ffc31fd7f30 below_bottom=8400 above_sp=424 above_entry_sp=-3528 value=user+0
+DBG   holder slot=0x7ffc31fd8848 below_bottom=6072 above_sp=2752 above_entry_sp=-1200 value=user+2182012
+DBG   holder slot=0x7ffc31fd8858 below_bottom=6056 above_sp=2768 above_entry_sp=-1184 value=user+2182012
+DBG   holders in stack window: 5
+DBG   code? slot=entry-3952 value=0x61c7dd48d9dc
+DBG   code? slot=entry-3904 value=0x61c7dd462a5c
+DBG   code? slot=entry-3896 value=0x61c8195b0b40
+DBG   code? slot=entry-3856 value=0x61c7dd5e4fbc
+DBG   code? slot=entry-3784 value=0x61c7dd5e4f1c
+DBG   code? slot=entry-3712 value=0x61c7dd5e9c7c
+DBG   code? slot=entry-3688 value=0x61c7dd5e4e6c
+DBG   code? slot=entry-3656 value=0x61c8195b0b40
+DBG   code? slot=entry-3576 value=0x61c7dd5e9c70
+DBG   code? slot=entry-3504 value=0x61c7dd48a146
+DBG   code? slot=entry-2688 value=0x61c8195cca20
+DBG   code? slot=entry-2664 value=0x61c8195b0b40
+DBG   code? slot=entry-2536 value=0x61c8195b0b40
+DBG   code? slot=entry-2464 value=0x61c8195b0b40
+DBG   code? slot=entry-2320 value=0x61c7dd4f2d73
+DBG   code? slot=entry-2200 value=0x61c8195b32c8
+DBG   code? slot=entry-2096 value=0x61c7dd53cb54
+DBG   code? slot=entry-2016 value=0x61c7dd53c88f
+DBG   code? slot=entry-1808 value=0x61c7dd6297f8
+DBG   code? slot=entry-1680 value=0x61c7dd6297f8
+DBG   code? slot=entry-1664 value=0x61c7dd489055
+DBG   code? slot=entry-1608 value=0x61c8195b0b40
+DBG   code? slot=entry-1560 value=0x61c8195b0b40
+DBG   code? slot=entry-1480 value=0x61c8195b0b40
+DBG   code? slot=entry-1440 value=0x61c7dd461de0
+DBG   code? slot=entry-1400 value=0x61c8000001e9
+DBG   code? slot=entry-1360 value=0x61c8195b0b40
+DBG   code? slot=entry-1352 value=0x61c8195b0bfe
+DBG   code? slot=entry-1344 value=0x61c7dd476cb4
+DBG   code? slot=entry-1320 value=0x61c8195b0b40
+DBG   code? slot=entry-1296 value=0x61c7dd47cdf4
+DBG   code? slot=entry-1256 value=0x61c7dd5e4a90
+DBG   code? slot=entry-1136 value=0x61c7dd4e2b03
+DBG   code? slot=entry-1056 value=0x61c7dd45da3b
+DBG   code? slot=entry-496 value=0x61c7dd3fe930
+DBG   code? slot=entry-472 value=0x61c7dd3fe930
+DBG   code? slot=entry-464 value=0x61c8195c6150
+DBG   code? slot=entry-272 value=0x61c8195b0b40
+DBG   code? slot=entry-232 value=0x61c7dd3fe930
+DBG   code? slot=entry+0 value=0x61c7dd45be6c
+DBG   code? slot=entry+24 value=0x61c8195b0b40
+DBG   code? slot=entry+32 value=0x61c7dd4bc4ff
+DBG   code? slot=entry+56 value=0x61c8195b0b40
+DBG   code? slot=entry+80 value=0x61c7dd3fcca6
+DBG   code? slot=entry+128 value=0x61c7dd3f0549
+DBG   code? slot=entry+184 value=0x61c8195c5ad8
+DBG   code? slot=entry+208 value=0x61c7dd4c0e08
+DBG   code? slot=entry+224 value=0x61c8195b0b40
+DBG   code? slot=entry+240 value=0x61c7dd4c4541
+DBG   code? slot=entry+248 value=0x61c8195c5ad8
+DBG   word entry-1264 = 0x70ac9737a000
+DBG   word entry-1256 = 0x61c7dd5e4a90
+DBG   word entry-1248 = 0x1d3000001d3
+DBG   word entry-1240 = 0x70ac9739a730
+DBG   word entry-1232 = 0x70ac9749dc76
+DBG   word entry-1224 = 0x70ac9739a730
+DBG   word entry-1216 = 0x70ac9749dc76
+DBG   word entry-1208 = 0x70ac00000001
+DBG   word entry-1200 = 0x70ac7fe13bbc
+DBG   word entry-1192 = 0x1
+DBG   word entry-1184 = 0x70ac7fe13bbc
+DBG   word entry-1176 = 0
+DBG   word entry-1168 = 0x70ac974dc000
+DBG   word entry-1160 = 0x7ffc31fd8880
+DBG   word entry-1152 = 0x70ac970f5a0d
+DBG   word entry-1144 = 0x7ffc31fd9400
+DBG   word entry-1136 = 0x61c7dd4e2b03
+DBG   word entry-1128 = 0x129a6caf
+parallel_dormant: threads=3 retain=65536KiB ordinary collect
+  RSS peak 72 MB, after collect 68 MB; empty chunks 18 MB, dormant 0 MB
+  seeded by stack 3715 KiB, parked 0 KiB, thread 3 KiB, static 3 KiB
+  the collects: 7 major, 0 minor; last major sweep: after the world, multi-mutator, release on; empties warm 18 MB, grace 0 MB, dormant 0 MB, unmapped 0 MB, kept 0 MB, header-blocked 0 MB
+  warm budget / threshold, MB: 69/69 -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36) -> 70/70 (live 36)
+DBG gc-idle stack base=0x70ac8c65a000 bottom=0x70ac8ce5a000
+DBG grow 24 buffer=0x70ac7fbff040 bytes=1241912
+DBG grow 25 buffer=0x70ac7cfff040 bytes=4754784
+FAIL: no empty chunk went dormant (18 MB of them kept mapped) — the opt-in is inert

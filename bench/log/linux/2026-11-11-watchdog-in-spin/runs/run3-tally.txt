@@ -1,0 +1,7 @@
+barrier-only runs=3000 fired=2992 missed=8 rc!=0=0 dropped&resent=0
+base-instr   runs=3000 fired=2996 missed=4 rc!=0=0 never_spun=4 missed&never_spun=4 fired&never_spun=0 dropped&resent=0
+base         runs=3000 fired=2994 missed=6 rc!=0=0 dropped&resent=0
+fix-instr    runs=3000 fired=3000 missed=0 rc!=0=0 never_spun=0 missed&never_spun=0 fired&never_spun=0 dropped&resent=3000
+fix          runs=3000 fired=3000 missed=0 rc!=0=0 dropped&resent=3000
+tip-instr    runs=3000 fired=2995 missed=5 rc!=0=0 never_spun=5 missed&never_spun=5 fired&never_spun=0 dropped&resent=0
+tip          runs=3000 fired=2993 missed=7 rc!=0=0 dropped&resent=0

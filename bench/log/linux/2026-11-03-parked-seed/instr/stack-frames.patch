@@ -1,0 +1,78 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index 3d275833..84e075e3 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -294,6 +294,10 @@ module Gcry
+       when RootSource::Stack
+         @first_mark_stack_objects += 1
+         @first_mark_stack_bytes += bytes
++        if bytes > (1_u64 << 20) && @dbg_stack_user == 0
++          @dbg_stack_user = user_of(chunk, header).address
++          @dbg_stack_bytes = bytes
++        end
+         @first_mark_stack_atomic_bytes += bytes if atomic
+       when RootSource::Parked
+         @first_mark_parked_objects += 1
+diff --git a/src/gcry/collect_scan.cr b/src/gcry/collect_scan.cr
+index 4cd5ba31..f138f188 100644
+--- a/src/gcry/collect_scan.cr
++++ b/src/gcry/collect_scan.cr
+@@ -803,9 +803,58 @@ module Gcry
+           mark_root_candidate(candidate, source: RootSource::Stack)
+         end
+       end
++      dbg_stack_seed(bottom.address, stack.pointer.address)
+       scan_precise_mutator_stack(bottom)
+     end
+ 
++    @dbg_stack_user = 0_u64
++    @dbg_stack_bytes = 0_u64
++
++    def dbg_stack_seed(bottom : UInt64, base : UInt64) : Nil
++      user = @dbg_stack_user
++      return if user == 0
++      @dbg_stack_user = 0_u64
++      fin = user &+ @dbg_stack_bytes
++      sp = Roots.hardware_stack_pointer.address
++      t = Thread.current?
++      tn = t ? t.name : nil
++      f = Fiber.current
++      fnm = f.name
++      LibC.dprintf(2, "DBG big stack seed user=%#lx bytes=%lu thread=%s fiber=%s base=%#lx bottom=%#lx sp=%#lx entry_sp=%#lx collections=%lu\n",
++        user, @dbg_stack_bytes, tn ? tn.to_unsafe : "(nil)".to_unsafe, fnm ? fnm.to_unsafe : "(nil)".to_unsafe, base, bottom, sp, @collect_entry_sp, @collections)
++      a = (sp &- 8192) & ~7_u64
++      a = base if a < base
++      n = 0
++      while a < bottom && n < 12
++        if Roots.page_readable?(a & ~(Roots::PAGE_SIZE &- 1))
++          v = Pointer(UInt64).new(a).value
++          if v >= user && v < fin
++            LibC.dprintf(2, "DBG   holder slot=%#lx below_bottom=%lu above_sp=%ld above_entry_sp=%ld value=user+%lu\n",
++              a, bottom &- a, a.to_i64 &- sp.to_i64, a.to_i64 &- @collect_entry_sp.to_i64, v &- user)
++            n += 1
++          end
++          a &+= 8
++        else
++          a = (a & ~(Roots::PAGE_SIZE &- 1)) &+ Roots::PAGE_SIZE
++        end
++      end
++      LibC.dprintf(2, "DBG   holders in stack window: %d\n", n)
++      # Code-looking words between the scan SP and the entry SP: candidate return addresses.
++      w = sp & ~7_u64
++      while w < @collect_entry_sp &+ 256
++        v = Pointer(UInt64).new(w).value
++        if v >= 0x500000000000_u64 && v < 0x700000000000_u64
++          LibC.dprintf(2, "DBG   code? slot=entry%+ld value=%#lx\n", w.to_i64 &- @collect_entry_sp.to_i64, v)
++        end
++        w &+= 8
++      end
++      w = (@collect_entry_sp &- 1264) & ~7_u64
++      while w < @collect_entry_sp &- 1120
++        LibC.dprintf(2, "DBG   word entry%+ld = %#lx\n", w.to_i64 &- @collect_entry_sp.to_i64, Pointer(UInt64).new(w).value)
++        w &+= 8
++      end
++    end
++
+     # Below SP (+ red zone): catch LLVM spill slots maps/FP walk miss without
+     # scanning the whole fiber high-water (exclusive's RSS point). 4 KiB was
+     # too shallow under acik --release (ThreadPool UAF / collect hang); 16 KiB

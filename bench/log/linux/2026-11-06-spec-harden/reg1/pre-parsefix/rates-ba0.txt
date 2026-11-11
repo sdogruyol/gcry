@@ -1,0 +1,39 @@
+ba0 new 1 rc=0 158s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 2 rc=0 139s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 3 rc=0 147s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 4 rc=0 141s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 5 rc=0 123s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 6 rc=0 129s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 7 rc=0 125s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 8 rc=0 125s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 9 rc=0 148s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 10 rc=0 130s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 11 rc=0 149s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 12 rc=0 128s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 13 rc=0 128s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 14 rc=0 147s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 15 rc=0 126s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 16 rc=1 121s reg1=[1_live_objects_dormant_spec.cr:151 1_live_objects_dormant_spec.cr:158 ] {count=10000 drift=0 | count=1000 drift=0} other=[] 296 examples, 1 failures, 0 errors, 2 pending
+ba0 new 17 rc=0 147s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 18 rc=1 123s reg1=[1_live_objects_dormant_spec.cr:151 1_live_objects_dormant_spec.cr:158 ] {count=10000 drift=0 | count=1000 drift=0} other=[] 296 examples, 1 failures, 0 errors, 2 pending
+ba0 new 19 rc=0 154s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 20 rc=0 149s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 21 rc=0 162s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 22 rc=0 150s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 23 rc=0 154s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 24 rc=0 146s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 25 rc=1 144s reg1=[1_live_objects_dormant_spec.cr:151 1_live_objects_dormant_spec.cr:158 ] {count=10000 drift=0 | count=1000 drift=0} other=[] 296 examples, 1 failures, 0 errors, 2 pending
+ba0 new 26 rc=0 116s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 27 rc=0 111s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 28 rc=0 112s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 29 rc=0 111s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 3 pending
+ba0 new 30 rc=0 118s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 31 rc=0 120s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 32 rc=0 119s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 33 rc=0 132s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 34 rc=0 143s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 35 rc=0 136s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 36 rc=0 151s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 37 rc=0 140s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 38 rc=0 131s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending
+ba0 new 39 rc=0 129s reg1=[] {} other=[] 296 examples, 0 failures, 0 errors, 2 pending

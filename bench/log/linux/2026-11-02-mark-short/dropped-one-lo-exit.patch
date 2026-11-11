@@ -1,0 +1,67 @@
+diff --git a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+index d7e5e021..31ad58d3 100644
+--- a/src/gcry/collect_mark.cr
++++ b/src/gcry/collect_mark.cr
+@@ -705,23 +705,47 @@ module Gcry
+       # addresses, so a payload of under three words never forms a pointer
+       # before `p`.
+       quad_end = finish.address >= p.address &+ 24 ? finish - 3 : p
+-      while p < quad_end
+-        w = p[0]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[1]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[2]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        w = p[3]
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
+-        p += 4
+-      end
+-      while p < finish
+-        w = p.value
++      while true
++        found = false
++        w = 0_u64
++        while p < quad_end
++          w = p[0]
++          if w >= lo
++            found = true
++            break
++          end
++          w = p[1]
++          if w >= lo
++            p += 1
++            found = true
++            break
++          end
++          w = p[2]
++          if w >= lo
++            p += 2
++            found = true
++            break
++          end
++          w = p[3]
++          if w >= lo
++            p += 3
++            found = true
++            break
++          end
++          p += 4
++        end
++        unless found
++          while true
++            return hits if p >= finish
++            w = p.value
++            break if w >= lo
++            p += 1
++          end
++        end
+         p += 1
+-        hits &+= scan_edge_word(w, base_only, shard, hi, l1, shift, l2_mask) if w >= lo
++        next if w >= hi
++        hits &+= resolve_candidate(w, base_only, shard, l1, shift, l2_mask)
+       end
+-      hits
+     end
+ 
+     # One word at or above the span's low end. The high end is tested here,

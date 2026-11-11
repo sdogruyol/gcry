@@ -1,0 +1,91 @@
+# Primes: runs at 10 collections per arm, and timed-section medians at 9 and 10 collections (s)
+
+## placement
+base          at 10: 13/21  median 1.417  at 9: 1.325  at 10: 1.422
+var           at 10: 19/21  median 1.471  at 9: 1.365  at 10: 1.472
+prepad16      at 10: 17/21  median 1.442  at 9: 1.396  at 10: 1.443
+prepad32      at 10: 17/21  median 1.423  at 9: 1.375  at 10: 1.423
+prepad48      at 10: 19/21  median 1.462  at 9: 1.356  at 10: 1.471
+prepad64      at 10: 18/21  median 1.447  at 9: 1.291  at 10: 1.448
+baseprepad16  at 10:  0/21  median 1.351  at 9: 1.351  at 10: —
+baseprepad32  at 10: 16/21  median 1.460  at 9: 1.345  at 10: 1.478
+baseprepad48  at 10:  8/21  median 1.410  at 9: 1.369  at 10: 1.429
+baseprepad64  at 10: 16/21  median 1.443  at 9: 1.324  at 10: 1.448
+
+## placement2
+base          at 10: 17/21  median 1.211  at 9: 1.109  at 10: 1.218
+var           at 10: 19/21  median 1.215  at 9: 1.110  at 10: 1.220
+prepad16      at 10: 20/21  median 1.209  at 9: 1.766  at 10: 1.208
+prepad32      at 10: 21/21  median 1.216  at 9: —  at 10: 1.216
+prepad48      at 10: 20/21  median 1.216  at 9: 1.104  at 10: 1.216
+prepad64      at 10: 19/21  median 1.213  at 9: 1.101  at 10: 1.215
+baseprepad16  at 10:  5/21  median 1.126  at 9: 1.120  at 10: 1.234
+baseprepad32  at 10: 13/21  median 1.217  at 9: 1.111  at 10: 1.222
+baseprepad48  at 10: 17/21  median 1.219  at 9: 1.133  at 10: 1.225
+baseprepad64  at 10: 20/21  median 1.214  at 9: 1.099  at 10: 1.215
+
+## placement3
+base          at 10:  7/21  median 1.443  at 9: 1.425  at 10: 1.541
+var           at 10: 17/21  median 1.531  at 9: 1.516  at 10: 1.537
+prepad16      at 10: 18/21  median 1.528  at 9: 1.511  at 10: 1.535
+prepad32      at 10: 12/21  median 1.487  at 9: 1.436  at 10: 1.531
+prepad48      at 10: 17/21  median 1.556  at 9: 1.508  at 10: 1.583
+prepad64      at 10: 18/21  median 1.559  at 9: 1.430  at 10: 1.561
+baseprepad16  at 10:  1/21  median 1.455  at 9: 1.462  at 10: 1.443
+baseprepad32  at 10: 13/21  median 1.528  at 9: 1.481  at 10: 1.572
+baseprepad48  at 10:  8/21  median 1.439  at 9: 1.429  at 10: 1.517
+baseprepad64  at 10: 13/21  median 1.493  at 9: 1.438  at 10: 1.534
+
+## placement4
+base          at 10:  3/21  median 1.413  at 9: 1.413  at 10: 1.432
+var           at 10:  5/21  median 1.396  at 9: 1.394  at 10: 1.404
+prepad16      at 10:  9/21  median 1.419  at 9: 1.414  at 10: 1.459
+prepad32      at 10:  5/21  median 1.408  at 9: 1.413  at 10: 1.391
+prepad48      at 10:  6/21  median 1.416  at 9: 1.406  at 10: 1.522
+prepad64      at 10: 11/21  median 1.418  at 9: 1.411  at 10: 1.452
+baseprepad16  at 10:  3/21  median 1.417  at 9: 1.410  at 10: 1.490
+baseprepad32  at 10:  6/21  median 1.415  at 9: 1.412  at 10: 1.465
+baseprepad48  at 10:  4/21  median 1.410  at 9: 1.409  at 10: 1.413
+baseprepad64  at 10:  2/21  median 1.410  at 9: 1.410  at 10: 1.357
+
+## primes-unroll1
+base          at 10:  6/31  median 0.846  at 9: 0.812  at 10: 0.901
+var           at 10:  8/31  median 0.839  at 9: 0.821  at 10: 0.898
+prepad16      at 10:  7/31  median 0.866  at 9: 0.837  at 10: 0.905
+prepad32      at 10:  4/31  median 0.836  at 9: 0.835  at 10: 1.041
+prepad48      at 10:  0/31  median 0.826  at 9: 0.826  at 10: —
+baseprepad16  at 10:  0/31  median 0.844  at 9: 0.844  at 10: —
+baseprepad32  at 10:  4/31  median 0.838  at 9: 0.830  at 10: 0.932
+baseprepad48  at 10:  3/31  median 0.842  at 9: 0.835  at 10: 0.883
+rev           at 10:  3/31  median 0.831  at 9: 0.828  at 10: 1.022
+revp16        at 10:  3/31  median 0.835  at 9: 0.829  at 10: 0.924
+revp32        at 10:  6/31  median 0.826  at 9: 0.814  at 10: 0.965
+revp48        at 10:  4/31  median 0.833  at 9: 0.828  at 10: 0.920
+
+## primes-unroll2
+base          at 10:  1/31  median 1.364  at 9: 1.363  at 10: 1.466
+var           at 10: 10/31  median 1.412  at 9: 1.387  at 10: 1.480
+prepad16      at 10: 13/31  median 1.397  at 9: 1.356  at 10: 1.483
+prepad32      at 10:  7/31  median 1.356  at 9: 1.352  at 10: 1.462
+prepad48      at 10:  9/31  median 1.394  at 9: 1.383  at 10: 1.501
+baseprepad16  at 10:  0/31  median 1.390  at 9: 1.390  at 10: —
+baseprepad32  at 10:  5/31  median 1.379  at 9: 1.377  at 10: 1.503
+baseprepad48  at 10:  4/31  median 1.366  at 9: 1.362  at 10: 1.497
+rev           at 10:  3/31  median 1.392  at 9: 1.387  at 10: 1.570
+revp16        at 10: 10/31  median 1.384  at 9: 1.366  at 10: 1.506
+revp32        at 10:  8/31  median 1.387  at 9: 1.367  at 10: 1.473
+revp48        at 10:  2/31  median 1.384  at 9: 1.383  at 10: 1.464
+
+## primes-unroll3
+base          at 10: 12/31  median 1.320  at 9: 1.283  at 10: 1.423
+var           at 10: 19/31  median 1.376  at 9: 1.313  at 10: 1.417
+prepad16      at 10: 17/31  median 1.342  at 9: 1.296  at 10: 1.371
+prepad32      at 10:  8/31  median 1.308  at 9: 1.287  at 10: 1.399
+prepad48      at 10: 15/31  median 1.360  at 9: 1.324  at 10: 1.442
+baseprepad16  at 10:  0/31  median 1.310  at 9: 1.310  at 10: —
+baseprepad32  at 10:  4/31  median 1.306  at 9: 1.296  at 10: 1.462
+baseprepad48  at 10:  9/31  median 1.313  at 9: 1.297  at 10: 1.405
+rev           at 10:  4/31  median 1.320  at 9: 1.308  at 10: 1.434
+revp16        at 10: 18/31  median 1.367  at 9: 1.308  at 10: 1.422
+revp32        at 10: 10/31  median 1.330  at 9: 1.316  at 10: 1.442
+revp48        at 10:  6/31  median 1.326  at 9: 1.304  at 10: 1.457

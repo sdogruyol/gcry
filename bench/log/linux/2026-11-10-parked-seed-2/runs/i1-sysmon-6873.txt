@@ -1,0 +1,94 @@
+DBG big parked seed user=0x7599007ff040 bytes=5945016 fiber=0x7599159200d0 name=main running=1 base=0x759914800000 bottom=0x759915000000 stack_top=0x759914ffec64 scan_top=0x759914ffa000 scanned=24576 stw_multi=1 own_sp=0x7ffe31275528
+DBG   thread=0x7599166880d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x759916688190
+DBG   thread=0x759916688310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7599159200d0
+DBG   thread=0x759916688490 name=(nil) current_is=0 main_is=0 sp=0x759913dfecb8 exempt=0 current_fiber=0x7599158f70d0
+DBG   thread=0x759916688550 name=(nil) current_is=0 main_is=0 sp=0x7599135fdcb8 exempt=0 current_fiber=0x7599158d70d0
+DBG   thread=0x7599158b7190 name=gc-idle current_is=0 main_is=0 sp=0x759903ffec68 exempt=1 current_fiber=0x7599158d7190
+DBG   holder slot=0x759914ffeb60 below_bottom=5280 above_stack_top=-260 value=user+1608284
+DBG     chunk base=0x7599007ff000 mapped=5947392 extent=16781312 large=1 class=4294967295
+DBG   idle parked_sp=0x759903ffec68
+DBG big parked seed user=0x7599007ff040 bytes=5945016 fiber=0x7599159200d0 name=main running=1 base=0x759914800000 bottom=0x759915000000 stack_top=0x759914ffec64 scan_top=0x759914ffa000 scanned=24576 stw_multi=1 own_sp=0x7ffe31275528
+DBG   thread=0x7599166880d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x759916688190
+DBG   thread=0x759916688310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7599159200d0
+DBG   thread=0x759916688490 name=(nil) current_is=0 main_is=0 sp=0x759913dfecb8 exempt=0 current_fiber=0x7599158f70d0
+DBG   thread=0x759916688550 name=(nil) current_is=0 main_is=0 sp=0x7599135fdcb8 exempt=0 current_fiber=0x7599158d70d0
+DBG   thread=0x7599158b7190 name=gc-idle current_is=0 main_is=0 sp=0x759903ffec68 exempt=1 current_fiber=0x7599158d7190
+DBG   holder slot=0x759914ffeb60 below_bottom=5280 above_stack_top=-260 value=user+1611534
+DBG     chunk base=0x7599007ff000 mapped=5947392 extent=16781312 large=1 class=4294967295
+DBG   idle parked_sp=0x759903ffec68
+DBG big parked seed user=0x7599007ff040 bytes=5945016 fiber=0x7599159200d0 name=main running=1 base=0x759914800000 bottom=0x759915000000 stack_top=0x759914ffec64 scan_top=0x759914ffa000 scanned=24576 stw_multi=1 own_sp=0x7ffe31275528
+DBG   thread=0x7599166880d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x759916688190
+DBG   thread=0x759916688310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7599159200d0
+DBG   thread=0x759916688490 name=(nil) current_is=0 main_is=0 sp=0x759913dfecb8 exempt=0 current_fiber=0x7599158f70d0
+DBG   thread=0x759916688550 name=(nil) current_is=0 main_is=0 sp=0x7599135fdcb8 exempt=0 current_fiber=0x7599158d70d0
+DBG   thread=0x7599158b7190 name=gc-idle current_is=0 main_is=0 sp=0x759903ffec68 exempt=1 current_fiber=0x7599158d7190
+DBG   holder slot=0x759914ffeb60 below_bottom=5280 above_stack_top=-260 value=user+1611714
+DBG     chunk base=0x7599007ff000 mapped=5947392 extent=16781312 large=1 class=4294967295
+DBG   idle parked_sp=0x759903ffec68
+DBG big parked seed user=0x7599007ff040 bytes=5945016 fiber=0x7599159200d0 name=main running=1 base=0x759914800000 bottom=0x759915000000 stack_top=0x759914ffec64 scan_top=0x759914ffa000 scanned=24576 stw_multi=1 own_sp=0x7ffe31275528
+DBG   thread=0x7599166880d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x759916688190
+DBG   thread=0x759916688310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7599159200d0
+DBG   thread=0x759916688490 name=(nil) current_is=0 main_is=0 sp=0x759913dfecb8 exempt=0 current_fiber=0x7599158f70d0
+DBG   thread=0x759916688550 name=(nil) current_is=0 main_is=0 sp=0x7599135fdcb8 exempt=0 current_fiber=0x7599158d70d0
+DBG   thread=0x7599158b7190 name=gc-idle current_is=0 main_is=0 sp=0x759903ffec68 exempt=1 current_fiber=0x7599158d7190
+DBG   holder slot=0x759914ffeb60 below_bottom=5280 above_stack_top=-260 value=user+1611694
+DBG     chunk base=0x7599007ff000 mapped=5947392 extent=16781312 large=1 class=4294967295
+DBG   idle parked_sp=0x759903ffec68
+DBG big parked seed user=0x7599007ff040 bytes=5945016 fiber=0x7599159200d0 name=main running=1 base=0x759914800000 bottom=0x759915000000 stack_top=0x759914ffec64 scan_top=0x759914ffa000 scanned=24576 stw_multi=1 own_sp=0x7ffe31275528
+DBG   thread=0x7599166880d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x759916688190
+DBG   thread=0x759916688310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7599159200d0
+DBG   thread=0x759916688490 name=(nil) current_is=0 main_is=0 sp=0x759913dfecb8 exempt=0 current_fiber=0x7599158f70d0
+DBG   thread=0x759916688550 name=(nil) current_is=0 main_is=0 sp=0x7599135fdcb8 exempt=0 current_fiber=0x7599158d70d0
+DBG   thread=0x7599158b7190 name=gc-idle current_is=0 main_is=0 sp=0x759903ffec68 exempt=1 current_fiber=0x7599158d7190
+DBG   holder slot=0x759914ffeb60 below_bottom=5280 above_stack_top=-260 value=user+1611784
+DBG     chunk base=0x7599007ff000 mapped=5947392 extent=16781312 large=1 class=4294967295
+DBG   idle parked_sp=0x759903ffec68
+DBG big parked seed user=0x7599007ff040 bytes=5945016 fiber=0x7599159200d0 name=main running=1 base=0x759914800000 bottom=0x759915000000 stack_top=0x759914ffec64 scan_top=0x759914ffa000 scanned=24576 stw_multi=1 own_sp=0x7ffe31275528
+DBG   thread=0x7599166880d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x759916688190
+DBG   thread=0x759916688310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7599159200d0
+DBG   thread=0x759916688490 name=(nil) current_is=0 main_is=0 sp=0x759913dfecb8 exempt=0 current_fiber=0x7599158f70d0
+DBG   thread=0x759916688550 name=(nil) current_is=0 main_is=0 sp=0x7599135fdcb8 exempt=0 current_fiber=0x7599158d70d0
+DBG   thread=0x7599158b7190 name=gc-idle current_is=0 main_is=0 sp=0x759903ffec68 exempt=1 current_fiber=0x7599158d7190
+DBG   holder slot=0x759914ffeb60 below_bottom=5280 above_stack_top=-260 value=user+1611094
+DBG     chunk base=0x7599007ff000 mapped=5947392 extent=16781312 large=1 class=4294967295
+DBG   idle parked_sp=0x759903ffec68
+DBG big parked seed user=0x7599007ff040 bytes=5945016 fiber=0x7599159200d0 name=main running=1 base=0x759914800000 bottom=0x759915000000 stack_top=0x759914ffec64 scan_top=0x759914ffa000 scanned=24576 stw_multi=1 own_sp=0x7ffe31275528
+DBG   thread=0x7599166880d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x759916688190
+DBG   thread=0x759916688310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7599159200d0
+DBG   thread=0x759916688490 name=(nil) current_is=0 main_is=0 sp=0x759913dfecb8 exempt=0 current_fiber=0x7599158f70d0
+DBG   thread=0x759916688550 name=(nil) current_is=0 main_is=0 sp=0x7599135fdcb8 exempt=0 current_fiber=0x7599158d70d0
+DBG   thread=0x7599158b7190 name=gc-idle current_is=0 main_is=0 sp=0x759903ffec68 exempt=1 current_fiber=0x7599158d7190
+DBG   holder slot=0x759914ffeb60 below_bottom=5280 above_stack_top=-260 value=user+1611194
+DBG     chunk base=0x7599007ff000 mapped=5947392 extent=16781312 large=1 class=4294967295
+DBG   idle parked_sp=0x759903ffec68
+parallel_dormant: threads=4 retain=65536KiB ordinary collect
+  RSS peak 72 MB, after collect 70 MB; empty chunks 1 MB, dormant 0 MB
+  seeded by stack 2 KiB, parked 5905 KiB, thread 0 KiB, static 2 KiB
+  the collects: 7 major, 0 minor; last major sweep: after the world, multi-mutator, release on; empties warm 1 MB, grace 0 MB, dormant 0 MB, unmapped 0 MB, kept 0 MB, header-blocked 0 MB
+  warm budget / threshold, MB: 69/69 -> 105/105 (live 53) -> 105/105 (live 53) -> 105/105 (live 53) -> 105/105 (live 53) -> 105/105 (live 53) -> 105/105 (live 53) -> 105/105 (live 53)
+INCONCLUSIVE: the burst was retained: 70 MB resident after the collect and only 1 MB of empty chunks. A root held the dropped objects (see the seeds above); this says nothing about the release
+gcry: holders — looking for words pointing into [0x759915897420, 0x759915897438), the range gcry released
+gcry: holders — explicit roots: 0 of 4 point into it — gcry is not rooting it
+gcry: holders — heap: 0 word(s) in 0 live block(s), from 1455809 block(s) in 473 chunk(s). current mark gen 11, collections 10
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe31275f90 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe312760c8 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe312763d0 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe31276418 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe31276670 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stacks: 5 word(s) across 7 stack(s)
+gcry: holders — looking for words pointing into [0x7599007ff040, 0x759900daa6f8), the range gcry released
+gcry: holders — explicit roots: 0 of 4 point into it — gcry is not rooting it
+gcry: holders — heap: 0 word(s) in 0 live block(s), from 1455809 block(s) in 473 chunk(s). current mark gen 11, collections 10
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe31275f90 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe312760c8 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe312763d0 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x759916688190 (running) slot 0x7ffe31276418 holds block+0, stack_top 0x7ffe312763f0
+gcry: holders — stack: fiber 0x7599159200d0 (running) slot 0x759914ffeb60 holds block+1607445, stack_top 0x759914ffec64
+gcry: holders — stacks: 5 word(s) across 7 stack(s)
+  running again (attempt 2 of 3)
+parallel_dormant: threads=4 retain=65536KiB ordinary collect
+  RSS peak 72 MB, after collect 35 MB; empty chunks 55 MB, dormant 31 MB
+  seeded by stack 2 KiB, parked 99 KiB, thread 0 KiB, static 2 KiB
+  the collects: 2 major, 0 minor; last major sweep: after the world, multi-mutator, release on; empties warm 24 MB, grace 0 MB, dormant 31 MB, unmapped 0 MB, kept 0 MB, header-blocked 0 MB
+  warm budget / threshold, MB: 69/69 -> 24/24 (live 0) -> 24/24 (live 0)
+  PASS

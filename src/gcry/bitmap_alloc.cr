@@ -220,7 +220,10 @@ module Gcry
     #    clear bits, so no update is lost either way: that is what the
     #    per-block `lock or` was for. A double or stale free into a claimed
     #    block is refused under the lock (`block_allocated_exact?`), which is
-    #    also the lock any change of the chunk's owner takes.
+    #    also the lock any change of the chunk's owner takes. Its `mark`
+    #    clear follows its `occ` clear, and the owner, which claims with no
+    #    lock, claims nothing from the chunk between them: the chunk carries
+    #    FREEING across both (regression 91).
     # 5. **The sweep's `occ = mark`.** In a stop, the settle runs before the
     #    mark (`bitmap_settle_cursor_sets`): a set not mid-allocation is
     #    retired and releases its claims; a set frozen mid-allocation keeps
@@ -297,8 +300,8 @@ module Gcry
     # sees it nonzero sees the whole key, never a key written apart from its
     # "ready" flag. `@cursor_tsd_refused` is set if the check ever fails, and
     # the hit path then stays on the Crystal thread-local for good.
+    # `@cursor_tsd_slot` is declared in `heap_hot.cr`.
     {% if flag?(:darwin) %}
-      @cursor_tsd_slot = 0_u64
       @cursor_tsd_refused = false
     {% end %}
 
@@ -310,11 +313,6 @@ module Gcry
     # the locked one. Plain increments, best-effort across threads, exact for
     # one mutator — the same standing as `bitmap_locked_allocations`.
     getter cursor_word_advances : UInt64 = 0_u64
-    getter fast_miss_collecting : UInt64 = 0_u64
-    getter fast_miss_size : UInt64 = 0_u64
-    getter fast_miss_no_set : UInt64 = 0_u64
-    getter fast_miss_refill : UInt64 = 0_u64
-    getter fast_miss_threshold : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
     getter bitmap_dormant_revives : UInt64 = 0_u64
     # Claimed blocks a retiring cursor gave back unused (`cursor_release_claim`):
@@ -340,6 +338,21 @@ module Gcry
     # 2026-10-22 — CURSOR cleared, then the chunk read, then the slot
     # cleared — the control arm of regression 82 (`retire_cursor_slot`).
     property cursor_retire_slot_first : Bool = true
+    # Word advances the hit path gave up because a `free` was in flight on
+    # the chunk (`cursor_advance_word`, FREEING): each one an allocation
+    # that took the locked path instead. Plain increments, like the census
+    # counters above.
+    getter cursor_free_deferrals : UInt64 = 0_u64
+    # Research only: called by `bitmap_free_block` between its `occ` clear
+    # and its `mark` clear, on the freeing thread under the class lock; must
+    # not allocate. A hook that parks the thread there puts another thread's
+    # lock-free claim of the freed block, and a stop, between the two
+    # clears (`process_spec/regression/91_free_mark_clear_claim_spec.cr`).
+    property bitmap_free_split_hook : Proc(ChunkHeader*, Nil)? = nil
+    # Research only: false frees a bitmap block as before 2026-10-31, with
+    # no FREEING on the chunk, so its owner may claim the block between the
+    # two clears — the control arm of regression 91 (`bitmap_free_block`).
+    property bitmap_free_claim_guard : Bool = true
 
     # A failed capacity search remains true until a free, sweep, or retirement
     # publishes capacity for this (class, kind). The same generation invalidates
@@ -827,6 +840,20 @@ module Gcry
     # mid-allocation, left alone with its chunks pinned and its claims
     # marked, because that owner will finish its allocation from them,
     # without the class lock, when it resumes.
+    #
+    # A set that never takes the hit path (the fallback shared by threads
+    # past the table, the monitor's, the out-of-memory reserve's) is never
+    # retired here, since its owner may be running, and its claims are marked
+    # for the same reason; but it is pinned only when it is mid-allocation.
+    # Its owners allocate only under the class lock, which the after-world
+    # sweep takes too, so there is nothing to pin it against. Until
+    # 2026-11-07 it was pinned at every stop, so the after-world sweep never
+    # swept a chunk it held: every block that died there stayed allocated
+    # until the cursor moved on. A thread born while the table was full keeps
+    # the fallback for life — the pool thread that took over a moved main
+    # fiber in regression 21, whose eight dead controls `GC_base` answered
+    # live (`bench/log/linux/2026-11-07-reg21-fallback-pinned/FINDINGS.md`,
+    # `process_spec/regression/109_no_hit_set_chunks_swept_spec.cr`).
     protected def bitmap_settle_cursor_sets : Nil
       return unless @bitmap_alloc
       each_chunk do |chunk|
@@ -844,21 +871,24 @@ module Gcry
         ChunkHeader.set_pinned(chunk, false)
       end
       each_cursor_set do |set|
-        if set.value.no_hit_path != 0_u8 || cursor_set_mid_allocation?(set)
+        no_hit = set.value.no_hit_path != 0_u8
+        mid = cursor_set_mid_allocation?(set)
+        if no_hit || mid
+          pin = mid || !@no_hit_sets_swept
           i = 0
           while i < POOL_SLOTS
             s = CursorSet.slot(set, i)
             chunk = s.value.chunk
             unless chunk.null?
-              ChunkHeader.set_pinned(chunk, true)
+              ChunkHeader.set_pinned(chunk, true) if pin
               cursor_premark_claim(s, chunk)
             end
             i += 1
           end
-          # The out-of-memory reserve's set is never on the hit path, so it is
-          # pinned at every stop; counting it would add one per collection to
-          # a number that says a mutator was frozen mid-allocation.
-          @cursor_sets_pinned &+= 1 unless set == @oom_reserve_set
+          # Not the out-of-memory reserve's set, which never takes the hit
+          # path: a pin of it would add to a number that says a mutator was
+          # frozen mid-allocation.
+          @cursor_sets_pinned &+= 1 if pin && set != @oom_reserve_set
         else
           credit_cursor_set(set)
           i = 0
@@ -874,6 +904,10 @@ module Gcry
         end
       end
     end
+
+    # Off only for regression 109's control arm: the stop pins every set that
+    # never takes the hit path, as before (`bitmap_settle_cursor_sets`).
+    property no_hit_sets_swept : Bool = true
 
     # Root every block a cursor slot is mid-handover on. Called from the root
     # phase, like `mark_large_alloc_in_flight`. The sentinel a slot carries
@@ -949,6 +983,14 @@ module Gcry
 
     def bitmap_alloc_chunk_public?(chunk : ChunkHeader*) : Bool
       bitmap_alloc_chunk?(chunk)
+    end
+
+    # Does this thread allocate through the shared fallback set (it first
+    # allocated with the table full)? For the stresses that need threads
+    # there (`bench/claim_stress.cr`, regression 109).
+    def on_fallback_cursor_set? : Bool
+      set = cursor_set_cached
+      !set.null? && set == @fallback_cursor_set
     end
 
     # Allocated blocks in a chunk, straight from `occ` — one popcount pass
@@ -1066,11 +1108,16 @@ module Gcry
 
     # Free blocks in one bitmap word, with every correction applied. See the
     # note above for why each is needed.
+    #
+    # The `occ` read is an atomic (relaxed) load: a `free` on another thread
+    # clears bits of the word with a release RMW, and the acquire fence in
+    # `cursor_advance_word` pairs with that clear only through an atomic
+    # read. Relaxed costs nothing over the plain load on x86-64 or arm64.
     @[AlwaysInline]
     protected def chunk_free_mask(chunk : ChunkHeader*, word : Int32, nblocks : UInt64) : UInt64
       occ = ChunkHeader.occ_bitmap(chunk)
       return 0_u64 if occ.null?
-      mask = ~occ[word]
+      mask = ~Atomic::Ops.load(occ + word, LLVM::AtomicOrdering::Monotonic, false)
       last_word = ((nblocks - 1) >> 6).to_i32
       mask &= Heap.tail_mask(nblocks) if word == last_word
       mask &= blacklist_free_mask(chunk, word, mask) if @blacklist_enabled && mask != 0_u64
@@ -1210,17 +1257,43 @@ module Gcry
     # occupancy is a `free` clearing a bit, and the locked refill tolerates
     # that the same way — a block freed behind the cursor is found on the
     # chunk's next pass; the claim (`cursor_claim_word`) sets only bits it
-    # found clear, which no `free` touches. The blacklist is written only
+    # found clear, which no `free` touches. The `free`'s `mark` clear comes
+    # after its `occ` clear, though, and a claim between the two would have
+    # its mark wiped (`bitmap_free_block`): so a word is claimed here only
+    # with no `free` in flight on the chunk (FREEING clear), and otherwise
+    # the caller takes the locked path, which waits for that `free` on the
+    # class lock and claims after it. The blacklist is written only
     # while marking, when this thread is stopped. Runs inside the
     # mid-allocation window, so a stop-the-world that lands during the scan
     # pins the set rather than retiring the slot under it. Zero when the slot
-    # holds no chunk or the chunk is exhausted; the caller then takes the
-    # locked path, which retires the chunk and takes another from the pool.
+    # holds no chunk, the chunk is exhausted or a `free` is in flight on it;
+    # the caller then takes the locked path, which retires an exhausted chunk
+    # and takes another from the pool.
     #
     # Measured before this: 96% of locked refills (`bitmap_alloc_refills`
     # 705 k against `bitmap_alloc_chunk_advances` 29 k per 15 s of Kemal
     # `/json`) were exactly this word advance, taken under the class lock.
-    @[AlwaysInline]
+    #
+    # Out of line: it runs once per word, up to 64 hand-outs, and inlined its
+    # loop shared registers with the hit path (`Heap#fast_alloc`). With
+    # FREEING added, macos-15-intel's `Heap#malloc` spilled the hit path's
+    # `bytes_local` and size-class index to the stack and back on every
+    # allocation (frame 0x88 → 0x98); out of line, 5 stack stores in place of
+    # 19 and a 0x28 frame (`bench/log/macos/2026-11-02-intel-binarytrees/`).
+    #
+    # Inline on x86-64 Windows. There the out-of-line advance made
+    # Binarytrees 3–5% slower than 0.39.0 on the EPYC 9V74 runners, in every
+    # placement and in every session, and inline it reads level with 0.39.0.
+    # On the EPYC 7763 runners out of line reads 1–2% faster than 0.39.0 and
+    # inline level with it, placement averaged out. ubuntu-latest on the same
+    # 9V74 shows no such cost, so the other targets keep it out of line. The
+    # Win64 copy saves eight registers and takes a 0xa8 frame, the SysV one
+    # six and 0x58 (`bench/log/windows/2026-11-03-binarytrees/`).
+    {% if flag?(:win32) && flag?(:x86_64) %}
+      @[AlwaysInline]
+    {% else %}
+      @[NoInline]
+    {% end %}
     protected def cursor_advance_word(s : CursorSlot*, index : Int32) : UInt64
       chunk = s.value.chunk
       return 0_u64 if chunk.null?
@@ -1230,6 +1303,15 @@ module Gcry
       while word < words
         mask = chunk_free_mask(chunk, word, nblocks)
         if mask != 0_u64
+          # The `occ` loads above before the FREEING load: a `free` whose
+          # `occ` clear they saw set FREEING before that clear (a release).
+          # On x86-64 the fence is a compiler barrier and the acquire load
+          # a plain one; it runs once per word, not per block.
+          Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+          if ChunkHeader.freeing?(chunk)
+            @cursor_free_deferrals &+= 1
+            return 0_u64
+          end
           cursor_claim_word(s, chunk, word, mask, index)
           @cursor_word_advances &+= 1
           return mask
@@ -1564,19 +1646,48 @@ module Gcry
     #
     # Both clears are atomic for the usual reason: 64 blocks share each word,
     # and a cursor's claim and release write other bits of the same word.
+    #
+    # And the two must look like one to the chunk's cursor owner, which
+    # claims words with no lock (`cursor_advance_word`). Between them the
+    # block is free in `occ` and its mark clear is still to come. A claim of
+    # the word there takes the block, and when a sweep can run before the
+    # next stop it marks it (`cursor_claim_word`); the hand-out marks it
+    # again (allocate-black), and a stop marks it as a claim, an `in_flight`
+    # root or a block the trace reaches — a stop this thread can be frozen
+    # across, still between the clears. The mark clear then wipes that mark,
+    # and the incremental finishing slice, which sweeps with no settle,
+    # takes the block out of `occ` under the claim or under the object
+    # handed out of it: one block handed out twice
+    # (`process_spec/regression/91_free_mark_clear_claim_spec.cr`). So the
+    # chunk carries FREEING from before the `occ` clear to after the `mark`
+    # clear, and the cursor owner claims nothing from it while it is set.
+    # Reversing the clears is no answer: a `free` frozen between them would
+    # leave its block occupied and unmarked for the stop's sweep, which
+    # frees it and counts it freed a second time.
+    #
+    # The orderings pair with `cursor_advance_word`'s: the FREEING set is
+    # ordered before the `occ` clear by the clear's release, so an owner that
+    # sees the block free sees FREEING (its acquire fence); the clear of
+    # FREEING is a release after the `mark` clear, so an owner that sees it
+    # clear claims after the `mark` clear.
     @[AlwaysInline]
     protected def bitmap_free_block(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       occ = ChunkHeader.occ_bitmap(chunk)
-      return if occ.null?
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return if occ.null? || mark.null?
       ordinal = chunk_block_ordinal(chunk, header.address)
       word = ordinal >> 6
       clear = ~(1_u64 << (ordinal & 63))
+      guard = @bitmap_free_claim_guard
+      ChunkHeader.set_freeing(chunk, true) if guard
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, occ + word, clear,
-        LLVM::AtomicOrdering::Monotonic, false)
-      mark = ChunkHeader.mark_bitmap(chunk)
-      return if mark.null?
+        LLVM::AtomicOrdering::Release, false)
+      if hook = @bitmap_free_split_hook
+        hook.call(chunk)
+      end
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, mark + word, clear,
         LLVM::AtomicOrdering::Monotonic, false)
+      ChunkHeader.set_freeing(chunk, false) if guard
       bitmap_capacity_changed(chunk)
     end
 

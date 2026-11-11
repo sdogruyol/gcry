@@ -1,0 +1,9 @@
+base 1 gzip_free_loop: 20000 iterations in 3843.2 ms (6540000 bytes out) unmapped 1768 KiB, 37 chunks mapped, 4985 collections MAXRSS_KB=8100 
+prev 1 gzip_free_loop: 20000 iterations in 3469.0 ms (6540000 bytes out) unmapped 1350276 KiB, 19868 chunks mapped, 4985 collections FAIL: the loop unmapped more than 1 KiB per iteration Command exited with non-zero status 1 MAXRSS_KB=8004 
+wt 1 gzip_free_loop: 20000 iterations in 3745.3 ms (6540000 bytes out) unmapped 1768 KiB, 37 chunks mapped, 4985 collections MAXRSS_KB=7924 
+base 2 gzip_free_loop: 20000 iterations in 3783.9 ms (6540000 bytes out) unmapped 1768 KiB, 37 chunks mapped, 4985 collections MAXRSS_KB=7780 
+prev 2 gzip_free_loop: 20000 iterations in 3496.2 ms (6540000 bytes out) unmapped 1350276 KiB, 19868 chunks mapped, 4985 collections FAIL: the loop unmapped more than 1 KiB per iteration Command exited with non-zero status 1 MAXRSS_KB=7988 
+wt 2 gzip_free_loop: 20000 iterations in 3783.1 ms (6540000 bytes out) unmapped 1768 KiB, 37 chunks mapped, 4985 collections MAXRSS_KB=8016 
+base 3 gzip_free_loop: 20000 iterations in 3789.3 ms (6540000 bytes out) unmapped 1768 KiB, 37 chunks mapped, 4985 collections MAXRSS_KB=8112 
+prev 3 gzip_free_loop: 20000 iterations in 3492.5 ms (6540000 bytes out) unmapped 1350276 KiB, 19868 chunks mapped, 4985 collections FAIL: the loop unmapped more than 1 KiB per iteration Command exited with non-zero status 1 MAXRSS_KB=7976 
+wt 3 gzip_free_loop: 20000 iterations in 3783.0 ms (6540000 bytes out) unmapped 1768 KiB, 37 chunks mapped, 4985 collections MAXRSS_KB=7856 

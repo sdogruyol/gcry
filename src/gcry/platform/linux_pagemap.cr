@@ -19,7 +19,12 @@
 # That is the test used here, so memory pressure cannot turn this into a missed
 # root.
 #
-# Callable under STW: no allocation, fixed buffer, `pread` into it.
+# Callable under STW: no allocation, `pread` into a buffer on the caller's
+# stack. Not a shared static one: the Monitor (regression 107) and the idle
+# thread probe their own stacks outside any stop, the Monitor once it is no
+# longer suspended by one, and a read of theirs into a shared buffer between
+# the collector's `pread` and its loop could hand `low_water_or_guard` a mark
+# above a parked fiber's live frames.
 {% skip_file unless flag?(:linux) %}
 
 lib LibC
@@ -35,7 +40,6 @@ module Gcry
 
     @@pagemap_fd = -1
     @@pagemap_pid = 0
-    @@pagemap_buf = uninitialized StaticArray(UInt64, PAGEMAP_CHUNK)
     @@pagemap_failed = false
 
     # Reopened when the pid changes: an fd on /proc/self/pagemap keeps pointing
@@ -78,6 +82,7 @@ module Gcry
       # entry of an address 4 or 16 times larger — past the end of the address
       # space, where the read fails and the skip turns itself off for good, or
       # an unmapped page, which reads "never faulted" and skips live stack.
+      buf = uninitialized StaticArray(UInt64, PAGEMAP_CHUNK)
       page = Roots.runtime_page_size
       first = low // page
       last = (high + page - 1) // page # exclusive
@@ -88,7 +93,7 @@ module Gcry
         want = PAGEMAP_CHUNK.to_u64 if want > PAGEMAP_CHUNK
         bytes = want * PAGEMAP_ENTRY_BYTES
         n = LibC.pread(fd,
-          @@pagemap_buf.to_unsafe.as(Void*),
+          buf.to_unsafe.as(Void*),
           LibC::SizeT.new(bytes),
           LibC::OffT.new(idx * PAGEMAP_ENTRY_BYTES))
         if n <= 0
@@ -101,7 +106,7 @@ module Gcry
         got = (n // PAGEMAP_ENTRY_BYTES).to_u64
         i = 0_u64
         while i < got
-          entry = @@pagemap_buf[i]
+          entry = buf[i]
           if (entry & (PAGEMAP_PRESENT | PAGEMAP_SWAPPED)) != 0
             addr = (idx + i) * page
             return addr < low ? low : addr

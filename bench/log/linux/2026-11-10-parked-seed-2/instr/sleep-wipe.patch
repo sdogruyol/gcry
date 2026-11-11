@@ -1,0 +1,21 @@
+diff --git a/src/gcry/monitor_gate.cr b/src/gcry/monitor_gate.cr
+index 2cadea1e..dbd27fe7 100644
+--- a/src/gcry/monitor_gate.cr
++++ b/src/gcry/monitor_gate.cr
+@@ -492,3 +492,16 @@ end
+     end
+   end
+ {% end %}
++{% if flag?(:gc_none) %}
++  class Thread
++    @[NoInline]
++    def self.sleep(time : Time::Span) : Nil
++      previous_def
++    end
++
++    def self.sleep(time : Time::Span) : Nil
++      Gcry::Roots.wipe_below_sp(Gcry::Roots.wipe_limit(Gcry::Roots.hardware_stack_pointer.address))
++      previous_def
++    end
++  end
++{% end %}

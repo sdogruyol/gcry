@@ -1,0 +1,43 @@
+name: probe primes 040
+
+# Probe only, on `probe/primes-040-*`: Primes' 9-or-10 and arm64 JsonGenerate's
+# 14-or-15 collections, every arm traced (threshold, pace per major).
+on:
+  push:
+    branches: ["probe/primes-040-*"]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            benches: Primes
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - env:
+          PROBE_BENCHES: ${{ matrix.benches }}
+          PROBE_REPS: "20"
+          PROBE_ARMS: >-
+            base=c0d570c52793cfa144d88f3f4b600c839f7a40ce
+            tip=1452b941481a0a61defcd6df29d038fea3b72723
+            noreserve=7df8c19738246fe3fff01df4ff2e76fe8ac46fb0
+            nofreeing=a77c15ab069059e945d01bc7e635675417a89e07
+            nohighheap=1452b941481a0a61defcd6df29d038fea3b72723|GCRY_HIGH_HEAP=0
+        run: bench/runner_ab/probe_pace.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.os }}
+          path: probe-out

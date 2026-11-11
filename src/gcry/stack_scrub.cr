@@ -147,6 +147,30 @@ module Gcry
     # thread; `make collect-scrub-cost` uses it as the red arm.
     property scrub_libc_bounds : Bool = false
 
+    # The collector scrub leaves `CLEAR_STACK_RED_ZONE + CLEAR_STACK_LEAF_MARGIN`
+    # bytes just below its own SP as they were: its `memset` runs there. That
+    # band is dead once the scrub returns, and it held the allocation slow
+    # path's residue: `cursor_claim_word` leaves a chunk's data start there,
+    # which is the header address of the chunk's first block, accepted as a
+    # pointer into that block, so a fresh chunk's first block was kept through
+    # every collection that built its frames over the word (regression 61's
+    # flake, `bench/log/linux/2026-11-02-reg61-flake/`). `run_collection`
+    # wipes it after each scrub with the slow path's frameless wipe
+    # (`Roots.wipe_below_sp`). `GCRY_COLLECT_BAND_WIPE=0` turns that off, the
+    # control arm of regression 101 and of the measurement
+    # (`bench/log/linux/2026-11-02-scrub-band/`).
+    property collect_band_wipe : Bool = true
+
+    # Regression 101's hook: when not 0, each collector scrub writes
+    # `scrub_band_plant ^ SCRUB_BAND_PLANT_MASK` over the band it skipped
+    # (`scrub_band_low`...`scrub_band_high`, recorded by each collector
+    # scrub) once its `memset` is done: the residue the band wipe exists for,
+    # on every build and layout. Stored masked so the field is no root.
+    property scrub_band_plant : UInt64 = 0_u64
+    SCRUB_BAND_PLANT_MASK = 0x5a5a_a5a5_5a5a_a5a5_u64
+    getter scrub_band_low : UInt64 = 0_u64
+    getter scrub_band_high : UInt64 = 0_u64
+
     # Zero unused stack below the hardware SP (stack grows down).
     def clear_stack(bytes : UInt64 = @clear_stack_bytes) : Nil
       len = clear_stack_guarded(bytes, fiber_bounds: false)
@@ -163,19 +187,56 @@ module Gcry
       @collect_scrub_runs += 1
     end
 
+    # The band `collect_scrub` skipped, and the frames it ran on, zeroed from
+    # the caller's frame (see `collect_band_wipe`). Inlined: a call would push
+    # its return address into the range it clears.
+    @[AlwaysInline]
+    protected def collect_band_wipe_here : Nil
+      return unless @collect_band_wipe && @collect_scrub_bytes > 0
+      Roots.wipe_below_sp(Roots.wipe_limit(Roots.hardware_stack_pointer.address))
+    end
+
+    # The same scrub and band wipe again from `run_collection_body`, just
+    # before `scan_mutator_stack` builds its frames there. The entry scrub
+    # takes the last cycle's residue; this one takes what this cycle's own
+    # earlier phases (stop, clear, the fiber, thread and static scans, the
+    # timers) left at the depth the mutator scan's frames take, which the
+    # scan reads as the collecting thread's stack: a slot of those frames
+    # that is not written before it is scanned is a root of whatever was
+    # there. In `make parallel-dormant` one such slot, 1 200 bytes below the
+    # entry SP in every build measured, named a word inside the burst's
+    # 3.6 MiB outer-array buffer and kept 36 MB through every collection,
+    # "seeded by stack 3715 KiB": 5 of 5 000 runs with the register buffer
+    # cleared (`Roots.capture_registers`), 0 of 5 000 with this
+    # `bench/log/linux/2026-11-03-parked-seed/FINDINGS.md`). Not counted in
+    # `collect_scrub_runs`, which stays two a collection. It runs inside the
+    # pause, so it takes the running fiber's bounds or nothing: never the
+    # libc lookup, which on the initial thread is a `/proc/self/maps` parse.
+    #
+    # `false` is the control arm of
+    # `process_spec/regression/104_unwritten_root_words_spec.cr`.
+    property mutator_scan_scrub : Bool = true
+
+    @[AlwaysInline]
+    protected def pre_mutator_scan_scrub : Nil
+      return unless @mutator_scan_scrub
+      clear_stack_guarded(@collect_scrub_bytes, fiber_bounds: true, libc_fallback: false)
+      collect_band_wipe_here
+    end
+
     # Bytes zeroed, 0 when nothing was (disabled, re-entered, or no room).
-    private def clear_stack_guarded(bytes : UInt64, fiber_bounds : Bool) : UInt64
+    private def clear_stack_guarded(bytes : UInt64, fiber_bounds : Bool, libc_fallback : Bool = true) : UInt64
       return 0_u64 if bytes == 0
       return 0_u64 if @@clear_stack_active
       @@clear_stack_active = true
       begin
-        clear_stack_body(bytes, fiber_bounds)
+        clear_stack_body(bytes, fiber_bounds, libc_fallback)
       ensure
         @@clear_stack_active = false
       end
     end
 
-    private def clear_stack_body(bytes : UInt64, fiber_bounds : Bool) : UInt64
+    private def clear_stack_body(bytes : UInt64, fiber_bounds : Bool, libc_fallback : Bool) : UInt64
       {% if flag?(:win32) %}
         # Windows commits a stack incrementally. Do not touch its guard page
         # or call memset on memory below SP that memset itself could occupy.
@@ -200,8 +261,9 @@ module Gcry
       # free on the thread that matters: for the *initial* thread glibc
       # answers `pthread_getattr_np` by parsing `/proc/self/maps`, which
       # `linux_stack.cr` already documents and snapshots its way around to
-      # keep out of the pause. The collector's scrub runs twice per collection
-      # and outside the pause, so the cost was real and invisible to
+      # keep out of the pause. The collector's entry and exit scrubs run
+      # outside the pause (the pre-scan scrub, inside it, never asks), so
+      # the cost was real and invisible to
       # `pause_p50`/`p99`: measured on this box, 15.7 µs a call at 48 maps
       # lines, **2.1 ms** at 4 000 parked fibers (8 049 lines) and **24.7 ms**
       # at 20 000 (40 047 lines) — per call, twice a collection, on exactly
@@ -221,6 +283,7 @@ module Gcry
       end
 
       unless bounds_known
+        return 0_u64 unless libc_fallback
         # Counted on *asking*, not on the answer. The counter's whole job is
         # the structural claim "the collector never asks libc" — which
         # `make collect-scrub-cost` gates on — and a lookup that fails, or
@@ -273,7 +336,18 @@ module Gcry
       len = high - low
       return 0_u64 if len == 0 || len > Roots::MAX_SCAN_BYTES
 
+      if fiber_bounds
+        @scrub_band_low = high
+        @scrub_band_high = sp_addr
+      end
       Pointer(UInt8).new(low).clear(len)
+      if fiber_bounds && (plant = @scrub_band_plant) != 0
+        p = high & ~7_u64
+        while p < sp_addr
+          Pointer(UInt64).new(p).value = plant ^ SCRUB_BAND_PLANT_MASK
+          p &+= 8
+        end
+      end
       len
     end
 

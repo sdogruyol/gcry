@@ -50,7 +50,8 @@ module Gcry
     RESIDENT_WINDOW_PAGES    =    16
     RESIDENT_MIN_RANGE_PAGES =    64
 
-    @@page_query_buf = uninitialized StaticArray(Int32, 1024)
+    # The query buffers are locals, on the caller's stack: callers probe their
+    # own stacks outside any stop as well as inside one (see `linux_pagemap.cr`).
     @@page_query_errors = 0_u64
     @@resident_low_water = true
     @@resident_hits = 0_u64
@@ -148,6 +149,7 @@ module Gcry
       resident = info[2].to_u64 + info[3].to_u64
       aligned = low & ~(page - 1)
       lo = where > aligned ? where : aligned
+      buf = uninitialized StaticArray(Int32, RESIDENT_WINDOW_PAGES)
       found = 0_u64
       lowest = high
       addr = high
@@ -158,11 +160,11 @@ module Gcry
         from = addr - want * page
         got = want
         kr = LibMachVM.mach_vm_page_range_query(LibMachVM.mach_task_self_, from, want * page,
-          @@page_query_buf.to_unsafe.address, pointerof(got))
+          buf.to_unsafe.address, pointerof(got))
         return nil if kr != 0 || got != want
         i = want.to_i32 - 1
         while i >= 0
-          if (@@page_query_buf[i] & (PAGE_QUERY_PRESENT | PAGE_QUERY_PAGED_OUT)) != 0
+          if (buf[i] & (PAGE_QUERY_PRESENT | PAGE_QUERY_PAGED_OUT)) != 0
             found &+= 1
             lowest = from + i.to_u64 * page
           end
@@ -188,6 +190,7 @@ module Gcry
     end
 
     private def self.full_low_water(low : UInt64, high : UInt64, page : UInt64) : UInt64
+      buf = uninitialized StaticArray(Int32, PAGE_QUERY_CHUNK)
       addr = low & ~(page - 1)
       last = (high + page - 1) & ~(page - 1)
       while addr < last
@@ -195,14 +198,14 @@ module Gcry
         want = PAGE_QUERY_CHUNK.to_u64 if want > PAGE_QUERY_CHUNK
         count = want
         kr = LibMachVM.mach_vm_page_range_query(LibMachVM.mach_task_self_, addr, want * page,
-          @@page_query_buf.to_unsafe.address, pointerof(count))
+          buf.to_unsafe.address, pointerof(count))
         if kr != 0 || count == 0 || count > want
           @@page_query_errors &+= 1
           return low
         end
         i = 0_u64
         while i < count
-          if (@@page_query_buf[i] & (PAGE_QUERY_PRESENT | PAGE_QUERY_PAGED_OUT)) != 0
+          if (buf[i] & (PAGE_QUERY_PRESENT | PAGE_QUERY_PAGED_OUT)) != 0
             hit = addr + i * page
             return hit < low ? low : hit
           end

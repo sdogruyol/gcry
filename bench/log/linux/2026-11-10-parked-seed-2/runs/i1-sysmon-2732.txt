@@ -1,0 +1,15 @@
+DBG big parked seed user=0x7b4b00799040 bytes=3802600 fiber=0x7b4b099bf0d0 name=main running=1 base=0x7b4b09a00000 bottom=0x7b4b0a200000 stack_top=0x7b4b0a1fec64 scan_top=0x7b4b0a1fa000 scanned=24576 stw_multi=1 own_sp=0x7ffc220067c8
+DBG   thread=0x7b4b0b7280d0 name=DEFAULT-0 current_is=0 main_is=0 sp=0 exempt=0 current_fiber=0x7b4b0b728190
+DBG   thread=0x7b4b0b728310 name=SYSMON current_is=1 main_is=1 sp=0 exempt=1 current_fiber=0x7b4b099bf0d0
+DBG   thread=0x7b4b0b728490 name=(nil) current_is=0 main_is=0 sp=0x7b4b08ffecb8 exempt=0 current_fiber=0x7b4b0997f0d0
+DBG   thread=0x7b4b0b728550 name=(nil) current_is=0 main_is=0 sp=0x7b4b03ffecb8 exempt=0 current_fiber=0x7b4b0999f0d0
+DBG   thread=0x7b4b0995f190 name=gc-idle current_is=0 main_is=0 sp=0x7b4b015f9c68 exempt=1 current_fiber=0x7b4b0997f190
+DBG   holder slot=0x7b4b0a1feb60 below_bottom=5280 above_stack_top=-260 value=user+2025136
+DBG     chunk base=0x7b4b00799000 mapped=3805184 extent=4198400 large=1 class=4294967295
+DBG   idle parked_sp=0x7b4b015f9c68
+parallel_dormant: threads=4 retain=65536KiB ordinary collect
+  RSS peak 72 MB, after collect 35 MB; empty chunks 55 MB, dormant 31 MB
+  seeded by stack 2 KiB, parked 0 KiB, thread 3 KiB, static 2 KiB
+  the collects: 3 major, 0 minor; last major sweep: after the world, multi-mutator, release on; empties warm 24 MB, grace 0 MB, dormant 31 MB, unmapped 0 MB, kept 0 MB, header-blocked 0 MB
+  warm budget / threshold, MB: 69/69 -> 70/70 (live 36) -> 24/24 (live 0) -> 24/24 (live 0)
+  PASS

@@ -7,6 +7,743 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-11
+
+> **0.39.0 and earlier have memory-safety bugs in the opt-in incremental and
+> nursery modes that 0.40.0 fixes.** With `GCRY_INCREMENTAL=1` or
+> `GCRY_NURSERY` (on Linux arm64 the mprotect barrier is the only backend, so
+> `GCRY_NURSERY` alone crashes a minor collection), a cycle could free live
+> objects or crash: an object moved onto the stack or stored into a chunk
+> mapped or remapped during the cycle, soft-dirty's "too dirty" fallback, a
+> block handed out twice after `GC.free` raced a lock-free claim, a block freed
+> while still waiting to be marked, and a full collection racing a cycle's
+> begin or drop. Regressions 91, 95 and 99–102, 108 and 110; 0.38.0 and 0.39.0
+> reproduce them. On Crystal 1.22 the idle collector never ran before 0.40.0.
+> On Crystal 1.21, in any configuration, a program could die at startup
+> (`Fiber#execution_context cannot be nil`) when the execution-context
+> Monitor read one of gcry's lazily initialized class variables while the
+> main thread was still initializing it; rare, present since at least 0.36.0
+> (regression 112).
+> On Linux, 0.39.0's 4 GiB fence could walk a `realloc` growing past about
+> 1 GiB down under one fence after another (16 fences and 60 GiB in the
+> traced case) and still leave its front in a window. With incremental and
+> nursery off (the default), none of the bugs fixed here freed live memory:
+> the default collector's fixes are over-retention. All are under Fixed below.
+
+### Added
+
+- **README, COMPARISON, WINDOWS and the RFC carry 0.40.0's numbers on every
+  platform, measured again on the final source (`2658369a`)**, after the
+  growth-priced pace, hot heap fields first, the Windows inline word
+  advance, the scrub band, the pthread clamp and the parked-seed, Monitor
+  and claimed-not-live fixes landed. Linux x86_64 on the 12-vCPU host,
+  against v0.39.0 and Boehm in one quiet session with 16- and 64-byte pad
+  arms (`bench/log/linux/2026-11-05-0.40-linux-host/`): no crystal-metric
+  row slower than 0.39.0; Revcomp 98% of Boehm (0.39.0 97%), the allocation
+  entry on a 64-byte line in this build; JsonParseSerializable's peak 0.71×
+  → 0.77× and JsonParsePull's 0.76× → 0.78×, the pace's trade of peak for
+  fewer collections. Kemal `/json` 103.6% at 1.24× (0.39.0 105.6% in the
+  same session, −1.8%), code placement: a second session with pad arms of
+  both releases reads 0.40.0's three placements at 103.3–104.3% and
+  0.39.0's at 102.2–104.9%. The other four from `perf-ab.yml` run
+  41577045896 on the GitHub runners (the first refresh's inputs, two pads a
+  side; `bench/log/{linux,macos,windows}/2026-11-05-0.40-runners/`): the
+  keep rule finds 2 of 45 rows unexcused, both on Windows. Both are code
+  placement at four phases a side (the next entry): JsonParsePure (+3.0%
+  wall) and Binarytrees (+0.7%, the inline word advance on an EPYC 7763).
+  Windows'
+  other slower rows (Revcomp +6.1%, JsonParseSerializable, JsonParsePull,
+  RegexDna) and Intel's (Revcomp +7.7%, JsonParsePull +2.3%) have a 0.40.0
+  pad arm inside 0.39.0's band. Primes'
+  9-or-10-collection step is gone (Intel +1.5%, Windows +0.6%, within the
+  spread; +7.6% and +6.3% before), and so is arm64 JsonGenerate's fifteenth
+  collection. JsonParseSerializable's and JsonParsePull's peaks rise 4–15%
+  on every runner (at most 0.95× Boehm's, Intel JsonParsePull), the pace;
+  M1 JsonParsePure's 0.93× → 1.06×, a register pin in crystal-metric's
+  driver (next entry). JsonGenerate's peak stays −13.6% on both Macs.
+  Kemal `/json` is level on all four runners it runs on.
+
+- **Windows JsonParsePure and Binarytrees on 0.40.0's final source are
+  code placement, measured at four phases a side.** These are the keep
+  rule's two unexcused rows in run 41577045896, where two pads a side
+  could not reach 0.39.0's band. Each tree was built at all four 16-byte
+  phases in one session (six sessions on `windows-latest`: four on an EPYC
+  7763, one on an EPYC 9V45, one on a Xeon 8573C), with the source at
+  `2c600dfb` and `e7efe740` and the tip less each group of the later
+  commits as further arms. JsonParsePure's ranges overlap in every
+  session, and 0.40.0 is 0.6–2.1% faster in wall time at the same phase.
+  Its timed section reads +1.5% to +2.0% pooled on the 7763 (phase 48 slow,
+  16 level), −2.1% on the 9V45 and −0.2% on the 8573C. The checkpoints
+  read level, and no revert group lowers the band at every phase. The
+  collection 0.40.0 skips is in the setup, before crystal-metric's
+  `GC.collect` ahead of the timer. Binarytrees (three 7763 sessions): the
+  ranges meet, the same-phase difference is +0.4% to +0.8%, and the slow
+  phase is the one 0.40.0 sits on unpadded. No source change
+  (`bench/log/windows/2026-11-06-win-phases/`).
+
+- **M1 JsonParsePure's peak (0.93× → 1.06× of Boehm's) is a register pin
+  in crystal-metric's `Benchmark::run`, not the pace.** Since `19cf3a60`
+  (hot heap fields first, word advance out of line) changed gcry's
+  allocation entry, which is inlined into that function, LLVM keeps the
+  setup's dead `JsonGenerate` in `x20` across the `GC.collect` before the
+  timed run. `GC.collect` saves the register in its frame, the stack scan
+  reads it, and the 120 MiB of coordinates survive that collection: 120
+  MiB scanned and a 274 MiB heap where 0.39.0 has 0.1 MiB and 62 MiB. The
+  parse then grows from a heap about 110 MiB larger, and the peak is 558
+  MiB where it was 489 MiB. The collection after it frees them. The one
+  collection fewer comes from the 64 MiB first stretch that the pin sets.
+  A same-session bisect on `macos-latest` (probe 42257657635, 15 reps)
+  puts the step at `19cf3a60` exactly. The tip with the pace's growth
+  term off reads the same 558 MiB. A live caller register is a root, so
+  there is no collector fix: the pace and Primes' 9 collections are
+  unchanged (`bench/log/macos/2026-11-06-m1-peak/`).
+
+- **Windows: 0.40.0's seven slower rows are code placement, row by row.**
+  Same-session runs on `windows-latest` with nops ahead of all the code at
+  each of the four 16-byte phases, for both 0.40.0 and 0.39.0
+  (`bench/log/windows/2026-11-02-0.40-win-rows/`; four sessions on two CPU
+  models, 21 reps): at the same phase the two read the same time (medians
+  −2.3% to +3.3% apart, both signs), and unpadded 0.40.0 sits on a slow
+  phase of each row and 0.39.0 on a fast one — JsonParsePure,
+  JsonParseSerializable, JsonParsePull (3.5–6% between phases), JsonGenerate
+  (7%), RegexDna (1.4%), Revcomp (16–19%, where `Revcomp#revcomp` lands);
+  a control that allocates nothing moves 4%. Primes reads the same at equal
+  collection counts; 0.40.0 reaches the pace's tenth collection more often,
+  about half of that with the mark unroll on an EPYC 7763, at rates
+  placement moves for both releases. No default-path commit reverted alone
+  brings a row under the tip's band, 0.39.0 with 0.40.0's heap field layout
+  overlaps both releases' ranges, and on Windows the hit path adds one load
+  and one test per 64 blocks. Nothing changes in `src/`. README, COMPARISON
+  and WINDOWS say so.
+
+- **The overnight stress runs every week on the five GitHub runners**
+  (`.github/workflows/stress.yml`): Linux x86_64 and arm64, macOS arm64 and
+  Intel, Windows x86_64, three jobs each. `bench/stress_overnight.sh` takes
+  `--only`/`--skip` loop filters, builds only what the selected loops run,
+  runs without the heavy lock where there is no `flock`, exits 1 on any
+  failed or stalled run (a classified Crystal scheduler deadlock is counted,
+  not failed), and prints `<loop> skipped: <reason>` for a loop that cannot
+  run on that OS or lacks its compiler or `wrk`. `bench/run_bounded.sh`
+  captures a Windows stall with cdb and the executable's PDB and kills the
+  whole native tree. The full set on `ubuntu-latest`: 1 652 runs in three
+  jobs of 75–100 minutes, all passing; every runner at scale 0.05 passing
+  (`bench/log/linux/2026-11-01-stress-ci/`).
+
+### Changed
+
+- **The pace prices a growing heap's next cycle.** It held the threshold to
+  the cost of the cycle just measured, and a heap that grows every stretch
+  reads more in the next one. Primes spent 18–36% of each stretch
+  collecting against the 10% target, and took a tenth collection whenever a
+  few percent of mark time moved its seventh major. The threshold is now
+  `P / (1 − P × survived / (allocated × max(scanned, 64 MiB)))`, with
+  `survived` at most the previous stretch's survival rate, so a one-off step
+  is not priced (`Heap.pace_survived`, `PACE_GROWTH_SCAN_FLOOR`). Five-runner
+  A/B against the previous tree (41293132278): Primes collected 10 times in
+  1 of 75 runs instead of 13, and the JSON rows had 1–2 fewer collections.
+  JsonParsePure's wall was −0.5% to −3.4% on four runners and its peak
+  stayed 1.07× Boehm's. Knuckeotide's peak was −2.6% to +3.6%, and Kemal
+  was level. JsonParseSerializable and JsonParsePull peak 3–16% higher, at
+  most 0.99× Boehm's. The pricing without the trend and the floor put
+  Knuckeotide's peak up 23–26% on Linux
+  (`bench/log/linux/2026-11-02-pace-growth/`).
+
+- **The `String::Builder` and `@[Raises]` reopens apply only below Crystal
+  1.22.1,** which fixed both upstream (crystal-lang/crystal#17650 for
+  #17645, #17656 for #17644; both on master too). Regressions 22 and 13 pass
+  on 1.21.0 with the reopens and on 1.22.2 without them. CI's second
+  compiler leg, the pinned `std_spec` arm and the compiler-with-gcry build
+  move from 1.22.0 to 1.22.2.
+
+- **The mark scans a payload four words per loop turn, and tells a
+  small-object batch entry by one compare.** 7.2% fewer instructions in
+  JsonGenerate's batch scans (callgrind, one marker). Σ mark on arm64 Linux:
+  Primes −3.9%, JsonParsePure −7.0%, JsonGenerate −8.6%,
+  JsonParseSerializable −11.9%, JsonParsePull −11.5% at the same
+  collections; Windows −1% to −5% on the JSON rows; level on x86 Linux and
+  both Macs. No row slower than base beyond what a 16- or 64-byte code pad
+  moves it on the same runner (Perf A/B 41213949301, pads 41216031947,
+  41219560170, 41221127852; `bench/log/linux/2026-10-31-mark-cost/`). The
+  32 MiB parallel-mark live floor stays: it does not reach Binarytrees,
+  and Boehm's own parallel markers do not speed Binarytrees up on any runner
+  (`bench/log/linux/2026-10-31-parallel-mark-floor/`).
+
+- **0.39.0's Revcomp row on the Linux host, 1–2% slower than 0.38.0, is
+  code placement (README, ROADMAP).** The allocation entry
+  `GC::malloc_atomic` starts 16 bytes past a 64-byte line in the 0.39.0
+  binary, moved there by 80 bytes of the mprotect fix's class-variable
+  initializers ahead of it, and Revcomp is slowest at that phase on x86-64
+  whichever release is built there. Over eight placements of each release
+  0.39.0 is level with 0.38.0 on the host (+0.05% [−0.38, +0.23]); over five
+  it is 0.9% faster on `ubuntu-latest` and 0.5% faster on arm64 (Perf A/B
+  41212029709 and 41213664006). Collections, pauses, grows and faults are
+  the same, and 0.39.0 runs 0.12% more instructions, five per allocation
+  from the slow path's tail call (`bench/log/linux/2026-10-31-revcomp-host-placement/`).
+
+### Fixed
+
+- **A program on Crystal 1.21 no longer dies at startup with
+  `Fiber#execution_context cannot be nil`.** The execution-context Monitor
+  starts in the prelude, before `__crystal_main` reaches gcry's class
+  variables, and runs gcry code: its loop prologue at birth, its sleeps and
+  its gated work. A class variable with a call initializer (the gate's
+  `Atomic(Int32).new` flags) is Crystal's `once`, and a Monitor that read one
+  while the main thread was running its initializer waited in it; on 1.21 its
+  fiber has no execution context, and the main thread's `resume_all` raised.
+  Seen in PR #57's darwin job, in regression 107's child (the loop prologue's
+  research flag, read at the Monitor's birth); the gate's own `@@site` and
+  `@@stopped`, read in its first gated call ~10 ms after it starts, had the
+  same shape since at least 0.36.0, so any program whose main thread was in
+  one of those initializers then could hit it. On 1.22 the Monitor waited
+  instead. Every class variable the Monitor, the idle thread and the
+  watchdog read is now literal-initialized (`Gcry::StaticAtomic`, sequentially
+  consistent `Atomic::Ops` on it). Regression 107 on an M2: 29 of 2 000 runs
+  died before, 0 of 2 000 after. Regression 112 holds the main thread inside
+  an initializer while the Monitor runs (the control arm reads the held
+  variable and dies on 1.21, stalls on 1.22), and fails on any `once` flag
+  in those modules' symbols (`GCRY_MONITOR_ONCE_TEST`, research only). Keep
+  rule against 0.39.0 on the five runners: one row flagged (`macos-15-intel`
+  JsonParseSerializable, +3.9%), ok in 21-rep sessions on that runner
+  against 0.39.0 and against the release tip
+  (`bench/log/macos/2026-11-11-monitor-once-race/`).
+
+- **The execution-context Monitor's sleep no longer builds a heap address
+  every 10 ms.** `Monitor#every` sleeps between passes in `Thread.sleep`, and
+  Crystal's `System::Thread.sleep` copies the `Time::Span` into its frame,
+  writing only the `Int32` half of the nanoseconds word. On Crystal 1.21.0
+  the other half was rewritten every pass by `Comparable#clamp`'s `self` in
+  `every`, an address in the Monitor's stack with the heap's high half, so
+  the Monitor slept on (that half << 32 | remaining ns), an address in the
+  heap's 4 GiB, which every stop reads whole on Linux. It kept whatever block
+  lay there: `make parallel-dormant`'s dropped burst ("seeded by … parked
+  3812 KiB", live 36 MB, no empty chunk dormant) in 5 of 8 000 local runs,
+  the residual the parked-seed fix below named. Regression 107's loop scrub
+  runs once and could not reach it. `Thread.sleep`, whose one stdlib caller is the
+  Monitor, now wipes 1 KiB below its SP before Crystal's sleep builds its
+  frames; a Crystal without it fails to build. 0 of 16 000 runs in the same
+  session. Over-retention only. Regression 111 plants a marker under the
+  sleep: its high half survives under half-written words before the fix and
+  not after (`GCRY_MONITOR_SLEEP_TEST`, research only). Keep rule against
+  0.39.0 on the five runners: one row flagged (`ubuntu-latest`
+  JsonParsePure, +2.1%), within spread in a 21-rep session on that runner
+  and placement against the release tip
+  (`bench/log/linux/2026-11-10-parked-seed-2/`).
+
+- **An incremental cycle begins inside the collection section.**
+  `collect_a_little` began its cycle (`begin_incremental`: a stop, the
+  marks cleared, the roots marked, the barrier armed, `@collecting` set
+  and cleared) before it queued for the section, on entry checks that read
+  `@collecting` false. A full collection sets that flag only once it holds
+  the section and is past its prelude, so a slicing thread that read it
+  false while a collection queued or prepared still began: its stop waited
+  out the collection's and took the world in the post-stop passes, ahead of
+  the default sweep after the world, and cleared the marks that sweep
+  reads. The collection then freed every object a root does not point at
+  directly, its re-arm took the new cycle's barrier down (the cycle stayed
+  open with none), and the begin's `@collecting = false` ended the
+  collection's flag early. A begin landing while a collection dropped an
+  open cycle had its grey entries and barrier undone by the rest of the
+  drop (probe). The cycle now begins after `lock_post_stw`, in the same
+  section → `lock_write` → stop order as every collection; a slice that
+  queued expecting an open cycle still returns false when it finds it
+  gone, and one that queued to begin returns true without beginning when
+  a collection ran while it queued (that collection paid the debt). A
+  raise inside the begin (a before-collect callback, the event hook, the
+  stop) releases the section and drops the half-begun cycle. Boehm begins
+  a cycle under its allocation lock. Regression 110: fixed, a 20 000-block
+  chain behind an explicit root lives; control
+  (`Heap.inc_begins_in_section = false`), 19 999 of its blocks are swept
+  by the collection's own sweep. Its *raise* arm: an event hook raising
+  in the begin, then another thread's `collect` returns; control
+  (`Heap.inc_begin_raise_releases_section = false`) it still waits after
+  5 s. Affects every
+  release through 0.39.0 (each begins the cycle before the section; the
+  sweep-after-world form since lazy sweep became the default, 0.17.0 at
+  the latest). The default stop-the-world path's machine code is
+  unchanged. `bench/log/linux/2026-11-07-incremental-begin/FINDINGS.md`.
+
+- **A full collection drops an open incremental cycle only once it holds
+  the collection section, and regression 99's *race* control no longer
+  flakes.** `collect` and `minor_collect` called `abort_incremental` before
+  they queued, so it could land while another thread's slice held the
+  section, between its re-read of `@inc_active` and its stop: the slice
+  went on with its grey entries cleared and the backend `None`, saw no
+  lost barrier, and swept what only those entries reached while a root
+  held it. The drop now runs in `run_collection_body` after the section is
+  taken (Boehm finishes the cycle under its allocation lock). Regression
+  108 forces the window: fixed, a 20 000-block chain behind an explicit
+  root lives; control (`Heap.collect_drops_cycle_in_section = false`),
+  19 859 of its blocks are swept. The same early drop decided which way
+  regression 99's *race* control went: on an idle host the queued slice
+  ran on a cycle already dropped, on a loaded one it ran first and its
+  4 096 marks did not finish the chain the losing slice left grey (298 and
+  299 of 300 failures pinned to one CPU, both layouts). The control's
+  slice now always runs on the open cycle, with an unbounded budget, and
+  asserts it saw the cycle open; the fixed arm asserts its slice returned
+  before the hook. 0 failures in 300 pinned and 300 unpinned children per
+  arm on both layouts; in suite order (cut after regression 99) 0 of 300
+  unpinned and 0 of 200 pinned runs per layout, against 200 and 199 of 200
+  pinned for the tree before. The keep rule against 0.39.0 on the five
+  runners finds no row unexcused (`bench/log/linux/2026-11-06-reg99-race/`).
+
+- **Blocks that die in a chunk the shared fallback cursor set holds are
+  reclaimed, and regression 21 no longer fails "controls kept 8 > 1" a
+  third way.** A thread that first allocates while the 64-set table is full
+  shares the fallback set for the rest of its life, and the stop pinned the
+  fallback's chunks at every collection (the monitor's and the
+  out-of-memory reserve's too), so the after-world sweep never swept them:
+  everything that died there stayed allocated, finalizers unrun, until the
+  cursor left the chunk. Regression 21 failed this way on 1.22.2 headerless
+  (1 in 174 suite-order runs, the main fiber moved): moved right after
+  `process_gc_spec`'s 80 threads fill the table, the main fiber lands on a
+  pool thread born on the fallback, and 21 fails on every run of the tree
+  before (13 of 13), its eight controls never marked, claimed or swept.
+  Such a set is now pinned only when it is mid-allocation; its owners
+  allocate only under the class lock, which the after-world sweep takes
+  (`Heap#bitmap_settle_cursor_sets`). The same move: 0 failures in 100
+  runs (97 moved), and 0 in 30 with the move before the first example.
+  Since v0.23.0; never under `GCRY_BITMAP_ALLOC=0`
+  (`bench/log/linux/2026-11-07-reg21-fallback-pinned/`). Regression 109,
+  with a control arm, and a stamped arm in which a thread on the fallback
+  allocates through 20 collections; `make claim-stress` and the overnight
+  loops also run `claim_stress --fallback`, which fills the table with
+  parked threads so its workers allocate through the fallback, in both
+  sweep arms (a mutant that leaves the unpinned claim unmarked fails both
+  guards). Its first form, 72 workers past the table, put none on the
+  fallback on the macOS and Windows runners, whose execution context starts
+  its threads on demand.
+
+- **Regression 1 runs its drift cycles in a process of their own.** In
+  the suite's shared process it still drifted rarely on Crystal 1.22.2
+  headerless (−1 849, −2 151, −2 444; −1 881 in 1 of 74 runs of the tree
+  before this), held by state an earlier spec left, with no root word
+  changing in the window. The example now spawns its own binary for the
+  two cycles, with the same baseline logic and bounds, and asserts the
+  child's verdict: 0 failures in 100 suite-order runs on 1.22.2 headerless
+  and 50 with headers and `GCRY_BITMAP_ALLOC=0`, every child reading 0
+  for both counts (`bench/log/linux/2026-11-06-spec-harden/`).
+
+- **Regression 74 no longer fails when another spec's string shares its
+  size class.** It counted occupied blocks in whatever chunk its block
+  landed in, and on arm64 CI regression 95's failure message sat there
+  (`chunk_occupied_count` 2). It now allocates in the class until its
+  block is the only one in its chunk, then asserts exactly what it did.
+  With a string of the class kept first, the old spec fails 20 of 20 and
+  the new one 0 of 20 across both layouts; with `cursor_premark_claim`
+  removed from the stop's settle the new one fails 40 of 40 on the claim
+  (`bench/log/linux/2026-11-06-spec-harden/`).
+
+- **`GC_base`, `GC_size` and `GC_register_finalizer` no longer answer a
+  freed block as live once a cursor has claimed its word, and regression 21
+  no longer fails "controls kept 8 > 1".** The bitmap allocator claims all
+  of a word's free blocks at once, setting them in `occ` before it hands
+  them out, and these three looked blocks up by `occ` alone. So after a
+  sweep, the first allocation in a freed block's class, on any thread,
+  made every freed block of its word read allocated again, its bytes
+  intact; a pointer kept past the free got a base, a size, or a finalizer
+  registered on a block nobody held. Regression 21's eight control blocks
+  were freed by its three collections and counted live that way: seen
+  twice, both times with the main fiber moved; under a diagnostic no root
+  reached them and they read free until a claim, and one allocation forced
+  after the collections fails the example on every run, moved or not. The
+  three now leave out a block its cursor has claimed and not handed out
+  (`Heap#find_live_object_with_chunk`), as `free` and `Heap#live?` already
+  did; the mark, the sweep and `find_object` are unchanged. Since the claim
+  (`20cbb8f2`); never under `GCRY_BITMAP_ALLOC=0`
+  (`bench/log/linux/2026-11-04-reg21-claimed-controls/`). Regression 106,
+  with a control arm.
+
+- **Windows Binarytrees no longer runs 3–5% slower than 0.39.0 on the
+  EPYC 9V74 runners.** The keep rule on the 0.40 tip (Perf A/B
+  41409560598) left the row unexcused, +3.4% timed and +4.8% wall, on that
+  run's 9V74; the earlier keep runs had drawn EPYC 7763s and Xeon 8573Cs.
+  It was the hit path's word advance (`cursor_advance_word`) going out of
+  line in the Intel Binarytrees fix: on the 9V74 every placement of the tip
+  read 3–5% over 0.39.0, 0.40's `src/` history steps up at that commit
+  alone, and the advance inline again (hot fields still first) reads level
+  with 0.39.0. Not the pre-scan scrub, the band wipe or the pthread scan
+  clamp: reverted or off they move nothing, Σ pause is the same in every
+  arm, and the pre-scan scrub costs ~1.5 µs a collection there. The
+  advance is inline on x86-64 Windows only; ubuntu-latest on the same CPU
+  shows no cost and keeps it out of line, as do arm64 and macOS. On the
+  EPYC 7763 out of line had read 1.8–2.7% under 0.39.0 and inline reads
+  level with it (`bench/log/windows/2026-11-03-binarytrees/`).
+
+- **On Linux a word the execution-context Monitor's calls left below its SP
+  no longer keeps a block.** The Monitor is never signalled, so a stop reads
+  its stack whole from the low-water mark. `collect_stacks` leaves the base
+  and top of the fiber stack it frees 648 bytes below where the Monitor
+  sleeps. Once gcry mapped chunks over that range, both words were interior
+  pointers into large blocks: in regression 1's suite order they kept
+  16–70 thousand objects until the next `collect_stacks` wrote over them,
+  inside the spec's window (−15 985 to −70 174 with block headers, 4 of 113
+  tip runs). The Monitor now zeroes 16 KiB below its SP as each gated call
+  ends (`MonitorGate.leave`), before a stop may read it. Over-retention
+  only. Regression 105 plants a block's address there: the code before
+  keeps it, the fix frees it. Regression 1 also zeroes `drift_cycle`'s own
+  frame before each cycle; a planted address in that frame's slots read
+  −4 003 (`bench/log/linux/2026-11-04-reg1-drift/`).
+
+- **The execution-context Monitor's loop frame no longer keeps what its
+  thread's birth left there.** `Monitor#run_loop` never returns, and every
+  stop reads its frame. Crystal's `every` keeps `Time::Instant`s and
+  `Time::Span`s in it and stores only the `Int32` half of their second word,
+  so the other half kept the high bits of an address the birth had left at
+  that depth: each pass the word became a new address in the heap's 4 GiB
+  (low half a nanosecond count), and kept whatever block it named until the
+  next pass. In regression 1's full suite order on Crystal 1.22.2 it was
+  the one root word that held a block before the baseline and something else
+  after the check; it matches the one `drift=-2444` seen after the fix
+  above, and the Monitor word left in `make parallel-dormant`
+  ([INFERENCE] for both: neither failure was captured with it). The
+  Monitor now zeroes its stack below the loop's entry before Crystal's loop
+  builds its frame there (`MonitorGate.scrub_loop_stack`), while it is
+  still a mutator a stop suspends, as the idle thread does at its birth;
+  all platforms, once per process. Over-retention only. The stack
+  low-water probe (Linux pagemap, Darwin page query) now reads into a
+  buffer on the caller's stack instead of one static buffer, so a probe
+  outside a stop cannot change the collector's answer for a parked
+  fiber's stack; a Crystal without the Monitor methods gcry wraps fails
+  to build. Regression 107: a block's address planted under the loop is kept by
+  the code before and freed by the fix, and a marker's high half survives
+  under the loop's half-written words before the fix and not after
+  (`GCRY_MONITOR_LOOP_TEST`, research only). Regression 1 still fails on
+  1.22.2 headerless with this fix, by the same size (`drift=-1849`, 1 of 9
+  suite-order runs); an instrumented `drift=-2151` had no root word change
+  in its window, and that source is open
+  (`bench/log/linux/2026-11-04-reg1-drift/`).
+
+- **The root scan no longer reads words nothing wrote in three frames, and
+  `make parallel-dormant` no longer keeps its dropped burst 1 run in 200.**
+  CI failed the gate once (job 125102880486, "seeded by … parked 3714
+  KiB", 36 MB live across 7 majors); the same failure was 25 in 5 000 local
+  runs on the tip and 5 in 5 000 after this. Not the change to
+  `scan_pthread_stack` (`21462240`): 15 in 3 500 on the tree before it and
+  15 in 3 500 with its clamp off, against 22 on the tip (p = 0.32). Each
+  holder was a stack slot no code had written, keeping a word an earlier
+  call had left at that depth, which named a word inside the burst's
+  3.6 MiB outer-array buffer whenever that buffer was mapped there. (1) The
+  idle collector's `loop_forever` frame never returns, and a slot of it held
+  an address left from the thread's birth at every collection; the thread
+  now zeroes its stack below the block that starts it before that frame is
+  built. (2) The mutator scan reads its own frames, and a slot of them held
+  what this cycle's earlier phases had left there; the collector scrubs
+  below its frame once more just before that scan. (3)
+  `Roots.capture_registers` scanned all 256 bytes of a buffer `setjmp`
+  writes 80 of on x86_64 glibc, 21 words read as registers; it is cleared
+  first. Over-retention only: every word cleared is one nothing wrote after
+  the clear. The 5 left are the execution-context monitor's own frames,
+  which gcry reads whole for want of its SP: a word whose low half is a
+  ~10 ms nanosecond count and whose high half matches the heap's
+  (`bench/log/linux/2026-11-03-parked-seed/`). Regression 104, with a
+  control arm for each.
+
+- **A collection no longer keeps blocks named only by its own frames once
+  the main fiber has moved to another thread.** Crystal 1.21+'s
+  execution-context monitor hands the scheduler of a thread it catches in a
+  `Fiber.syscall` (stdlib's blocking `open(2)`, `getaddrinfo`) to another
+  thread, and the main fiber carries on there. The initial thread's stack
+  mapping is then the main fiber's stack, and the stop-the-world scan read
+  it whole as that thread's — from the collector itself when the collection
+  ran on the main fiber, frames below its SP and the mark chain under the
+  scan included, whose locals hold each looked-up chunk's data start and
+  block header. The first block of a chunk the mark had looked into, and
+  whatever such a word named, were kept through every collection
+  (regression 21's two control blocks, failing CI's 1.22.2 step about half
+  the times the main fiber had moved). A thread running on a mapping now
+  bounds its scan the way the owner's own SP would: the collector at its
+  SP, a stopped thread at its suspend SP less the usual slack; with no
+  thread on it the mapping is read as before. Over-retention only, never a
+  premature free; v0.36.0–v0.39.0 have the same scan. Regression 103 plants
+  eight blocks' addresses below the collector on the moved main fiber: the
+  code before keeps all eight (0.39.0 too), the fix frees them
+  (`bench/log/linux/2026-11-03-reg21-marked-unmarked/`).
+
+- **Regression 100's *remap* control no longer finds a swept object
+  allocated again after a retry.** The window read the object's state after
+  printing its stop trace, and the print allocates: after the arm's retry
+  (a false root had marked the old block), on the freelist allocator, the
+  sweep had left the swept object's slot first in its class, and the print
+  took it. The control then read the object as alive with its pattern
+  overwritten — twice in test-crystal-next's step on ubuntu-latest, and on
+  every run locally with the retry forced (200 of 200). The window now
+  reads the object before it allocates anything, and counts it alive only
+  if a block begins at it: 0 failures in 200 runs of every arm on each
+  layout and allocator, with and without the forced retry; the control
+  still finds it swept every time
+  (`bench/log/linux/2026-11-02-incremental-stack-rescan/`).
+
+- **A collection no longer leaves the 192 bytes under its own stack scrub
+  as they were.** `run_collection`'s scrubs zero 16 KiB below the scrub's
+  SP but skip the red zone and leaf margin where their `memset` runs. The
+  allocation slow path left a chunk's data start there, the first block's
+  header address, and the collector's stack scan kept that block through
+  every collection built over the word (regression 61's flake: 10 of 100
+  suite-order runs on the trees before this, 0 of 30 after). `run_collection`
+  now wipes 1 KiB below its own SP after each scrub with the slow path's
+  frameless wipe (`Roots.wipe_below_sp`), on every target.
+  `GCRY_COLLECT_BAND_WIPE=0` turns it off (research knob). Regression 101
+  plants a word in the band on every build: the control arm keeps the
+  block and the fixed arm frees it. Keep rule against 0.39.0 on the five
+  runners: every flagged row is placement
+  (`bench/log/linux/2026-11-02-scrub-band/`).
+
+- **Regression 1 no longer fails once in about 80 suite-order runs.** A
+  word in the dead frames below its cycle held a dead object with a
+  finalizer and ~1 700 objects behind it, through all four pre-baseline
+  collections. Once the word goes it takes two more, one to run the
+  finalizer and one to reclaim, and when the cycle's own calls overwrote it
+  the reclaim landed inside the measured window (drift −1 225 and −1 457).
+  The cycle now scrubs those frames before its pre-baseline collections:
+  0 of 40 against 2 of 160. Regression 21's one sighting ("controls kept
+  8 > 1") did not recur in 200 runs, and no probe reproduced it.
+
+- **Regression 86 no longer misses its third arm's collection on Windows.**
+  The idle collector is born at the end of the process's first collection,
+  the first arm's, and allocates on its own thread until it exempts itself.
+  On windows-latest that birth landed inside a later arm's window, where the
+  threshold is 1, and collected; the arm's own allocation found that
+  collection still running and returned without one (5 of 200 freelist
+  runs). The spec now runs the first collection itself and waits until the
+  idle thread is exempt before any arm: 0 of 800, one collection per arm
+  (`bench/log/windows/2026-11-03-reg86-idle-birth/`).
+
+- **Regression 79 no longer misses its collection on Windows arm64.** The
+  IOCP forwarder thread Crystal starts before `main` copies its name to
+  UTF-16 once its fiber is current, an allocation that landed inside the
+  spec's threshold-1 window and took the collection section; the spec's
+  own allocation then coalesced into it and returned without a collection
+  (`Expected 0 to be > 0`, 4–8 of 200 runs on windows-11-arm, default and
+  headers). Regressions 79 and 86, which check that one allocation at
+  threshold 1 collected, and 27's two examples that check that
+  `GC_collect_a_little` ran a due collection, now call
+  `settle_runtime_threads` (`process_spec/support/collection_window.cr`).
+  It runs the first collection and waits until the idle thread is exempt
+  and every named thread has its Windows description, i.e. is past its
+  birth's allocations. Inside each threshold-1 window, 79 and 86 also call
+  `credit_window_debt`, which makes the credited debt at least 1. The slow
+  path checks the credited debt before it credits its own allocation, so
+  right after a collection a window could see 0 and not collect (79 after
+  27 in one process). 79 and 86 each: 0 of 450 runs on windows arm64 and
+  0 of 450 on x86-64, 150 per variant
+  (`bench/log/windows/2026-11-07-reg79-iocp-birth/`).
+
+- **The nursery and incremental marking no longer crash on the mprotect
+  page barrier when the heap's chunks change between collections.** The
+  barrier's cards are sized to the heap at the arm, and the dirty-page scan
+  of every minor (and of an incremental cycle's last slice) ran against
+  them after the chunk set had moved on, two ways. It read every dirty page
+  in the cards, including one of a cached large chunk that the allocation
+  path had dirtied and unmapped since (`trim_large_cache`): a fault with
+  nothing mapped. And it protected the old chunks again, including one
+  mapped since the arm below or above the cards (a large allocation's own
+  mapping), so the same collection's sweep faulted on its header, live or
+  freed, with no card to claim the fault. Either way the handler passed the
+  fault on and the program died with "Invalid memory access". The scan now
+  reads the dirty pages of the chunks the heap holds, nothing protects a
+  page outside the cards, and an incremental slice's scan replaces cards
+  the heap has outgrown. Where no cards can be had (a span past 64 GiB, or
+  a refused `malloc`) the barrier is taken down instead of left blind: no
+  incremental cycle starts, and one whose termination scan fails ends in a
+  full collection rather than finishing on a mark that missed stores (the
+  cycle is dropped inside that slice's stop, so no other thread's slice can
+  finish it first). That last rule also fixes incremental marking on
+  soft-dirty, x86-64's backend for `GCRY_INCREMENTAL=1`: when the
+  termination scan found too many dirty pages it gave up on the dirty set
+  and the slice swept anyway, so an object moved into an already-marked
+  block during the cycle was freed (IncStack's probe, 4 of 4). It falls back
+  in 2–3 of 23–28 majors on the JSON benches, 9 of 16 on Primes, 4 of 198 on
+  Binarytrees and 0 of 2 813 in `pattern_fuzz`; each now costs a full
+  collection.
+  `GCRY_NURSERY` alone (header layout) reaches it on
+  Linux: aarch64 has no soft-dirty, so the barrier is mprotect from the
+  start, and on x86-64 a minor that finds too many soft-dirty pages hands
+  it to mprotect until the next major. With only `GCRY_NURSERY=262144`, a
+  loop dropping 200 KiB buffers and `bench/pattern_fuzz.cr` crashed 5 of 5
+  and 3 of 3 on both `ubuntu-24.04-arm` and `ubuntu-latest`, and pass on
+  the fix. 0.38.0 and 0.39.0 reproduce; the same code is in 0.35.0 to
+  0.37.0. The default configuration arms no barrier. Regression 99; the
+  overnight stress now runs `pattern_fuzz` with each opt-in on the mprotect
+  backend, and its `pattern-fuzz-headers-freelist` loop on the header
+  layout it is named for (`bench/log/linux/2026-11-02-nursery-mprotect/`).
+
+- **An incremental cycle no longer sweeps an object the program moved out
+  of a heap field mid-cycle.** `GCRY_INCREMENTAL=1` (or `collect_a_little`)
+  missed two places such a pointer can go, and swept the object while the
+  program held it: the next allocation of its size reused the block. Its
+  page barrier records the store that clears the field and nothing about
+  where the pointer went.
+  Onto a stack, into a register or a static, or onto another thread's
+  stack: the cycle scanned the roots in its first stop only. The stop that
+  finishes it now marks that whole root set again, as Boehm's final stopped
+  mark does, and sweeps only once what that finds is marked within the
+  slice's budget; otherwise the cycle stays open for the next slice.
+  Into an object in a chunk mapped since the cycle began, with the mprotect
+  barrier (`GCRY_MPROTECT_BARRIER=1`, and aarch64 Linux): the barrier
+  protected only the chunks it found when it was armed, so writes to a new
+  one went unrecorded. The finishing scan now reads every page the barrier
+  neither protects nor has seen written, once; it is protected from then on.
+  A chunk mapped where a chunk the barrier protected was freed and unmapped
+  mid-cycle got that chunk's page records too, all protected and unwritten,
+  so writes to it hid as well: a chunk now carries a flag when the barrier
+  protects it, and the finishing scan reads a chunk without it whole.
+  Regression 100 forces each for a stack slot, a class variable, a second
+  thread's stack, a 4 MiB block allocated mid-cycle and one mapped at a
+  freed block's address: the code before swept the object in 30 of 30 runs
+  of each, on both layouts. 0.38.0 and 0.39.0 reproduce the first; no
+  release since 0.1.0 scanned a root after the first stop. Opt-in only
+  (`GCRY_INCREMENTAL=1`): the default stop-the-world collector scans every
+  root and the whole heap in every collection and is unaffected
+  (`bench/log/linux/2026-11-02-incremental-stack-rescan/`).
+
+- **An incremental cycle no longer reads a block the program freed while
+  it waited to be scanned.** Under `GCRY_INCREMENTAL=1` (or
+  `collect_a_little`) a block the cycle had marked and not yet scanned kept
+  its mark-stack entry when `GC.free` released it, and the slice that
+  reached the entry scanned whatever was at that address by then. Freeing a
+  large block unmaps its chunk once the cache is over its retention (4 MiB
+  is), and on the header layout (`-Dgcry_block_headers`) the slice read the
+  freed block's header there and died of SIGSEGV; headerless looked the
+  chunk up first and skipped it. On both layouts a freed block still mapped
+  had its dead contents traced, keeping whatever only it pointed to through
+  the cycle. The incremental mark now checks each entry against the heap
+  before it reads anything there and skips one whose block is no longer
+  allocated, for 5–8% of a slice's marking on a heap of small blocks.
+  Regression 102 frees a 4 MiB, a 40 000-byte and a 16 000-byte block
+  grey: the code before died at the freed header in 6 000 of 6 000
+  header-layout runs and kept the object in 500 of 500 of each of the
+  others, on both layouts. 0.38.0 and 0.39.0 reproduce both; every release
+  since 0.1.0 scanned the entries unchecked. Opt-in only: the
+  stop-the-world collector's machine code is unchanged
+  (`bench/log/linux/2026-11-03-incremental-free-grey/`).
+
+- **`thread_staged_total` no longer loses births to concurrent thread
+  creation.** Every creating thread bumped it with a plain `&+= 1`, and a
+  parallel context's schedulers start each other's threads, so two births at
+  once could count as one. It is an atomic add now. Found with the
+  thread-staging spec, which read 0 on CI (crystal 1.22.2,
+  `make bitmap-marks-freelist`) for a different reason: the execution
+  context it creates took its threads from Crystal's thread pool — the main
+  thread among them, parked there for good once the monitor has moved its
+  scheduler off a blocking `open(2)` — so it created none. Not a staging
+  miss, and not 1.22.2: it reproduces on 1.21.0. The spec now seeds the pool,
+  asserts that every thread the context did create was staged, and asserts
+  the hook ran on a `Thread.new`, which never goes through the pool
+  (`bench/log/linux/2026-11-01-staging-1.22.2/`).
+
+- **The large-cache counters' resets after a collection are no longer lost
+  to a running allocation.** The collector reset the recycling budget, the
+  large bytes allocated since the last major and the cache's hit and miss
+  counts with the world running and no lock, while allocating threads
+  updated them with plain read-modify-writes; one that had read before the
+  reset stored the old cycle's value back. The large cache then kept more or
+  less than intended for a cycle (RSS) and the adaptive retain read two
+  cycles' hits. The four are atomic now. Regression 89
+  (`bench/log/linux/2026-11-01-large-cache-counters/`).
+
+- **An incremental cycle's finish now takes and resets the large-cache
+  counters as a stop-the-world major does.** Under `GCRY_INCREMENTAL=1` the
+  large bytes allocated since the last major and the cache's hit and miss
+  counts used to add up across every sliced cycle. The recycling budget
+  stayed what the last stop-the-world major had set, and the adaptive
+  retain never moved. Both majors now run the same code
+  (`Heap#settle_large_cache`). A major keeps a cycle's large frees for
+  recycling only while no page barrier is armed, because the recycler
+  refuses to take them under one. The incremental and nursery modes arm one
+  between collections. Minors still keep the program's own frees, which are
+  reused in place under any barrier. Peak RSS under `GCRY_INCREMENTAL=1` is
+  unchanged on the nine benches. Regression 95
+  (`bench/log/linux/2026-11-02-large-cache-incr/`).
+
+- **On macOS the heap no longer sits where 33-bit integers point.** The
+  kernel put it right after the executable, at 4–8 GiB, and any word holding
+  an integer from about 4.3 to 8.5 billion kept whatever block it named: a
+  `5 000 000 000` in a system library's data kept a dead 32–128 MiB buffer of
+  JsonGenerate's, whose peak landed on a high level in 35–90% of reps on
+  both macOS runners. Every heap mapping on macOS is now asked for at a
+  random base 16 to 32 TiB up (a hint, never `MAP_FIXED`; mapped where the
+  kernel answers if refused there; `GCRY_HIGH_HEAP=0` turns it off).
+  JsonGenerate reps on a high level over three sessions: `macos-latest` 0
+  of 75 against 112 of 130 for base and the same binary without it (peak
+  0.74–0.78× → 0.64× of Boehm's), `macos-15-intel` 0 of 75 against 59 of
+  130; Intel's Revcomp and RegexDna peaks drop 21% and 25% against the same
+  binary without it. No row slower beyond its spread that the same binary
+  without the placement or code placement alone does not move as much.
+  Linux and Windows build the same machine code as before (Perf A/B
+  41203146054, 41207913078, 41212311272;
+  `process_spec/regression/92_darwin_high_heap_spec.cr`,
+  `bench/log/macos/2026-10-31-heap-high/FINDINGS.md`).
+
+- **A growth reservation too long to place whole now has its front kept
+  off the 4 GiB windows, as 0.39.0 meant to.** Such a reservation (a block
+  `realloc` grew past about 1 GiB) has only its committed front placed;
+  when the front entered a window, 0.39.0 fenced the window and asked
+  again, and on Linux, which maps top-down and fits no extent that long
+  between two fences, every try went right under the last fence with its
+  front across the boundary 4 GiB lower, until the 17th try was kept in a
+  window, 16 fences spent. The reservation now goes back and is asked
+  for again with its front ending where the window starts, the room over
+  the window; the window is fenced only when that hint is not taken. The
+  spec example for it failed 6 of 60 local runs (a CI flake in 0.39.0);
+  a new example reproduces the walk
+  (`bench/log/linux/2026-10-26-four-gib/` §5).
+
+- **Under incremental collection (`GCRY_INCREMENTAL=1`, or a heap driven
+  by `collect_a_little`), a block `GC.free` released could be handed out
+  twice.** A bitmap `free` clears the block's occupancy bit, then its mark
+  bit. The chunk's own cursor, which claims words with no lock, could
+  claim and hand out the block between the two, and a stop could mark it
+  there; the free's mark clear then unmarked a block in use, and the
+  cycle's finishing slice swept it free under the program. A `free` now
+  marks the chunk `FREEING` across both clears, and the cursor takes the
+  locked path rather than claim from it. Stop-the-world collection (the
+  default) was not affected. Regression 91 (control arm: the block handed
+  out again 30 of 30 runs; fixed: 0 of 30). No row slower beyond what code
+  placement alone moves on the same runner (Perf A/B 41203821072, pads
+  41210728957; `bench/log/linux/2026-11-01-free-mark-clear-claim/FINDINGS.md`).
+
+- **On Crystal 1.22 the idle collector runs; it never had.** 1.22
+  wraps `Thread.sleep` and the condition-variable waits in `GC.syscall`,
+  and `gc/none.cr`'s takes its block as a captured proc, so each call
+  allocated a 48-byte closure — the Monitor's every 10 ms, for the life of
+  the process. The allocation count the idle collector waits on never stood
+  still: a program spinning without allocating read +4 752 bytes a second
+  on 1.22.2 (0 on 1.21.0), and an idle one got no idle collection
+  (regression 93 and `make idle-release` red on 1.22.2 only: 0 idle
+  collections of 47). gcry now defines `GC.syscall` itself, yielding.
+  Regression 94: the runtime's threads allocate nothing over 300 ms of a
+  program that does not, and a thousand `GC.syscall` calls allocate
+  nothing (1 392 bytes in the 300 ms before, on 1.22.2); its control arm
+  checks that a closure of that shape is counted.
+
+- **An idle stretch that begins while an idle collection is finishing now
+  gets a collection of its own.** The idle thread took its activity
+  baseline again once its collection returned, and an allocation made after
+  the collection let the mutator go — the last of a burst it had
+  interrupted — went into that baseline: the stretch it began looked
+  already collected, and the program kept its warm budget and unswept
+  garbage until it next allocated. The baseline is now the count the idle
+  decision read. Regression 93 holds the idle thread at its collection's
+  end until the last allocation is made: 1 idle collection before (the
+  held one), 2 after, the second re-armed by the allocation and not by the
+  collection. Found reading the loop for the flake below, not seen in it
+  (`bench/log/macos/2026-11-01-idle-release-flake/`).
+
+- **`make idle-release` no longer fails on macOS when the idle collection
+  comes after its read.** The release check read the counters 200 ms after
+  the last burst, assuming the idle collection had run; on macos-latest a
+  12.5 ms `nanosleep` takes 35–55 ms (p50), the idle thread's polls with it,
+  and the collection began after 200 ms in 86 of 1 014 runs, up to 377 ms.
+  When the burst had also run an ordinary collection, the read found that
+  one's warm budget and failed: 4 718 592 bytes in CI run 41209225316, 1 in
+  1 014 runs alone and 14 in 4 041 in all, on 0.38.0 as on 0.39.0 and with
+  0.39's dormant counter put back to its recount — not a regression. Every
+  failure re-read 0 once the collection came. The gate now waits up to 10 s
+  for the last gap's idle collection, reads it, reads again if a collection
+  began across the read, and fails by name if none comes; what it requires
+  is unchanged. 0 failures in 4 043 runs of the fixed gate on macos-latest
+  (1 013 alone), with and without the collector fix.
+
 ## [0.39.0] - 2026-10-27
 
 > **0.38.0 and earlier have two memory-safety bugs that 0.39.0 fixes.** On
@@ -8219,7 +8956,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/sdogruyol/gcry/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/sdogruyol/gcry/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/sdogruyol/gcry/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/sdogruyol/gcry/compare/v0.36.0...v0.37.0

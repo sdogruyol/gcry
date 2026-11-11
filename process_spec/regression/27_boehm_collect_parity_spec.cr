@@ -1,5 +1,6 @@
 require "../../src/gcry"
 require "spec"
+require "../support/collection_window"
 
 # Boehm's collection entry points against what Boehm does with them (PR #44
 # review). `GC_collect_a_little` returned 1 when a cycle *finished* — the
@@ -39,6 +40,11 @@ describe "GC_collect_a_little (Boehm parity)" do
   end
 
   it "runs the collection allocation would have run once it is due, then returns 0" do
+    # The due collection is an automatic one (`collect(coalesce: true)`): a
+    # thread being born that allocated past the same debt would take it, and
+    # this call would return before that collection had finished
+    # (`settle_runtime_threads`).
+    settle_runtime_threads
     heap = Gcry.default_heap
     LibGC.disable
     begin
@@ -58,6 +64,7 @@ describe "GC_collect_a_little (Boehm parity)" do
   # Where no page-dirty barrier can be armed the cycle cannot start and the
   # call is the full collection instead; the loop must end either way.
   it "is 1 only while a sliced cycle is in progress, and a loop on it ends with the cycle" do
+    settle_runtime_threads
     heap = Gcry.default_heap
     saved = heap.incremental_auto
     saved_work = heap.incremental_work

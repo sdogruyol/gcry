@@ -1,0 +1,75 @@
+name: probe-idle-release
+
+# PROBE ONLY (never merged; lives on probe/idle-release). `make idle-release`
+# failed once on macos-latest (run 41209225316, job 124560517197): its last
+# collection "kept 4718592 bytes of empty chunks mapped". Every job builds
+# these arms and runs them interleaved, so each arm meets the same runner:
+#   v039  release 0.39.0 (c0d570c5; its src is 0.40.0's for Crystal 1.21)
+#   v039rc  v039 with PROBE_RECOUNT=1: `Heap.shared_counters_atomic = false`,
+#         the dormant counter recounted at every major, as before 0.39
+#   v038  release 0.38.0 (9157672e)
+# Each arm's bench/idle_release.cr is replaced by harness.cr from this
+# directory: the same run, plus what the release check read, when the last
+# gap's idle collection ran, and, on a failure, a re-read once it finished.
+on:
+  push:
+    branches: [probe/idle-release]
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: macos-latest
+    timeout-minutes: 120
+    name: probe (${{ matrix.shard }})
+    env:
+      ARMS: "v039 v039rc v038"
+      MINUTES: "75"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - name: Build every arm's harness in its own tree
+        run: |
+          d="$PWD/bench/log/macos/idle-release-flake"
+          spec=""
+          for arm in $ARMS; do
+            if [ "$arm" = v039rc ]; then
+              w="$RUNNER_TEMP/$arm.sh"
+              printf '#!/bin/sh\nPROBE_RECOUNT=1 exec "%s" "$@"\n' "$RUNNER_TEMP/arm-v039/bin/idle_release" > "$w"
+              chmod +x "$w"; cat "$w"
+              spec="$spec${spec:+,}$arm=$w"
+              continue
+            fi
+            case "$arm" in
+              v039) sha=c0d570c52793cfa144d88f3f4b600c839f7a40ce ;;
+              v038) sha=9157672e370e21d7b20ff276b84d65e6aae27364 ;;
+              *) echo "unknown arm $arm"; exit 1 ;;
+            esac
+            t="$RUNNER_TEMP/arm-$arm"
+            git worktree add --detach "$t" "$sha"
+            cp "$d/harness.cr" "$t/bench/idle_release.cr"
+            echo "== $arm: $(git -C "$t" log -1 --format='%H %s')"
+            (cd "$t" && mkdir -p bin && crystal build -Dgc_none bench/idle_release.cr -o bin/idle_release --error-trace)
+            spec="$spec${spec:+,}$arm=$t/bin/idle_release"
+          done
+          echo "ARM_SPEC=$spec" >> "$GITHUB_ENV"
+          crystal --version; sw_vers; uname -m; sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string
+      - name: Loop
+        run: |
+          bench/log/macos/idle-release-flake/probe_loop.sh "$ARM_SPEC" "$MINUTES" plog "${{ matrix.shard }}"
+          for f in plog/*.log; do
+            [ -e "$f" ] || continue
+            echo "--- $f"; grep -vE '^  CHUNK 0x' "$f" | head -c 20000
+          done
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plog-${{ matrix.shard }}
+          path: plog

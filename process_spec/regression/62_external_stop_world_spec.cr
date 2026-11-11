@@ -25,7 +25,7 @@ require "spec"
 # public reader because nothing outside the gate needs one.
 module Gcry::MonitorGate
   def self.closed_for_external_stop_spec? : Bool
-    @@stopped.get != 0
+    Gcry::StaticAtomic.load(pointerof(@@stopped)) != 0
   end
 end
 

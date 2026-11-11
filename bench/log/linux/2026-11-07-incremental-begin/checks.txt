@@ -1,0 +1,79 @@
+=== crystal tool format --check src spec process_spec bench samples
+exit=0
+=== make lint
+[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m[32m.[39m
+
+Finished in 909.01 milliseconds
+[32m262 inspected, 0 failures[39m
+exit=0
+=== crystal spec -Dgc_none spec/all_specs.cr
+...................................................................................................................................................................................
+
+Finished in 5.05 seconds
+307 examples, 0 failures, 0 errors, 0 pending
+exit=0
+=== crystal spec -Dgc_none -Dgcry_block_headers spec/all_specs.cr
+..............................................................................................................................................................................................
+
+Finished in 3.13 seconds
+330 examples, 0 failures, 0 errors, 0 pending
+exit=0
+=== env GCRY_DEBUG_INVARIANTS=1 crystal spec -Dgc_none spec/all_specs.cr
+...................................................................................................................................................................................
+
+Finished in 3.19 seconds
+307 examples, 0 failures, 0 errors, 0 pending
+exit=0
+=== crystal spec -Dgc_none process_spec
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 2:23 minutes
+457 examples, 0 failures, 0 errors, 2 pending
+exit=0
+=== crystal spec -Dgc_none -Dgcry_block_headers process_spec
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 2:16 minutes
+458 examples, 0 failures, 0 errors, 2 pending
+exit=0
+=== env GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 2:35 minutes
+458 examples, 0 failures, 0 errors, 2 pending
+exit=0
+=== make windows-typecheck
+crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/segv_region_report.cr -o bin/windows_typecheck_srr >/dev/null
+crystal build --cross-compile --target x86_64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o bin/windows_typecheck_proc_x86 >/dev/null
+crystal build --cross-compile --target aarch64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o bin/windows_typecheck_proc_arm64 >/dev/null
+ok — the Windows build type-checks on both targets
+exit=0
+=== make darwin-typecheck
+crystal build --cross-compile --target x86_64-apple-darwin -Dgc_none samples/hello.cr -o bin/darwin_typecheck_x86 >/dev/null
+crystal build --cross-compile --target aarch64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o bin/darwin_typecheck_stw_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o bin/darwin_typecheck_stw_x86 >/dev/null
+ok — the Darwin build and its STW resume gate type-check on both targets
+exit=0
+=== make alloc-entry-frame
+...
+
+Finished in 9.69 milliseconds
+5 examples, 0 failures, 0 errors, 0 pending
+exit=0
+=== env PATH=/home/naruto/.local/share/mise/installs/crystal/1.22.2/bin:/home/naruto/.local/share/mise/installs/crystal/1.21.0/bin:/home/naruto/.local/share/mise/installs/node/24.21.0/bin:/home/naruto/.local/share/mise/shims:/home/naruto/.atuin/bin:/home/naruto/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin:/home/naruto/.local/bin crystal spec -Dgc_none process_spec
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Finished in 2:11 minutes
+457 examples, 0 failures, 0 errors, 2 pending
+exit=0
+=== stress loops, scale 0.5
+2026-11-07T08:50:52+0300 pattern-fuzz-nursery-mprotect runs=10 pass=10 fail=0 stall=0 crystal_scheduler_deadlock=0 (478 s)
+2026-11-07T08:57:41+0300 pattern-fuzz-incremental-mprotect runs=5 pass=5 fail=0 stall=0 crystal_scheduler_deadlock=0 (407 s)
+2026-11-07T09:08:10+0300 claim-stress-lazy runs=100 pass=100 fail=0 stall=0 crystal_scheduler_deadlock=0 (603 s)
+2026-11-07T09:23:14+0300 claim-stress-in-stop runs=150 pass=150 fail=0 stall=0 crystal_scheduler_deadlock=0 (904 s)
+2026-11-07T09:27:43+0300 claim-stress-fallback-lazy runs=50 pass=50 fail=0 stall=0 crystal_scheduler_deadlock=0 (269 s)
+2026-11-07T09:32:08+0300 claim-stress-fallback-in-stop runs=50 pass=50 fail=0 stall=0 crystal_scheduler_deadlock=0 (265 s)
+2026-11-07T09:32:55+0300 claim-stress-gate runs=2 pass=2 fail=0 stall=0 crystal_scheduler_deadlock=0 (47 s)
+2026-11-07T09:32:55+0300 done
+exit=0
+CHECKS-DONE

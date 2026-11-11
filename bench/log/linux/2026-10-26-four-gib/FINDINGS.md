@@ -183,3 +183,73 @@ stays inside the 1.1× budget but Knuckeotide's, the documented exception.
 `hp.py` (high reps per arm, or pooled per runner), `pair.py` (every arm
 against base, paired per rep), `lr.py` (local interleaved runs of a counter
 build). `perf-*/` hold the five summaries of each run.
+
+## 5. The long reservation's front walked down under the fences (2026-10-31)
+
+The example "places the committed front of a reservation too long to place
+whole" failed 6 of 60 local runs (Linux x86-64), and 20 of 500 on
+`bf94d363` measured again: the reservation `os_reserve_placed` returned had
+its 64 MiB front in a window. So in 0.39.0 the fence did not hold for a
+reservation that long (4 GiB + 64 KiB: a block `realloc` grew past about
+1 GiB), and the example was a CI flake.
+
+**Mechanism** (tries traced, `runs/local-front-walk-trace.txt`). Try 0 lands
+at the spec's hint across `B`, is refused and its window fenced. Try 1 goes
+wherever Linux puts it: top-down, at the top of the highest free range that
+holds 4 GiB + 64 KiB. In 1 run of 60 that put the front across another
+boundary, `B'`; fenced too. No extent that long fits between two fences
+(4 GiB − 2 MiB apart), so from try 2 on the highest fit is right under the
+lowest fence, `[B − 1 MiB − 4 GiB − 64 KiB, B − 1 MiB)`, whose front covers
+`B − 4 GiB`: fenced, and the next try sits under that fence, its front across
+`B − 8 GiB`, every try, until the 17th (try 16) was kept in a window, 16
+fences spent and 60 GiB walked. A program meets the same walk without a
+hint: whenever a long reservation's first front enters a window, the next
+try already goes under that fence. Windows (bottom-up) and macOS (first fit
+upward) place past a fence instead, so they did not walk.
+
+**Fix** (`os_reserve_placed`). The front is moved off the window, not
+fenced off it: the reservation goes back and is asked for again with the
+hint `lo − commit`, so the front ends where the window starts and the room
+lies over the window, where nothing else can be mapped while the room holds
+it. The kernel just had `[ptr, ptr + extent)` free and the hinted range
+reaches below it by less than the front, so top-down Linux takes it. Only a
+hint not taken (that range not free) fences the window, as before. POSIX
+only; Windows ignores the hint and keeps the fence path. On macOS with the
+high heap on (`high_heap_base`, 0.40.0) a hint below the base is not given:
+the window is fenced and first fit upward places the front past it, so no
+heap mapping goes below the base. `MAP_FIXED` stays out. Every other case
+(`os_map_placed`, a reservation placed whole) is unchanged.
+
+**Regression** (`spec/four_gib_fence_spec.cr`). The flaky example now
+asserts where the reservation lands (`B − 1 MiB − commit`), one remap and no
+fence. A new example, Linux only, reproduces the walk without a hint: a lid
+(a fence's stand-in) over the top of a free 80 GiB range and every higher
+range that holds the reservation filled, so the kernel's own choice is right
+under the lid with its front across the boundary 4 GiB lower (the control
+maps there first). Before the fix 50 of 50 runs fail it (the walk's last try
+in a window), after it the front lands at `B − 4 GiB − 1 MiB − commit`.
+
+Runs: the fixed spec binary 600 of 600 clean locally (Linux x86-64), on
+`bf94d363` and again on the high heap's tree; `make spec` (316),
+`-Dgcry_block_headers` (338), `make spec-process` (318, 2 pending), lint,
+format and the Windows and Darwin typechecks green. A placement probe (128
+long reservations a run: 48 unhinted at four front lengths up to 1.5 GiB, 40
+forced across a boundary, 40 forced with the retry's hint blocked) kept a
+front in a window in 3 of 10 local runs before the fix (44, 44 and 66 of
+128, up to 1146 fences a run) and in 0 of 8 after.
+
+On the Macs (`probe/fence-front`, throwaway; per runner 300 spec runs, 50
+probe runs, and 50 probe runs of the tree before the fix), all clean:
+
+- Run 41216834689, the fix on `bf94d363` (no high heap): `macos-latest`
+  (arm64, macOS 26.6.2) and `macos-15-intel` (15.7.9) pass the spec 300 of
+  300 and the probe 50 of 50; the hinted retry was taken in 1993 of 2000
+  forced cases on arm64, 2000 of 2000 on Intel. The tree before the fix
+  kept no front in a window there either (0 of 50 runs each), as first fit
+  upward predicts.
+- Run 41217958198, the fix on the high heap (`98013b4a`; `16d7112d` after
+  it changes only how the base is chosen), the unhinted reservations at the
+  high base and the forced ones with it off, as the spec's `with_hint`:
+  both runners again 300 of 300 and 50 of 50, no front below the base,
+  `high_heap_misses` 0; the hinted retry taken as before (1993 and 2000 of
+  2000); the high heap's tree before the fix 0 of 50 each.

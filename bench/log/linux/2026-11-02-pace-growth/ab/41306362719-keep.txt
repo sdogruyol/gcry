@@ -1,0 +1,1 @@
+macos-15-intel    Binarytrees            UNEXCUSED time +4.1% [+0.2, +6.2]; wall +4.0% [+0.2, +6.0] var-code var=1.442 prepad16=1.456 prepad64=1.459 | base-code base=1.406 baseprepad16=1.396 baseprepad64=1.373

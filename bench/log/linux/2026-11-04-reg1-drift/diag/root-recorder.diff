@@ -1,0 +1,124 @@
+diff -r a/src/gcry/collect_mark.cr b/src/gcry/collect_mark.cr
+--- a/src/gcry/collect_mark.cr	2026-11-02 18:51:38.000000000 +0300
++++ b/src/gcry/collect_mark.cr	2026-11-02 20:58:10.096008678 +0300
+@@ -1,6 +1,30 @@
+ # Mark phase: candidates, object scan, nursery remembered-set helpers.
+ 
+ module Gcry
++  {% if flag?(:reg1_diag) %}
++    # Reg1 diagnostic: every root candidate that first-marks a block.
++    module Reg1Diag
++      CAP = 1 << 20
++      class_property on = false
++      class_property recs = Pointer(UInt64).null
++      class_property n = 0
++      class_property dropped = 0
++
++      def self.add(col : UInt64, src : UInt64, slot : UInt64, val : UInt64, hdr : UInt64, chunk : UInt64 = 0_u64) : Nil
++        if @@recs.null?
++          @@recs = LibC.malloc(CAP * 48).as(UInt64*)
++        end
++        i = @@n
++        if i >= CAP
++          @@dropped += 1
++          return
++        end
++        @@n = i + 1
++        r = @@recs + i * 6
++        r[0] = col; r[1] = src; r[2] = slot; r[3] = val; r[4] = hdr; r[5] = chunk
++      end
++    end
++  {% end %}
+   class Heap
+     # Ambient-root source tag for per-source reject counters. Distinguishes
+     # fiber/mutator stacks, BSS/data segments, and TLS (thread) so the
+@@ -64,6 +88,15 @@
+           end
+         end
+       {% end %}
++      {% if flag?(:reg1_diag) %}
++        if Reg1Diag.on && (found = find_block_with_chunk(pointer))
++          h, c = found
++          if block_allocated?(c, h) && !block_marked_in?(c, h)
++            Reg1Diag.add(@collections, source.value.to_u64, Roots.hl_slot, pointer.address, h.address, c.address)
++          end
++        end
++        Roots.hl_slot = 0_u64
++      {% end %}
+       mark_impl(pointer, gate_type_id: gate, base_only: !@allow_interior_pointers, source: source)
+     end
+ 
+@@ -79,6 +112,14 @@
+     # @entries / Array @buffer have no Crystal type_id). Interior policy matches
+     # ambient roots so allow_interior_pointers still applies.
+     private def mark_explicit_root(pointer : Void*) : Nil
++      {% if flag?(:reg1_diag) %}
++        if Reg1Diag.on && (found = find_block_with_chunk(pointer))
++          h, c = found
++          if block_allocated?(c, h) && !block_marked_in?(c, h)
++            Reg1Diag.add(@collections, 99_u64, 0_u64, pointer.address, h.address)
++          end
++        end
++      {% end %}
+       mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Stack)
+     end
+ 
+diff -r a/src/gcry/platform/linux_stw.cr b/src/gcry/platform/linux_stw.cr
+--- a/src/gcry/platform/linux_stw.cr	2026-11-02 18:51:38.000000000 +0300
++++ b/src/gcry/platform/linux_stw.cr	2026-11-02 20:58:10.097275475 +0300
+@@ -520,6 +520,7 @@
+       with_thread_gregs(id) do |gregs, n|
+         j = 0
+         while j < n
++          {% if flag?(:reg1_diag) %} Roots.hl_slot = 1_u64 {% end %}
+           yield Pointer(Void).new(gregs[j])
+           j += 1
+         end
+diff -r a/src/gcry/roots.cr b/src/gcry/roots.cr
+--- a/src/gcry/roots.cr	2026-11-02 18:51:38.000000000 +0300
++++ b/src/gcry/roots.cr	2026-11-02 20:58:10.096199971 +0300
+@@ -502,7 +502,7 @@
+     class_getter last_mutator_low : UInt64 = 0_u64
+     class_getter last_mutator_high : UInt64 = 0_u64
+ 
+-    {% if flag?(:gcry_hl_assert) %}
++    {% if flag?(:gcry_hl_assert) || flag?(:reg1_diag) %}
+       # Address of the word most recently yielded by a scan loop (diagnostics).
+       class_property hl_slot : UInt64 = 0_u64
+     {% end %}
+@@ -531,7 +531,7 @@
+         cursor = Pointer(UInt64).new(lo)
+         end_ptr = Pointer(UInt64).new(hi)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          {% if flag?(:gcry_hl_assert) || flag?(:reg1_diag) %} @@hl_slot = cursor.address {% end %}
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end
+@@ -618,7 +618,7 @@
+           cursor = Pointer(UInt64).new(start)
+           end_ptr = Pointer(UInt64).new(finish)
+           while cursor < end_ptr
+-            {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++            {% if flag?(:gcry_hl_assert) || flag?(:reg1_diag) %} @@hl_slot = cursor.address {% end %}
+             yield Pointer(Void).new(cursor.value)
+             cursor += 1
+           end
+@@ -642,7 +642,7 @@
+         cursor = Pointer(UInt64).new(start)
+         end_ptr = Pointer(UInt64).new(finish)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          {% if flag?(:gcry_hl_assert) || flag?(:reg1_diag) %} @@hl_slot = cursor.address {% end %}
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end
+@@ -671,7 +671,7 @@
+         cursor = Pointer(UInt64).new(start)
+         end_ptr = Pointer(UInt64).new(finish)
+         while cursor < end_ptr
+-          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
++          {% if flag?(:gcry_hl_assert) || flag?(:reg1_diag) %} @@hl_slot = cursor.address {% end %}
+           yield Pointer(Void).new(cursor.value)
+           cursor += 1
+         end

@@ -1,0 +1,9 @@
+windows-latest    Primes                 ok                                                      var-code var=1.315 prepad16=1.351 prepad64=1.354 | base-code base=1.417 baseprepad16=1.333 baseprepad64=1.460  PEAK +0.3% [+0.1, +1.0]
+windows-latest    JsonParsePure          placement time +5.0% [+4.1, +7.3]; wall +1.3% [+0.3, +2.0] var-code var=0.870 prepad16=0.831 prepad64=0.828 | base-code base=0.824 baseprepad16=0.845 baseprepad64=0.847
+windows-latest    Binarytrees            placement time +1.7% [+0.9, +4.2]; wall +1.3% [+0.4, +4.2] var-code var=1.326 prepad16=1.281 prepad64=1.275 | base-code base=1.296 baseprepad16=1.268 baseprepad64=1.286
+windows-latest    JsonGenerate           ok                                                      var-code var=1.333 prepad16=1.286 prepad64=1.285 | base-code base=1.347 baseprepad16=1.290 baseprepad64=1.279
+windows-latest    JsonParseSerializable  placement time +4.1% [+2.0, +5.3]; wall +1.2% [+0.2, +2.5] var-code var=0.714 prepad16=0.705 prepad64=0.702 | base-code base=0.685 baseprepad16=0.688 baseprepad64=0.724  PEAK +4.2% [+0.6, +5.9]
+windows-latest    JsonParsePull          placement time +2.8% [+2.3, +5.1]                       var-code var=0.705 prepad16=0.688 prepad64=0.690 | base-code base=0.681 baseprepad16=0.674 baseprepad64=0.711  PEAK +3.7% [+1.1, +4.7]
+windows-latest    Revcomp                placement time +13.3% [+11.3, +14.0]; wall +4.3% [+3.6, +6.4] var-code var=1.427 prepad16=1.380 prepad64=1.259 | base-code base=1.259 baseprepad16=1.260 baseprepad64=1.380
+windows-latest    RegexDna               placement time +1.1% [+0.9, +1.5]; wall +1.3% [+1.0, +1.6] var-code var=3.481 prepad16=3.461 prepad64=3.415 | base-code base=3.447 baseprepad16=3.457 baseprepad64=3.514
+windows-latest    Knuckeotide            ok                                                      var-code var=1.399 prepad16=1.397 prepad64=1.396 | base-code base=1.386 baseprepad16=1.399 baseprepad64=1.412

@@ -1,0 +1,72 @@
+--- a/process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr
++++ b/process_spec/regression/79_alloc_entry_frame_uninitialized_spec.cr
+@@ -2,6 +2,10 @@
+ require "spec"
+ require "../support/collection_window"
+ 
++module Diag79
++  class_property who : String? = nil
++end
++
+ # The allocation entry carried 512 bytes of stack that nothing writes.
+ # `GC.malloc` and `GC.malloc_atomic` inline `check_fork_poison!`, and its
+ # message buffer (`uninitialized UInt8[RawOut::LIMIT]`) sat in their frame.
+@@ -48,11 +52,7 @@
+ 
+ describe "Regression: the allocation entry's frame holds no unwritten buffer" do
+   it "leaves under 64 stale words between the allocation and the collector" do
+-    # No thread the process started on its own may be allocating inside the
+-    # window (`settle_runtime_threads`): on Windows the IOCP forwarder's
+-    # birth collected there, and this allocation returned without a
+-    # collection of its own.
+-    settle_runtime_threads
++    settle_runtime_threads unless ENV["GCRY_PROBE_NOSETTLE"]? == "1"
+     heap = Gcry.default_heap
+     saved_threshold = heap.gc_threshold
+     caller_sp = 0_u64
+@@ -60,6 +60,7 @@
+     collections_before = heap.collections
+     heap.post_stw_hook = ->(stage : Symbol) do
+       if stage == :after_start_world && stale < 0
++        Diag79.who = Thread.current?.try(&.name) || "?"
+         h = Gcry.default_heap
+         n = 0
+         p = h.collect_entry_sp & ~7_u64
+@@ -73,13 +74,36 @@
+     end
+     begin
+       stale_fill_below
++      d_bsg = heap.@bytes_since_gc.get
++      d_unc = heap.allocation_activity &- heap.@total_bytes.get
++      d_ops = heap.@alloc_ops
++      d_coal = heap.collect_coalesced
++      d_mt = heap.fast_miss_threshold
++      d_mr = heap.fast_miss_refill
++      d_en = heap.@enabled
++      d_cing = heap.@collecting
++      d_sup = heap.@suppress_collect.get
++      d_inc = heap.@inc_active
+       heap.gc_threshold = 1_u64
+       stale_alloc_collecting(pointerof(caller_sp))
++      a_bsg = heap.@bytes_since_gc.get
++      a_ops = heap.@alloc_ops
++      a_coal = heap.collect_coalesced
++      a_mt = heap.fast_miss_threshold
++      a_mr = heap.fast_miss_refill
+     ensure
+       heap.gc_threshold = saved_threshold
+       heap.post_stw_hook = nil
+     end
+-    heap.collections.should be > collections_before
++    names = [] of String
++    Thread.each { |t| names << (t.name || "?") }
++    verdict = heap.collections > collections_before ? "ok" : "nocollect"
++    t0 = Time.instant
++    while heap.collections == collections_before && Time.instant - t0 < 2.seconds
++      sleep 1.millisecond
++    end
++    STDERR.puts "diag79: #{verdict} collector=#{Diag79.who} coll #{collections_before}->#{heap.collections} bsg #{d_bsg}->#{a_bsg} unc=#{d_unc} thr=#{saved_threshold} ops #{d_ops}->#{a_ops} coal #{d_coal}->#{a_coal} miss_thr #{d_mt}->#{a_mt} miss_refill #{d_mr}->#{a_mr} en=#{d_en} cing=#{d_cing} sup=#{d_sup} inc=#{d_inc} idle_armed=#{Gcry::IdleRelease.armed?} threads=#{names.join(",")}"
++    verdict.should eq("ok")
+     caller_sp.should_not eq(0)
+     # Printed so a layout's margin under the bound can be read from a log.
+     STDERR.puts "stale79: #{stale}"

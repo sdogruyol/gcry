@@ -39,10 +39,12 @@ module Gcry
   end
 
   # Research and specs only: an address `os_map` and `os_reserve` pass the
-  # kernel as their hint, 0 for none (every mapping outside a spec). A hint
-  # is taken only where that much is free (Linux, macOS), so a spec can put
-  # a heap mapping where it wants one, across a 4 GiB boundary say, without
-  # `MAP_FIXED`. Not honoured on Windows, where an address is a demand.
+  # kernel as their hint, 0 for none (every mapping outside a spec): where
+  # the kernel would have put a mapping. A hint is taken only where that
+  # much is free (Linux, macOS), so a spec can put a heap mapping where it
+  # wants one, across a 4 GiB boundary say, without `MAP_FIXED`. Not
+  # honoured on Windows, where an address is a demand, nor by a heap mapping
+  # on macOS while the high placement is on (`high_heap_base`).
   @@map_hint = 0_u64
 
   def self.map_hint=(at : UInt64) : UInt64
@@ -60,7 +62,12 @@ module Gcry
   # Anonymous private read/write mapping of *bytes*; null or `MAP_FAILED` on
   # failure, exactly as `mmap` answers (check with `mmap_failed?`).
   def self.os_map(bytes : UInt64) : Void*
-    ptr = Gcry::OS.mmap(hint, LibC::SizeT.new(bytes),
+    os_map_at(hint, bytes)
+  end
+
+  # `os_map` with *at* for the kernel's hint.
+  private def self.os_map_at(at : Void*, bytes : UInt64) : Void*
+    ptr = Gcry::OS.mmap(at, LibC::SizeT.new(bytes),
       Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
       Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
     unless mmap_failed?(ptr)
@@ -86,7 +93,12 @@ module Gcry
   # committed pages out of the count (`Committed_AS`). Windows reserves with
   # `MEM_RESERVE` and commits with `MEM_COMMIT`.
   def self.os_reserve(extent : UInt64, commit : UInt64) : Void*
-    ptr = os_reserve_pages(extent, commit)
+    os_reserve_at(hint, extent, commit)
+  end
+
+  # `os_reserve` with *at* for the kernel's hint (POSIX).
+  private def self.os_reserve_at(at : Void*, extent : UInt64, commit : UInt64) : Void*
+    ptr = os_reserve_pages(at, extent, commit)
     unless ptr.null?
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@os_mapped_bytes), commit,
         LLVM::AtomicOrdering::Monotonic, false)
@@ -95,7 +107,7 @@ module Gcry
   end
 
   # `os_reserve` without the count; null on failure.
-  private def self.os_reserve_pages(extent : UInt64, commit : UInt64) : Void*
+  private def self.os_reserve_pages(at : Void*, extent : UInt64, commit : UInt64) : Void*
     {% if flag?(:win32) %}
       # 0x01 is `PAGE_NOACCESS`, which Crystal's bindings do not name.
       ptr = LibC.VirtualAlloc(Pointer(Void).null, LibC::SizeT.new(extent), LibC::MEM_RESERVE, 0x01_u32)
@@ -104,7 +116,7 @@ module Gcry
       LibC.VirtualFree(ptr, LibC::SizeT.new(0), LibC::MEM_RELEASE)
       Pointer(Void).null
     {% else %}
-      ptr = Gcry::OS.mmap(hint, LibC::SizeT.new(extent), Gcry::OS::PROT_NONE,
+      ptr = Gcry::OS.mmap(at, LibC::SizeT.new(extent), Gcry::OS::PROT_NONE,
         Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
       return Pointer(Void).null if mmap_failed?(ptr)
       return ptr if Gcry::OS.mprotect(ptr, LibC::SizeT.new(commit), Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE) == 0
@@ -289,7 +301,155 @@ module Gcry
     {lo, b &+ FOUR_GIB_FENCE}
   end
 
-  # `os_map`, at an address outside every 4 GiB window (`FOUR_GIB_FENCE`).
+  {% if flag?(:darwin) %}
+    # On macOS every heap mapping is asked for at or above a base 16 to
+    # 32 TiB up (`high_heap_base`), not wherever the kernel would put it.
+    #
+    # Why. Left to itself, Darwin's `mmap` gives the first free range above
+    # the executable: the executable loads at 4 GiB (`__PAGEZERO` takes the
+    # first 4 GiB), and the heap followed it at 4–8 GiB (M1: `0x141000000`,
+    # `0x143000000`). There it is a target for every word holding a 33-bit
+    # integer: on the M1 a `5 000 000 000` (`0x12a05f200`) beside a code
+    # pointer in a system library's `__DATA`, scanned as a static root, kept
+    # a dead 32 or 128 MiB `IO::Memory` buffer of JsonGenerate's, and
+    # JsonGenerate's peak lands on a high level in 35–80% of reps on both
+    # macOS runners (`bench/log/macos/2026-10-23-jsongen-m1/`). Up here a
+    # word reaches the heap only as a real address or as an integer past
+    # 2^44, which counts, sizes, times in seconds or milliseconds since 1970
+    # (2^40.7 now) and flags never are.
+    #
+    # Where. The user address space is 47 bits on both macOS arm64 and
+    # x86-64 (`MACH_VM_MAX_ADDRESS`: `0x7FFFFE000000` arm64, `0x7FFFFFE00000`
+    # x86-64). On the runners (`vmmap`, `bench/log/macos/2026-10-31-heap-high/`)
+    # x86-64 has the malloc nano zone at `0x600000000000` (96 TiB), thread
+    # stacks at `0x700000000000`, malloc's helper zone, the main stack and
+    # the shared cache past `0x7F0000000000`; arm64 has the shared cache at
+    # 6–11 GiB and malloc's small regions near 51 GiB. 16 to 32 TiB was
+    # empty on both, with 64 TiB above the highest base before x86-64's
+    # nano zone.
+    #
+    # How. A hint only, never `MAP_FIXED`: Darwin's `mmap` without
+    # `MAP_FIXED` takes the address as the start of its search for a free
+    # range, so the heap is packed first-fit upward from the base and reuses
+    # the holes its own unmaps leave, as the kernel's own placement did from
+    # the bottom. A mapping refused there is asked for again without the
+    # hint, and one the kernel put below the base (no room above it) is
+    # kept; both count in `high_heap_misses`. The 4 GiB fence works on top
+    # unchanged (`os_map_placed`): the base is off every window, and the
+    # heap's mappings still go back from one.
+    #
+    # The base is random: 2^44 plus 2^44 in 2 MiB steps (23 bits), chosen at
+    # the first heap mapping from `arc4random`. A fixed base would put the
+    # heap at the same address in every process, which the kernel's
+    # placement never did (it followed the executable's slide). A forked
+    # child inherits the base with the parent's address space, which is
+    # right: its heap is the parent's, mapped where the parent mapped it,
+    # and its next mappings pack above the same base.
+    #
+    # One mapping the kernel puts below the base (a miss) widens the heap
+    # bounds (`@heap_min`, `@heap_max`) to about [4 GiB, 2^44+), so every
+    # low word then passes the bounds filter and costs a chunk-index lookup.
+    # No run has missed (`high_heap_misses` 0 everywhere measured); a count
+    # above 0 is the cue to look.
+    #
+    # Cost: none on the paths that matter. The chunk index keys on the
+    # address's bits 32–47 (`chunk_radix.cr`), so the heap takes the same
+    # number of 4 GiB regions as anywhere; the heap bounds are tighter, the
+    # heap no longer sharing its range with malloc's and the libraries'.
+    # Other collector mappings (mark stack, tables) stay where the kernel
+    # puts them: they are not chunks, no word keeps anything through them.
+    #
+    # `GCRY_HIGH_HEAP=0` (read at `GC.init`) or `Gcry.high_heap = false`
+    # maps where the kernel answers, as before 0.40.0. A spec's `map_hint`
+    # stands for the kernel's answer and does not move the base: it places
+    # a heap mapping only with the placement off.
+    HIGH_HEAP_FLOOR = 17592186044416_u64 # 2^44, 16 TiB
+    # The base's random offset: bits 21–43, 2 MiB steps below 2^44
+    # (2^44 − 2^21).
+    HIGH_HEAP_SLIDE_MASK = 17592183947264_u64
+    HIGH_HEAP_STEP       =        2097152_u64
+
+    @@high_heap = true
+    @@high_heap_base = 0_u64
+    @@high_heap_misses = 0_u64
+
+    def self.high_heap=(on : Bool) : Bool
+      @@high_heap = on
+    end
+
+    def self.high_heap? : Bool
+      @@high_heap
+    end
+
+    # Heap mappings refused at the base and mapped without it, or put below it.
+    def self.high_heap_misses : UInt64
+      Atomic::Ops.load(pointerof(@@high_heap_misses), LLVM::AtomicOrdering::Monotonic, false)
+    end
+
+    # The base heap mappings are asked for at, chosen on the first call with
+    # the placement on; one per process, whichever thread chooses first.
+    # 0 while the placement is off and none was chosen, so a counter line
+    # never names a base the heap did not use. Never in a 4 GiB window: a
+    # 2 MiB step enters one only on its boundary.
+    def self.high_heap_base : UInt64
+      base = Atomic::Ops.load(pointerof(@@high_heap_base), LLVM::AtomicOrdering::Monotonic, false)
+      return base unless base == 0_u64 && @@high_heap
+      base = HIGH_HEAP_FLOOR | ((LibC.arc4random.to_u64 << 21) & HIGH_HEAP_SLIDE_MASK)
+      base &+= HIGH_HEAP_STEP if base & (FOUR_GIB &- 1) == 0_u64
+      old, won = Atomic::Ops.cmpxchg(pointerof(@@high_heap_base), 0_u64, base,
+        LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::SequentiallyConsistent)
+      won ? base : old
+    end
+
+    # The hint a heap mapping passes: the base, or 0 when the placement is
+    # off.
+    private def self.high_heap_hint : UInt64
+      return 0_u64 unless @@high_heap
+      high_heap_base
+    end
+
+    private def self.high_heap_miss : Nil
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@high_heap_misses), 1_u64,
+        LLVM::AtomicOrdering::Monotonic, false)
+    end
+  {% end %}
+
+  # A heap mapping, before the 4 GiB placement: `os_map`, at or above the
+  # high base on macOS (`high_heap_base`).
+  private def self.heap_map(bytes : UInt64) : Void*
+    {% if flag?(:darwin) %}
+      at = high_heap_hint
+      unless at == 0_u64
+        ptr = os_map_at(Pointer(Void).new(at), bytes)
+        unless mmap_failed?(ptr)
+          high_heap_miss if ptr.address < at
+          return ptr
+        end
+        high_heap_miss
+      end
+    {% end %}
+    os_map(bytes)
+  end
+
+  # `heap_map` for a reservation: `os_reserve`, at or above the high base on
+  # macOS.
+  private def self.heap_reserve(extent : UInt64, commit : UInt64) : Void*
+    {% if flag?(:darwin) %}
+      at = high_heap_hint
+      unless at == 0_u64
+        ptr = os_reserve_at(Pointer(Void).new(at), extent, commit)
+        unless ptr.null?
+          high_heap_miss if ptr.address < at
+          return ptr
+        end
+        high_heap_miss
+      end
+    {% end %}
+    os_reserve(extent, commit)
+  end
+
+  # `os_map` (`heap_map`: at the high base on macOS), at an address outside
+  # every 4 GiB window (`FOUR_GIB_FENCE`).
   # A mapping the kernel puts in a window goes back, the window is fenced
   # off with an inaccessible reservation nothing will ever be placed in
   # (`fence_four_gib`), and the mapping is asked for again. Rare: only a
@@ -303,7 +463,7 @@ module Gcry
   def self.os_map_placed(bytes : UInt64) : Void*
     tries = 0
     loop do
-      ptr = os_map(bytes)
+      ptr = heap_map(bytes)
       return ptr if mmap_failed?(ptr) || !@@four_gib_fence
       lo, hi = four_gib_window(ptr.address, bytes)
       return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
@@ -325,11 +485,23 @@ module Gcry
   # 4 GiB − 2 MiB, `Heap#large_reserve_extent`) cannot be; its committed
   # front is placed instead, so the block covers no window until it grows
   # across one.
+  #
+  # Such a front is moved off its window, not fenced off it: the reservation
+  # goes back and is asked for again with a hint so that the front ends where
+  # the window starts, the room over the window (nothing else can be mapped
+  # there while the room holds it). Fenced, it walked: no extent that long
+  # fits between two fences, so Linux, which places top-down, put the next
+  # one right under the fence, its front across the boundary 4 GiB lower,
+  # every try, until the last was kept in a window (6 of 60 spec runs;
+  # `bench/log/linux/2026-10-26-four-gib/` §5). A hint the kernel does not
+  # take (that room is not free) fences the window as before. Windows takes
+  # no hint here and places bottom-up, past a fence: the fence alone.
   def self.os_reserve_placed(extent : UInt64, commit : UInt64) : Void*
     span = extent > FOUR_GIB &- 2_u64 &* FOUR_GIB_FENCE ? commit : extent
     tries = 0
+    at = 0_u64
     loop do
-      ptr = os_reserve(extent, commit)
+      ptr = at == 0_u64 ? heap_reserve(extent, commit) : os_reserve_at(Pointer(Void).new(at), extent, commit)
       return ptr if ptr.null? || !@@four_gib_fence
       lo, hi = four_gib_window(ptr.address, span)
       return ptr if hi == 0_u64 || tries == FOUR_GIB_ATTEMPTS
@@ -338,8 +510,25 @@ module Gcry
       return ptr unless Gcry::OS.munmap(ptr, LibC::SizeT.new(extent)) == 0
       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Sub, pointerof(@@os_mapped_bytes), commit,
         LLVM::AtomicOrdering::Monotonic, false)
-      fence_four_gib(ptr.address, span, lo, hi)
       tries += 1
+      {% unless flag?(:win32) %}
+        # A window the front enters lies above `commit` bytes outside every
+        # window (`four_gib_window` names none for a longer one). On macOS
+        # not below the high base (`high_heap_base`): a front at the base
+        # is fenced, and first fit upward places it past the fence.
+        floor = 0_u64
+        {% if flag?(:darwin) %}
+          floor = high_heap_hint
+        {% end %}
+        if span < extent && at == 0_u64 && lo > commit && lo &- commit >= floor
+          Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add, pointerof(@@four_gib_remaps), 1_u64,
+            LLVM::AtomicOrdering::Monotonic, false)
+          at = lo &- commit
+          next
+        end
+      {% end %}
+      fence_four_gib(ptr.address, span, lo, hi)
+      at = 0_u64
     end
   end
 

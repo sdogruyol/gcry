@@ -1,0 +1,66 @@
+diff --git a/src/gcry/collect.cr b/src/gcry/collect.cr
+index 62061e39..e7a9e7b5 100644
+--- a/src/gcry/collect.cr
++++ b/src/gcry/collect.cr
+@@ -160,22 +160,46 @@ module Gcry
+     getter threshold_pace_pct : UInt64 = 100_u64
+     @last_major_end_ns = 0_u64
+ 
+-    # The pace (percent, 100..max_pct) that holds a cycle costing `cycle_ns`
+-    # after `mutator_ns` of allocating `allocated` bytes to the target, for a
+-    # live-sized threshold `base`.
++    # The pace (percent, 100..max_pct) that holds the next cycle to the
++    # target after this one cost `cycle_ns` following `mutator_ns` of
++    # allocating `allocated` bytes, for a live-sized threshold `base`.
++    #
++    # The next cycle reads what this one read (`scanned`) and what survives
++    # of the next stretch; `survived` of this stretch's `allocated` did, so
++    # a stretch of T bytes adds about T × survived / allocated, and costs
++    # the cycle that much more. Holding cost(T) to the target fraction of
++    # T's mutator time: T = P / (1 − P × survived / (allocated × scanned)),
++    # where P is the threshold that would hold this cycle's own cost to it.
++    # A steady live set (`survived` 0) keeps P. Pricing the next cycle at
++    # this one's cost undershot a growing heap's by its growth: Primes,
++    # whose every allocation survives, read 13–15% where the pace fell
++    # below the maximum, and a cheaper mark (`cbf1b2e8`) lowered the pace
++    # often enough to fit a tenth major
++    # (`bench/log/macos/2026-11-01-primes-collections/`).
+     def self.threshold_pace_pct(allocated : UInt64, mutator_ns : UInt64, cycle_ns : UInt64,
+-                                base : UInt64, max_pct : UInt64) : UInt64
++                                base : UInt64, max_pct : UInt64,
++                                scanned : UInt64 = 0_u64, survived : UInt64 = 0_u64) : UInt64
+       return 100_u64 if mutator_ns == 0_u64 || base == 0_u64
+       paced = allocated.to_f64 * cycle_ns.to_f64 * 100.0 / (mutator_ns.to_f64 * THRESHOLD_PACE_TARGET_PCT)
++      if scanned > 0_u64 && survived > 0_u64 && allocated > 0_u64
++        grows = paced * Math.min(survived, allocated).to_f64 / (allocated.to_f64 * scanned.to_f64)
++        return max_pct if grows >= 1.0
++        paced /= 1.0 - grows
++      end
+       pct = paced * 100.0 / base.to_f64
+       return max_pct if pct >= max_pct.to_f64
+       pct <= 100.0 ? 100_u64 : pct.to_u64
+     end
+ 
++    # `@mark_scanned_bytes` at the last major, the growth the pace prices.
++    @pace_scanned_bytes = 0_u64
++
+     private def update_threshold_pace(base : UInt64, cycle_started_ns : UInt64) : UInt64
+       now = monotonic_ns
+       last = @last_major_end_ns
+       @last_major_end_ns = now
++      scanned_before = @pace_scanned_bytes
++      @pace_scanned_bytes = @mark_scanned_bytes
+       # A releasing collection (`GC.collect`, the idle collector, the one
+       # before an `OutOfMemoryError`) asks for the footprint back, as it does
+       # of the warm budget. Keeping the pace across it carried a setup phase's
+@@ -189,8 +213,9 @@ module Gcry
+       return @threshold_pace_pct if cycle_started_ns == 0_u64 || last == 0_u64
+       return @threshold_pace_pct unless last < cycle_started_ns && cycle_started_ns < now
+       return @threshold_pace_pct if @bytes_before_gc < (@gc_threshold >> 1)
++      survived = @mark_scanned_bytes > scanned_before ? @mark_scanned_bytes - scanned_before : 0_u64
+       @threshold_pace_pct = Heap.threshold_pace_pct(@bytes_before_gc, cycle_started_ns - last,
+-        now - cycle_started_ns, base, @threshold_pace_max_pct)
++        now - cycle_started_ns, base, @threshold_pace_max_pct, @mark_scanned_bytes, survived)
+     end
+ 
+     # `cycle_started_ns`: when this cycle's stop began, 0 when unknown.

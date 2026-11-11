@@ -1,5 +1,6 @@
 require "../../src/gcry"
 require "spec"
+require "../support/collection_window"
 
 # The allocation entry carried 512 bytes of stack that nothing writes.
 # `GC.malloc` and `GC.malloc_atomic` inline `check_fork_poison!`, and its
@@ -47,6 +48,11 @@ end
 
 describe "Regression: the allocation entry's frame holds no unwritten buffer" do
   it "leaves under 64 stale words between the allocation and the collector" do
+    # No thread the process started on its own may be allocating inside the
+    # window (`settle_runtime_threads`): on Windows the IOCP forwarder's
+    # birth collected there, and this allocation returned without a
+    # collection of its own.
+    settle_runtime_threads
     heap = Gcry.default_heap
     saved_threshold = heap.gc_threshold
     caller_sp = 0_u64
@@ -66,6 +72,7 @@ describe "Regression: the allocation entry's frame holds no unwritten buffer" do
       nil
     end
     begin
+      credit_window_debt
       stale_fill_below
       heap.gc_threshold = 1_u64
       stale_alloc_collecting(pointerof(caller_sp))

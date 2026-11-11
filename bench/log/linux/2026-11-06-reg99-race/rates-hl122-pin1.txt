@@ -1,0 +1,400 @@
+hl122 new 1 rc=0 4s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 1 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 2 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 2 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 3 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 3 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 4 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 4 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 5 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 5 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 6 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 6 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 7 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 7 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 8 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 8 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 9 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 9 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 10 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 10 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 11 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 11 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 12 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 12 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 13 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 13 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 14 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 14 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 15 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 15 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 16 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 16 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 17 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 17 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 18 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 18 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 19 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 19 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 20 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 20 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 21 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 21 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 22 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 22 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 23 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 23 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 24 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 24 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 25 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 25 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 26 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 26 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 27 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 27 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 28 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 28 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 29 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 29 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 30 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 30 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 31 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 31 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 32 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 32 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 33 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 33 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 34 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 34 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 35 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 35 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 36 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 36 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 37 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 37 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 38 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 38 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 39 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 39 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 40 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 40 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 41 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 41 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 42 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 42 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 43 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 43 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 44 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 44 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 45 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 45 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 46 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 46 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 47 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 47 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 48 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 48 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 49 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 49 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 50 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 50 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 51 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 51 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 52 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 52 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 53 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 53 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 54 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 54 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 55 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 55 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 56 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 56 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 57 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 57 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 58 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 58 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 59 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 59 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 60 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 60 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 61 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 61 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 62 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 62 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 63 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 63 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 64 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 64 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 65 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 65 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 66 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 66 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 67 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 67 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 68 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 68 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 69 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 69 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 70 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 70 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 71 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 71 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 72 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 72 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 73 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 73 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 74 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 74 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 75 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 75 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 76 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 76 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 77 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 77 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 78 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 78 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 79 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 79 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 80 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 80 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 81 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 81 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 82 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 82 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 83 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 83 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 84 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 84 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 85 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 85 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 86 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 86 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 87 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 87 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 88 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 88 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 89 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 89 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 90 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 90 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 91 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 91 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 92 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 92 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 93 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 93 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 94 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 94 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 95 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 95 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 96 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 96 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 97 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 97 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 98 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 98 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 99 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 99 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 100 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 100 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 101 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 101 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 102 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 102 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 103 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 103 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 104 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 104 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 105 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 105 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 106 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 106 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 107 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 107 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 108 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 108 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 109 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 109 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 110 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 110 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 111 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 111 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 112 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 112 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 113 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 113 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 114 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 114 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 115 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 115 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 116 rc=0 63s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 116 rc=1 34s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 117 rc=0 52s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 117 rc=1 150s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 118 rc=0 164s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 118 rc=1 198s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 119 rc=0 25s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 119 rc=1 25s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 120 rc=0 24s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 120 rc=1 24s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 121 rc=0 25s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 121 rc=1 24s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 122 rc=0 24s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 122 rc=1 25s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 123 rc=0 24s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 123 rc=1 46s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 124 rc=0 35s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 124 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 125 rc=0 45s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 125 rc=1 40s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 126 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 126 rc=1 40s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 127 rc=0 43s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 127 rc=1 44s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 128 rc=0 39s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 128 rc=1 35s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 129 rc=0 43s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 129 rc=1 45s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 130 rc=0 39s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 130 rc=1 35s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 131 rc=0 35s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 131 rc=1 34s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 132 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 132 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 133 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 133 rc=1 43s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 134 rc=0 33s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 134 rc=1 33s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 135 rc=0 45s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 135 rc=1 46s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 136 rc=0 50s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 136 rc=1 39s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 137 rc=0 48s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 137 rc=1 43s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 138 rc=0 44s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 138 rc=1 48s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 139 rc=0 35s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 139 rc=1 45s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 140 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 140 rc=1 46s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 141 rc=0 32s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 141 rc=1 34s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 142 rc=0 39s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 142 rc=1 34s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 143 rc=0 41s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 143 rc=1 32s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 144 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 144 rc=1 47s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 145 rc=0 44s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 145 rc=1 46s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 146 rc=0 43s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 146 rc=1 48s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 147 rc=0 47s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 147 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 148 rc=0 35s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 148 rc=1 43s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 149 rc=0 32s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 149 rc=1 47s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 150 rc=0 33s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 150 rc=1 33s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 151 rc=0 40s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 151 rc=1 42s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 152 rc=0 38s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 152 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 153 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 153 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 154 rc=0 47s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 154 rc=1 49s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 155 rc=0 48s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 155 rc=1 51s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 156 rc=0 42s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 156 rc=1 37s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 157 rc=0 38s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 157 rc=1 54s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 158 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 158 rc=1 45s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 159 rc=0 33s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 159 rc=1 41s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 160 rc=0 49s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 160 rc=1 47s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 161 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 161 rc=1 48s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 162 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 162 rc=1 42s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 163 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 163 rc=1 51s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 164 rc=0 37s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 164 rc=1 48s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 165 rc=0 50s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 165 rc=1 37s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 166 rc=0 40s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 166 rc=1 39s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 167 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 167 rc=1 50s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 168 rc=0 49s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 168 rc=1 45s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 169 rc=0 40s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 169 rc=1 40s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 170 rc=0 37s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 170 rc=1 37s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 171 rc=0 36s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 171 rc=1 48s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 172 rc=0 42s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 172 rc=1 48s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 173 rc=0 47s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 173 rc=1 46s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 174 rc=0 45s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 174 rc=1 44s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 175 rc=0 36s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 175 rc=1 47s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 176 rc=0 47s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 176 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 177 rc=0 44s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 177 rc=1 42s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 178 rc=0 47s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 178 rc=1 47s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 179 rc=0 44s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 179 rc=1 35s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 180 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 180 rc=1 45s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 181 rc=0 43s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 181 rc=1 44s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 182 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 182 rc=1 35s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 183 rc=0 43s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 183 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 184 rc=0 32s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 184 rc=1 44s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 185 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 185 rc=1 36s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 186 rc=0 46s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 186 rc=1 35s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 187 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 187 rc=1 33s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 188 rc=0 34s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 188 rc=1 17s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 189 rc=0 47s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 189 rc=1 35s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 190 rc=0 35s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 190 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 191 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 191 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 192 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 192 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 193 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 193 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 194 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 194 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 195 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 195 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 196 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 196 rc=1 44s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 197 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 197 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 198 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 198 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 199 rc=0 11s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 199 rc=1 10s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending
+hl122 new 200 rc=0 10s fails=[] {} 117 examples, 0 failures, 0 errors, 0 pending
+hl122 old 200 rc=1 11s fails=[crystal spec process_spec/regression/99_mprotect_protect_outside_cards_spec.cr:628 ] {mprotect99 race: the queued slice returned false|} 117 examples, 1 failures, 0 errors, 0 pending

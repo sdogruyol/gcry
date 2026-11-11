@@ -376,7 +376,6 @@ end
     # then `stop_world` neither suspends nor scans it. The record is dropped
     # when the thread turns up in Crystal's list.
     it "records every thread it creates" do
-      before = Gcry::Platform.staged_total
       # The counters are process-wide, so what this example owns is the
       # difference. Asserting `staged_overflows == 0` outright asserted on
       # every spec that ran first: `crystal spec` collects files with an
@@ -387,14 +386,41 @@ end
       # every run of v0.37.0 and 0.38 alike, and 0 on the 2026-10-12 image
       # (probe run 39463376257).
       overflows_before = Gcry::Platform.staged_overflows
+
+      # An execution context does not necessarily create a thread: its
+      # schedulers take a parked thread from Crystal's thread pool first
+      # (`ThreadPool#checkout`), and only start one when none is parked. The
+      # pool is not empty in this process as a rule. The execution-context
+      # monitor hands a scheduler it catches inside `Fiber.syscall` (`open(2)`)
+      # to another thread, and the thread it leaves checks itself in when the
+      # call returns — for 5 minutes, or for good when it is the main thread.
+      # This example asserted `> 0` on the context's births alone until
+      # 2026-10-31 and read 0 on CI (crystal 1.22.2, `make
+      # bitmap-marks-freelist`): both of its schedulers' threads came from
+      # the pool, so nothing was created and nothing was there to stage
+      # (bench/log/linux/2026-11-01-staging-1.22.2/FINDINGS.md).
+      #
+      # So the pool is seeded here on purpose — an isolated context's thread
+      # checks in when its fiber ends — and the example counts the threads
+      # the context's fibers ran on that did not exist before it: every one of
+      # them went through `pthread_create`, and each must have been staged.
+      Fiber::ExecutionContext::Isolated.new("staging-spec-seed") { }.wait
+      listed = Set(UInt64).new
+      Thread.unsafe_each { |thread| listed << thread.to_unsafe.unsafe_as(UInt64) }
+
+      before = Gcry::Platform.staged_total
       ec = Fiber::ExecutionContext::Parallel.new("staging-spec", 2)
-      done = Channel(Nil).new(4)
-      4.times { ec.spawn { done.send(nil) } }
-      4.times { done.receive }
+      ran_on = Channel(UInt64).new(4)
+      4.times { ec.spawn { ran_on.send(Gcry::Platform.current_thread_id) } }
+      created = Array(UInt64).new(4) { ran_on.receive }.uniq.count { |id| !listed.includes?(id) }
+      (Gcry::Platform.staged_total - before).should be >= created
 
       # The hook ran. A run that stages nothing at all is indistinguishable
       # from one where `pthread_create` was never wrapped, which is the failure
-      # this asserts against.
+      # this asserts against — so on a thread that is created whatever the
+      # pool holds: `Thread.new` never goes through it.
+      before = Gcry::Platform.staged_total
+      Thread.new { }.join
       (Gcry::Platform.staged_total - before).should be > 0
       (Gcry::Platform.staged_overflows - overflows_before).should eq(0)
     end

@@ -1,0 +1,61 @@
+D1 c1 pre1 live=1433305 cols=200 fin=147
+D1 c1 pre2 live=1433305 cols=201 fin=147
+D1 c1 pre3 live=1433305 cols=202 fin=147
+D1 c1 freed live=1433305 cols=202 fin=147
+D1 c1 post0 live=1383304 cols=203 fin=147
+D1 c1 post1 live=1383304 cols=204 fin=147
+D1 c1 post2 live=1383304 cols=205 fin=147
+D1 c1 post3 live=1383304 cols=206 fin=147
+D1 c1 ROOTS records=2633 dropped=0
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6064
+D1 c1 ROOT col=198 src=5 slot=0x780982ffd850 (SYSMON, bottom-8738439632816) val=0x78093c200000 hdr=0x78093c1c2030 chunk=0x78093c1c2000 cur=0x78091e200000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6056
+D1 c1 ROOT col=198 src=5 slot=0x780982ffd858 (SYSMON, bottom-8738439632808) val=0x78093ca00000 hdr=0x78093c97c030 chunk=0x78093c97c000 cur=0x78091ea00000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6064
+D1 c1 ROOT col=199 src=5 slot=0x780982ffd850 (SYSMON, bottom-8738439632816) val=0x78093c200000 hdr=0x78093c1c2030 chunk=0x78093c1c2000 cur=0x78091e200000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6056
+D1 c1 ROOT col=199 src=5 slot=0x780982ffd858 (SYSMON, bottom-8738439632808) val=0x78093ca00000 hdr=0x78093c97c030 chunk=0x78093c97c000 cur=0x78091ea00000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6064
+D1 c1 ROOT col=200 src=5 slot=0x780982ffd850 (SYSMON, bottom-8738439632816) val=0x78093c200000 hdr=0x78093c1c2030 chunk=0x78093c1c2000 cur=0x78091e200000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6056
+D1 c1 ROOT col=200 src=5 slot=0x780982ffd858 (SYSMON, bottom-8738439632808) val=0x78093ca00000 hdr=0x78093c97c030 chunk=0x78093c97c000 cur=0x78091ea00000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6064
+D1 c1 ROOT col=201 src=5 slot=0x780982ffd850 (SYSMON, bottom-8738439632816) val=0x78093c200000 hdr=0x78093c1c2030 chunk=0x78093c1c2000 cur=0x78091e200000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOT-THREAD SYSMON slot=bottom-6056
+D1 c1 ROOT col=201 src=5 slot=0x780982ffd858 (SYSMON, bottom-8738439632808) val=0x78093ca00000 hdr=0x78093c97c030 chunk=0x78093c97c000 cur=0x78091ea00000
+D1 c1   val in fiber stack #17 [0x78093c200000,+0x800000] allocated at collection 100
+D1 c1   val in fiber stack #18 [0x78093c200000,+0x800000] freed at collection 102
+D1 c1 ROOTS gone=8 main stack [0x7ffc16171000,0x7ffc1696f000) stack events=21
+D1 TASK 1986156 d3_hdr syscall=0 0xe 0x7ffc16964c28 0x8000 0x0 0x0 0x0 0x7ffc16964908 0x780983eac802
+D1 TASK 1986158 SYSMON syscall=230 0x0 0x0 0x780982ffdb78 0x780982ffdb58 0x0 0x0 0x780982ffdad8 0x780983eac802
+D1 TASK 1986159 gcry-mark syscall=202 0x620863088bcc 0x80 0x8c66c 0x7809813fec60 0x0 0x0 0x7809813fec08 0x780983f34acd
+D1 TASK 1986160 gcry-mark syscall=202 0x620863088bcc 0x80 0x8c66c 0x780980bfdc60 0x0 0x0 0x780980bfdc08 0x780983f34acd
+D1 TASK 1986161 gcry-mark syscall=202 0x620863088bcc 0x80 0x8c66c 0x78097bffec60 0x0 0x0 0x78097bffec08 0x780983f34acd
+D1 TASK 1986162 gc-idle syscall=230 0x0 0x0 0x78097b7fdd10 0x78097b7fdd00 0x0 0x0 0x78097b7fdc08 0x780983eac802
+D1 TASK 1986166 staging-spec-0 syscall=232 0xa 0x78097adff648 0x80 0xffffffffffffffff 0x0 0x0 0x78097adfec28 0x780983eac802
+D1 TASK 1986167 staging-spec-1 syscall=202 0x780983c82a68 0x189 0x0 0x0 0x0 0xffffffff 0x7809793ffb48 0x780983eac802
+D1 THREAD DEFAULT-0 main=[0x7ffc16171000,0x7ffc1696f000) current=[0x7ffc16171000,0x7ffc1696f000)
+D1 THREAD SYSMON main=[0x7809827ff000,0x780982fff000) current=[0x7809827ff000,0x780982fff000)
+D1 THREAD gc-idle main=[0x78097afff000,0x78097b7ff000) current=[0x78097afff000,0x78097b7ff000)
+D1 THREAD staging-spec-0 main=[0x780979600000,0x780979e00000) current=[0x78097a600000,0x78097ae00000)
+D1 THREAD staging-spec-1 main=[0x780973000000,0x780973800000) current=[0x780978c00000,0x780979400000)
+D1 c1 report drift=-50001 words=928 frame=0x7ffc1696e1f8 lo=0x7ffc1696d330
+D1 c1 summary gone_words=0 gone_fin=0
+D1 c2 report drift=-3 words=928 frame=0x7ffc1696e1f8 lo=0x7ffc1696d330
+       count=10000 drift=-50001 | count=1000 drift=-3
+275 examples, 1 failures, 0 errors, 2 pending
+Failed examples:

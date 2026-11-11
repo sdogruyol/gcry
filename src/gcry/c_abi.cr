@@ -236,12 +236,13 @@ module Gcry
     end
 
     # Boehm's `GC_base`: the start of the live block containing *pointer*, or
-    # null. Interior pointers resolve, as in Boehm.
+    # null. Interior pointers resolve, as in Boehm. A block a cursor has
+    # claimed and not handed out is not live (`find_live_object_with_chunk`).
     def self.base(pointer : Void*) : Void*
       return Pointer(Void).null if pointer.null?
       heap = Gcry.default_heap?
       return Pointer(Void).null unless heap
-      found = heap.find_object_with_chunk(pointer)
+      found = heap.find_live_object_with_chunk(pointer)
       return Pointer(Void).null unless found
       header, chunk = found
       heap.user_of(chunk, header)
@@ -269,7 +270,7 @@ module Gcry
                                 order : Finalizers::Order) : Nil
       previous = {Pointer(Void).null, Pointer(Void).null}
       heap = Gcry.default_heap?
-      if heap && (found = heap.find_object_with_chunk(object))
+      if heap && (found = heap.find_live_object_with_chunk(object))
         header, chunk = found
         if heap.user_of(chunk, header) == object
           previous = heap.replace_c_finalizer(object, fn.pointer, data, order)

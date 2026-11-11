@@ -1,0 +1,82 @@
+...................................................idle fixed: unwritten104: idle fixed: block freed after three collections with the idle thread parked
+idle fixed: unwritten104: idle: planted block freed
+.idle control: unwritten104: idle control: block kept after three collections with the idle thread parked
+idle control: unwritten104: idle: planted block kept
+.idle unplanted: unwritten104: idle unplanted: block freed after three collections with the idle thread parked
+idle unplanted: unwritten104: idle: planted block freed
+.registers fixed: unwritten104: registers fixed: 0 pattern word(s) yielded from the register buffer
+registers fixed: unwritten104: registers: pattern not yielded
+.registers control: unwritten104: registers control: 21 pattern word(s) yielded from the register buffer
+registers control: unwritten104: registers: pattern yielded
+.scan fixed: unwritten104: mutator scan fixed: block freed after three collections
+scan fixed: unwritten104: mutator scan: planted block freed
+.scan control: unwritten104: mutator scan control: block kept after three collections
+scan control: unwritten104: mutator scan: planted block kept
+.scan unplanted: unwritten104: mutator scan unplanted: block freed after three collections
+scan unplanted: unwritten104: mutator scan: planted block freed
+..............gcry: GC.free ignored 0x78661bd80460: the block is already free (double free, or a stale pointer the sweep reclaimed); counted in double_frees / stale_frees, reported once per kind
+.gcry: GC.free ignored 0x78661bd80828: not a live gcry allocation (interior pointer, or its chunk was released); counted in double_frees / stale_frees, reported once per kind
+................................................fixed: claim106: fixed: 8 of 8 freed, 7 claimed, 0 answered live
+fixed: claim106: claimed blocks answered free
+.control: claim106: control: 8 of 8 freed, 7 claimed, 7 answered live
+control: claim106: claimed blocks answered live
+...............fixed: monitor105: fixed: block freed after three collections, 3 plant(s)
+fixed: monitor105: planted block freed
+.control: monitor105: control: block kept after three collections, 3 plant(s)
+control: monitor105: planted block kept
+.unplanted: monitor105: unplanted: block freed after three collections, 0 plant(s)
+unplanted: monitor105: planted block freed
+..........................................................................................fixed: monitor107: fixed: block freed after three collections, 0 planted word(s) in the loop's frames
+fixed: monitor107: planted block freed
+.control: monitor107: control: block freed after three collections, 0 planted word(s) in the loop's frames
+control: monitor107: skipped
+.unplanted: monitor107: unplanted: block freed after three collections, 0 planted word(s) in the loop's frames
+unplanted: monitor107: planted block freed
+.halves fixed: monitor107: halves fixed: 0 word(s) in the loop's frames keep the planted high half
+halves fixed: monitor107: no planted high half
+.halves control: monitor107: halves control: 1 word(s) in the loop's frames keep the planted high half
+halves control: monitor107: planted high halves kept
+.............................................GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+..GC Warning: Out of Memory! Heap size: 186 MiB. Returning NULL!
+.......fixed: scrub101: wipe true, band 192 bytes, its low end 784 bytes below the entry SP
+fixed: scrub101: target freed
+control: scrub101: wipe false, band 192 bytes, its low end 784 bytes below the entry SP
+control: scrub101: target kept
+unplanted: scrub101: wipe true, band 192 bytes, its low end 784 bytes below the entry SP
+unplanted: scrub101: target freed
+..**..F
+
+Pending:
+  Regression: on macOS no heap mapping lies where a 33-bit integer points fixed arm in a process of its own
+  Regression: on macOS no heap mapping lies where a 33-bit integer points control arm in a process of its own
+
+Failures:
+
+  1) Regression: live_objects counter drift on dormant chunks returns live_objects to its baseline after full free + collect
+     Failure/Error: big.drift.abs.should(be < 500, detail)
+
+       count=10000 drift=-1881 | count=1000 drift=0
+
+     # ../tip/process_spec/regression/1_live_objects_dormant_spec.cr:137
+
+Finished in 24.12 seconds
+294 examples, 1 failures, 0 errors, 2 pending
+
+Failed examples:
+
+crystal spec ../tip/process_spec/regression/1_live_objects_dormant_spec.cr:97 # Regression: live_objects counter drift on dormant chunks returns live_objects to its baseline after full free + collect

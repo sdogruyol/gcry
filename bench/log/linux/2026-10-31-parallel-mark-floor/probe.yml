@@ -1,0 +1,40 @@
+# The probe workflow of this log: copied to .github/workflows/ on a
+# `probe/mark-floor` branch only (push-triggered there, deleted after), never
+# on a real branch. `ref` is the probed commit, a full SHA; arms, reps and
+# benches are the env below, edited per run.
+name: Probe mark-floor
+on:
+  push:
+    branches: ["probe/mark-floor"]
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["macos-latest", "ubuntu-24.04-arm", "ubuntu-latest"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: PROBE_SHA
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - env:
+          AB_OUT: bench/log/_ab
+          AB_REPS: "30"
+          AB_BENCHES: "Binarytrees"
+          PROBE_ENV_ARMS: "boehm:boehm: boehm1:boehm:GC_MARKERS=1 gcry:gcry: gcry0:gcry:GCRY_PARALLEL_MARK_MIN_LIVE=0 gcry8m:gcry:GCRY_PARALLEL_MARK_MIN_LIVE=8388608 gcry1:gcry:GCRY_PARALLEL_MARK=1"
+        run: bench/log/linux/2026-10-31-parallel-mark-floor/probe.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: probe-${{ matrix.os }}
+          path: bench/log/_ab/
+          if-no-files-found: ignore
+          retention-days: 30
